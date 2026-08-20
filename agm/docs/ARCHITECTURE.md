@@ -153,7 +153,9 @@ Its tool and transport boundaries are documented in
 - Model aliases and command flags belong to executable registries and generated
   help, not copied architecture tables.
 - Session lifecycle mutations must pass through shared operations or an
-  explicitly documented compatibility boundary.
+  explicitly documented compatibility boundary. Every reactivation path,
+  including administrative reconciliation, shares archive's stable session-ID
+  lock and reloads the durable lifecycle before mutation.
 
 ## Failure boundaries
 

@@ -360,6 +360,12 @@ func TestParser_FindSections(t *testing.T) {
 }
 
 func TestParser_Performance(t *testing.T) {
+	if raceEnabled {
+		// SLA-RACE-SKIP: discovered by agm/test/bdd's race-skipped-SLA coverage
+		// check, which publishes this package to the ordinary (non-race) run.
+		t.Skip("wall-clock parser latency is enforced without race instrumentation")
+	}
+
 	parser := NewParser()
 
 	t.Run("parses large document quickly", func(t *testing.T) {

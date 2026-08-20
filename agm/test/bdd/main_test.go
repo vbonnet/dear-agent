@@ -16,13 +16,16 @@ import (
 // being silently skipped, so dead/aspirational specs cannot accumulate. If you
 // add a feature file, add its step definitions in the same change.
 func TestFeatures(t *testing.T) {
-	suite := godog.TestSuite{
-		ScenarioInitializer: InitializeScenario,
-		Options:             featureTestOptions(t),
-	}
-
+	suite := featureTestSuite(t)
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run feature tests")
+	}
+}
+
+func featureTestSuite(t *testing.T) godog.TestSuite {
+	return godog.TestSuite{
+		TestSuiteInitializer: InitializeTestSuite,
+		Options:              featureTestOptions(t),
 	}
 }
 
@@ -41,9 +44,27 @@ func TestFeatureRunnerUsesStrictUndefinedStepPolicy(t *testing.T) {
 	}
 }
 
-func InitializeScenario(ctx *godog.ScenarioContext) {
+func TestFeatureRunnerRegistersDefinitionsAtSuiteScope(t *testing.T) {
+	suite := featureTestSuite(t)
+	if suite.TestSuiteInitializer == nil {
+		t.Fatal("BDD runner must register definitions once on the base suite")
+	}
+	if suite.ScenarioInitializer != nil {
+		t.Fatal("BDD runner must not rebuild every step regular expression per scenario")
+	}
+}
+
+func InitializeTestSuite(ctx *godog.TestSuiteContext) {
+	// Godog copies this base suite for every scenario. Registering definitions
+	// and Before hooks here preserves per-scenario state setup while compiling
+	// the step expressions once instead of once for every scenario.
+	RegisterScenarioDefinitions(ctx.ScenarioContext())
+}
+
+func RegisterScenarioDefinitions(ctx *godog.ScenarioContext) {
 	// Each step group registers its own per-scenario Before hook to set up
-	// state, so there is no shared environment to wire here.
+	// state. Godog copies those hooks with the base suite and invokes them for
+	// each scenario.
 	steps.RegisterAGMControlSurfaceGuardrailSteps(ctx)
 	steps.RegisterAGMConversationDiscoveryGuardrailSteps(ctx)
 	steps.RegisterAGMCapacityPlatformSteps(ctx)

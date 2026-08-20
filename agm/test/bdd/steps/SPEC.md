@@ -1,6 +1,6 @@
 # AGM BDD Step Definitions Specification
 
-<!-- Last audited at: 2026-07-23 -->
+<!-- Last audited at: 2026-07-27 -->
 
 ## Requirements
 
@@ -17,6 +17,8 @@
 **BDDS-06** When a real-tmux regression self-skips because the execution environment denies process-table inspection, the step definitions shall accept that exact capability diagnosis while rejecting every other unconfigured skip.
 
 **BDDS-07** When a BDD scenario enforces a portability contract also covered by a package regression, the step definition shall call the same canonical checker.
+
+**BDDS-08** When multiple scenarios assert the same immutable behavior by launching an expensive static subprocess test suite, the step definitions shall execute that suite once per BDD process under a bounded contention-tolerant deadline, share the immutable result safely with concurrent callers, and copy the result into scenario-local state without weakening any assertion.
 
 **BDDS-ROOT-01** When BDD steps resolve the repository from a nested package working directory, the system shall find the nearest ancestor containing `go.mod` and `agm` without relying on compiler source paths.
 

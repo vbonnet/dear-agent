@@ -75,6 +75,11 @@ func TestRealJSONLParsing_Performance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping performance test in short mode")
 	}
+	if raceEnabled {
+		// SLA-RACE-SKIP: discovered by agm/test/bdd's race-skipped-SLA coverage
+		// check, which publishes this package to the ordinary (non-race) run.
+		t.Skip("wall-clock JSONL throughput is enforced without race instrumentation")
+	}
 
 	// Create temp directory for large JSONL file
 	tmpDir := t.TempDir()

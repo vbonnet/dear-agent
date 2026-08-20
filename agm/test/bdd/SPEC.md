@@ -1,6 +1,6 @@
 # AGM Executable BDD Runner Specification
 
-<!-- Last audited at: 2026-07-20 -->
+<!-- Last audited at: 2026-07-27 -->
 
 ## Requirements
 
@@ -15,6 +15,8 @@
 **BDDR-05** When a lifecycle scenario claims an operation succeeded, the system shall invoke the production operation boundary and assert observable storage or runtime effects instead of setting simulated success flags.
 
 **BDDR-06** When a BDD scenario hook overrides process-wide environment variables or creates an owned temporary directory, the system shall limit setup to applicable scenarios, restore the exact prior environment, reuse explicit shared Go caches, remove only the owned directory, and report restoration or cleanup failures.
+
+**BDDR-07** When the BDD runner initializes step definitions and scenario hooks, the system shall register them once on the base suite and let the runner copy that immutable registration into each scenario while every mutable scenario state remains independently initialized.
 
 ## BDD Traceability
 

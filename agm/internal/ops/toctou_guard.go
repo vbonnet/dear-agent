@@ -70,6 +70,28 @@ func WithAPISessionLockContext(ctx context.Context, sessionName string, fn func(
 	return WithSessionLockTimeoutContext(ctx, sessionName, apiSessionMutationLockTimeout, fn)
 }
 
+// ArchiveCleanupLockTimeout returns a lock-acquisition timeout wide enough to
+// wait out archive's bounded sandbox-cleanup retry loop (see
+// cleanupSandboxDirWithCheckerAndRetry in session_archive.go) plus the
+// preceding tmux-kill grace sleep in killTmuxAndProcessGroup — both of which
+// run while archive still holds the same stable-ID session lock. Callers
+// that may start while an archive is in flight (unarchive, admin reconcile
+// --fix) need a timeout covering that whole window; the ordinary
+// WithSessionLock timeout is sized for uncontended lifecycle operations and
+// can otherwise fail a lock wait moments before archive would have released
+// it on a transient sandbox-cleanup retry.
+func ArchiveCleanupLockTimeout() time.Duration {
+	slo := contracts.Load().SessionLifecycle
+	return slo.LockTimeout.Duration + time.Duration(archiveSandboxCleanupAttempts+1)*slo.ProcessKillGracePeriod.Duration
+}
+
+// WithArchiveCleanupAwareSessionLock is WithSessionLock sized with
+// ArchiveCleanupLockTimeout, for callers that must be able to wait out an
+// in-flight archive's bounded sandbox-cleanup retries rather than fail fast.
+func WithArchiveCleanupAwareSessionLock(sessionName string, fn func() error) error {
+	return WithSessionLockTimeout(sessionName, ArchiveCleanupLockTimeout(), fn)
+}
+
 // WithSessionLockTimeout is like WithSessionLock but accepts a custom timeout.
 func WithSessionLockTimeout(sessionName string, timeout time.Duration, fn func() error) error {
 	return WithSessionLockTimeoutContext(context.Background(), sessionName, timeout, fn)

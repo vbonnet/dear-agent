@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	inttmux "github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
+
+const archiveSandboxCleanupAttempts = 5
 
 // ArchiveSessionRequest defines the input for archiving a session.
 type ArchiveSessionRequest struct {
@@ -519,8 +522,11 @@ func killTmuxAndProcessGroup(m *manifest.Manifest) {
 // mount point left inside (deleting through a live overlay mount can destroy
 // the source repo, per ~/.agm/cleanup-runbook.md). The live-session gate is
 // intentionally nil here: the caller archived this session immediately before
-// invoking cleanup. A refused reap keeps the sandbox for the periodic
-// `agm sandbox gc` sweep to retry once the blocker is gone.
+// invoking cleanup. A specific live-process refusal is retried for a bounded
+// grace window because a just-terminated harness may briefly retain the
+// sandbox as it exits; every retry re-runs all checker safety gates. Every
+// other refusal keeps the sandbox for the periodic `agm sandbox gc` sweep to
+// retry once the blocker is gone.
 //
 // Returns (removed, existed, reason): existed is false only when there was
 // no sandbox directory to remove in the first place (not a failure); every
@@ -541,6 +547,26 @@ func cleanupSandboxDir(sessionID, mergedPath string) (removed bool, existed bool
 }
 
 func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) (removed bool, existed bool, reason string) {
+	return cleanupSandboxDirWithCheckerAndRetry(
+		sessionID,
+		mergedPath,
+		base,
+		checker,
+		archiveSandboxCleanupAttempts,
+		contracts.Load().SessionLifecycle.ProcessKillGracePeriod.Duration,
+		time.Sleep,
+		time.Now,
+	)
+}
+
+func cleanupSandboxDirWithCheckerAndRetry(
+	sessionID, mergedPath, base string,
+	checker *sandboxgc.Checker,
+	attempts int,
+	retryDelay time.Duration,
+	sleep func(time.Duration),
+	now func() time.Time,
+) (removed bool, existed bool, reason string) {
 	sandboxDir := filepath.Join(base, sessionID)
 	if checker == nil || filepath.Clean(checker.Base) != filepath.Clean(base) {
 		slog.Warn("Refusing sandbox cleanup with a mismatched safety checker", "session", sessionID)
@@ -560,23 +586,80 @@ func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *s
 		return false, false, ""
 	}
 
-	// Preserve .claude/settings.local.json from the upper layer before removal.
-	// This file contains RBAC permission rules written by ConfigureProjectPermissions.
-	preserveSettingsFromUpper(sandboxDir)
+	// ReapContext owns the only unmount boundary. It first proves that no live
+	// process holds the sandbox, then unmounts this exact merged child and the
+	// sandbox root before re-reading the mount table. Do not pre-unmount here:
+	// that would violate SGC-06 and weaken every retry's complete safety proof.
+	return reapSandboxWithRetry(sessionID, sandboxDir, checker, attempts, retryDelay, sleep, now)
+}
 
-	// Unmount the validated merged path before checker.Reap retries the default path.
-	if err := checker.Unmount(mergedPath); err != nil {
-		slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
+func reapSandboxWithRetry(
+	sessionID, sandboxDir string,
+	checker *sandboxgc.Checker,
+	attempts int,
+	retryDelay time.Duration,
+	sleep func(time.Duration),
+	now func() time.Time,
+) (removed bool, existed bool, reason string) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	bounded := retryDelay > 0
+	if retryDelay <= 0 {
+		attempts = 1
+	}
+	retryDeadline := now().Add(time.Duration(attempts) * retryDelay)
+	for attempt := 1; attempt <= attempts; attempt++ {
+		attemptCtx := context.Background()
+		cancelAttempt := func() {}
+		if bounded {
+			remaining := retryDeadline.Sub(now())
+			if remaining <= 0 {
+				slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
+					"session", sessionID, "path", sandboxDir, "attempts", attempt-1,
+					"retry_deadline", retryDeadline)
+				return false, true, "sandbox cleanup grace deadline exceeded"
+			}
+			attemptCtx, cancelAttempt = context.WithTimeout(attemptCtx, remaining)
+		}
+		// A holder may update permission rules while shutting down during the
+		// retry grace period. Refresh the upper-layer snapshot on every attempt;
+		// if that holder is still live, the following process gate refuses and a
+		// later attempt copies its final write before the successful reap.
+		preserveSettingsFromUpper(sandboxDir)
+		err := checker.ReapContext(attemptCtx, sandboxDir)
+		cancelAttempt()
+		if err == nil {
+			slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
+			return true, true, ""
+		}
+		if attempt == attempts || !retryableArchiveSandboxRefusal(err) {
+			slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
+				"session", sessionID, "path", sandboxDir, "attempts", attempt, "error", err)
+			return false, true, err.Error()
+		}
+		remaining := retryDeadline.Sub(now())
+		if remaining <= 0 {
+			slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
+				"session", sessionID, "path", sandboxDir, "attempts", attempt,
+				"retry_deadline", retryDeadline, "error", err)
+			return false, true, err.Error()
+		}
+		delay := min(retryDelay, remaining)
+		slog.Info("Waiting for transient sandbox holder to exit before retrying cleanup",
+			"session", sessionID, "path", sandboxDir, "attempt", attempt, "max_attempts", attempts,
+			"retry_delay", delay, "retry_deadline", retryDeadline, "error", err)
+		sleep(delay)
 	}
 
-	if err := checker.Reap(sandboxDir); err != nil {
-		slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
-			"session", sessionID, "path", sandboxDir, "error", err)
-		return false, true, err.Error()
-	}
+	return false, true, "exhausted sandbox cleanup retries"
+}
 
-	slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
-	return true, true, ""
+func retryableArchiveSandboxRefusal(err error) bool {
+	var refusal *sandboxgc.RefusalError
+	return errors.As(err, &refusal) &&
+		refusal.Reason == sandboxgc.ReasonLiveProcess &&
+		refusal.ProcessID > 0
 }
 
 func ownedSandboxPathForArchive(m *manifest.Manifest) string {

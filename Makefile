@@ -119,7 +119,7 @@ override _GOVERNED_BUILD_TARGETS := \
 #   preflight               Fast local CI-parity gates: vet + build + AI skills + lint (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-race          preflight + go test -race — catch data races before push
-#   preflight-full          preflight + go test -race + govulncheck (full parity)
+#   preflight-full          race tests + ordinary performance SLAs + govulncheck
 #   health-check            Run the codebase health auditor (cmd/repo-health)
 #   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
@@ -275,9 +275,9 @@ preflight-tests:
 preflight-race:
 	@./scripts/preflight.sh --race
 
-# Full CI parity: preflight + `go test -race -count=1` + govulncheck with
-# the same allowlist as ci.yml. Slower but gives the highest confidence
-# before pushing.
+# Publication gate: CI-parity race tests, ordinary (non-race) performance SLA
+# enforcement, and govulncheck with the same allowlist as ci.yml. Slower but
+# gives the highest confidence before pushing.
 preflight-full:
 	@./scripts/preflight.sh --full
 

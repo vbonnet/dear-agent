@@ -67,9 +67,13 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 **SGC-13** When the sweep encounters non-git, partial, or corrupt sandbox content, the system shall treat it as ordinary reapable content rather than an error.
 
+### Caller Deadlines
+
+**SGC-14** When a caller supplies a bounded reap context, the system shall propagate its deadline into process and mount inspection, fail closed on cancellation, re-check the context before unmount and recursive removal, and never authorize removal from a safety scan that completed after the caller's budget expired.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature` (changed-package SPEC coverage gate)
-- Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, store-down, path escapes), `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage), and `agm/cmd/agm/sandbox_gc_test.go` (configured workspace missing-database degradation).
+- Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, deadline-bounded process and mount inspection, store-down, path escapes), `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage), and `agm/cmd/agm/sandbox_gc_test.go` (configured workspace missing-database degradation).
 - SGC-16 evidence: `agm/cmd/agm/sandbox_gc_test.go::TestEffectiveSandboxGCReapRefusesPartialInventory` (a requested reap with any skipped workspace yields scan-only plus a notice; a complete inventory reaps as asked).
 - SGC-17 evidence: `agm/internal/ops/sandbox_gc_test.go::TestSandboxGCResultPublishesTheRefusalOnTheWire` and `::TestSandboxGCResultOmitsTheRefusalWhenItReaped` (the refusal, and only a real refusal, reaches the caller as `reap_refused`); the reciprocal consumer check is `cmd/disk-watchdog/reaper_liveness_honesty_test.go::TestSweepMergedWorktrees_RefusedReapIsARemediationFailure`, which asserts the watchdog treats it as failed remediation rather than a completed sweep.

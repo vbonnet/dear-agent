@@ -44,6 +44,19 @@ type PerformanceReport struct {
 	MemoryUsage          runtime.MemStats
 }
 
+func assertP99Latency(t *testing.T, testName string, latency time.Duration) {
+	t.Helper()
+	if raceEnabled {
+		// SLA-RACE-SKIP: discovered by agm/test/bdd's race-skipped-SLA coverage
+		// check, which publishes this package to the ordinary (non-race) run.
+		t.Logf("%s p99 latency %v observed under race instrumentation; SLA enforcement remains in the ordinary test pass", testName, latency)
+		return
+	}
+	if latency > time.Second {
+		t.Errorf("%s p99 latency %v exceeds 1s requirement", testName, latency)
+	}
+}
+
 // calculateLatencyMetrics computes comprehensive latency statistics
 func calculateLatencyMetrics(latencies []time.Duration) LatencyMetrics {
 	if len(latencies) == 0 {
@@ -270,9 +283,7 @@ func TestBaseline(t *testing.T) {
 	printReport(t, report)
 
 	// Verify performance
-	if metrics.P99 > time.Second {
-		t.Errorf("Baseline p99 latency %v exceeds 1s requirement", metrics.P99)
-	}
+	assertP99Latency(t, "Baseline", metrics.P99)
 }
 
 // TestLoad tests 100 concurrent clients
@@ -419,9 +430,7 @@ func TestLoad(t *testing.T) {
 	printReport(t, report)
 
 	// Verify performance requirements
-	if latencyMetrics.P99 > time.Second {
-		t.Errorf("Load test p99 latency %v exceeds 1s requirement", latencyMetrics.P99)
-	}
+	assertP99Latency(t, "Load test", latencyMetrics.P99)
 }
 
 // TestBurst tests 100 clients receiving 100 events in rapid succession
@@ -548,9 +557,7 @@ func TestBurst(t *testing.T) {
 	printReport(t, report)
 
 	// Verify performance
-	if latencyMetrics.P99 > time.Second {
-		t.Errorf("Burst test p99 latency %v exceeds 1s requirement", latencyMetrics.P99)
-	}
+	assertP99Latency(t, "Burst test", latencyMetrics.P99)
 }
 
 // TestSustained tests sustained load over 5 minutes
@@ -695,9 +702,7 @@ loop:
 	printReport(t, report)
 
 	// Verify performance
-	if latencyMetrics.P99 > time.Second {
-		t.Errorf("Sustained test p99 latency %v exceeds 1s requirement", latencyMetrics.P99)
-	}
+	assertP99Latency(t, "Sustained test", latencyMetrics.P99)
 }
 
 // printReport outputs a formatted performance report
@@ -742,9 +747,12 @@ func printReport(t *testing.T, report PerformanceReport) {
 	fmt.Printf("  NumGC:               %d\n", report.MemoryUsage.NumGC)
 
 	fmt.Printf("\nPerformance Status:\n")
-	if report.EventDeliveryLatency.P99 < time.Second {
+	switch {
+	case raceEnabled:
+		fmt.Printf("  ℹ️ OBSERVED: p99 latency (%v); the <1s SLA is enforced without race instrumentation\n", report.EventDeliveryLatency.P99)
+	case report.EventDeliveryLatency.P99 < time.Second:
 		fmt.Printf("  ✅ PASS: p99 latency (%v) is below 1s requirement\n", report.EventDeliveryLatency.P99)
-	} else {
+	default:
 		fmt.Printf("  ❌ FAIL: p99 latency (%v) exceeds 1s requirement\n", report.EventDeliveryLatency.P99)
 	}
 
@@ -891,9 +899,7 @@ func TestFilteredLoad(t *testing.T) {
 	}
 	printReport(t, report)
 
-	if latencyMetrics.P99 > time.Second {
-		t.Errorf("Filtered load p99 latency %v exceeds 1s", latencyMetrics.P99)
-	}
+	assertP99Latency(t, "Filtered load", latencyMetrics.P99)
 }
 
 // TestConnectionChurn tests event delivery while clients connect and disconnect.
@@ -1010,9 +1016,7 @@ func TestConnectionChurn(t *testing.T) {
 	}
 	printReport(t, report)
 
-	if latencyMetrics.P99 > time.Second {
-		t.Errorf("Connection churn p99 latency %v exceeds 1s", latencyMetrics.P99)
-	}
+	assertP99Latency(t, "Connection churn", latencyMetrics.P99)
 }
 
 // BenchmarkEventBusLoad is a standard Go benchmark
