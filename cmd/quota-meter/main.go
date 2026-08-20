@@ -17,8 +17,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -42,7 +45,7 @@ type config struct {
 	asJSON      bool
 }
 
-func run(args []string, stdout, stderr *os.File) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	var cfg config
 	fs := flag.NewFlagSet("quota-meter", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -73,7 +76,9 @@ func run(args []string, stdout, stderr *os.File) int {
 		RefreshInterval: -1,
 	})
 
-	snapshot, readErr := meter.Refresh(context.Background())
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	snapshot, readErr := meter.Refresh(ctx)
 	if readErr != nil {
 		fmt.Fprintf(stderr, "quota-meter: %v\n", readErr)
 		return 1
@@ -218,7 +223,7 @@ func buildRoles(meter *quota.Meter, rolesFile string) ([]roleReport, string) {
 			Role:       name,
 			Configured: configured,
 			Effective:  effective,
-			Reordered:  !equalSlices(configured, effective),
+			Reordered:  !slices.Equal(configured, effective),
 		}
 		for i, model := range effective {
 			if d := decisions[i]; d.Known() {
@@ -280,19 +285,7 @@ func resolveRolesPath(explicit string) string {
 	return ""
 }
 
-func equalSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func writeText(stdout *os.File, rep report, cfg config) {
+func writeText(stdout io.Writer, rep report, cfg config) {
 	age := time.Duration(rep.AgeSeconds * float64(time.Second)).Round(time.Second)
 	staleNote := ""
 	if rep.Stale {
