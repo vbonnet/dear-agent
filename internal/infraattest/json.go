@@ -331,8 +331,12 @@ func commitment(key, nonce []byte, domain string, payload []byte) (string, error
 func writeCommitmentPart(mac hash.Hash, value []byte) {
 	var size [8]byte
 	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
-	_, _ = mac.Write(size[:])
-	_, _ = mac.Write(value)
+	if _, err := mac.Write(size[:]); err != nil {
+		panic(err)
+	}
+	if _, err := mac.Write(value); err != nil {
+		panic(err)
+	}
 }
 
 func encodeNonce(nonce []byte) (string, error) {
