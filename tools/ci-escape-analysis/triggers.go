@@ -61,6 +61,7 @@ type workflowInfo struct {
 var (
 	triggersOnce    sync.Once
 	workflowsByName map[string]workflowInfo
+	workflowsByPath map[string]workflowInfo
 )
 
 // workflowIndex maps a workflow's display name to its trigger facts. Parsed
@@ -74,6 +75,7 @@ var (
 func workflowIndex() map[string]workflowInfo {
 	triggersOnce.Do(func() {
 		workflowsByName = map[string]workflowInfo{}
+		workflowsByPath = map[string]workflowInfo{}
 		// Both extensions: GitHub honours .yaml as well as .yml, and a glob on
 		// one of them silently drops half the possible workflows.
 		entries, err := os.ReadDir(".github/workflows")
@@ -94,10 +96,32 @@ func workflowIndex() map[string]workflowInfo {
 			name, info, ok := parseWorkflow(string(data))
 			if ok {
 				workflowsByName[name] = info
+				workflowsByPath[filepath.ToSlash(filepath.Join(".github/workflows", entry.Name()))] = info
 			}
 		}
 	})
 	return workflowsByName
+}
+
+// workflowPathIndex maps a workflow's repository path to its trigger facts.
+// The sweep enumerates workflows by path (that is what the API returns and what
+// `gh run list --workflow` takes), and needs the trigger facts BEFORE it has a
+// run to read a display name from.
+func workflowPathIndex() map[string]workflowInfo {
+	workflowIndex()
+	return workflowsByPath
+}
+
+// MainEvaluatingFile reports whether the workflow file at path can run against
+// main at all. Unknown paths report true: GitHub can list a workflow whose file
+// is no longer in the tree, and treating that as "cannot be red" would hide a
+// real failure.
+func (o sweepOptions) MainEvaluatingFile(workflowPath string) bool {
+	wf, known := workflowPathIndex()[workflowPath]
+	if !known {
+		return true
+	}
+	return wf.MainTriggered
 }
 
 // pullRequestTriggers are the only two `on:` keys that make a workflow run
