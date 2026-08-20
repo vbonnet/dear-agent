@@ -40,6 +40,6 @@ to close them.
 | [035](ADR-035-dear-terminology-disambiguation.md) | DEAR Terminology Disambiguation | Accepted |
 | [036](ADR-036-wayfinder-enforcement.md) | Wayfinder trace at the delivery boundary | Accepted |
 | [037](ADR-037-cedar-policy-language.md) | Cedar as the persona/policy-enforcement language | Proposed |
-| [038](ADR-038-codexbar-quota-routing.md) | CodexBar-backed quota-aware routing | Proposed |
+| [038](ADR-038-codexbar-quota-routing.md) | CodexBar-backed quota-aware routing and cost guardrail | Accepted |
 
 Subsystem ADR directories have independent scoped numbering and indexes.
