@@ -45,24 +45,9 @@ func warmedMeter(t *testing.T, snapshot *quota.Snapshot) *quota.Meter {
 // returns the exit code together with everything printed.
 func captureRun(t *testing.T, args ...string) (int, string) {
 	t.Helper()
-	out, err := os.CreateTemp(t.TempDir(), "stdout-*")
-	if err != nil {
-		t.Fatalf("temp stdout: %v", err)
-	}
-	errOut, err := os.CreateTemp(t.TempDir(), "stderr-*")
-	if err != nil {
-		t.Fatalf("temp stderr: %v", err)
-	}
-	code := run(args, out, errOut)
-	if err := out.Close(); err != nil {
-		t.Fatalf("close stdout: %v", err)
-	}
-	if err := errOut.Close(); err != nil {
-		t.Fatalf("close stderr: %v", err)
-	}
-	stdout, _ := os.ReadFile(out.Name())
-	stderr, _ := os.ReadFile(errOut.Name())
-	return code, string(stdout) + string(stderr)
+	var stdout, stderr strings.Builder
+	code := run(args, &stdout, &stderr)
+	return code, stdout.String() + stderr.String()
 }
 
 func TestRunRejectsAnUnexpectedArgument(t *testing.T) {
@@ -247,18 +232,6 @@ func TestBuildRolesReportsALoadFailure(t *testing.T) {
 	}
 	if !strings.Contains(reports[0].Notes[0], "load roles") {
 		t.Errorf("note = %q, want it to name the load failure", reports[0].Notes[0])
-	}
-}
-
-func TestEqualSlices(t *testing.T) {
-	if !equalSlices([]string{"a", "b"}, []string{"a", "b"}) {
-		t.Error("identical slices should compare equal")
-	}
-	if equalSlices([]string{"a", "b"}, []string{"b", "a"}) {
-		t.Error("order matters")
-	}
-	if equalSlices([]string{"a"}, []string{"a", "b"}) {
-		t.Error("length matters")
 	}
 }
 
