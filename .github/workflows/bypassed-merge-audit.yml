@@ -275,10 +275,18 @@ jobs:
             --jq '.[0].number // empty')
 
           if [ -n "$existing" ]; then
+            # Track the title too, not just append a comment. The title is what
+            # shows in the issue list, so an issue opened while the required-set
+            # history was readable would keep asserting a bypass after the audit
+            # lost that access — and vice versa. Comments do not correct a title
+            # nobody expands to read.
+            timeout 30 gh issue edit "$existing" \
+              --repo "$REPO" \
+              --title "$title" || true
             timeout 30 gh issue comment "$existing" \
               --repo "$REPO" \
               --body "$body"
-            echo "Updated existing issue #${existing}"
+            echo "Updated existing issue #${existing} (title: ${title})"
           else
             timeout 30 gh issue create \
               --repo "$REPO" \
