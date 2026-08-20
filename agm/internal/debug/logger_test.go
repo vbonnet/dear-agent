@@ -3,7 +3,9 @@ package debug
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestInit_Disabled(t *testing.T) {
@@ -233,4 +235,57 @@ func TestClose_DisabledLogger(t *testing.T) {
 
 	// Should not panic
 	Close()
+}
+
+func TestClose_ReleasesHandleAndIsIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	f, err := os.Create(logFile)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+
+	mu.Lock()
+	oldLogger := globalLogger
+	globalLogger = &Logger{file: f, enabled: true, startTime: time.Now()}
+	mu.Unlock()
+	defer func() {
+		mu.Lock()
+		globalLogger = oldLogger
+		mu.Unlock()
+	}()
+
+	Close()
+
+	mu.Lock()
+	handle := globalLogger.file
+	stillEnabled := globalLogger.enabled
+	mu.Unlock()
+	if handle != nil {
+		t.Error("Close() should drop the file handle so a later write cannot reach a closed descriptor")
+	}
+	if stillEnabled {
+		t.Error("Close() should clear enabled so Log() short-circuits instead of touching a nil file")
+	}
+
+	// The descriptor really is closed, not just forgotten.
+	if _, err := f.Write([]byte("after close")); err == nil {
+		t.Error("write after Close() succeeded; the descriptor was never closed")
+	}
+
+	// DBG-04: repeated close and post-close logging stay no-ops.
+	Close()
+	Log("after close %d", 1)
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+	if got := string(data); !strings.Contains(got, "Debug session ended") {
+		t.Errorf("closing log should be flushed to disk, got %q", got)
+	}
+	if got := string(data); strings.Contains(got, "after close") {
+		t.Error("Log() after Close() must not append to the closed log")
+	}
 }
