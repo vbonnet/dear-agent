@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+)
 
 func TestParseWorkflow(t *testing.T) {
 	tests := []struct {
@@ -292,4 +297,60 @@ func TestParseWorkflowDetectsMainTriggers(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A workflow that cannot run against main must be recognisable BEFORE the sweep
+// looks for one of its runs. claude.yml fires only on issue and review events;
+// those runs are reported against the default branch but say nothing about
+// whether main builds, so they are all filtered out. With more than a page of
+// them the run lookup returned "could not observe", the sweep set
+// complete=false on every pass, and stale-retro reconciliation never ran — so
+// no recovered incident was ever auto-closed. Measured on the live repo:
+// 31 workflows checked, 0 red, reconciliation skipped anyway.
+func TestMainEvaluatingFileSkipsInteractionOnlyWorkflows(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, ".github", "workflows", name), []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error: %v", name, err)
+		}
+	}
+	write("claude.yml", "name: Claude Code\n\non:\n  issue_comment:\n    types: [created]\n  issues:\n    types: [opened]\n")
+	write("ci.yml", "name: CI\n\non:\n  push:\n    branches: [main]\n")
+
+	t.Chdir(dir)
+	resetTriggerIndex(t)
+
+	var opts sweepOptions
+	if opts.MainEvaluatingFile(".github/workflows/claude.yml") {
+		t.Error("interaction-only workflow reported as main-evaluating; the sweep would " +
+			"treat its unqualifying runs as an observation gap and skip reconciliation")
+	}
+	if !opts.MainEvaluatingFile(".github/workflows/ci.yml") {
+		t.Error("push-triggered workflow reported as not main-evaluating; its failures would go unfiled")
+	}
+	// A workflow GitHub still lists but whose file has been deleted must stay
+	// observable: calling it "cannot be red" would hide a real failure.
+	if !opts.MainEvaluatingFile(".github/workflows/deleted.yml") {
+		t.Error("unknown workflow path must default to main-evaluating")
+	}
+}
+
+// resetTriggerIndex clears the memoised workflow index so a test can point it
+// at a fixture tree. The index is a sync.Once by design — parsed once per
+// process in production — so a test that changes the working directory has to
+// reset it explicitly, and restore it so later tests are unaffected.
+func resetTriggerIndex(t *testing.T) {
+	t.Helper()
+	triggersOnce = sync.Once{}
+	workflowsByName = nil
+	workflowsByPath = nil
+	t.Cleanup(func() {
+		triggersOnce = sync.Once{}
+		workflowsByName = nil
+		workflowsByPath = nil
+	})
 }
