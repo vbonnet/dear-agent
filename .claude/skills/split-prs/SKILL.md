@@ -126,7 +126,7 @@ Keep using it afterwards: `gh stack sync` after anything lands beneath you,
 Re-commit it in that order rather than opening one mixed PR:
 
 ```bash
-git reset --soft <base>
+git reset --soft origin/main
 # stage and commit the mechanical part, then the refactor, then the behavior
 ```
 
