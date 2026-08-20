@@ -16,6 +16,15 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// reportError writes msg to stderr. If that write itself fails, it falls
+// back to the process's real stderr (in case the caller's writer wraps a
+// broken pipe or similar) rather than silently discarding the failure.
+func reportError(stderr io.Writer, err error) {
+	if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "%s (also failed to write to the configured stderr: %v)\n", err, writeErr)
+	}
+}
+
 func run(args []string, output, stderr io.Writer) int {
 	return runWithPolicy(args, output, stderr, hookparity.ProductionHelperTrustPolicy())
 }
@@ -30,13 +39,13 @@ func runWithPolicy(args []string, output, stderr io.Writer, policy hookparity.He
 	}
 	status, err := hookparity.InspectHelperDeployment(*artifact, *deployed, policy)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "spec-contract-hook-status: %v\n", err)
+		reportError(stderr, fmt.Errorf("spec-contract-hook-status: %w", err))
 		return 2
 	}
 	encoder := json.NewEncoder(output)
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(status); err != nil {
-		_, _ = fmt.Fprintf(stderr, "spec-contract-hook-status: encode result: %v\n", err)
+		reportError(stderr, fmt.Errorf("spec-contract-hook-status: encode result: %w", err))
 		return 2
 	}
 	if status.Status != hookparity.HelperCurrent {

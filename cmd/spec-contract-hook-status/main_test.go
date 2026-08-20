@@ -33,17 +33,38 @@ func TestRunReportsMissingDeployment(t *testing.T) {
 	}
 	wantDigest := fmt.Sprintf("%x", sha256.Sum256(body))
 	wantPinned := deployed + "." + wantDigest
-	if status.Status != hookparity.HelperMissing ||
-		status.Stable.Status != hookparity.HelperMissing ||
-		status.Stable.Artifact != artifact ||
-		status.Stable.Deployed != deployed ||
-		status.Stable.ExpectedSHA256 != wantDigest ||
-		status.Stable.ActualSHA256 != "" ||
-		status.Stable.Reason != "deployed helper is missing" ||
-		status.ContentAddressed.Status != hookparity.HelperMissing ||
-		status.ContentAddressed.Deployed != wantPinned ||
-		status.ContentAddressed.ExpectedSHA256 != wantDigest {
-		t.Fatalf("run() status = %#v", status)
+	if status.Status != hookparity.HelperMissing {
+		t.Errorf("run() status.Status = %q, want %q", status.Status, hookparity.HelperMissing)
+	}
+	if status.Stable.Status != hookparity.HelperMissing {
+		t.Errorf("run() status.Stable.Status = %q, want %q", status.Stable.Status, hookparity.HelperMissing)
+	}
+	if status.Stable.Artifact != artifact {
+		t.Errorf("run() status.Stable.Artifact = %q, want %q", status.Stable.Artifact, artifact)
+	}
+	if status.Stable.Deployed != deployed {
+		t.Errorf("run() status.Stable.Deployed = %q, want %q", status.Stable.Deployed, deployed)
+	}
+	if status.Stable.ExpectedSHA256 != wantDigest {
+		t.Errorf("run() status.Stable.ExpectedSHA256 = %q, want %q", status.Stable.ExpectedSHA256, wantDigest)
+	}
+	if status.Stable.ActualSHA256 != "" {
+		t.Errorf("run() status.Stable.ActualSHA256 = %q, want empty", status.Stable.ActualSHA256)
+	}
+	if status.Stable.Reason != "deployed helper is missing" {
+		t.Errorf("run() status.Stable.Reason = %q, want %q", status.Stable.Reason, "deployed helper is missing")
+	}
+	if status.ContentAddressed.Status != hookparity.HelperMissing {
+		t.Errorf("run() status.ContentAddressed.Status = %q, want %q", status.ContentAddressed.Status, hookparity.HelperMissing)
+	}
+	if status.ContentAddressed.Deployed != wantPinned {
+		t.Errorf("run() status.ContentAddressed.Deployed = %q, want %q", status.ContentAddressed.Deployed, wantPinned)
+	}
+	if status.ContentAddressed.ExpectedSHA256 != wantDigest {
+		t.Errorf("run() status.ContentAddressed.ExpectedSHA256 = %q, want %q", status.ContentAddressed.ExpectedSHA256, wantDigest)
+	}
+	if t.Failed() {
+		t.Logf("run() status = %#v", status)
 	}
 }
 
