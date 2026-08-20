@@ -14,6 +14,11 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
+const (
+	realHostReadinessTimeout     = 15 * time.Second
+	slowRealHostReadinessTimeout = 20 * time.Second
+)
+
 func setupRealReadinessTmux(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
@@ -126,7 +131,7 @@ func TestRealTmuxReadinessDetectsFakeCodexComposer(t *testing.T) {
 	fakeCodex := installFakeCodexProcess(t)
 	command := fmt.Sprintf("printf '│ >_ OpenAI Codex (vtest) │\\n│ model: gpt-5.5 /model to change │\\n›\\n'; exec %q 10", fakeCodex)
 	sendReadinessTestCommand(t, socketPath, sessionName, command)
-	if err := realTmux.WaitForHarnessReady(context.Background(), sessionName, "codex-cli", 3*time.Second); err != nil {
+	if err := realTmux.WaitForHarnessReady(context.Background(), sessionName, "codex-cli", realHostReadinessTimeout); err != nil {
 		t.Fatalf("WaitForHarnessReady(fake Codex) error = %v", err)
 	}
 }
@@ -144,12 +149,12 @@ func TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows(t *testing.T
 	sendReadinessTestCommand(t, socketPath, sessionName, command)
 
 	start := time.Now()
-	err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "codex-cli", 10*time.Second)
+	err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "codex-cli", realHostReadinessTimeout)
 	if !errors.Is(err, tmux.ErrCodexHookReviewRequired) {
 		pane, captureErr := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", tmux.NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").CombinedOutput()
 		t.Fatalf("WaitForHarnessReady(hook review) error = %v, want ErrCodexHookReviewRequired; capture error = %v; pane:\n%s", err, captureErr, pane)
 	}
-	if elapsed := time.Since(start); elapsed > 3*time.Second {
+	if elapsed := time.Since(start); elapsed > 7*time.Second {
 		t.Fatalf("shared hook-review failure took %v, want prompt failure", elapsed)
 	}
 }
@@ -165,7 +170,7 @@ func TestRealTmuxReadinessDetectsManagedPiComposer(t *testing.T) {
 	fakePi := installFakeHarnessProcess(t, "pi")
 	command := fmt.Sprintf("printf '/work • pi-worker\\nAGM default/ready launch-shared\\n'; exec %q 10", fakePi)
 	sendReadinessTestCommand(t, socketPath, sessionName, command)
-	if err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "pi-cli", 5*time.Second); err != nil {
+	if err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "pi-cli", realHostReadinessTimeout); err != nil {
 		t.Fatalf("WaitForHarnessReady(fake Pi) error = %v", err)
 	}
 }
@@ -181,7 +186,7 @@ func TestRealTmuxWaitForHarnessReadyAllowsSlowProcessStart(t *testing.T) {
 	fakeCodex := installFakeCodexProcess(t)
 	command := fmt.Sprintf("sleep 4; printf '│ >_ OpenAI Codex (vtest) │\\n│ model: gpt-5.5 /model to change │\\n›\\n'; exec %q 10", fakeCodex)
 	sendReadinessTestCommand(t, socketPath, sessionName, command)
-	if err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "codex-cli", 8*time.Second); err != nil {
+	if err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "codex-cli", slowRealHostReadinessTimeout); err != nil {
 		t.Fatalf("WaitForHarnessReady(slow fake Codex) error = %v", err)
 	}
 }
@@ -197,7 +202,7 @@ func TestRealTmuxReadinessPreservesClaudeGhostComposer(t *testing.T) {
 	fakeClaude := installFakeHarnessProcess(t, "claude")
 	command := fmt.Sprintf("printf 'Do you want to proceed?\\n❯ 1. Allow\\n  2. Deny\\napproved\\n❯ \\033[2mstart the loop\\033[0m\\n────────────────\\n? for shortcuts\\n'; exec %q 10", fakeClaude)
 	sendReadinessTestCommand(t, socketPath, sessionName, command)
-	if err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "claude-code", 5*time.Second); err != nil {
+	if err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "claude-code", realHostReadinessTimeout); err != nil {
 		t.Fatalf("WaitForHarnessReady(styled Claude ghost) error = %v", err)
 	}
 }
@@ -323,7 +328,7 @@ func TestRealTmuxReadinessIdentifiesNodeBackedCodex(t *testing.T) {
 	codexScript := filepath.Join(t.TempDir(), "node_modules", "@openai", "codex", "bin", "codex.js")
 	writeNodeFixture(codexScript)
 	sendReadinessTestCommand(t, socketPath, codexSession, fmt.Sprintf("exec %q %q", nodePath, codexScript))
-	if err := NewRealTmux().WaitForHarnessReady(t.Context(), codexSession, "codex-cli", 5*time.Second); err != nil {
+	if err := NewRealTmux().WaitForHarnessReady(t.Context(), codexSession, "codex-cli", realHostReadinessTimeout); err != nil {
 		t.Fatalf("WaitForHarnessReady(Node-backed Codex) error = %v", err)
 	}
 
@@ -357,7 +362,7 @@ func TestRealTmuxReadinessRejectsSuspendedHarnessWithStaleComposer(t *testing.T)
 	command := fmt.Sprintf("PS1=''; export PS1; printf '❯\\n────────────────\\n? for shortcuts\\n'; %q", fakeClaude)
 	sendReadinessTestCommand(t, socketPath, sessionName, command)
 	realTmux := NewRealTmux()
-	if err := realTmux.WaitForHarnessReady(t.Context(), sessionName, "claude-code", 5*time.Second); err != nil {
+	if err := realTmux.WaitForHarnessReady(t.Context(), sessionName, "claude-code", realHostReadinessTimeout); err != nil {
 		t.Fatalf("WaitForHarnessReady(fake Claude) error = %v", err)
 	}
 

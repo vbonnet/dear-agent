@@ -268,7 +268,8 @@ func PushArgs(repoDir, ghPath string, pushArgs []string) []string {
 }
 
 // Push runs a safe push, streaming git's output to the caller's stdout/stderr.
-// It rejects force-pushes to protected branches, bounds the run by timeout
+// It rejects force-pushes to protected branches and commit messages carrying
+// a private Claude Code session reference, bounds the run by timeout
 // (DefaultTimeout if zero), and sets GIT_TERMINAL_PROMPT=0 so git never falls
 // back to an interactive prompt. A timeout is reported as a credential-helper
 // hang, the failure this package exists to convert from "hang forever" into
@@ -277,6 +278,9 @@ func Push(repoDir string, pushArgs []string, timeout time.Duration) error {
 	if target, blocked := ForcePushViolation(repoDir, currentPushBranch(repoDir), pushArgs); blocked {
 		return fmt.Errorf("refusing %q: safe-push blocks force-pushes to protected/default branches "+
 			"(main, master, and the repository default); use --force-with-lease only for non-default PR branches", target)
+	}
+	if err := CheckSessionLeaks(repoDir); err != nil {
+		return err
 	}
 	gh, err := ResolveGh()
 	if err != nil {

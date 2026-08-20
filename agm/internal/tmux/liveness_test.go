@@ -21,6 +21,16 @@ func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestLivenessScanTimeoutCoversCompleteHostObservation(t *testing.T) {
+	// Readiness resolves the pane and then takes two sequential process-table
+	// snapshots. Keep enough bounded headroom for all three subprocesses on a
+	// contended host; the caller-cancellation test above proves a shorter caller
+	// lifetime remains authoritative.
+	if livenessScanTimeout < 5*time.Second {
+		t.Fatalf("livenessScanTimeout = %v, want at least 5s for the complete observation sequence", livenessScanTimeout)
+	}
+}
+
 func TestTmuxSessionExistenceResultDistinguishesOperationalFailures(t *testing.T) {
 	t.Parallel()
 

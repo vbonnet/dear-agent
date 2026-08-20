@@ -101,10 +101,27 @@ func renderWatchStalledPlist(homeDir, agmBin, orchestrator, workspace string) (s
 	if err != nil {
 		return "", fmt.Errorf("read embedded plist template: %w", err)
 	}
-	content := string(tmpl)
+	// Normalize line endings before any newline-sensitive replacement below:
+	// a CRLF checkout (e.g. git autocrlf on Windows) would otherwise make
+	// the --orchestrator removal below match nothing and silently leave the
+	// placeholder in the installed plist.
+	content := strings.ReplaceAll(string(tmpl), "\r\n", "\n")
 	content = strings.ReplaceAll(content, "__USER_HOME__", homeDir)
 	content = strings.ReplaceAll(content, "__AGM_BINARY__", agmBin)
-	content = strings.ReplaceAll(content, "__ORCHESTRATOR__", orchestrator)
+	// The default orchestrator is empty, which is what enables run-time
+	// discovery. Emitting "--orchestrator" followed by an empty <string>
+	// leaves a flag whose value is a blank argument: it parses today, but
+	// any plist round-trip that drops empty strings would leave the flag
+	// dangling and make it swallow the next argument instead. Drop the
+	// whole pair when there is no orchestrator to name.
+	if strings.TrimSpace(orchestrator) == "" {
+		content = strings.ReplaceAll(content,
+			"        <string>--orchestrator</string>\n        <string>__ORCHESTRATOR__</string>\n", "")
+	}
+	// Run unconditionally afterwards: the placeholder also appears in the
+	// template's header comment, which must be substituted whether or not
+	// the argument pair survived.
+	content = strings.ReplaceAll(content, "__ORCHESTRATOR__", orchestratorDescription(orchestrator))
 	content = strings.ReplaceAll(content, "__WORKSPACE__", workspace)
 	return content, nil
 }
@@ -189,4 +206,15 @@ func runUninstallWatchStalledSchedule(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("✓ Removed:  %s\n", dest)
 	return nil
+}
+
+// orchestratorDescription names the routing target for the generated
+// plist's header comment. An empty orchestrator is not "nothing": it is
+// what selects run-time discovery, so the comment says so rather than
+// leaving a blank where a session name is expected.
+func orchestratorDescription(orchestrator string) string {
+	if strings.TrimSpace(orchestrator) == "" {
+		return "(discovery: no pinned orchestrator)"
+	}
+	return orchestrator
 }

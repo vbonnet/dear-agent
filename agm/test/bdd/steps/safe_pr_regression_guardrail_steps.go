@@ -17,6 +17,8 @@ func registerSafePRRegressionGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
 	ctx.Step(`^AGM runs the safe-pr no-merge subprocess regression$`, agmRunsSafePRNoMergeSubprocessRegression)
 	ctx.Step(`^safe-pr creation should not invoke a merge subprocess$`, safePRCreationShouldNotInvokeMergeSubprocess)
+	ctx.Step(`^AGM runs the session reference leak regressions$`, agmRunsSessionReferenceLeakRegressions)
+	ctx.Step(`^safe-pr and safe-push should refuse published session references$`, wrappersShouldRefusePublishedSessionReferences)
 }
 
 func agmRunsSafePRAbruptParentRegression(ctx context.Context) error {
@@ -84,6 +86,33 @@ func safePRCreationShouldNotInvokeMergeSubprocess(ctx context.Context) error {
 	}
 	if state.noMergeRegressionErr != nil {
 		return fmt.Errorf("safe-pr no-merge subprocess regression: %w: %s", state.noMergeRegressionErr, state.noMergeRegression)
+	}
+	return nil
+}
+
+// agmRunsSessionReferenceLeakRegressions exercises the detector and both of its
+// enforcement call sites together. A session reference is only prevented if the
+// shared detector finds it AND each publish path refuses on it, so one scenario
+// covers the whole chain rather than asserting the library in isolation.
+func agmRunsSessionReferenceLeakRegressions(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.sessionLeakRegression, state.sessionLeakErr = runLocalGuardrailGoTest(ctx,
+		`^(TestScan|TestRedact|TestDescribe|TestValidateRejectsSessionReferenceInPRText|TestValidateAllowsCleanPRText|TestCheckSessionLeaks|TestUnpushedCommits)`,
+		"./internal/sessionid", "./internal/safepr", "./internal/safegit",
+	)
+	return nil
+}
+
+func wrappersShouldRefusePublishedSessionReferences(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.sessionLeakErr != nil {
+		return fmt.Errorf("session reference leak regressions: %w: %s", state.sessionLeakErr, state.sessionLeakRegression)
 	}
 	return nil
 }

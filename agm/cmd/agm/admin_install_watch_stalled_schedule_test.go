@@ -87,3 +87,33 @@ func TestRenderWatchStalledPlistCustomOrchestrator(t *testing.T) {
 		t.Error("default orchestrator leaked when a custom one was supplied")
 	}
 }
+
+// An empty orchestrator is the default and is what turns on run-time
+// discovery. The generated plist must not carry a flag with a blank value.
+func TestRenderWatchStalledPlistOmitsEmptyOrchestrator(t *testing.T) {
+	content, err := renderWatchStalledPlist("/Users/x", "/Users/x/go/bin/agm", "", "oss")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	// Matched as an argument element, not as free text: the template's
+	// own comment block explains --orchestrator in prose.
+	if strings.Contains(content, "<string>--orchestrator</string>") {
+		t.Fatalf("empty orchestrator still emitted the flag:\n%s", content)
+	}
+	if strings.Contains(content, "__ORCHESTRATOR__") {
+		t.Fatal("placeholder left unsubstituted")
+	}
+}
+
+// A named orchestrator is still a preferred first candidate and must
+// survive into the plist.
+func TestRenderWatchStalledPlistKeepsNamedOrchestrator(t *testing.T) {
+	content, err := renderWatchStalledPlist("/Users/x", "/Users/x/go/bin/agm", "vroom-orchestrator", "oss")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(content, "<string>--orchestrator</string>") ||
+		!strings.Contains(content, "<string>vroom-orchestrator</string>") {
+		t.Fatalf("named orchestrator missing from plist:\n%s", content)
+	}
+}

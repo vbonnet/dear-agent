@@ -25,8 +25,12 @@ import (
 	"time"
 )
 
-// livenessScanTimeout bounds the tmux + ps round-trips for one scan.
-const livenessScanTimeout = 2 * time.Second
+// livenessScanTimeout bounds the complete tmux + ps observation sequence for
+// one scan. The readiness path performs pane resolution followed by two
+// process-table reads, so the bound must tolerate ordinary host contention
+// without turning a live harness into an operational error. A shorter caller
+// deadline still wins through context.WithTimeout.
+const livenessScanTimeout = 5 * time.Second
 
 // ProcEntry is one row of a process table. PGID, TPGID, and State are populated
 // for input-readiness scans, which must distinguish a foreground harness from

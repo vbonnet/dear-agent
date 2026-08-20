@@ -1,0 +1,9 @@
+# The language-policy waiver store must stay reviewable text. Marking it
+# explicitly keeps Git from ever treating it as binary and suppressing the
+# per-line diff that makes each waiver attributable.
+.github/language-policy/*.jsonl text eol=lf diff
+
+# Binary waiver stores are rejected by tools/language-policy verify-store
+# and by TestNoBinaryWaiverStore; this keeps a stray one from being
+# silently committed as an opaque blob in the meantime.
+.github/language-policy/*.db binary

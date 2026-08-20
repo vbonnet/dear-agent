@@ -108,6 +108,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-50** When atomic initial delivery of a Codex prompt with no extractable verification keyword is followed by a styled idle composer at the first delayed verification capture, the verifier shall treat the outcome as an ambiguous successful return and shall not resend the prompt, because the turn may already have completed; observable processing, prompt keywords, and prompt disappearance shall remain stronger confirmation signals, while an extractable keyword that remains absent shall retain retry behavior.
 
+**TMUX-51** When a readiness or pane-liveness scan invokes multiple sequential tmux or process-table observations, the system shall bound the complete scan with an internal deadline that accommodates the full observation sequence under loaded-host contention while an earlier caller cancellation or deadline remains authoritative; exhausting either deadline or failing any observation shall return an operational error and shall never fabricate absence, wrong-harness state, or readiness.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

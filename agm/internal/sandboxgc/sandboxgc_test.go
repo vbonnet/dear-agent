@@ -1,11 +1,13 @@
 package sandboxgc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 const testBase = "/home/u/.agm/sandboxes"
@@ -169,10 +171,10 @@ type fakeHost struct {
 func (f *fakeHost) checker(base string, withLiveGate bool) *Checker {
 	c := &Checker{
 		Base: base,
-		ListMounts: func() ([]string, error) {
+		ListMounts: func(context.Context) ([]string, error) {
 			return append([]string(nil), f.mounts...), f.mountsErr
 		},
-		ListProcPaths: func() ([]ProcPath, error) { return f.procs, f.procsErr },
+		ListProcPaths: func(context.Context) ([]ProcPath, error) { return f.procs, f.procsErr },
 		Unmount: func(p string) error {
 			f.unmounted = append(f.unmounted, p)
 			if f.unmountClears {
@@ -206,6 +208,7 @@ func TestCheckReapable(t *testing.T) {
 		liveGate      bool
 		wantReason    string // "" = reapable
 		wantProbeFail bool
+		wantPID       int
 	}{
 		{
 			name:     "reapable: no session, no process, no mount",
@@ -248,6 +251,7 @@ func TestCheckReapable(t *testing.T) {
 			dir:        dir,
 			liveGate:   true,
 			wantReason: ReasonLiveProcess,
+			wantPID:    7,
 		},
 		{
 			name:       "refused: open fd inside",
@@ -255,6 +259,7 @@ func TestCheckReapable(t *testing.T) {
 			dir:        dir,
 			liveGate:   true,
 			wantReason: ReasonLiveProcess,
+			wantPID:    7,
 		},
 		{
 			name:          "refused (fail closed): lsof unavailable",
@@ -297,6 +302,9 @@ func TestCheckReapable(t *testing.T) {
 			}
 			if ref.ProbeFailure != tt.wantProbeFail {
 				t.Errorf("ProbeFailure = %v, want %v (detail: %s)", ref.ProbeFailure, tt.wantProbeFail, ref.Detail)
+			}
+			if ref.ProcessID != tt.wantPID {
+				t.Errorf("refusal process ID = %d, want %d (detail: %s)", ref.ProcessID, tt.wantPID, ref.Detail)
 			}
 		})
 	}
@@ -394,6 +402,77 @@ func TestReapProcessGateBlocksBeforeUnmount(t *testing.T) {
 	}
 }
 
+func TestReapContextBoundsInFlightSafetyScans(t *testing.T) {
+	dir := testBase + "/deadbeef"
+	tests := []struct {
+		name          string
+		listProcPaths func(context.Context) ([]ProcPath, error)
+		listMounts    func(context.Context) ([]string, error)
+		wantUnmounts  int
+	}{
+		{
+			name: "process inspection",
+			listProcPaths: func(ctx context.Context) ([]ProcPath, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+			listMounts: func(context.Context) ([]string, error) {
+				return nil, nil
+			},
+		},
+		{
+			name: "mount inspection",
+			listProcPaths: func(context.Context) ([]ProcPath, error) {
+				return nil, nil
+			},
+			listMounts: func(ctx context.Context) ([]string, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+			wantUnmounts: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var unmounts, removes int
+			checker := &Checker{
+				Base:          testBase,
+				ListMounts:    tt.listMounts,
+				ListProcPaths: tt.listProcPaths,
+				Unmount: func(string) error {
+					unmounts++
+					return nil
+				},
+				Remove: func(string) error {
+					removes++
+					return nil
+				},
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+			start := time.Now()
+			err := checker.ReapContext(ctx, dir)
+			if time.Since(start) > 250*time.Millisecond {
+				t.Fatalf("ReapContext exceeded bounded scan lifetime: %v", time.Since(start))
+			}
+			var refusal *RefusalError
+			if !errors.As(err, &refusal) {
+				t.Fatalf("ReapContext() error = %v, want fail-closed refusal", err)
+			}
+			if refusal.ProcessID != 0 {
+				t.Fatalf("deadline refusal process ID = %d, want 0", refusal.ProcessID)
+			}
+			if unmounts != tt.wantUnmounts {
+				t.Fatalf("unmount calls = %d, want %d", unmounts, tt.wantUnmounts)
+			}
+			if removes != 0 {
+				t.Fatalf("SAFETY VIOLATION: expired scan removed sandbox %d time(s)", removes)
+			}
+		})
+	}
+}
+
 func TestNewCheckerDefaults(t *testing.T) {
 	c := NewChecker(testBase, nil)
 	if c.Base != testBase {
@@ -423,8 +502,8 @@ func TestReapRealFS(t *testing.T) {
 
 	c := &Checker{
 		Base:           base,
-		ListMounts:     func() ([]string, error) { return []string{"/"}, nil },
-		ListProcPaths:  func() ([]ProcPath, error) { return nil, nil },
+		ListMounts:     func(context.Context) ([]string, error) { return []string{"/"}, nil },
+		ListProcPaths:  func(context.Context) ([]ProcPath, error) { return nil, nil },
 		LiveSessionIDs: func() (map[string]bool, error) { return nil, nil },
 		Unmount:        func(string) error { return nil },
 		Remove:         os.RemoveAll,

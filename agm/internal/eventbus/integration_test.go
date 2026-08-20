@@ -42,6 +42,20 @@ func waitForClients(t *testing.T, hub *Hub, expected int) {
 	t.Fatalf("expected %d clients, got %d", expected, hub.ClientCount())
 }
 
+// waitForSubscriptions polls until the hub has processed the expected number
+// of subscription transitions for sessionID.
+func waitForSubscriptions(t *testing.T, hub *Hub, sessionID string, expected int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.SubscriptionCount(sessionID) == expected {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected %d subscriptions for %q, got %d", expected, sessionID, hub.SubscriptionCount(sessionID))
+}
+
 // readEvent reads a single Event from a WebSocket connection.
 func readEvent(t *testing.T, conn *websocket.Conn, timeout time.Duration) *Event {
 	t.Helper()
@@ -239,7 +253,8 @@ func TestIntegration_SessionFilterMultipleSessions(t *testing.T) {
 	// Subscribe to specific sessions
 	sendJSONMessage(t, sessionAConn, ClientMessage{Action: "subscribe", SessionID: "session-A"})
 	sendJSONMessage(t, sessionBConn, ClientMessage{Action: "subscribe", SessionID: "session-B"})
-	time.Sleep(50 * time.Millisecond)
+	waitForSubscriptions(t, hub, "session-A", 1)
+	waitForSubscriptions(t, hub, "session-B", 1)
 
 	// Broadcast events for session-A, session-B, and session-C
 	for _, sid := range []string{"session-A", "session-B", "session-C"} {
@@ -410,7 +425,7 @@ func TestIntegration_SubscribeUnsubscribeResubscribe(t *testing.T) {
 	waitForClients(t, hub, 1)
 
 	sendJSONMessage(t, conn, ClientMessage{Action: "subscribe", SessionID: "session-X"})
-	time.Sleep(50 * time.Millisecond)
+	waitForSubscriptions(t, hub, "session-X", 1)
 
 	event1 := mustEvent(t, EventSessionStuck, "session-X", SessionStuckPayload{Reason: "first"})
 	hub.Broadcast(event1)
@@ -420,7 +435,7 @@ func TestIntegration_SubscribeUnsubscribeResubscribe(t *testing.T) {
 	// Phase 2: unsubscribe — verify no delivery using a channel-based check
 	// (avoids setting read deadline which corrupts gorilla/websocket state)
 	sendJSONMessage(t, conn, ClientMessage{Action: "unsubscribe"})
-	time.Sleep(50 * time.Millisecond)
+	waitForSubscriptions(t, hub, "session-X", 0)
 
 	event2 := mustEvent(t, EventSessionStuck, "session-X", SessionStuckPayload{Reason: "missed"})
 	hub.Broadcast(event2)
@@ -447,7 +462,7 @@ func TestIntegration_SubscribeUnsubscribeResubscribe(t *testing.T) {
 	// The background goroutine is still blocking on ReadMessage, which will
 	// unblock when the hub delivers this new event.
 	sendJSONMessage(t, conn, ClientMessage{Action: "subscribe", SessionID: "*"})
-	time.Sleep(100 * time.Millisecond)
+	waitForSubscriptions(t, hub, "*", 1)
 
 	event3 := mustEvent(t, EventSessionStuck, "session-Y", SessionStuckPayload{Reason: "resubscribed"})
 	hub.Broadcast(event3)
@@ -525,7 +540,9 @@ func TestIntegration_MixedSessionFilterConcurrent(t *testing.T) {
 			SessionID: fmt.Sprintf("session-%d", i),
 		})
 	}
-	time.Sleep(50 * time.Millisecond)
+	for i := range numSessions {
+		waitForSubscriptions(t, hub, fmt.Sprintf("session-%d", i), 1)
+	}
 
 	// Broadcast events for each session
 	for i := 0; i < numSessions; i++ {
@@ -688,7 +705,7 @@ func TestIntegration_MultipleEventTypesSameSession(t *testing.T) {
 
 	// Filter to a single session
 	sendJSONMessage(t, conn, ClientMessage{Action: "subscribe", SessionID: "lifecycle"})
-	time.Sleep(50 * time.Millisecond)
+	waitForSubscriptions(t, hub, "lifecycle", 1)
 
 	// Simulate a session lifecycle: stuck → escalated → recovered → state_change → completed
 	lifecycle := []struct {
@@ -733,4 +750,3 @@ func mustEvent(t *testing.T, eventType EventType, sessionID string, payload any)
 	require.NoError(t, err)
 	return event
 }
-

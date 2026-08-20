@@ -21,12 +21,18 @@ env:
   MAX_CHANGED_LINES: "1000"
   MAX_CHANGED_FILES: "50"
   MAX_TOP_LEVEL_AREAS: "4"
+  # Added non-test source lines that must accompany a pure source-file move
+  # before the diff counts as mixing a refactor with new logic.
+  MIN_NEW_LOGIC_LINES: "50"
 
 jobs:
   size-scope:
     name: Size and scope signal
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      should_comment: ${{ steps.scope.outputs.should_comment }}
+      mixed_concern: ${{ steps.concern.outputs.mixed_concern }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -124,6 +130,26 @@ jobs:
             fi
           } >> "$GITHUB_OUTPUT"
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Shape, not size. The thresholds above cannot see a small PR that
+      # renames a source file AND builds new logic on the new names — the exact
+      # split CONTRIBUTING.md asks for. This reports that mix on its own.
+      # Advisory by construction: the command exits 0 either way, so it can
+      # never become the reason a PR cannot merge.
+      - name: Detect mixed refactor and new logic
+        id: concern
+        run: |
+          go run ./tools/pr-concern-lint \
+            -base "${{ github.event.pull_request.base.sha }}" \
+            -head "${{ github.event.pull_request.head.sha }}" \
+            -min-new-logic "$MIN_NEW_LOGIC_LINES" \
+            -github-output >> "$GITHUB_OUTPUT"
+
       - name: Comment with split suggestion
         # A pull_request run from a fork, or one opened by Dependabot (whose
         # workflow runs also get a read-only GITHUB_TOKEN even though the head
@@ -135,7 +161,7 @@ jobs:
         # PR flips actor to that human while the token stays read-only — the
         # step would then run and fail. The author is stable across every event
         # on the PR.
-        if: steps.scope.outputs.should_comment == 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: (steps.scope.outputs.should_comment == 'true' || steps.concern.outputs.mixed_concern == 'true') && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -144,6 +170,7 @@ jobs:
           CHANGED_FILES: ${{ steps.scope.outputs.changed_files }}
           TOP_LEVEL_AREAS: ${{ steps.scope.outputs.top_level_areas }}
           REASONS: ${{ steps.scope.outputs.reasons }}
+          CONCERN_REASON: ${{ steps.concern.outputs.reason }}
         run: |
           set -euo pipefail
           body=/tmp/pr-size-scope-comment.md
@@ -151,13 +178,14 @@ jobs:
             echo "<!-- pr-size-scope -->"
             echo "## PR size and scope signal"
             echo
-            echo "This PR crossed the deterministic split-suggestion threshold:"
+            echo "This PR tripped a deterministic split-suggestion signal:"
             echo
-            printf '%s\n' "$REASONS"
+            [ -n "$REASONS" ] && printf '%s\n' "$REASONS"
+            [ -n "$CONCERN_REASON" ] && printf '%s\n' "$CONCERN_REASON"
             echo
             echo "Current scope: ${CHANGED_LINES} changed lines, ${CHANGED_FILES} changed files, ${TOP_LEVEL_AREAS} top-level areas."
             echo
-            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently."
+            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands."
           } > "$body"
 
           # Edit the existing marker comment in place when there is one. The
@@ -185,7 +213,7 @@ jobs:
       - name: Remove stale split-suggestion comment
         # A later synchronize run can drop below every threshold; clear any
         # marker comment left by an earlier, larger revision of this PR.
-        if: steps.scope.outputs.should_comment == 'false' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -198,3 +226,104 @@ jobs:
               [ -n "$comment_id" ] || continue
               gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
             done
+
+  # ---------------------------------------------------------------------------
+  # The deterministic job above states THAT a PR is too big. It cannot say what
+  # to do about it, and two days of evidence say a bare threshold report changes
+  # nothing: every oversized PR merged after that job shipped got its comment and
+  # merged unsplit anyway (5 of 5 — see the 2026-08-19 retro).
+  #
+  # This job answers the question the comment left open: given THIS diff, where
+  # are the seams? It runs ONLY when the deterministic gate already tripped, so
+  # the model is never spent on a PR that is within budget, and its verdict is
+  # advisory — the job cannot fail the check, because size is explicitly not a
+  # REVIEW.md §3 blocking trigger.
+  #
+  # It is also allowed to conclude the change is genuinely atomic. That is the
+  # point: declining to split should be a stated, recorded reason rather than
+  # silence.
+  # ---------------------------------------------------------------------------
+  split-request:
+    name: Split request
+    needs: size-scope
+    if: |
+      (needs.size-scope.outputs.should_comment == 'true' ||
+       needs.size-scope.outputs.mixed_concern == 'true') &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Ask for a concrete split
+        uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb  # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            PR ${{ github.repository }}#${{ github.event.pull_request.number }} tripped the
+            deterministic size/scope gate. Read its diff and propose how to break it up.
+
+            The repository budget is at most 400 changed lines and at most 15 changed files
+            per PR; CONTRIBUTING.md section "Small, stacked PRs" and the .claude/skills/split-prs
+            skill hold the full rule. The CI thresholds are ceilings, not targets.
+
+            Produce ONE of two verdicts.
+
+            SPLITTABLE — the normal case. Propose a concrete stacked series in the required
+            order: mechanical (renames, moves, generated output, formatting) first, then the
+            enabling refactor (new seams, extracted interfaces, signature changes, no behavior
+            change), then behavior last. For each proposed PR give a title, the specific files
+            or hunks it carries, and a rough changed-line count. Name real paths from this
+            diff, never placeholders. Say explicitly that each step must land on main before
+            the next opens, so every PR gets the five-dimension review.
+
+            Frame the proposal so THIS pull request stays as the TIP of the stack. The lower
+            slices are extracted into new PRs beneath it, and this PR is retargeted onto the
+            topmost slice — it is never closed and replaced by a fresh PR for the remainder.
+
+            Prescribe GitHub's native stacking, and give the exact commands. Pointing each
+            base at the branch below builds a valid chain, but a chain is not a registered
+            stack: `gh stack sync` only cascade-rebases members of a registered stack, and it
+            is what switches to `--onto` automatically once a lower PR merges. So the proposal
+            must end with the registration step, tip LAST, and must reuse this PR number:
+              gh extension install github/gh-stack   # once per machine
+              gh stack link <slice-1-branch> <slice-2-branch> <this-branch>
+              gh stack sync                          # after anything lands beneath it
+            `gh stack link` accepts PR numbers and reuses the open PR on a branch, so this PR
+            keeps its number, threads, and CI history by construction. Do not propose
+            `git rebase --onto` with `gh pr edit --base`; that hand-rolled recipe is
+            superseded.
+
+            Never propose closing this PR and opening a new top PR: an open PR carries the
+            review threads, bot findings, and CI history that a later retrospective reads to
+            reconstruct the decision, and closing it discards that while git keeps the code
+            either way. Closing is correct only if the slices absorb the change completely and
+            nothing remains at the tip; say that only when it is true, and say which PRs would
+            supersede it.
+
+            ATOMIC — only when the change genuinely cannot be split: a mechanical rename across
+            many call sites, a generated-file refresh, a vendored dependency update, or a change
+            where any smaller step would leave main broken. State which of those it is and why.
+            "It was all one task" and "the parts are related" are NOT atomic; discovering two
+            problems in one session does not make them one change. If you claim ATOMIC, say
+            whether the mechanical bulk is at least isolated in its own commit so a reviewer can
+            skip it.
+
+            Be specific and short. No preamble, no restating the diff back.
+
+            Then post your verdict as a single PR comment whose FIRST line is exactly the
+            marker `<!-- pr-split-request -->`. Before posting, list existing comments and if
+            one already starts with that marker, EDIT it in place instead of adding another
+            (`gh api --method PATCH repos/OWNER/REPO/issues/comments/ID`). Editing notifies
+            nobody; re-posting on every push trains people to mute the thread, which is how the
+            deterministic comment came to be ignored.

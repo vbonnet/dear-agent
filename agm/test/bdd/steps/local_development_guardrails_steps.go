@@ -55,6 +55,8 @@ type localDevGuardrailState struct {
 	auditRegressionErr     error
 	noMergeRegression      string
 	noMergeRegressionErr   error
+	sessionLeakRegression  string
+	sessionLeakErr         error
 	treeRegression         string
 	treeRegressionErr      error
 	cleanupWTRegression    string
@@ -63,6 +65,9 @@ type localDevGuardrailState struct {
 	requiredCIError        error
 	mergeLoopCIRegression  string
 	mergeLoopCIError       error
+	raceSkippedSLAs        []string
+	ordinarySLAPackages    []string
+	ordinarySLASanitized   bool
 }
 
 type localDevGuardrailStateKey struct{}
@@ -99,6 +104,9 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the safe-pr full preflight timeout is configured$`, safePRFullPreflightTimeoutIsConfigured)
 	ctx.Step(`^AGM validates the safe-pr preflight budget$`, agmValidatesSafePRPreflightBudget)
 	ctx.Step(`^safe-pr should allow at least (\d+) minutes for preflight-full$`, safePRShouldAllowAtLeastMinutesForPreflightFull)
+	ctx.Step(`^the full preflight ordinary performance gate is configured$`, fullPreflightOrdinaryPerformanceGateIsConfigured)
+	ctx.Step(`^AGM validates race-skipped wall-clock SLA coverage$`, agmValidatesRaceSkippedWallClockSLACoverage)
+	ctx.Step(`^every race-skipped SLA package should run without inherited test modes or race instrumentation$`, everyRaceSkippedSLAPackageShouldRunWithoutRaceInstrumentation)
 	ctx.Step(`^a safe-pr linked worktree with "([^"]*)" lock ownership$`, safePRLinkedWorktreeWithLockOwnership)
 	ctx.Step(`^safe-pr protects a "([^"]*)" preflight and PR creation transaction$`, safePRProtectsTransaction)
 	ctx.Step(`^the worktree should be protected during preflight and PR creation$`, worktreeShouldBeProtectedDuringTransaction)
@@ -124,6 +132,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
 	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
 	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
+	ctx.Step(`^local preflight should resolve configured GOBIN and first-GOPATH Go tool installs outside PATH$`, localPreflightShouldResolveStandardGoToolInstallsOutsidePATH)
 }
 
 func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) error {
@@ -755,6 +764,44 @@ func localAndRequiredCIGovulncheckAllowlistsShouldMatch(ctx context.Context) err
 	return nil
 }
 
+func localPreflightShouldResolveStandardGoToolInstallsOutsidePATH(ctx context.Context) error {
+	if _, err := getLocalDevGuardrailState(ctx); err != nil {
+		return err
+	}
+	sourcePath := filepath.Join(localDevBDDRepoRoot(), "scripts", "preflight.sh")
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("read local preflight: %w", err)
+	}
+	return validateGoToolInstallResolution(string(source))
+}
+
+func validateGoToolInstallResolution(source string) error {
+	requiredInOrder := []string{
+		`GOVULNCHECK_BIN="$(command -v govulncheck || true)"`,
+		`GO_TOOL_INSTALL_BIN="$(go env GOBIN)"`,
+		`if [[ -z "$GO_TOOL_INSTALL_BIN" ]]; then`,
+		`GOPATH_VALUE="$(go env GOPATH)"`,
+		`GO_TOOL_INSTALL_BIN="${GOPATH_VALUE%%:*}/bin"`,
+		`GOVULNCHECK_CANDIDATE="$GO_TOOL_INSTALL_BIN/govulncheck"`,
+		`[[ -x "$GOVULNCHECK_CANDIDATE" ]]`,
+		`GOVULNCHECK_BIN="$GOVULNCHECK_CANDIDATE"`,
+		`"$GOVULNCHECK_BIN" -format json -scan package ./...`,
+	}
+	previous := -1
+	for _, required := range requiredInOrder {
+		index := strings.Index(source, required)
+		if index < 0 {
+			return fmt.Errorf("local preflight is missing govulncheck resolution contract %q", required)
+		}
+		if index <= previous {
+			return fmt.Errorf("local preflight govulncheck resolution contract is out of order at %q", required)
+		}
+		previous = index
+	}
+	return nil
+}
+
 func safePRFullPreflightTimeoutIsConfigured(ctx context.Context) error {
 	state, err := getLocalDevGuardrailState(ctx)
 	if err != nil {
@@ -794,6 +841,120 @@ func safePRShouldAllowAtLeastMinutesForPreflightFull(ctx context.Context, minimu
 	}
 	if state.preflightMinutes < minimum {
 		return fmt.Errorf("safe-pr preflight timeout = %dm, want at least %dm", state.preflightMinutes, minimum)
+	}
+	return nil
+}
+
+func fullPreflightOrdinaryPerformanceGateIsConfigured(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	root := localDevBDDRepoRoot()
+	preflight, err := os.ReadFile(filepath.Join(root, "scripts", "preflight.sh"))
+	if err != nil {
+		return fmt.Errorf("read local preflight: %w", err)
+	}
+	if !strings.Contains(string(preflight), "ordinary performance SLA packages") {
+		return fmt.Errorf("ordinary performance SLA publication gate is not configured")
+	}
+	state.ordinarySLASanitized = strings.Contains(
+		string(preflight),
+		"GOFLAGS='' CI='' go test -race=false -short=false",
+	)
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return fmt.Errorf("open repository root: %w", err)
+	}
+	defer func() {
+		_ = rootFS.Close()
+	}()
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		relativeFile, relativeErr := filepath.Rel(root, path)
+		if relativeErr != nil {
+			return relativeErr
+		}
+		source, readErr := rootFS.ReadFile(relativeFile)
+		if readErr != nil {
+			return readErr
+		}
+		if !sourceHasRaceSuppressedSLA(string(source)) {
+			return nil
+		}
+		relativeDir, relativeErr := filepath.Rel(root, filepath.Dir(path))
+		if relativeErr != nil {
+			return relativeErr
+		}
+		packagePath := "./" + filepath.ToSlash(relativeDir)
+		if !slices.Contains(state.raceSkippedSLAs, packagePath) {
+			state.raceSkippedSLAs = append(state.raceSkippedSLAs, packagePath)
+		}
+		return nil
+	})
+}
+
+// raceSkippedSLAMarker is the structural token a wall-clock SLA assertion
+// must carry at its `raceEnabled` skip/downgrade site (see
+// docs/policies/harness-hygiene.ai.md#L31-L32: "encode a binary requirement
+// as prose the model self-checks" is a documented anti-pattern here).
+// sourceHasRaceSuppressedSLA keys discovery off this exact token instead of
+// matching one of several known skip/log sentences, so rewording a
+// human-readable skip message can't silently drop a package from "every
+// race-skipped SLA published to preflight.sh" coverage.
+const raceSkippedSLAMarker = "SLA-RACE-SKIP"
+
+func sourceHasRaceSuppressedSLA(source string) bool {
+	return strings.Contains(source, "raceEnabled") && strings.Contains(source, raceSkippedSLAMarker)
+}
+
+func agmValidatesRaceSkippedWallClockSLACoverage(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if len(state.raceSkippedSLAs) == 0 {
+		return fmt.Errorf("no race-skipped wall-clock SLA packages discovered")
+	}
+	preflight, err := os.ReadFile(filepath.Join(localDevBDDRepoRoot(), "scripts", "preflight.sh"))
+	if err != nil {
+		return fmt.Errorf("read local preflight: %w", err)
+	}
+	for _, packagePath := range state.raceSkippedSLAs {
+		if strings.Contains(string(preflight), packagePath) {
+			state.ordinarySLAPackages = append(state.ordinarySLAPackages, packagePath)
+		}
+	}
+	return nil
+}
+
+func everyRaceSkippedSLAPackageShouldRunWithoutRaceInstrumentation(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	missing := make([]string, 0)
+	for _, packagePath := range state.raceSkippedSLAs {
+		if !slices.Contains(state.ordinarySLAPackages, packagePath) {
+			missing = append(missing, packagePath)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("ordinary performance SLA gate omits race-skipped packages: %s", strings.Join(missing, ", "))
+	}
+	if !state.ordinarySLASanitized {
+		return fmt.Errorf("ordinary performance SLA gate does not neutralize inherited Go test modes")
 	}
 	return nil
 }

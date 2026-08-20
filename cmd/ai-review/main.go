@@ -385,7 +385,14 @@ func run(c config) int {
 	// reviewer-dependency, traceability, stale base) is conclusive without a
 	// model: the missing credential is NOT its blocker, so it keeps the
 	// ordinary blocking exit even when keyless (AIREV-26 boundary).
-	if plan.needsHuman() && modelUnavailable {
+	// An AIREV-22 bound proof is not such a verdict. It records that the
+	// reviewer could not fit this diff inside its own prompt and response
+	// budgets, so no verdict was ever reachable and no human finding was
+	// made; keyless, that is the cannot-run disposition. It falls through to
+	// the shared oversize probe below before any neutral translation, so it
+	// proves the same diff bound every other cannot-run path proves.
+	keylessBoundProof := plan.capacityOnly() && keylessTranslatable(c)
+	if plan.needsHuman() && modelUnavailable && !keylessBoundProof {
 		code, _ := handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "), false)
 		return code
 	}
@@ -407,6 +414,17 @@ func run(c config) int {
 			logCommentErr(postComment(c, oversizeComment(c.maxDiff)))
 			return failClosed(c, "the diff exceeded the auto-review size limit")
 		}
+	}
+	// The bound proof deferred above, now past the shared oversize probe.
+	// Publication stays honest: the evidence comment carries the reason, no
+	// approval is claimed, and a failed evidence post keeps the plain
+	// blocking exit exactly as every other cannot-run path does.
+	if keylessBoundProof {
+		code, evidencePosted := handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "), true)
+		if evidencePosted {
+			return keylessExit(c, code)
+		}
+		return code
 	}
 	// A deterministic escalation still benefits from the complete automated
 	// review when credentials are available. Fork and secretless runs cannot
