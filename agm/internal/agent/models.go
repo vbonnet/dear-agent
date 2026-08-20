@@ -522,8 +522,12 @@ func ModelFamilyForHarnessModel(harnessName, model string) string {
 
 	// Nothing in the catalog claimed it. Infer from the identifier itself, so
 	// an unregistered harness or a forward-compatible model the catalog has
-	// not caught up to can still name its own vendor.
-	return ModelFamilyForName(model)
+	// not caught up to can still name its own vendor. current is the most
+	// resolved form seen (model, if no alias hop matched at all, or the
+	// last successfully resolved alias) — a bare legacy alias like
+	// "legacy-gpt" carries no vendor token, but the name it resolves to
+	// usually does (gemini review on #1327).
+	return ModelFamilyForName(current)
 }
 
 // modelFamilyOverrides names the family for registered models whose public
