@@ -571,10 +571,14 @@ func TestTreeIdentityInventoryBoundIsDerivedFromEntryLimit(t *testing.T) {
 	}
 	// Every record the parser accepts fits in maxTreeIdentityRecordBytes, so
 	// the byte bound admits at least this many entries no matter how the
-	// repository is shaped.
+	// repository is shaped. The byte bound must guarantee at least
+	// maxTreeIdentityEntries records at the worst permitted record size, or
+	// the byte cap would bind and fail closed before the declared entry
+	// limit is ever reached.
 	guaranteedEntries := maxTreeIdentityBytes / maxTreeIdentityRecordBytes
-	if guaranteedEntries < 64*1024 {
-		t.Errorf("inventory bound guarantees only %d entries at the worst permitted record size", guaranteedEntries)
+	if guaranteedEntries < maxTreeIdentityEntries {
+		t.Errorf("inventory bound guarantees only %d entries at the worst permitted record size, want at least %d",
+			guaranteedEntries, maxTreeIdentityEntries)
 	}
 	// A 256-component path at one byte per component must still fit one
 	// record, or the two declared limits would contradict each other.

@@ -25,12 +25,13 @@ const (
 	// maxTreeIdentityEntries: a file-plus-directory record averages ~88 bytes
 	// here, so 4 MiB capped out near 48,000 entries against a declared
 	// 200,000, and every review would have failed once the repository grew
-	// past that. This bound admits at least maxTreeIdentityBytes /
-	// maxTreeIdentityRecordBytes = 65,536 records at the worst permitted
-	// record size and roughly 760,000 at this repository's average, so
-	// maxTreeIdentityEntries is the constraint that binds and gets reported
-	// for any realistic inventory.
-	maxTreeIdentityBytes             = 64 * 1024 * 1024
+	// past that. Deriving the byte bound from maxTreeIdentityEntries *
+	// maxTreeIdentityRecordBytes keeps maxTreeIdentityEntries the constraint
+	// that binds and gets reported even at the worst permitted record size,
+	// instead of a fixed byte cap silently reimposing a lower entry ceiling
+	// (a prior fixed 64 MiB only guaranteed 65,536 records at that size,
+	// below the declared 200,000).
+	maxTreeIdentityBytes             = maxTreeIdentityEntries * maxTreeIdentityRecordBytes
 	maxSpecControlIdentityComponents = 64 * 1024
 )
 
