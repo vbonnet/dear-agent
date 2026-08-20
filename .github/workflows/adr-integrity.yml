@@ -16,19 +16,87 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Change Detection
+    uses: ./.github/workflows/changed-paths.yml
+
   integrity:
     name: Identity, index, and lifecycle parity
+    needs: changes
+    # Always runs so the required context always reports (see the checkout/
+    # relevance step below for the actual scoping — job-level `if:` would skip
+    # the whole job, including the check that lets a change to the linter's
+    # own implementation re-arm it).
+    if: "!cancelled()"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history: the relevance check below diffs base...head itself,
+          # same as changed-paths.yml, rather than trusting a shallow clone to
+          # contain both endpoints.
+          fetch-depth: 0
+
+      - name: Determine relevance
+        id: relevance
+        # adr-lint validates ADR records and their indexes — all Markdown. A
+        # PR that touches no Markdown cannot change identity, index, or
+        # lifecycle parity, so this was ~1 minute of Go toolchain setup per
+        # Go-only PR to reprove the previous answer.
+        #
+        # Gated on `docs`, not `adr`: ADR scopes live in a dozen directories
+        # (docs/adr, agm/docs/adr, engram/cmd/engram, …) per .dear-agent.yml >
+        # adr-governance.scopes, and encoding that list a second time here is
+        # exactly the drift that let the Wayfinder wf/ leak through
+        # routing-enforcement. Any Markdown change runs the full check.
+        #
+        # Also gated on the linter's OWN implementation. pkg/adrlint and
+        # tools/adr-lint are Go, not Markdown, so `docs`/`global` from the
+        # shared taxonomy don't see a change there — the one case that most
+        # needs the real check to run against the real tree. Checked locally,
+        # not added as a new central taxonomy output, to keep this narrow and
+        # specific to this one workflow.
+        #
+        # Scope of the scan itself is unchanged: still whole-repo. The repo is
+        # clean today, so a whole-repo pass costs the same as a diff-scoped one
+        # and catches strictly more — diff-scoping here would be a weakening,
+        # not a fix.
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          DOCS: ${{ needs.changes.outputs.docs }}
+          GLOBAL: ${{ needs.changes.outputs.global }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          relevant=false
+          if [ "$CHANGES_RESULT" != "success" ] || [ "$DOCS" = "true" ] || [ "$GLOBAL" = "true" ]; then
+            relevant=true
+          fi
+
+          if [ "$relevant" != "true" ]; then
+            if [ "$EVENT_NAME" != "pull_request" ] || [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+              # Same fail-safe contract as changed-paths.yml: an unknowable
+              # change set says everything is relevant.
+              relevant=true
+            elif git diff --name-only "${BASE_SHA}...${HEAD_SHA}" | grep -qE '^(tools/adr-lint/|pkg/adrlint/)'; then
+              relevant=true
+            fi
+          fi
+
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Validate ADR governance
+        if: steps.relevance.outputs.relevant == 'true'
         run: go run ./tools/adr-lint -repo .
