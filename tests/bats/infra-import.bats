@@ -90,9 +90,11 @@ assert_output_contains() {
   assert_output_contains "Import complete"
 
   # The three managed-repo resources, at their module-qualified addresses.
-  grep -qF 'tofu import module.managed_repos["dear-agent"].github_repository.this dear-agent' "${STUB_LOG}"
-  grep -qF 'tofu import module.managed_repos["dear-agent"].github_repository_dependabot_security_updates.this dear-agent' "${STUB_LOG}"
-  grep -qF 'tofu import module.managed_repos["dear-agent"].github_repository_ruleset.branch_protection dear-agent:18061003' "${STUB_LOG}"
+  # -input=false is asserted, not tolerated: an import that can prompt hangs a
+  # CI job until its timeout, and a timed-out job reports nothing at all.
+  grep -qF 'tofu import -input=false module.managed_repos["dear-agent"].github_repository.this dear-agent' "${STUB_LOG}"
+  grep -qF 'tofu import -input=false module.managed_repos["dear-agent"].github_repository_dependabot_security_updates.this dear-agent' "${STUB_LOG}"
+  grep -qF 'tofu import -input=false module.managed_repos["dear-agent"].github_repository_ruleset.branch_protection dear-agent:18061003' "${STUB_LOG}"
 
   # No fourth import: an extra one would be a resource nobody declared.
   [ "$(grep -c 'tofu import' "${STUB_LOG}")" -eq 3 ]
