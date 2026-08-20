@@ -39,14 +39,14 @@ Feature: SPEC and BDD coverage
     Then every executable BDD feature should reference a governing SPEC.md
     And every governing SPEC.md should reference its executable BDD feature
 
-  Scenario: Changed production Go packages carry co-located specs
+  Scenario: Changed production Go packages declare one governed spec owner
     Given AGM parity coverage requirements
     When AGM validates changed Go package SPEC coverage
-    Then changed production Go packages should have co-located SPEC.md files
+    Then changed production Go packages should declare one governed SPEC owner
     And changed production Go package SPEC.md files should pass strict EARS lint
 
   Scenario: The actual repository enforces implementation coverage
     Given AGM parity coverage requirements
     When AGM validates repository-wide implementation SPEC and BDD coverage
-    Then every implementation directory including canonical Dockerfile and Makefile directories should have strict co-located SPEC and reciprocal BDD coverage
+    Then every implementation directory including canonical Dockerfile and Makefile directories should have one strict owned SPEC and reciprocal BDD coverage
     And every repository SPEC should have strict EARS and reciprocal executable BDD coverage
