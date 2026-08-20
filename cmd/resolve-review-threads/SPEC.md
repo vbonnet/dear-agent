@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 1.7
+**Version:** 1.8
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -68,6 +68,8 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-26** When a thread was already resolved by another actor before the pre-mutation re-read, the system shall report it as skipped and shall not count it among the threads it resolved.
 
 **RESOLVE-REVIEW-THREADS-27** When GitHub refuses a resolution for access reasons, the system shall report it as an access problem rather than prescribing an immediate retry of the same mutation.
+
+**RESOLVE-REVIEW-THREADS-28** When `reply-resolve` posts a reply, the system shall verify that the reply directly follows the comment it read before resolving, and shall leave the thread unresolved when another comment intervened.
 
 ## BDD Traceability
 

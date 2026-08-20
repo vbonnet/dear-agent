@@ -80,7 +80,7 @@ const listQuery = `query($owner:String!, $repo:String!, $pr:Int!, $after:String)
           isOutdated
           path
           opening: comments(first:1) { totalCount nodes { author { login } body } }
-          recent: comments(last:1) { nodes { author { login } body } }
+          recent: comments(last:2) { nodes { id author { login } body } }
         }
       }
     }
@@ -98,7 +98,7 @@ const threadByIDQuery = `query($id:ID!) {
       isOutdated
       path
       opening: comments(first:1) { totalCount nodes { author { login } body } }
-      recent: comments(last:1) { nodes { author { login } body } }
+      recent: comments(last:2) { nodes { id author { login } body } }
     }
   }
 }`
@@ -142,6 +142,11 @@ type thread struct {
 	// LastBody is the most recent comment, used to recognise a reply this
 	// tool already posted so a retry does not duplicate it.
 	LastBody string `json:"-"`
+	// LastID and PrevID are the node IDs of the last and second-to-last
+	// comments. reply-resolve pins LastID before posting and then requires
+	// PrevID to match it, which proves no comment slipped in underneath.
+	LastID string `json:"-"`
+	PrevID string `json:"-"`
 }
 
 func main() {
@@ -249,11 +254,31 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		// guard exists to prevent. Leave the thread untouched.
 		return fail("cannot read thread state, nothing posted: %v", err)
 	}
-	if cur.LastAuthor != cur.Author && sameReplyBody(cur.LastBody, body) {
+	// Pin what we read. If our reply does not land directly after this exact
+	// comment, someone spoke in the gap and our prewritten answer does not
+	// address them.
+	readLastID := cur.LastID
+	alreadyPosted := cur.LastAuthor != cur.Author && sameReplyBody(cur.LastBody, body)
+	if alreadyPosted {
 		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
 	} else if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
 		"-f", "query="+replyMutation); err != nil {
 		return fail("reply failed, thread left unresolved: %v", err)
+	} else if after, err := fetchThread(ctx, threadID); err != nil {
+		return fail("your reply is posted but the thread state could not be "+
+			"re-read, so it was NOT resolved: %v\n"+
+			"do NOT re-run reply-resolve (it would repost); check the thread, then:\n"+
+			"  resolve-review-threads resolve %s", err, threadID)
+	} else if after.PrevID != readLastID {
+		// A comment landed between our read and our post, so it now sits
+		// UNDER our reply. The re-read alone cannot see this: our comment is
+		// still last, so the thread would look answered and be resolved with
+		// the new feedback unread.
+		return fail("your reply is posted, but someone commented in between and "+
+			"your reply does not answer them.\n"+
+			"thread %s was left UNRESOLVED on purpose: read the comment above "+
+			"your reply, then answer it with:\n"+
+			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
 	}
 	msg, _, rErr := resolveWithEvidence(ctx, threadID, false)
 	if rErr != nil {
@@ -462,8 +487,12 @@ type threadNode struct {
 			Body string `json:"body"`
 		} `json:"nodes"`
 	} `json:"opening"`
+	// Recent holds the last two comments, newest last. Two rather than one so
+	// reply-resolve can verify its reply landed directly after the comment it
+	// had read, rather than after an unseen follow-up.
 	Recent struct {
 		Nodes []struct {
+			ID     string `json:"id"`
 			Author struct {
 				Login string `json:"login"`
 			} `json:"author"`
@@ -489,9 +518,15 @@ func toThread(n threadNode) thread {
 	t.Body = cleanBody(n.Opening.Nodes[0].Body)
 	openLogin := n.Opening.Nodes[0].Author.Login
 	lastLogin := ""
-	if len(n.Recent.Nodes) > 0 {
-		lastLogin = n.Recent.Nodes[0].Author.Login
-		t.LastBody = n.Recent.Nodes[0].Body
+	if k := len(n.Recent.Nodes); k > 0 {
+		// Newest is last in the connection, so index from the end.
+		last := n.Recent.Nodes[k-1]
+		lastLogin = last.Author.Login
+		t.LastBody = last.Body
+		t.LastID = last.ID
+		if k > 1 {
+			t.PrevID = n.Recent.Nodes[k-2].ID
+		}
 	}
 	t.LastAuthor = "unknown"
 	if lastLogin != "" {

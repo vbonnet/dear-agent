@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -116,15 +117,20 @@ func mkNode(id string, outdated bool, authors ...string) threadNode {
 	open.Body = "comment from " + authors[0]
 	n.Opening.Nodes = append(n.Opening.Nodes, open)
 
-	var last struct {
-		Author struct {
-			Login string `json:"login"`
-		} `json:"author"`
-		Body string `json:"body"`
+	// Recent mirrors comments(last:2): newest last.
+	for i := max(0, len(authors)-2); i < len(authors); i++ {
+		var c struct {
+			ID     string `json:"id"`
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body string `json:"body"`
+		}
+		c.ID = fmt.Sprintf("%s-c%d", id, i)
+		c.Author.Login = authors[i]
+		c.Body = "comment from " + authors[i]
+		n.Recent.Nodes = append(n.Recent.Nodes, c)
 	}
-	last.Author.Login = authors[len(authors)-1]
-	last.Body = "comment from " + authors[len(authors)-1]
-	n.Recent.Nodes = append(n.Recent.Nodes, last)
 	return n
 }
 
@@ -261,11 +267,13 @@ func mkNodeLogins(id, opening, latest string, total int) threadNode {
 	open.Author.Login = opening
 	n.Opening.Nodes = append(n.Opening.Nodes, open)
 	var last struct {
+		ID     string `json:"id"`
 		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
 		Body string `json:"body"`
 	}
+	last.ID = id + "-last"
 	last.Author.Login = latest
 	n.Recent.Nodes = append(n.Recent.Nodes, last)
 	return n
@@ -365,5 +373,39 @@ func TestIsAccessDenied(t *testing.T) {
 	}
 	if isAccessDenied(nil) {
 		t.Error("nil is not an access denial")
+	}
+}
+
+// TestToThreadRecentUsesNewestComment guards the indexing after widening the
+// recent window to two comments: the newest is LAST in the connection, so
+// reading nodes[0] would silently take the second-to-last commenter and could
+// call a thread answered when the reviewer actually spoke last.
+func TestToThreadRecentUsesNewestComment(t *testing.T) {
+	n := mkNode("t", false, "gemini-code-assist", "vbonnet", "gemini-code-assist")
+	got := toThread(n)
+	if got.LastAuthor != "gemini-code-assist" {
+		t.Errorf("LastAuthor = %q, want the newest comment's author", got.LastAuthor)
+	}
+	if got.Answered {
+		t.Error("reviewer spoke last; thread must not be answered")
+	}
+	if got.LastID == "" || got.PrevID == "" {
+		t.Errorf("both comment IDs must be populated, got last=%q prev=%q", got.LastID, got.PrevID)
+	}
+	if got.LastID == got.PrevID {
+		t.Error("last and previous comment IDs must differ")
+	}
+}
+
+// TestToThreadPrevIDEmptyOnSingleComment pins that a one-comment thread has no
+// predecessor. reply-resolve compares PrevID against the comment it read, so a
+// bogus non-empty value here would let an interleaved comment pass unnoticed.
+func TestToThreadPrevIDEmptyOnSingleComment(t *testing.T) {
+	got := toThread(mkNode("solo", false, "gemini-code-assist"))
+	if got.PrevID != "" {
+		t.Errorf("PrevID = %q, want empty for a single-comment thread", got.PrevID)
+	}
+	if got.LastID == "" {
+		t.Error("LastID must still be populated")
 	}
 }
