@@ -1,0 +1,25 @@
+# Credential-free pull-request fixture. It deliberately exercises both the
+# canonical dear-agent projection and the legacy/structured inventory adapters.
+# The CI plan uses ephemeral local state and must never be applied.
+active_repos = {
+  "dear-agent" = {
+    visibility     = "public"
+    default_branch = "main"
+  }
+  "fixture-context-only" = {
+    visibility      = "private"
+    default_branch  = "main"
+    required_checks = ["Build & Test"]
+  }
+  "fixture-structured-identity" = {
+    visibility     = "public"
+    default_branch = "main"
+    required_check_identities = [
+      { context = "Build & Test", integration_id = 15368 },
+    ]
+  }
+}
+
+archived_repos = {
+  "fixture-archived" = { visibility = "private" }
+}

@@ -165,13 +165,49 @@ jobs:
             | xargs -0 shellcheck -S style -e "$SHELLCHECK_EXCLUDES" -f gcc \
             | tee "$GITHUB_STEP_SUMMARY" || true
 
+  bats:
+    name: Bats (with toolchain)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Install bats helpers
+        # Same set shell-matrix.yml clones; several existing test files source
+        # them from tests/test_helper.
+        run: |
+          set -euo pipefail
+          mkdir -p tests/test_helper
+          for helper in bats-support bats-assert bats-file; do
+            git clone --depth 1 "https://github.com/bats-core/$helper.git" "tests/test_helper/$helper"
+          done
+
+      - name: Run bats
+        # shell-matrix.yml runs the same directory across five interpreters to
+        # prove portability, but in minimal containers with no Go toolchain, so
+        # any case needing a repository binary skips there. This run is where
+        # those cases execute. Both are needed: neither is a superset.
+        run: bats tests/bats/
+
   gate:
     name: Shell lint
     # Always runs and always reports, so this name is safe to promote to a
     # required status check: a pull request that touches no shell still gets a
     # passing result instead of a permanently pending one.
     if: always() && (github.event_name == 'push' || github.event_name == 'pull_request')
-    needs: [changed-scripts, baseline]
+    needs: [changed-scripts, baseline, bats]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -180,13 +216,15 @@ jobs:
           set -euo pipefail
           changed="${{ needs.changed-scripts.result }}"
           baseline="${{ needs.baseline.result }}"
+          bats="${{ needs.bats.result }}"
           echo "changed-scripts: $changed"
           echo "baseline: $baseline"
-          if [[ "$changed" == "failure" || "$baseline" == "failure" ]]; then
-            echo "::error::ShellCheck reported findings; see the failing job above."
+          echo "bats: $bats"
+          if [[ "$changed" == "failure" || "$baseline" == "failure" || "$bats" == "failure" ]]; then
+            echo "::error::A shell gate failed; see the failing job above."
             exit 1
           fi
-          if [[ "$baseline" != "success" ]]; then
-            echo "::error::The ShellCheck baseline job did not complete."
+          if [[ "$baseline" != "success" || "$bats" != "success" ]]; then
+            echo "::error::A required shell job did not complete."
             exit 1
           fi

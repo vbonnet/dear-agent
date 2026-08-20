@@ -9,9 +9,10 @@ three resources that together govern an actively managed repo:
 | `github_repository_dependabot_security_updates.this` | Dependabot security-update PRs. |
 | `github_repository_ruleset.branch_protection` | Active branch-protection ruleset on the default branch (no deletion, no force-push, linear history, PR required, optional status-check gate). |
 
-This is the single place to change fleet-wide repo policy. The repo **inventory**
-lives in `../../locals.tf` (`local.active_repos`); this module owns the
-**policy** applied to each entry.
+This is the single place to apply fleet-wide repo policy. The repo **inventory**
+lives in private inputs; this module owns the provider projection applied to
+each entry. For dear-agent, the committed `../../.github/rulesets/main.json`
+is the policy authority and OpenTofu is only its deployment path.
 
 ## Provider-agnostic
 
@@ -23,31 +24,57 @@ a provider explicitly:
 # Personal account (vbonnet/*)
 module "managed_repos" {
   source   = "./modules/managed-repo"
-  for_each = local.active_repos
+  for_each = var.active_repos
 
   name            = each.key
   visibility      = each.value.visibility
-  required_checks = try(each.value.required_checks, [])
+  ruleset = {
+    name          = "branch-protection"
+    target        = "branch"
+    enforcement   = "active"
+    bypass_actors = []
+    conditions = { ref_name = { include = ["~DEFAULT_BRANCH"], exclude = [] } }
+    policy_validation = {
+      unsupported_rule_types                  = []
+      unsupported_condition_keys              = []
+      unsupported_pull_request_parameter_keys = []
+      unsupported_status_check_parameter_keys = []
+    }
+    rules = {
+      deletion = true
+      non_fast_forward = true
+      required_linear_history = true
+      pull_request = {
+        allowed_merge_methods = ["squash"]
+        required_approving_review_count = 0
+        dismiss_stale_reviews_on_push = true
+        require_code_owner_review = false
+        require_last_push_approval = false
+        required_review_thread_resolution = true
+        required_reviewers = []
+      }
+      required_status_checks = {
+        enabled = length(each.value.required_checks) > 0
+        strict_required_status_checks_policy = true
+        do_not_enforce_on_create = false
+        required_checks = [for context in each.value.required_checks : {
+          context = context
+          integration_id = null
+        }]
+      }
+    }
+  }
 
   providers = {
     github = github
   }
 }
 
-# dear-labs org repos (once they come online), reusing the same policy:
-module "dearlabs_repos" {
-  source   = "./modules/managed-repo"
-  for_each = local.dearlabs_repos
-
-  name            = each.key
-  visibility      = each.value.visibility
-  required_checks = try(each.value.required_checks, [])
-
-  providers = {
-    github = github.dearlabs
-  }
-}
 ```
+
+An organization caller supplies the same supported `ruleset` subset through its
+own inventory and passes `github.dearlabs`; it must not use the retired
+`required_checks` module input.
 
 ## Inputs
 
@@ -55,7 +82,8 @@ module "dearlabs_repos" {
 |---|---|---|---|
 | `name` | `string` | — | Repository name (slug, without owner). |
 | `visibility` | `string` | — | `"public"` or `"private"`. Secret scanning + push protection are enabled for public repos only (private requires GitHub Advanced Security). |
-| `required_checks` | `list(string)` | `[]` | Exact check-run names required before merge. Empty = PR-required protection with no status-check gate. |
+| `ruleset` | object | — | Ruleset identity and enforcement. Each required check has `context` plus optional `integration_id`; each path-scoped required reviewer preserves `file_patterns`, `minimum_approvals`, and nested reviewer `id`/`type`. The module rejects non-active or non-zero-bypass input. Empty checks = PR-required protection with no status-check gate. |
+| `enforce_canonical_ruleset_invariants` | `bool` | `false` | Enables dear-agent's strict required-check and GitHub Actions integration-ID invariants without changing legacy inventory-owned fleet policy. |
 | `default_branch` | `string` | `"main"` | Target branch for Claude-review rollout PRs. |
 | `enable_claude_review` | `bool` | `false` | Installs the `CLAUDE_CODE_OAUTH_TOKEN` secret. Advisory only — never added to `required_checks`. See `../../claude_review.tf` for the fleet rollout list. |
 | `claude_review_rollout` | `bool` | `false` | Transiently stages `.github/workflows/claude-code-review.yml` and opens its rollout PR. Set false after merge so the deleted rollout branch is not recreated. |

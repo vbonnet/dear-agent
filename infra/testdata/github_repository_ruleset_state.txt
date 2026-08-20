@@ -1,0 +1,6 @@
+# Representative `tofu state show -no-color` output from integrations/github v6.13.0.
+resource "github_repository_ruleset" "branch_protection" {
+    id          = "18061003"
+    repository  = "dear-agent"
+    ruleset_id  = 18061003
+}
