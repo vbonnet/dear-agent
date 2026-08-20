@@ -103,6 +103,22 @@ const threadByIDQuery = `query($id:ID!) {
   }
 }`
 
+// threadCommentsQuery pages forward through a thread's entire comment list.
+// Deciding that no prior reply exists has to be a fact, not the result of a
+// bounded look: a reply pushed out of the tail by later discussion would be
+// reposted, and the repost anchors to the newest follow-up, so the placement
+// check passes and everything in between gets resolved unread.
+const threadCommentsQuery = `query($id:ID!, $after:String) {
+  node(id:$id) {
+    ... on PullRequestReviewThread {
+      comments(first:100, after:$after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id author { login } body }
+      }
+    }
+  }
+}`
+
 const resolveMutation = `mutation($threadId:ID!) {
   resolveReviewThread(input:{threadId:$threadId}) {
     thread { id isResolved }
@@ -165,6 +181,9 @@ func run(args []string) int {
 	cmd, rest := args[0], args[1:]
 
 	switch cmd {
+	case "-h", "--help", "help":
+		usage()
+		return 0
 	case "list", "list-all":
 		return cmdList(ctx, cmd, rest)
 	case "resolve", "unresolve":
@@ -263,11 +282,19 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		return 0
 	}
 
+	// Decide against the FULL history, not the tail: a prior reply buried by
+	// later discussion must still be found, or it gets reposted and anchored
+	// to the newest follow-up, which resolves everything in between unread.
+	history, err := fetchAllComments(ctx, threadID)
+	if err != nil {
+		return fail("cannot read thread history, nothing posted: %v", err)
+	}
+
 	// anchorID must be the thread's last comment, and anchorPrevID must be the
 	// comment before it, for resolution to be allowed. Both are required: see
 	// checkReplyPlacement.
 	var anchorID, anchorPrevID string
-	switch classifyPriorReply(cur.Tail, body) {
+	switch classifyPriorReply(history, body) {
 	case priorReplySuperseded:
 		// A previous run posted this reply and the reviewer has spoken since.
 		// Reposting would duplicate the comment AND put our copy last, making
@@ -282,9 +309,6 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
 		anchorID, anchorPrevID = cur.LastID, cur.PrevID
 	case noPriorReply:
-		// The tail scan is only an optimisation against duplicate comments;
-		// if it missed an older reply the worst case is a duplicate, never a
-		// bad resolve, because the anchor below governs resolution.
 		// Our reply must land directly after the comment we just read.
 		anchorPrevID = cur.LastID
 		id, err := postReply(ctx, threadID, body)
@@ -456,12 +480,10 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 
 	resolved, refused, skipped := 0, 0, 0
 	for _, t := range filterThreads(threads, author) {
-		if !t.Answered && !force {
-			refused++
-			fmt.Fprintf(os.Stderr, "REFUSED %s %s: unanswered (last word: @%s)%s\n",
-				t.ID, t.Path, t.LastAuthor, outdatedNote(t))
-			continue
-		}
+		// No pre-check on the listing snapshot: a reply may have arrived
+		// since, and refusing on stale state would report "nobody replied"
+		// about a thread that is currently answered. resolveWithEvidence
+		// re-reads and is the single place that decides.
 		msg, mutated, err := resolveWithEvidence(ctx, t.ID, force)
 		if err != nil {
 			var unanswered *unansweredError
@@ -771,6 +793,53 @@ func isAccessDenied(err error) bool {
 		}
 	}
 	return false
+}
+
+// fetchAllComments returns every comment on a thread, oldest first, following
+// cursor pagination. Used only where a bounded window would be unsound.
+func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, error) {
+	var all []tailComment
+	cursor := ""
+	for {
+		args := []string{"-f", "id=" + threadID, "-f", "query=" + threadCommentsQuery}
+		if cursor != "" {
+			args = append(args, "-f", "after="+cursor)
+		}
+		raw, err := ghGraphQL(ctx, args...)
+		if err != nil {
+			return nil, err
+		}
+		var resp struct {
+			Data struct {
+				Node struct {
+					Comments struct {
+						PageInfo struct {
+							HasNextPage bool   `json:"hasNextPage"`
+							EndCursor   string `json:"endCursor"`
+						} `json:"pageInfo"`
+						Nodes []struct {
+							ID     string `json:"id"`
+							Author struct {
+								Login string `json:"login"`
+							} `json:"author"`
+							Body string `json:"body"`
+						} `json:"nodes"`
+					} `json:"comments"`
+				} `json:"node"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return nil, fmt.Errorf("parse comments for %s: %w", threadID, err)
+		}
+		c := resp.Data.Node.Comments
+		for _, n := range c.Nodes {
+			all = append(all, tailComment{ID: n.ID, Login: n.Author.Login, Body: n.Body})
+		}
+		if !c.PageInfo.HasNextPage {
+			return all, nil
+		}
+		cursor = c.PageInfo.EndCursor
+	}
 }
 
 // mutateThread resolves ("resolve") or re-opens ("unresolve") one thread and

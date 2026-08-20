@@ -575,3 +575,44 @@ func TestCheckReplyPlacementRejectsBlankAnchors(t *testing.T) {
 		t.Error("blank expected last ID must not be satisfied by a real comment")
 	}
 }
+
+// TestRunHelpExitsZero pins that the documented help path works. The Makefile
+// points agents at `resolve-review-threads --help`, and a help that exits 1
+// aborts any caller running under `set -e`.
+func TestRunHelpExitsZero(t *testing.T) {
+	for _, flag := range []string{"-h", "--help", "help"} {
+		if code := run([]string{flag}); code != 0 {
+			t.Errorf("run(%q) = %d, want 0", flag, code)
+		}
+	}
+	if code := run([]string{"not-a-subcommand"}); code == 0 {
+		t.Error("an unknown subcommand must still fail")
+	}
+	if code := run(nil); code == 0 {
+		t.Error("no arguments must still fail")
+	}
+}
+
+// TestClassifyPriorReplyBeyondTail is the regression for the bounded-window
+// fail-open. A reply buried under later discussion must still be found, or it
+// gets reposted and anchored to the newest follow-up, which passes the
+// placement check and resolves everything in between unread. classifyPriorReply
+// is now fed the full paginated history, so depth must not matter.
+func TestClassifyPriorReplyBeyondTail(t *testing.T) {
+	reply := "Fixed - handled the nil case."
+	history := []tailComment{
+		{Login: "chatgpt-codex-connector", Body: "P1: nil deref"},
+		{Login: "vbonnet", Body: reply},
+	}
+	// Bury it far deeper than any bounded window would reach.
+	for i := range 60 {
+		history = append(history, tailComment{
+			Login: "chatgpt-codex-connector",
+			Body:  fmt.Sprintf("later finding %d", i),
+		})
+	}
+	if got := classifyPriorReply(history, reply); got != priorReplySuperseded {
+		t.Errorf("prior reply buried under %d comments not found: got %v",
+			len(history)-2, got)
+	}
+}

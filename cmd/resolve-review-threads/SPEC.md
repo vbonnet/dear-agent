@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 2.0
+**Version:** 2.1
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -78,6 +78,12 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-31** When `reply-resolve` resolves a thread, the system shall first confirm that a specific named comment, either the reply it just posted or a matching reply already present, is the thread's last comment.
 
 **RESOLVE-REVIEW-THREADS-32** When the reply mutation returns no comment ID, the system shall treat it as an error and shall not resolve the thread.
+
+**RESOLVE-REVIEW-THREADS-33** When determining whether a reply is already present, the system shall page through the thread's entire comment history rather than a bounded window.
+
+**RESOLVE-REVIEW-THREADS-34** When `resolve-all` evaluates a candidate thread, the system shall decide refusal from a fresh per-thread read rather than from the listing snapshot.
+
+**RESOLVE-REVIEW-THREADS-35** When `-h`, `--help`, or `help` is requested, the system shall print usage and exit zero.
 
 ## BDD Traceability
 
