@@ -797,6 +797,9 @@ func pruneExpiredReminderMarkers(directory string, now time.Time) (int, error) {
 			continue
 		}
 		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 			return 0, fmt.Errorf("reminder marker identity is unsafe")
 		}
@@ -816,6 +819,9 @@ func pruneExpiredReminderTemporary(directory string, entry os.DirEntry, now time
 		return false, nil
 	}
 	info, err := entry.Info()
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 		return true, fmt.Errorf("reminder marker temporary identity is unsafe")
 	}
