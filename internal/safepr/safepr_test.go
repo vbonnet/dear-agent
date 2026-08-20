@@ -375,3 +375,59 @@ func TestAppendAudit(t *testing.T) {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
 }
+
+// Synthetic session id — never a real one, see internal/sessionid tests.
+const testSessionURL = "https://claude.ai/code/session_01AaBbCcDdEeFfGgHhIiJjKk"
+
+func validRequest(verb string, ghArgs ...string) *Request {
+	return &Request{
+		Verb:    verb,
+		Session: &Session{ID: "test-project", ProjectPath: "/tmp/test-project"},
+		GhArgs:  ghArgs,
+	}
+}
+
+func TestValidateRejectsSessionReferenceInPRText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  *Request
+	}{
+		{"body", validRequest("create", "--title", "fix: thing", "--body", "Ran in "+testSessionURL)},
+		{"title", validRequest("create", "--title", "fix: thing ("+testSessionURL+")", "--body", "x")},
+		{"inline body", validRequest("create", "--title", "t", "--body=see "+testSessionURL)},
+		{"close comment", validRequest("close", "--comment", "superseded, see "+testSessionURL)},
+		{"reopen comment", validRequest("reopen", "--comment", "reopening per "+testSessionURL)},
+		{"bare id", validRequest("create", "--title", "t", "--body", "session_01AaBbCcDdEeFfGgHhIiJjKk")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.req.Validate()
+			if err == nil {
+				t.Fatal("Validate() = nil, want a refusal")
+			}
+			for _, want := range []string{"refusing to publish", "session"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error missing %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateAllowsCleanPRText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  *Request
+	}{
+		{"create", validRequest("create", "--title", "fix: correct the reaper", "--body", "## Problem\n\nThe reaper was stale.")},
+		{"close", validRequest("close", "--comment", "superseded by #1234")},
+		// The wrapper's own trailer carries a Wayfinder project name, which is
+		// not a Claude session reference and must not trip the guard.
+		{"wayfinder trailer", validRequest("create", "--title", "t", "--body", "x\n\n---\nWayfinder-Session: my-project")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.req.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}

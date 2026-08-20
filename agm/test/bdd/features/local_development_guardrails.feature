@@ -1,6 +1,7 @@
 # SPEC: internal/safegit/SPEC.md
 # RELATED-SPEC: internal/safepr/SPEC.md
 # RELATED-SPEC: internal/safesrc/SPEC.md
+# RELATED-SPEC: internal/sessionid/SPEC.md
 # RELATED-SPEC: internal/safeunlock/SPEC.md
 # RELATED-SPEC: cmd/safe-push/SPEC.md
 # RELATED-SPEC: cmd/safe-pr/SPEC.md
@@ -128,6 +129,10 @@ Feature: Local development guardrails
   Scenario: Safe PR creation never invokes a merge subprocess
     When AGM runs the safe-pr no-merge subprocess regression
     Then safe-pr creation should not invoke a merge subprocess
+
+  Scenario: Publish wrappers refuse leaked Claude session references
+    When AGM runs the session reference leak regressions
+    Then safe-pr and safe-push should refuse published session references
 
   Scenario: Bounded affected runner commands own their complete process trees
     When AGM runs the affected runner process-tree regressions

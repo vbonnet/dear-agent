@@ -55,6 +55,8 @@ type localDevGuardrailState struct {
 	auditRegressionErr     error
 	noMergeRegression      string
 	noMergeRegressionErr   error
+	sessionLeakRegression  string
+	sessionLeakErr         error
 	treeRegression         string
 	treeRegressionErr      error
 	cleanupWTRegression    string
