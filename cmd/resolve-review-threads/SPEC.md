@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 1.6
+**Version:** 1.7
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -64,6 +64,10 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-24** When `reply-resolve` cannot read the thread's current state, the system shall post nothing, leave the thread unchanged, and exit non-zero.
 
 **RESOLVE-REVIEW-THREADS-25** When `reply-resolve` posts a reply and the subsequent resolution is refused because the reviewer commented again, the system shall report that the reviewer now holds the thread and direct the user to answer the follow-up rather than to the resolution-only command.
+
+**RESOLVE-REVIEW-THREADS-26** When a thread was already resolved by another actor before the pre-mutation re-read, the system shall report it as skipped and shall not count it among the threads it resolved.
+
+**RESOLVE-REVIEW-THREADS-27** When GitHub refuses a resolution for access reasons, the system shall report it as an access problem rather than prescribing an immediate retry of the same mutation.
 
 ## BDD Traceability
 

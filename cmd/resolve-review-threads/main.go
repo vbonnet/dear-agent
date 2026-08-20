@@ -219,7 +219,7 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 		fmt.Println(msg)
 		return 0
 	}
-	msg, err := resolveWithEvidence(ctx, args[0], force)
+	msg, _, err := resolveWithEvidence(ctx, args[0], force)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -255,7 +255,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		"-f", "query="+replyMutation); err != nil {
 		return fail("reply failed, thread left unresolved: %v", err)
 	}
-	msg, rErr := resolveWithEvidence(ctx, threadID, false)
+	msg, _, rErr := resolveWithEvidence(ctx, threadID, false)
 	if rErr != nil {
 		var unanswered *unansweredError
 		if errors.As(rErr, &unanswered) {
@@ -267,6 +267,14 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 				"commented again and now holds this thread:\n%v\n"+
 				"read the follow-up and answer it; reply-resolve is the right "+
 				"command once you have", rErr)
+		}
+		if isAccessDenied(rErr) {
+			// Prescribing the resolve-only retry here would just repeat the
+			// denied mutation. This needs a credential or permission fix.
+			return fail("your reply is posted, but GitHub refused the resolution: %v\n"+
+				"this is an access problem, not a transient one: retrying will be denied too.\n"+
+				"check `gh auth status` and that the token can resolve threads on this repo, "+
+				"then finish with: resolve-review-threads resolve %s", rErr, threadID)
 		}
 		return fail("the reply is posted but the thread is NOT resolved: %v\n"+
 			"do NOT re-run reply-resolve (it would repost); finish with:\n"+
@@ -307,7 +315,7 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 		return fail("%v", err)
 	}
 
-	resolved, refused := 0, 0
+	resolved, refused, skipped := 0, 0, 0
 	for _, t := range filterThreads(threads, author) {
 		if !t.Answered && !force {
 			refused++
@@ -315,7 +323,7 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 				t.ID, t.Path, t.LastAuthor, outdatedNote(t))
 			continue
 		}
-		msg, err := resolveWithEvidence(ctx, t.ID, force)
+		msg, mutated, err := resolveWithEvidence(ctx, t.ID, force)
 		if err != nil {
 			var unanswered *unansweredError
 			if !errors.As(err, &unanswered) {
@@ -331,10 +339,14 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 			continue
 		}
 		fmt.Println(msg)
-		resolved++
+		if mutated {
+			resolved++
+		} else {
+			skipped++
+		}
 	}
 
-	fmt.Printf("resolved %d thread(s), refused %d\n", resolved, refused)
+	fmt.Printf("resolved %d thread(s), refused %d, skipped %d\n", resolved, refused, skipped)
 	if refused == 0 {
 		return 0
 	}
@@ -526,20 +538,42 @@ func (e *unansweredError) Error() string { return e.msg }
 // answered, so a reviewer comment arriving between the decision and the
 // mutation cannot be resolved away. force skips the evidence check, never the
 // re-read: an already-resolved thread is still reported as a no-op.
-func resolveWithEvidence(ctx context.Context, threadID string, force bool) (string, error) {
+func resolveWithEvidence(ctx context.Context, threadID string, force bool) (msg string, mutated bool, err error) {
 	cur, err := fetchThread(ctx, threadID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if cur.IsResolved {
-		return fmt.Sprintf("skipped %s (already resolved)", threadID), nil
+		// Someone else closed it between the listing and now. Report it, but
+		// do not claim it as this sweep's work: the count is an audit record.
+		return fmt.Sprintf("skipped %s (already resolved)", threadID), false, nil
 	}
 	if !cur.Answered && !force {
-		return "", &unansweredError{msg: fmt.Sprintf("%s %s: unanswered (last word: @%s)%s\n"+
+		return "", false, &unansweredError{msg: fmt.Sprintf("%s %s: unanswered (last word: @%s)%s\n"+
 			"reply with the reason instead: resolve-review-threads reply-resolve %s \"Fixed - <what changed>\"",
 			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)}
 	}
-	return mutateThread(ctx, "resolve", threadID)
+	msg, err = mutateThread(ctx, "resolve", threadID)
+	return msg, err == nil, err
+}
+
+// isAccessDenied reports whether an error is GitHub refusing the caller rather
+// than a transient failure. Retrying a denial just repeats it, so the two need
+// different advice.
+func isAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"permission", "forbidden", "unauthorized", "not accessible",
+		"http 401", "http 403", "bad credentials", "requires authentication",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // mutateThread resolves ("resolve") or re-opens ("unresolve") one thread and

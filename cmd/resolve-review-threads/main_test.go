@@ -338,3 +338,32 @@ func TestSameReplyBody(t *testing.T) {
 		})
 	}
 }
+
+// TestIsAccessDenied separates a refusal by GitHub from a transient failure.
+// Retrying a denial repeats it, so the two get different advice.
+func TestIsAccessDenied(t *testing.T) {
+	denied := []string{
+		"gh api graphql: HTTP 403: Resource not accessible by integration",
+		"gh api graphql: exit status 1: Bad credentials",
+		"Must have push permission to resolve",
+		"HTTP 401: requires authentication",
+	}
+	for _, m := range denied {
+		if !isAccessDenied(errors.New(m)) {
+			t.Errorf("expected access denial for %q", m)
+		}
+	}
+	transient := []string{
+		"gh api graphql: exit status 1: server error 502",
+		"context deadline exceeded",
+		"gh: Not Found",
+	}
+	for _, m := range transient {
+		if isAccessDenied(errors.New(m)) {
+			t.Errorf("misread %q as an access denial", m)
+		}
+	}
+	if isAccessDenied(nil) {
+		t.Error("nil is not an access denial")
+	}
+}
