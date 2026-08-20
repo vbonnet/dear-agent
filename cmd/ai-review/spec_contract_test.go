@@ -2396,33 +2396,3 @@ func completeOwnerSearchForTest(t *testing.T, plan *reviewPlan) {
 		Complete:       true,
 	}
 }
-
-func TestCapacityOnly(t *testing.T) {
-	const bound = "maximum-value canonical SPEC verdict is 96756 bytes and exceeds the 65536-byte review limit"
-	const governance = "SPEC ownership edge addition requires maintainer review (module/SPEC.owner)"
-
-	boundOnly := reviewPlan{}
-	boundOnly.addCapacityReason(bound)
-
-	mixed := reviewPlan{}
-	mixed.addCapacityReason(bound)
-	mixed.HumanReasons = append(mixed.HumanReasons, governance)
-
-	cases := []struct {
-		name string
-		plan reviewPlan
-		want bool
-	}{
-		{"no reasons is not a bound proof", reviewPlan{}, false},
-		{"bound proof only", boundOnly, true},
-		{"bound proof mixed with a governance finding", mixed, false},
-		{"governance finding only", reviewPlan{HumanReasons: []string{governance}}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.plan.capacityOnly(); got != tc.want {
-				t.Fatalf("capacityOnly() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}

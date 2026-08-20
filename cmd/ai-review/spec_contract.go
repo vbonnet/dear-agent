@@ -278,41 +278,9 @@ type reviewPlan struct {
 	DependabotModuleOnlyCandidate bool                           `json:"dependabot_module_only_candidate"`
 	EscalationTriggers            []string                       `json:"escalation_triggers"`
 	HumanReasons                  []string                       `json:"human_reasons"`
-	// capacityReasons classifies which HumanReasons are AIREV-22 bounded-wire
-	// proofs rather than governance findings. It is a classification of
-	// HumanReasons, not independent evidence, so it is never serialized.
-	capacityReasons map[string]struct{}
 }
 
 func (p reviewPlan) needsHuman() bool { return len(p.HumanReasons) > 0 }
-
-// addCapacityReason records an AIREV-22 bound proof: the reviewer could not fit
-// this diff inside its own prompt or response budgets, so no verdict was ever
-// reachable on it. The reason still blocks exactly as before; classifying it
-// only lets a keyless run tell "the review could not run" apart from "a human
-// must decide", which are published differently under AIREV-26.
-func (p *reviewPlan) addCapacityReason(reason string) {
-	p.HumanReasons = append(p.HumanReasons, reason)
-	if p.capacityReasons == nil {
-		p.capacityReasons = map[string]struct{}{}
-	}
-	p.capacityReasons[reason] = struct{}{}
-}
-
-// capacityOnly reports whether every recorded human-review reason is a bound
-// proof. One unclassified reason is enough to make the verdict conclusive
-// governance work, so anything not explicitly classified keeps failing closed.
-func (p reviewPlan) capacityOnly() bool {
-	if len(p.HumanReasons) == 0 {
-		return false
-	}
-	for _, reason := range p.HumanReasons {
-		if _, ok := p.capacityReasons[reason]; !ok {
-			return false
-		}
-	}
-	return true
-}
 
 var (
 	requirementStart   = regexp.MustCompile(`^\*\*([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]+)\*\*\s+(.+)$`)
@@ -518,7 +486,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 			RequirementChanges: []specRequirementDelta{},
 		}
 		if changedContractBytes > maxChangedContractBytes {
-			plan.addCapacityReason("complete changed-SPEC contract context exceeds the review limit")
+			plan.HumanReasons = append(plan.HumanReasons, "complete changed-SPEC contract context exceeds the review limit")
 		} else {
 			contract.Content = text
 		}
@@ -564,7 +532,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		})
 		if applicabilityComplete && !appendApplicabilityEvidence(&plan, change.Path, requirements, activeHarnessInventory.Members) {
 			applicabilityComplete = false
-			plan.addCapacityReason("complete active-harness applicability evidence exceeds the bounded review limit")
+			plan.HumanReasons = append(plan.HumanReasons, "complete active-harness applicability evidence exceeds the bounded review limit")
 		}
 		baseRequirements := []parsedRequirement{}
 		if change.Status == "modified" {
@@ -595,7 +563,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 			}
 		}
 		if deletionCount > maxDeletionReviews {
-			plan.addCapacityReason("too many deleted requirements for bounded semantic review")
+			plan.HumanReasons = append(plan.HumanReasons, "too many deleted requirements for bounded semantic review")
 		}
 		changedRequirementCount += len(deltas)
 		if changedRequirementCount > maxChangedRequirements {
@@ -695,7 +663,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 	// before the caller reads a provider credential.
 	for _, shard := range plan.OwnerShards {
 		if _, _, err := semanticOwnerShardPrompts(plan, shard); err != nil {
-			plan.addCapacityReason("semantic owner shard cannot fit the bounded review contract")
+			plan.HumanReasons = append(plan.HumanReasons, "semantic owner shard cannot fit the bounded review contract")
 			if err := normalizeHumanReasons(&plan); err != nil {
 				return reviewPlan{}, err
 			}
@@ -706,7 +674,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 			return reviewPlan{}, fmt.Errorf("size minimum semantic owner verdict: %w", err)
 		}
 		if minimumBytes > maxSemanticVerdictBytes {
-			plan.addCapacityReason("minimum complete semantic owner verdict exceeds the bounded review limit")
+			plan.HumanReasons = append(plan.HumanReasons, "minimum complete semantic owner verdict exceeds the bounded review limit")
 			if err := normalizeHumanReasons(&plan); err != nil {
 				return reviewPlan{}, err
 			}
@@ -717,7 +685,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 			return reviewPlan{}, fmt.Errorf("size maximum complete semantic owner verdict: %w", err)
 		}
 		if maximumBytes > maxSemanticVerdictBytes {
-			plan.addCapacityReason("maximum-value canonical semantic owner verdict exceeds the bounded review limit")
+			plan.HumanReasons = append(plan.HumanReasons, "maximum-value canonical semantic owner verdict exceeds the bounded review limit")
 			if err := normalizeHumanReasons(&plan); err != nil {
 				return reviewPlan{}, err
 			}
@@ -729,7 +697,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		return reviewPlan{}, fmt.Errorf("size minimum complete SPEC verdict: %w", err)
 	}
 	if minimumVerdictBytes > maxSpecVerdictBytes {
-		plan.addCapacityReason(fmt.Sprintf("minimum complete SPEC verdict is %d bytes and exceeds the %d-byte review limit", minimumVerdictBytes, maxSpecVerdictBytes))
+		plan.HumanReasons = append(plan.HumanReasons, fmt.Sprintf("minimum complete SPEC verdict is %d bytes and exceeds the %d-byte review limit", minimumVerdictBytes, maxSpecVerdictBytes))
 		if err := normalizeHumanReasons(&plan); err != nil {
 			return reviewPlan{}, err
 		}
@@ -740,7 +708,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		return reviewPlan{}, fmt.Errorf("size maximum complete SPEC verdict: %w", err)
 	}
 	if maximumVerdictBytes > maxSpecVerdictBytes {
-		plan.addCapacityReason(fmt.Sprintf("maximum-value canonical SPEC verdict is %d bytes and exceeds the %d-byte review limit", maximumVerdictBytes, maxSpecVerdictBytes))
+		plan.HumanReasons = append(plan.HumanReasons, fmt.Sprintf("maximum-value canonical SPEC verdict is %d bytes and exceeds the %d-byte review limit", maximumVerdictBytes, maxSpecVerdictBytes))
 		if err := normalizeHumanReasons(&plan); err != nil {
 			return reviewPlan{}, err
 		}
@@ -751,7 +719,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		return reviewPlan{}, fmt.Errorf("size maximum output-budget SPEC verdict: %w", err)
 	}
 	if maximumOutputBytes > maxSpecVisibleOutputBytes {
-		plan.addCapacityReason(fmt.Sprintf("maximum-value canonical SPEC verdict is %d unescaped bytes and exceeds the %d-byte visible-output budget", maximumOutputBytes, maxSpecVisibleOutputBytes))
+		plan.HumanReasons = append(plan.HumanReasons, fmt.Sprintf("maximum-value canonical SPEC verdict is %d unescaped bytes and exceeds the %d-byte visible-output budget", maximumOutputBytes, maxSpecVisibleOutputBytes))
 		if err := normalizeHumanReasons(&plan); err != nil {
 			return reviewPlan{}, err
 		}
