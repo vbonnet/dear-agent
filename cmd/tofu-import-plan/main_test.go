@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/tofuimport"
 )
 
 // fixture writes the four evidence files a plan run reads and returns the
@@ -64,7 +66,7 @@ func (f *fixture) write(t *testing.T) []string {
 	}
 }
 
-func TestPlanEmitsTabSeparatedRecords(t *testing.T) {
+func TestPlanEmitsFourFieldRecords(t *testing.T) {
 	f := newFixture(t)
 	args := f.write(t)
 
@@ -78,8 +80,8 @@ func TestPlanEmitsTabSeparatedRecords(t *testing.T) {
 		t.Fatalf("expected 3 records, got %d: %q", len(lines), out.String())
 	}
 	for _, line := range lines {
-		if fields := strings.Split(line, "\t"); len(fields) != 4 {
-			t.Fatalf("record %q has %d tab-separated fields, want 4", line, len(fields))
+		if fields := strings.Split(line, tofuimport.FieldSeparator); len(fields) != 4 {
+			t.Fatalf("record %q has %d fields, want 4", line, len(fields))
 		}
 	}
 	if !strings.Contains(out.String(), "dear-agent:18061003") {
