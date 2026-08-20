@@ -72,6 +72,10 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-28** When a push request contains any prefix of a history-overwriting long option (`--m`, `--forc`, `--force-w`), the system shall classify it as a force flag, since git's parse-options resolves unambiguous abbreviations; the system shall match by prefix rather than reproduce git's ambiguity rules, because over-blocking an abbreviation git itself rejects is safe while under-blocking overwrites remote history.
 
+**SAFEGIT-29** When a commit that a push would publish contains a Claude Code session identifier or session permalink in its message, the system shall refuse the push and shall report each offending commit with its matched references.
+
+**SAFEGIT-30** When the set of commits a push would publish cannot be determined, the system shall report the skipped scan on the diagnostic stream and shall allow the push to proceed.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

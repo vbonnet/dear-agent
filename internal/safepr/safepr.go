@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/sessionid"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
@@ -178,6 +179,36 @@ func (r *Request) Validate() error {
 				"is being mutated — unattributed state changes are invisible to reviewers and cannot be audited; "+
 				"use: safe-pr %s --wayfinder <dir> --comment \"reason\" <number>", r.Verb, r.Verb)
 		}
+	}
+	if err := r.checkSessionLeak(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// checkSessionLeak refuses to publish a PR whose title, body, or comment
+// carries a Claude Code session reference.
+//
+// Every pass-through argument is scanned, not just the value of --title/--body/
+// --comment: the leak is the published text, and gh accepts it in split
+// ("--body" "x"), inline ("--body=x"), and label/assignee positions alike.
+// Scanning the whole argv means a new gh flag cannot silently open a new hole.
+//
+// This rejects rather than redacts. safe-pr is relaying an author's words, and
+// a wrapper that quietly rewrote them would publish something the author never
+// wrote — worse than refusing. sessionid.Redact exists for callers that own
+// their text.
+func (r *Request) checkSessionLeak() error {
+	for _, a := range r.GhArgs {
+		findings := sessionid.Scan(a)
+		if len(findings) == 0 {
+			continue
+		}
+		return fmt.Errorf("refusing to publish: this %s carries a private Claude Code session "+
+			"reference:\n%s\nA session reference addresses a private transcript, gives reviewers "+
+			"nothing, and is permanent once pushed — squash-merge folds it into main's history. "+
+			"Remove it and re-run; describe what changed and why instead of linking the session",
+			r.Verb, sessionid.Describe(findings))
 	}
 	return nil
 }
