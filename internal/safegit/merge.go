@@ -310,14 +310,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	} else {
 		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
-			parts := strings.SplitN(cfg.Repo, "/", 2)
-			owner, repoName := parts[0], parts[1]
-			fmt.Fprintf(os.Stderr,
-				"safe-merge: guidance: address each thread, then close it with its reason:\n"+
-					"  resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\"\n"+
-					"then sweep the answered ones and re-run safe-merge:\n"+
-					"  resolve-review-threads resolve-all %s %s %d [author]\n",
-				owner, repoName, cfg.PRNumber)
+			fmt.Fprint(os.Stderr, threadRemediationGuidance(cfg.Repo, cfg.PRNumber))
 			return fmt.Errorf("review-thread gate: %w", err)
 		}
 		fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")

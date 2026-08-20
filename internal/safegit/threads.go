@@ -198,3 +198,19 @@ func reviewThreadError(threads []ReviewThread) error {
 	}
 	return nil
 }
+
+// threadRemediationGuidance is safe-merge's advice when the review-thread gate
+// rejects a PR. It leads with reply-resolve because resolving a thread asserts
+// its point was handled, and a reply is the only record that it was read.
+func threadRemediationGuidance(repo string, pr int) string {
+	owner, name := repo, repo
+	if parts := strings.SplitN(repo, "/", 2); len(parts) == 2 {
+		owner, name = parts[0], parts[1]
+	}
+	return fmt.Sprintf(
+		"safe-merge: guidance: address each thread, then close it with its reason:\n"+
+			"  resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\"\n"+
+			"then sweep the answered ones and re-run safe-merge:\n"+
+			"  resolve-review-threads resolve-all %s %s %d [author]\n",
+		owner, name, pr)
+}
