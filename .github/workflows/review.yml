@@ -19,8 +19,10 @@ name: AI Code Review (5-dimension)
 # neutral-with-warning on same-repository PRs: cmd/ai-review's explicit
 # cannot-run exit 78, which it emits only for the AIREV-26 predicate (an
 # otherwise-reviewable changed SPEC, or a §3 escalation whose accompanying
-# model review cannot run, or the credential preflight itself) and only after
-# its needs-human-review evidence reached the PR.
+# model review cannot run, or an AIREV-22 bound proof that no prompt or
+# verdict for this diff fits the reviewer's own wire budgets, or the
+# credential preflight itself) and only after its needs-human-review evidence
+# reached the PR.
 #
 # A review that CAN conclude without a model still fails closed, keyless or
 # not. AIREV-26 enumerates that set and it must not drift: a conclusive
@@ -29,6 +31,19 @@ name: AI Code Review (5-dimension)
 # failed evidence comment, a plan construction error, an expired deadline, a
 # fork PR, and an override audit-comment failure. Those are genuine findings
 # with named remedies; publishing them as neutral would be a false pass.
+#
+# A bound proof is deliberately NOT in that set, and the distinction is the
+# word 'conclusive'. The reasons above are verdicts the reviewer reached: it
+# read the diff and named something a human must decide. A bound proof is the
+# opposite, a report that the reviewer could not fit this diff into its own
+# prompt or response budgets, so it never reached any verdict. The remedy is
+# ours (shard or raise the budget), not the contributor's, and the byte count
+# scales with the repository's SPEC tree rather than with anything in the
+# diff. Publishing 'no verdict was reachable' as a red finding is as
+# misleading as publishing it as a pass, so it takes the same honest
+# neutral-with-warning as every other cannot-run disposition. Only the keyless
+# path is affected: with a key configured, keylessTranslatable is false and a
+# bound proof keeps failing closed at the review stage exactly as before.
 #
 # Neutral is never a fabricated success: no approval is claimed, the gate's own
 # findings stay on the PR as comments, and the check summary says review is
