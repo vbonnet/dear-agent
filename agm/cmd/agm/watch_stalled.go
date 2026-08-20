@@ -212,7 +212,11 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 					Binary:    selfBinary.Path(),
 					Action:    "exiting for supervisor restart",
 				}
-				data, _ := json.Marshal(out)
+				data, err := json.Marshal(out)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error marshaling binary replaced event: %v\n", err)
+					return nil
+				}
 				fmt.Println(string(data))
 				fmt.Fprintf(os.Stderr, "%s was replaced on disk; exiting so the supervisor restarts this daemon on the new build\n", selfBinary.Path())
 				return nil

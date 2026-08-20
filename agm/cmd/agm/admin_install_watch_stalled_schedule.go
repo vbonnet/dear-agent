@@ -101,7 +101,11 @@ func renderWatchStalledPlist(homeDir, agmBin, orchestrator, workspace string) (s
 	if err != nil {
 		return "", fmt.Errorf("read embedded plist template: %w", err)
 	}
-	content := string(tmpl)
+	// Normalize line endings before any newline-sensitive replacement below:
+	// a CRLF checkout (e.g. git autocrlf on Windows) would otherwise make
+	// the --orchestrator removal below match nothing and silently leave the
+	// placeholder in the installed plist.
+	content := strings.ReplaceAll(string(tmpl), "\r\n", "\n")
 	content = strings.ReplaceAll(content, "__USER_HOME__", homeDir)
 	content = strings.ReplaceAll(content, "__AGM_BINARY__", agmBin)
 	// The default orchestrator is empty, which is what enables run-time

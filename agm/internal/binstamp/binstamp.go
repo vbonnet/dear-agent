@@ -12,7 +12,6 @@ package binstamp
 import (
 	"fmt"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -33,10 +32,7 @@ func Of(path string) (Stamp, error) {
 	if err != nil {
 		return Stamp{}, fmt.Errorf("stat %s: %w", path, err)
 	}
-	stamp := Stamp{Size: info.Size(), ModTime: info.ModTime()}
-	if sys, ok := info.Sys().(*syscall.Stat_t); ok {
-		stamp.Inode = sys.Ino
-	}
+	stamp := Stamp{Size: info.Size(), ModTime: info.ModTime(), Inode: getInode(info)}
 	return stamp, nil
 }
 
