@@ -58,12 +58,20 @@ func isKnownBotAuthor(login string) bool {
 // a known bot. A single non-bot author anywhere in the thread means the
 // thread must never be auto-resolved (MLC-05). An empty slice is not a bot
 // thread.
-func allCommentsFromKnownBots(logins []string) bool {
-	if len(logins) == 0 {
+func allCommentsFromKnownBots(comments []threadComment) bool {
+	if len(comments) == 0 {
 		return false
 	}
-	for _, login := range logins {
-		if !isKnownBotAuthor(login) {
+	for _, c := range comments {
+		// mergeloop's own auto-resolve notice is posted by the authenticated
+		// gh user, not a bot. Treating it as a disqualifying human reply would
+		// strand any thread whose notice landed but whose resolution failed:
+		// it would never be selected again, and would block required
+		// conversation resolution forever.
+		if isAutoResolveNotice(c.body) {
+			continue
+		}
+		if !isKnownBotAuthor(c.login) {
 			return false
 		}
 	}
@@ -84,7 +92,7 @@ const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:Str
         nodes{
           id
           isResolved
-          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } } }
+          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } body } }
         }
       }
     }
@@ -98,7 +106,9 @@ const threadResolveMutation = `mutation($threadId:ID!){
 // autoResolveNotice is posted on every thread mergeloop auto-resolves, so the
 // finding stays visible and mineable rather than vanishing into a resolved
 // state that looks like a human handled it.
-const autoResolveNotice = "Auto-resolved by mergeloop: this is an advisory bot finding with no " +
+const autoResolveNoticePrefix = "Auto-resolved by mergeloop:"
+
+const autoResolveNotice = autoResolveNoticePrefix + " this is an advisory bot finding with no " +
 	"human reply, resolved to unblock required conversation resolution. It was NOT reviewed by " +
 	"a person. If it identified a real problem, reopen this thread or file it separately."
 
@@ -114,6 +124,34 @@ const threadReplyMutation = `mutation($threadId:ID!, $body:String!) {
 type botThread struct {
 	id     string
 	author string
+	// hasNotice records that a previous pass already posted the auto-resolve
+	// notice and only the resolution failed, so this pass must not post a
+	// second one.
+	hasNotice bool
+}
+
+// threadComment is one comment's author and body, the two things the bot-thread
+// selector needs.
+type threadComment struct {
+	login string
+	body  string
+}
+
+// hasAutoResolveNotice reports whether mergeloop already annotated this thread.
+func hasAutoResolveNotice(comments []threadComment) bool {
+	for _, c := range comments {
+		if isAutoResolveNotice(c.body) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAutoResolveNotice recognises mergeloop's own annotation. Matching a stable
+// prefix rather than the whole body keeps it robust to trailing-whitespace or
+// line-ending normalization by GitHub.
+func isAutoResolveNotice(body string) bool {
+	return strings.HasPrefix(strings.TrimSpace(body), autoResolveNoticePrefix)
 }
 
 // ResolveBotThreads resolves every unresolved review thread authored by a known
@@ -135,7 +173,7 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 			resolved++
 			continue
 		}
-		if err := r.resolveThread(ctx, t.id); err != nil {
+		if err := r.resolveThread(ctx, t); err != nil {
 			// Surface the partial count so the caller can audit progress.
 			return resolved, fmt.Errorf("resolving thread %s by %s: %w", t.id, t.author, err)
 		}
@@ -190,6 +228,7 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 										Author struct {
 											Login string `json:"login"`
 										} `json:"author"`
+										Body string `json:"body"`
 									} `json:"nodes"`
 								} `json:"comments"`
 							} `json:"nodes"`
@@ -206,14 +245,18 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 			if n.IsResolved || len(n.Comments.Nodes) == 0 || n.Comments.PageInfo.HasNextPage {
 				continue
 			}
-			logins := make([]string, len(n.Comments.Nodes))
+			comments := make([]threadComment, len(n.Comments.Nodes))
 			for i, c := range n.Comments.Nodes {
-				logins[i] = c.Author.Login
+				comments[i] = threadComment{login: c.Author.Login, body: c.Body}
 			}
-			if !allCommentsFromKnownBots(logins) {
+			if !allCommentsFromKnownBots(comments) {
 				continue
 			}
-			out = append(out, botThread{id: n.ID, author: logins[0]})
+			out = append(out, botThread{
+				id:        n.ID,
+				author:    comments[0].login,
+				hasNotice: hasAutoResolveNotice(comments),
+			})
 		}
 		if !rt.PageInfo.HasNextPage {
 			break
@@ -224,22 +267,27 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 }
 
 // resolveThread resolves one review thread by its node ID.
-func (r *ghThreadResolver) resolveThread(ctx context.Context, threadID string) error {
+func (r *ghThreadResolver) resolveThread(ctx context.Context, t botThread) error {
 	// Say so on the thread before closing it. mergeloop resolves bot findings
 	// nobody has replied to, which is the one sanctioned exception to the
 	// evidence rule in cmd/resolve-review-threads: without a note, an
 	// auto-resolved finding is indistinguishable from one a human read and
 	// dismissed, and the finding stops being mineable. A failed note is not
 	// fatal, but it must not be silent.
-	if _, err := ghJSON(ctx, 30*time.Second, []string{"api", "graphql",
-		"-f", "threadId=" + threadID,
-		"-f", "body=" + autoResolveNotice,
-		"-f", "query=" + threadReplyMutation,
-	}); err != nil {
-		fmt.Printf("  warning: could not annotate thread %s before resolving: %v\n", threadID, err)
+	if !t.hasNotice {
+		if _, err := ghJSON(ctx, 30*time.Second, []string{"api", "graphql",
+			"-f", "threadId=" + t.id,
+			"-f", "body=" + autoResolveNotice,
+			"-f", "query=" + threadReplyMutation,
+		}); err != nil {
+			// Resolving anyway would close the finding with no record that it
+			// was never read, which is exactly the silent discard this notice
+			// exists to end. Leave the thread open; the next pass retries.
+			return fmt.Errorf("annotating thread %s: %w", t.id, err)
+		}
 	}
 	_, err := ghJSON(ctx, 30*time.Second, []string{"api", "graphql",
-		"-f", "threadId=" + threadID,
+		"-f", "threadId=" + t.id,
 		"-f", "query=" + threadResolveMutation,
 	})
 	return err
