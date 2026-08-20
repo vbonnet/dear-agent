@@ -27,6 +27,8 @@ jobs:
   changes:
     name: Change Detection
     uses: ./.github/workflows/changed-paths.yml
+    permissions:
+      contents: read
 
   analyze:
     name: Analyze Go Code
