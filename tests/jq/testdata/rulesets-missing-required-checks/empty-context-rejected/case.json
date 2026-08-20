@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "An empty context identifies no check on either side of the comparison."
+}

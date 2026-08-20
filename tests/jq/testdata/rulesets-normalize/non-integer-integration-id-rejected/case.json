@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A fractional integration_id cannot identify a GitHub App and would import as a wrong or invalid identity."
+}

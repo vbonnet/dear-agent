@@ -1,0 +1,192 @@
+name: Shell Lint
+
+# ShellCheck gate for shell sources.
+#
+# Scoping mirrors `.golangci.yml`'s `new-from-merge-base: origin/main` and the
+# diff-scoping already used by `language-policy.yml`, for the same reason: a
+# repository-wide gate above `-S error` would fail on 105 pre-existing findings
+# across 104 tracked scripts and could therefore never be switched on, while a
+# whole-changed-file gate would fail a one-line edit to a legacy script for
+# findings its author did not write. Either shape teaches contributors to route
+# around the gate instead of using it.
+#
+# So: `changed-scripts` reports a finding only when it sits on a line the pull
+# request added or rewrote, decided by `cmd/shellcheck-diff` — a unit-tested Go
+# command rather than an untestable `run:` block. `baseline` keeps the whole
+# repository at `-S error`, the level that is clean today, so a regression in an
+# untouched script is still caught. `nightly-sweep` reports the remaining
+# lower-severity debt without blocking anyone.
+#
+# The escape hatch is ShellCheck's own `# shellcheck disable=SCxxxx` directive,
+# which lands in the diff and is reviewable, rather than a side-channel waiver.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        && 'sweep' || (github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+env:
+  # SC1090/SC1091 fire when ShellCheck cannot statically resolve a `source`
+  # target. That is a property of the checkout, not of the code under review,
+  # so it is excluded rather than silenced case by case in every script.
+  SHELLCHECK_EXCLUDES: SC1090,SC1091
+
+jobs:
+  changed-scripts:
+    name: New shell findings
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The base commit must be reachable for `git diff`; a shallow clone
+          # makes the diff silently lie about which lines changed.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve diff range
+        id: range
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            # The first push to a branch reports an all-zero "before".
+            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              base=$(git rev-parse "${head}^") || base="$head"
+            fi
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+      - name: Collect changed shell scripts
+        id: scripts
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+        run: |
+          set -euo pipefail
+          # -z guards against pathnames git would otherwise quote and escape.
+          # ACMRT excludes D: a deleted script has no destination line a
+          # finding could sit on, and shellcheck cannot read it either.
+          git diff -z --name-only --diff-filter=ACMRT "$BASE...$HEAD" -- '*.sh' \
+            | tr '\0' '\n' | grep -v '^$' > /tmp/changed-scripts.txt || true
+          count=$(wc -l < /tmp/changed-scripts.txt | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Changed shell scripts: $count"
+          cat /tmp/changed-scripts.txt
+
+      - name: ShellCheck changed lines
+        if: steps.scripts.outputs.count != '0'
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          # ShellCheck exits non-zero whenever it reports anything, including
+          # the low-severity findings this gate deliberately tolerates, so its
+          # status is not the gate. shellcheck-diff owns the verdict, and it
+          # fails closed on an unreadable or empty findings document.
+          # `xargs < file` rather than `xargs -a file`: -a is a GNU extension
+          # and silently produces nothing on BSD xargs, which would hand
+          # shellcheck-diff an empty document.
+          xargs shellcheck -f json1 -S style -e "$SHELLCHECK_EXCLUDES" \
+            < /tmp/changed-scripts.txt > /tmp/shellcheck.json || true
+          # -U0 so each hunk's destination range is exactly the added lines;
+          # surrounding context would over-report untouched code as changed.
+          git diff -U0 "$BASE...$HEAD" -- '*.sh' > /tmp/changed.patch
+          go run ./cmd/shellcheck-diff \
+            --diff /tmp/changed.patch \
+            --findings /tmp/shellcheck.json \
+            --min-severity style
+
+      - name: Verify the gate's own decision logic
+        run: go test ./cmd/shellcheck-diff/
+
+  baseline:
+    name: Repository ShellCheck baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: ShellCheck every tracked script at error severity
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          git ls-files -z '*.sh' \
+            | xargs -0 shellcheck -S error -e "$SHELLCHECK_EXCLUDES" -f gcc
+
+  nightly-sweep:
+    name: Full-repository shell debt
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Report lower-severity debt
+        # Advisory only. Diff scoping means debt in files nobody touches is
+        # invisible to every pull request; this job is where it stays visible.
+        run: |
+          set -euo pipefail
+          git ls-files -z '*.sh' \
+            | xargs -0 shellcheck -S style -e "$SHELLCHECK_EXCLUDES" -f gcc \
+            | tee "$GITHUB_STEP_SUMMARY" || true
+
+  gate:
+    name: Shell lint
+    # Always runs and always reports, so this name is safe to promote to a
+    # required status check: a pull request that touches no shell still gets a
+    # passing result instead of a permanently pending one.
+    if: always() && (github.event_name == 'push' || github.event_name == 'pull_request')
+    needs: [changed-scripts, baseline]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report
+        run: |
+          set -euo pipefail
+          changed="${{ needs.changed-scripts.result }}"
+          baseline="${{ needs.baseline.result }}"
+          echo "changed-scripts: $changed"
+          echo "baseline: $baseline"
+          if [[ "$changed" == "failure" || "$baseline" == "failure" ]]; then
+            echo "::error::ShellCheck reported findings; see the failing job above."
+            exit 1
+          fi
+          if [[ "$baseline" != "success" ]]; then
+            echo "::error::The ShellCheck baseline job did not complete."
+            exit 1
+          fi

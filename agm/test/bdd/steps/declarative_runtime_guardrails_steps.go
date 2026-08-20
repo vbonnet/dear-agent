@@ -67,6 +67,12 @@ type declarativeRuntimeRouteState struct {
 	harness string
 	family  string
 	ci      string
+	// shellLint and terraformLint hold the two non-Go source gates, read
+	// together so a scenario can assert on both without re-reading files.
+	shellLint     string
+	terraformLint string
+	// jqLint is the jq fixture gate workflow.
+	jqLint string
 }
 
 // RegisterDeclarativeRuntimeGuardrailSteps registers runtime configuration coverage steps.
@@ -92,6 +98,281 @@ func RegisterDeclarativeRuntimeGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^CI should run the isolated source-built Codex lifecycle$`, ciShouldRunIsolatedSourceBuiltCodexLifecycle)
 	ctx.Step(`^CI should enforce critical lifecycle coverage$`, ciShouldEnforceCriticalLifecycleCoverage)
 	ctx.Step(`^scheduled CI should run the credential-free tagged graphs$`, scheduledCIShouldRunCredentialFreeTaggedGraphs)
+	ctx.Step(`^the non-Go source gates are configured$`, nonGoSourceGatesAreConfigured)
+	ctx.Step(`^AGM validates non-Go source coverage$`, agmValidatesNonGoSourceCoverage)
+	ctx.Step(`^shell changes should be gated on the lines they introduce$`, shellChangesGatedOnIntroducedLines)
+	ctx.Step(`^the whole repository should stay ShellCheck clean at error severity$`, repositoryStaysShellCheckCleanAtError)
+	ctx.Step(`^the changed-line verdict should come from a tested command$`, changedLineVerdictComesFromTestedCommand)
+	ctx.Step(`^OpenTofu sources should be formatted, validated and linted$`, openTofuSourcesFormattedValidatedLinted)
+	ctx.Step(`^the OpenTofu gates should require no credentials$`, openTofuGatesRequireNoCredentials)
+	ctx.Step(`^the jq policy gate is configured$`, jqPolicyGateIsConfigured)
+	ctx.Step(`^AGM validates jq policy coverage$`, agmValidatesJQPolicyCoverage)
+	ctx.Step(`^every checked-in jq program should have a fixture case$`, everyJQProgramHasAFixtureCase)
+	ctx.Step(`^jq fixtures should assert output and refusal alike$`, jqFixturesAssertOutputAndRefusal)
+	ctx.Step(`^the jq gate should fail rather than skip when jq is absent from CI$`, jqGateFailsWhenJQAbsentInCI)
+}
+
+func jqPolicyGateIsConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), ".github", "workflows", "jq-lint.yml"))
+	if err != nil {
+		return fmt.Errorf("read jq gate workflow: %w", err)
+	}
+	state.jqLint = string(data)
+	return nil
+}
+
+func agmValidatesJQPolicyCoverage(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.jqLint == "" {
+		return fmt.Errorf("jq gate workflow was not loaded")
+	}
+	return nil
+}
+
+// everyJQProgramHasAFixtureCase walks the real tree rather than trusting the
+// runner's own coverage assertion, so deleting that assertion is caught here
+// too.
+func everyJQProgramHasAFixtureCase(ctx context.Context) error {
+	root := packageSpecBDDRepoRoot()
+	fixtures, err := os.ReadDir(filepath.Join(root, "tests", "jq", "testdata"))
+	if err != nil {
+		return fmt.Errorf("read jq fixtures: %w", err)
+	}
+	if len(fixtures) == 0 {
+		return fmt.Errorf("jq gate has no fixture suites; it would pass vacuously")
+	}
+
+	var programs []string
+	walkErr := filepath.WalkDir(filepath.Join(root, ".github"), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && filepath.Ext(path) == ".jq" {
+			programs = append(programs, path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return fmt.Errorf("walk jq programs: %w", walkErr)
+	}
+	if len(programs) == 0 {
+		return fmt.Errorf("no checked-in jq programs found")
+	}
+
+	covered, err := jqProgramsNamedByFixtures(filepath.Join(root, "tests", "jq", "testdata"))
+	if err != nil {
+		return err
+	}
+	for _, program := range programs {
+		rel, relErr := filepath.Rel(root, program)
+		if relErr != nil {
+			return relErr
+		}
+		if !covered[filepath.ToSlash(rel)] {
+			return fmt.Errorf("jq program %s has no fixture case", rel)
+		}
+	}
+	return nil
+}
+
+// jqProgramsNamedByFixtures reads every case.json and returns the set of
+// programs they exercise.
+func jqProgramsNamedByFixtures(fixtureRoot string) (map[string]bool, error) {
+	covered := map[string]bool{}
+	err := filepath.WalkDir(fixtureRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "case.json" {
+			return nil
+		}
+		// #nosec G122 -- path comes from a read-only walk rooted in the
+		// repository's own checked-in fixture tree.
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		var spec struct {
+			Program string `json:"program"`
+		}
+		if unmarshalErr := json.Unmarshal(data, &spec); unmarshalErr != nil {
+			return fmt.Errorf("%s: %w", path, unmarshalErr)
+		}
+		covered[spec.Program] = true
+		return nil
+	})
+	return covered, err
+}
+
+// jqFixturesAssertOutputAndRefusal keeps the suite from decaying into
+// happy-path-only coverage: a policy validator that is never shown a malformed
+// document proves nothing about how it fails.
+func jqFixturesAssertOutputAndRefusal(ctx context.Context) error {
+	fixtureRoot := filepath.Join(packageSpecBDDRepoRoot(), "tests", "jq", "testdata")
+	var outputs, refusals int
+	err := filepath.WalkDir(fixtureRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		switch d.Name() {
+		case "expected.json", "expected.txt":
+			outputs++
+		case "expected-error.txt":
+			refusals++
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk jq fixtures: %w", err)
+	}
+	if outputs == 0 {
+		return fmt.Errorf("no jq fixture asserts an expected output")
+	}
+	if refusals == 0 {
+		return fmt.Errorf("no jq fixture asserts an expected refusal")
+	}
+	return nil
+}
+
+// jqGateFailsWhenJQAbsentInCI closes the loop on the runner's local skip: the
+// skip keeps a developer machine without jq from reporting a false red, and CI
+// asserts jq is present so the skip can never hide a real regression.
+func jqGateFailsWhenJQAbsentInCI(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.jqLint, "command -v jq") {
+		return fmt.Errorf("jq gate does not assert jq is installed, so a missing jq would silently skip")
+	}
+	if !strings.Contains(state.jqLint, "go test -count=1 -v ./tests/jq/") {
+		return fmt.Errorf("jq gate does not replay the fixtures")
+	}
+	return nil
+}
+
+func nonGoSourceGatesAreConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, gate := range []struct {
+		name string
+		into *string
+	}{
+		{"shell-lint.yml", &state.shellLint},
+		{"terraform-lint.yml", &state.terraformLint},
+	} {
+		data, readErr := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), ".github", "workflows", gate.name))
+		if readErr != nil {
+			return fmt.Errorf("read %s: %w", gate.name, readErr)
+		}
+		*gate.into = string(data)
+	}
+	return nil
+}
+
+func agmValidatesNonGoSourceCoverage(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.shellLint == "" || state.terraformLint == "" {
+		return fmt.Errorf("non-Go source gates were not loaded")
+	}
+	return nil
+}
+
+// shellChangesGatedOnIntroducedLines pins the scoping decision itself. A gate
+// scoped to whole changed files would fail a one-line edit to a legacy script
+// for findings its author did not write, and would be routed around instead of
+// used.
+func shellChangesGatedOnIntroducedLines(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// -U0 is what makes each hunk's destination range exactly the added lines;
+	// any larger context would attribute untouched code to the change.
+	for _, required := range []string{"git diff -U0", "shellcheck-diff", "--min-severity style"} {
+		if !strings.Contains(state.shellLint, required) {
+			return fmt.Errorf("shell gate does not scope findings to introduced lines: missing %q", required)
+		}
+	}
+	return nil
+}
+
+func repositoryStaysShellCheckCleanAtError(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// Diff scoping alone would let a regression land in a script no pull
+	// request touches; the repository-wide error-severity job is what keeps
+	// that visible.
+	if !strings.Contains(state.shellLint, "shellcheck -S error") {
+		return fmt.Errorf("shell gate has no repository-wide error-severity baseline")
+	}
+	return nil
+}
+
+func changedLineVerdictComesFromTestedCommand(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// The verdict must not live in an untestable run: block.
+	if !strings.Contains(state.shellLint, "go test ./cmd/shellcheck-diff/") {
+		return fmt.Errorf("shell gate does not verify its own decision logic")
+	}
+	specPath := filepath.Join(packageSpecBDDRepoRoot(), "cmd", "shellcheck-diff", "SPEC.md")
+	if _, err := os.Stat(specPath); err != nil {
+		return fmt.Errorf("shell gate decision command has no co-located SPEC: %w", err)
+	}
+	return nil
+}
+
+func openTofuSourcesFormattedValidatedLinted(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, required := range []string{"tofu fmt -check -recursive", "tofu validate", "tflint --recursive"} {
+		if !strings.Contains(state.terraformLint, required) {
+			return fmt.Errorf("OpenTofu gate is missing %q", required)
+		}
+	}
+	return nil
+}
+
+// openTofuGatesRequireNoCredentials keeps the gate safe to run on a pull
+// request from any source: it must never reach the real state backend, and a
+// plan would need provider credentials this workflow deliberately lacks.
+func openTofuGatesRequireNoCredentials(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.terraformLint, "-backend=false") {
+		return fmt.Errorf("OpenTofu gate does not initialise without a backend")
+	}
+	if strings.Contains(state.terraformLint, "tofu plan") {
+		return fmt.Errorf("OpenTofu lint gate must not plan; planning needs credentials it deliberately lacks")
+	}
+	if strings.Contains(state.terraformLint, "secrets.") {
+		return fmt.Errorf("OpenTofu lint gate must not consume repository secrets")
+	}
+	return nil
 }
 
 func repositoryCIWorkflowIsConfigured(ctx context.Context) error {

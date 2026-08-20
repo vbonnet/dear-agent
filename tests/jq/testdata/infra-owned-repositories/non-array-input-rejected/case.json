@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/owned-repositories.jq",
+  "description": "A JSON object here is a GitHub error body, not a repository listing.",
+  "raw": true,
+  "args": {
+    "owner": "vbonnet"
+  }
+}

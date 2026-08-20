@@ -1,0 +1,14 @@
+{
+  "expected": [
+    {
+      "context": "Legacy Check",
+      "integration_id": null
+    }
+  ],
+  "produced": [
+    {
+      "context": "Legacy Check",
+      "integration_id": 42
+    }
+  ]
+}

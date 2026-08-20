@@ -1,0 +1,14 @@
+{
+  "expected": [
+    {
+      "context": "Lint",
+      "integration_id": 1.5
+    }
+  ],
+  "produced": [
+    {
+      "context": "Lint",
+      "integration_id": 15368
+    }
+  ]
+}

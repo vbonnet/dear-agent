@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "dear-agent is the repository this inventory governs; an inventory without it would reconcile the fleet against a policy that never mentions the source of truth.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

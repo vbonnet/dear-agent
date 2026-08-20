@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "deletion, non_fast_forward and required_linear_history take no parameters; parameters here mean the document was written against a different schema."
+}
