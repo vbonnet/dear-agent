@@ -78,7 +78,48 @@ jobs:
               echo "::error::Could not resolve the required checks for main; refusing to classify merges."
               exit 1
             }
-          echo "Required checks: ${required_checks}"
+          echo "Required checks (current): ${required_checks}"
+
+          # ...but "required" is a property of the moment the merge happened,
+          # not of today. Making a check required retroactively converts every
+          # merge in the lookback window that had it red into a bypass finding:
+          # `Structural Health (baselined)` became required at 2026-08-20T03:58Z
+          # and immediately accused PR #1253, merged 20 hours earlier when the
+          # ruleset asked for six contexts and not that one.
+          #
+          # Rulesets carry a version history, so the set as it stood at a given
+          # merge is recoverable. Fetch the version list once; per PR, take the
+          # newest version whose updated_at precedes the merge.
+          ruleset_id=$(gh api "repos/${REPO}/rules/branches/main" \
+            --jq '[.[] | .ruleset_id] | unique | first // empty' 2>/dev/null || true)
+          ruleset_history=""
+          if [ -n "${ruleset_id}" ]; then
+            ruleset_history=$(gh api "repos/${REPO}/rulesets/${ruleset_id}/history" --paginate \
+              --jq '[.[] | {version_id, updated_at}] | sort_by(.updated_at)' 2>/dev/null || true)
+          fi
+          if [ -z "${ruleset_history}" ] || [ "${ruleset_history}" = "[]" ]; then
+            echo "::notice::Ruleset history unavailable; classifying against the current required set. A check required recently may produce anachronistic findings."
+            ruleset_history=""
+          fi
+
+          # required_at <merged_at> — echoes the contexts required at that
+          # instant, falling back to the current set when history cannot answer.
+          required_at() {
+            local merged="$1" version cached
+            [ -z "${ruleset_history}" ] && { printf '%s' "${required_checks}"; return; }
+            version=$(jq -r --arg m "${merged}" \
+              '[.[] | select(.updated_at <= $m)] | last | .version_id // empty' <<<"${ruleset_history}")
+            # A merge older than every recorded version: the oldest version is
+            # the closest evidence available, and is still better than today's.
+            [ -z "${version}" ] && version=$(jq -r 'first | .version_id // empty' <<<"${ruleset_history}")
+            [ -z "${version}" ] && { printf '%s' "${required_checks}"; return; }
+            cached="/tmp/ruleset-${version}.json"
+            [ -f "${cached}" ] || gh api "repos/${REPO}/rulesets/${ruleset_id}/history/${version}" \
+              > "${cached}" 2>/dev/null || { printf '%s' "${required_checks}"; return; }
+            jq -c '[.state.rules[]? | select(.type == "required_status_checks")
+                    | .parameters.required_status_checks[]?.context] | unique' "${cached}" \
+              2>/dev/null || printf '%s' "${required_checks}"
+          }
 
           findings=""
 
@@ -90,13 +131,18 @@ jobs:
 
             echo "--- PR #${number}: ${title} (merged ${merged_at}, head=${head_sha})"
 
+            # The required set as it stood when THIS pull request merged.
+            pr_required=$(required_at "${merged_at}")
+            [ -z "${pr_required}" ] && pr_required="${required_checks}"
+            echo "    required at merge: ${pr_required}"
+
             # Fetch check-runs for the PR's HEAD commit.
             check_runs=$(gh api "repos/${REPO}/commits/${head_sha}/check-runs" \
               --jq '.check_runs // []' 2>/dev/null || echo '[]')
 
             # Checks that completed with a non-success conclusion BEFORE the merge.
             red=$(echo "$check_runs" | jq -r \
-              --argjson required "$required_checks" \
+              --argjson required "$pr_required" \
               --arg merged "$merged_at" \
               '[.[] | select(.name as $name | ($required | index($name)) != null) | select(
                   .status == "completed" and
@@ -109,7 +155,7 @@ jobs:
 
             # Checks that were still running (started but not completed) at merge time.
             pending=$(echo "$check_runs" | jq -r \
-              --argjson required "$required_checks" \
+              --argjson required "$pr_required" \
               --arg merged "$merged_at" \
               '[.[] | select(.name as $name | ($required | index($name)) != null) | select(
                   (.started_at // "z") <= $merged and
