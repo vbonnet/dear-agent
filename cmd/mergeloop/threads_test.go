@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsKnownBotAuthor(t *testing.T) {
 	cases := []struct {
@@ -75,5 +78,29 @@ func TestSplitOwnerRepo(t *testing.T) {
 			t.Errorf("splitOwnerRepo(%q) = (%q,%q,%v), want (%q,%q,%v)",
 				c.in, owner, name, ok, c.owner, c.name, c.ok)
 		}
+	}
+}
+
+// TestAutoResolveNoticeIsHonest pins the wording of the notice mergeloop posts
+// before auto-resolving. The whole point is that a reader can tell an
+// auto-resolved thread from one a person actually handled, so the notice must
+// say it was not reviewed and must offer a way back.
+func TestAutoResolveNoticeIsHonest(t *testing.T) {
+	for _, want := range []string{"Auto-resolved by mergeloop", "NOT reviewed by a person", "reopen"} {
+		if !strings.Contains(autoResolveNotice, want) {
+			t.Errorf("auto-resolve notice missing %q, got: %s", want, autoResolveNotice)
+		}
+	}
+}
+
+// TestThreadReplyMutationUsesCorrectInputField guards the one-character trap
+// between the two mutations: resolveReviewThread takes threadId while
+// addPullRequestReviewThreadReply takes pullRequestReviewThreadId.
+func TestThreadReplyMutationUsesCorrectInputField(t *testing.T) {
+	if !strings.Contains(threadReplyMutation, "pullRequestReviewThreadId:$threadId") {
+		t.Errorf("reply mutation must use pullRequestReviewThreadId, got: %s", threadReplyMutation)
+	}
+	if !strings.Contains(threadResolveMutation, "threadId:$threadId") {
+		t.Errorf("resolve mutation must use threadId, got: %s", threadResolveMutation)
 	}
 }

@@ -257,6 +257,17 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	}
 	msg, rErr := resolveWithEvidence(ctx, threadID, false)
 	if rErr != nil {
+		var unanswered *unansweredError
+		if errors.As(rErr, &unanswered) {
+			// The reviewer commented again in the gap, so they now hold the
+			// thread. Prescribing the resolve-only path here would just fail
+			// the same evidence check; the honest next step is to read the
+			// follow-up and answer it.
+			return fail("your reply is posted, but the reviewer has since "+
+				"commented again and now holds this thread:\n%v\n"+
+				"read the follow-up and answer it; reply-resolve is the right "+
+				"command once you have", rErr)
+		}
 		return fail("the reply is posted but the thread is NOT resolved: %v\n"+
 			"do NOT re-run reply-resolve (it would repost); finish with:\n"+
 			"  resolve-review-threads resolve %s", rErr, threadID)

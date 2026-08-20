@@ -37,6 +37,8 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-14** When the shared effective required-check policy is authoritatively empty, the command shall classify every reported check instead of treating the pull request as green.
 
+**MLC-15** When auto-resolving a bot review thread, the command shall first post a notice on that thread stating the finding was auto-resolved without human review and can be reopened.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

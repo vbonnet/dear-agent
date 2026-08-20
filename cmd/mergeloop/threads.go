@@ -95,6 +95,21 @@ const threadResolveMutation = `mutation($threadId:ID!){
   resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
 }`
 
+// autoResolveNotice is posted on every thread mergeloop auto-resolves, so the
+// finding stays visible and mineable rather than vanishing into a resolved
+// state that looks like a human handled it.
+const autoResolveNotice = "Auto-resolved by mergeloop: this is an advisory bot finding with no " +
+	"human reply, resolved to unblock required conversation resolution. It was NOT reviewed by " +
+	"a person. If it identified a real problem, reopen this thread or file it separately."
+
+// threadReplyMutation posts the auto-resolution notice. Note the input field is
+// pullRequestReviewThreadId here, unlike resolveReviewThread's threadId.
+const threadReplyMutation = `mutation($threadId:ID!, $body:String!) {
+  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId, body:$body}) {
+    comment { id }
+  }
+}`
+
 // botThread is a single unresolved review thread attributed to a known bot.
 type botThread struct {
 	id     string
@@ -210,6 +225,19 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 
 // resolveThread resolves one review thread by its node ID.
 func (r *ghThreadResolver) resolveThread(ctx context.Context, threadID string) error {
+	// Say so on the thread before closing it. mergeloop resolves bot findings
+	// nobody has replied to, which is the one sanctioned exception to the
+	// evidence rule in cmd/resolve-review-threads: without a note, an
+	// auto-resolved finding is indistinguishable from one a human read and
+	// dismissed, and the finding stops being mineable. A failed note is not
+	// fatal, but it must not be silent.
+	if _, err := ghJSON(ctx, 30*time.Second, []string{"api", "graphql",
+		"-f", "threadId=" + threadID,
+		"-f", "body=" + autoResolveNotice,
+		"-f", "query=" + threadReplyMutation,
+	}); err != nil {
+		fmt.Printf("  warning: could not annotate thread %s before resolving: %v\n", threadID, err)
+	}
 	_, err := ghJSON(ctx, 30*time.Second, []string{"api", "graphql",
 		"-f", "threadId=" + threadID,
 		"-f", "query=" + threadResolveMutation,

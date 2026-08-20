@@ -85,9 +85,18 @@ resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"
 resolve-review-threads resolve-all <owner> <repo> <n> [author]
 ```
 
-Every resolve path enforces this, including single-thread `resolve <threadId>`,
-and each one re-reads the thread immediately before mutating it, so a reviewer
-comment landing mid-sweep is never resolved away on stale state.
+Every `resolve-review-threads` path enforces this, including single-thread
+`resolve <threadId>`, and each one re-reads the thread immediately before
+mutating it, so a reviewer comment landing mid-sweep is never resolved away on
+stale state.
+
+**One sanctioned exception:** `mergeloop` auto-resolves unresolved threads whose
+every comment is from a known review bot, so a purely advisory finding cannot
+park a green PR on required conversation resolution forever. That is a
+deliberate throughput trade, not an oversight, and it now posts a notice on each
+thread saying the finding was auto-resolved and never read by a person. Treat
+those notices as a work queue: an auto-resolved thread is an unreviewed finding,
+not a handled one.
 
 `resolve-all --force` resolves unanswered threads. Use it only to dismiss a
 finding deliberately, and say why in a PR comment. Never reach for it to make

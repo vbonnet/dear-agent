@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 1.5
+**Version:** 1.6
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -62,6 +62,8 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-23** When comparing an existing comment against a requested reply, the system shall compare the bodies without whitespace collapsing or truncation, ignoring only surrounding whitespace.
 
 **RESOLVE-REVIEW-THREADS-24** When `reply-resolve` cannot read the thread's current state, the system shall post nothing, leave the thread unchanged, and exit non-zero.
+
+**RESOLVE-REVIEW-THREADS-25** When `reply-resolve` posts a reply and the subsequent resolution is refused because the reviewer commented again, the system shall report that the reviewer now holds the thread and direct the user to answer the follow-up rather than to the resolution-only command.
 
 ## BDD Traceability
 
