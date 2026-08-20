@@ -459,8 +459,11 @@ func TestCanonicalDirectBDDFeaturePathRejectsNestedOutsideAndUnparseableFiles(t 
 
 func isCanonicalDirectBDDFeaturePath(featuresDir, path string) bool {
 	rel, err := filepath.Rel(featuresDir, path)
+	if err != nil {
+		return false
+	}
 	outside := rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
-	if err != nil || rel == "." || outside || filepath.Dir(rel) != "." {
+	if rel == "." || outside || filepath.Dir(rel) != "." {
 		return false
 	}
 	repositoryPath := repoinventory.ExecutableBDDFeatureRoot + "/" + filepath.ToSlash(rel)
