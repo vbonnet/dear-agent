@@ -21,7 +21,7 @@ concurrency:
 permissions: {}
 
 jobs:
-  # See ADR-038. Job-level `if:` rather than `on.pull_request.paths`, because
+  # See ADR-039. Job-level `if:` rather than `on.pull_request.paths`, because
   # "Analyze Go Code (go)" is a required status check and a workflow dropped by
   # a path filter never reports one.
   changes:
@@ -97,4 +97,4 @@ jobs:
         echo "::notice ::CodeQL skipped its steps: this PR changes no Go source,"
         echo "::notice ::no build metadata, and no embedded build input, so the"
         echo "::notice ::database would be byte-identical. The required context is"
-        echo "::notice ::still reported. See ADR-038."
+        echo "::notice ::still reported. See ADR-039."

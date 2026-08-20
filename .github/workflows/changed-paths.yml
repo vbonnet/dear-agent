@@ -12,7 +12,7 @@ name: Changed Paths
 # check run at all, so branch protection sits at "Expected — Waiting for status
 # to be reported" forever. A job skipped by an `if:` condition DOES report, with
 # conclusion `skipped`, which GitHub treats as satisfying a required check.
-# See ADR-038.
+# See ADR-039.
 #
 # Callers must also treat a FAILED detector as "everything is relevant". A
 # consumer whose `if:` has no status function inherits an implicit `success()`,

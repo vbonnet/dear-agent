@@ -80,7 +80,7 @@ otherwise the gate becomes unsatisfiable.
 > failed change detector skips it — and the gate disappears instead of turning
 > red. Every scoped condition carries `!cancelled()` and treats
 > `needs.changes.result != 'success'` as "run everything". See
-> [ADR-038](adr/ADR-038-ci-path-scoping-and-gateway.md).
+> [ADR-039](adr/ADR-039-ci-path-scoping-and-gateway.md).
 
 ## Applying the ruleset
 

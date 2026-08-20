@@ -101,7 +101,7 @@ jobs:
     # inherits an implicit `success()`. A detector that fails on checkout or
     # runner startup would then skip this job, and a skipped required check
     # satisfies branch protection exactly as well as a passing one, so the
-    # security gate would vanish rather than turn red. See ADR-038.
+    # security gate would vanish rather than turn red. See ADR-039.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

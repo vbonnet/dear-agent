@@ -51,7 +51,7 @@ var depsRe = regexp.MustCompile(
 // under-selects the moment someone adds a new kind of embedded asset: the
 // compiled program changes, the classifier says `go=false`, and Build & Test
 // skips. A denylist of "provably documentation" over-selects instead, which
-// costs runner minutes. See ADR-038.
+// costs runner minutes. See ADR-039.
 var documentExts = map[string]bool{
 	".md": true, ".mdx": true, ".markdown": true,
 	".txt": true, ".rst": true, ".adoc": true,

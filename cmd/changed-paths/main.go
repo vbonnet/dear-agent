@@ -19,7 +19,7 @@
 // forces every consumer to run. Under-running is a silent hole in the gate;
 // over-running only costs runner minutes.
 //
-// See ADR-038 and .github/workflows/README.md.
+// See ADR-039 and .github/workflows/README.md.
 package main
 
 import (

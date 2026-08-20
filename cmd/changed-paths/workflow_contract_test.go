@@ -311,7 +311,7 @@ func TestScopedJobsTreatADetectorFailureAsRelevant(t *testing.T) {
 
 // TestNoPathFiltersOnRequiredWorkflows: a workflow dropped by `on.<event>.paths`
 // creates no check run at all, so the required context never reports and the PR
-// is unmergeable forever. This is the trap ADR-038 exists to avoid.
+// is unmergeable forever. This is the trap ADR-039 exists to avoid.
 func TestNoPathFiltersOnRequiredWorkflows(t *testing.T) {
 	required := map[string]bool{}
 	for _, ctx := range requiredContexts(t) {
@@ -349,7 +349,7 @@ func TestNoPathFiltersOnRequiredWorkflows(t *testing.T) {
 					t.Errorf("%s: event %q uses `%s`, but this workflow produces a required "+
 						"status check. A workflow dropped by a path filter reports no check "+
 						"run, so the required context never arrives. Scope with a job- or "+
-						"step-level `if:` instead (ADR-038).", file, event, key)
+						"step-level `if:` instead (ADR-039).", file, event, key)
 				}
 			}
 		}

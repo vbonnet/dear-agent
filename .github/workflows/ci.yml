@@ -32,7 +32,7 @@ jobs:
   # a skipped matrix job never emits its expanded contexts. Jobs that do not
   # are scoped at the job level, and every such condition carries `!cancelled()`
   # plus `needs.changes.result != 'success'` so a failed detector cannot
-  # silently skip a gate. See ADR-038.
+  # silently skip a gate. See ADR-039.
   changes:
     name: Change Detection
     uses: ./.github/workflows/changed-paths.yml
@@ -182,7 +182,7 @@ jobs:
           echo "::notice ::Build & Test skipped its steps: this PR changes no Go"
           echo "::notice ::source, no build metadata, and no embedded or verified"
           echo "::notice ::build input. The context is still reported so branch"
-          echo "::notice ::protection stays satisfiable. See ADR-038."
+          echo "::notice ::protection stays satisfiable. See ADR-039."
 
   # Smart integration-test selection. The selector (cmd/test-affected)
   # walks the dependency graph from this branch vs. origin/main and runs
@@ -193,7 +193,7 @@ jobs:
   #
   # This is *additive*. The "Build & Test" job above still runs the full
   # unit-test surface on every PR that touches a build input — Go source,
-  # build metadata, or an embedded/hash-verified asset (ADR-038); this job
+  # build metadata, or an embedded/hash-verified asset (ADR-039); this job
   # just narrows the integration suite down to what the PR actually
   # touches. Empty output = clean pass.
   #
@@ -417,7 +417,7 @@ jobs:
   # cmd/changed-paths/workflow_contract_test.go asserts the ruleset entry.
   #
   # Honours DECL-WORKFLOW-02: a failing required job cannot be reported as
-  # success through this aggregate. See ADR-038.
+  # success through this aggregate. See ADR-039.
   #
   # NOT in `needs`: the `govulncheck` job. It is independently listed in the
   # repository ruleset, is unconditional, and is being modified concurrently
