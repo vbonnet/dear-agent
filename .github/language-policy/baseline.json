@@ -1,0 +1,9 @@
+{
+  "_comment": "Ratchet for the language-policy waiver store. max_waivers may only ever be lowered. A change that raises it is the change to question: it means a script was exempted rather than shortened or tested. Lower it whenever waivers are removed, so the backlog cannot silently refill.",
+  "rules": {
+    "bash-20-line-limit": {
+      "max_waivers": 77,
+      "goal": "Drive to 0. Each entry clears by adding a bats test under tests/bats/ or by shortening the script below the limit. Tracked as ce-kx3fm."
+    }
+  }
+}
