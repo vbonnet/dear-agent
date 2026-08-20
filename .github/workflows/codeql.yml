@@ -21,8 +21,36 @@ concurrency:
 permissions: {}
 
 jobs:
+  # See ADR-039. Job-level `if:` rather than `on.pull_request.paths`, because
+  # "Analyze Go Code (go)" is a required status check and a workflow dropped by
+  # a path filter never reports one.
+  changes:
+    name: Change Detection
+    uses: ./.github/workflows/changed-paths.yml
+    permissions:
+      contents: read
+
   analyze:
     name: Analyze Go Code
+    needs: changes
+    # CodeQL builds and analyses the Go program. A PR that touches no Go source
+    # and no build metadata produces a byte-identical database, so re-running
+    # costs ~10 minutes to reprove the previous answer. Every push to main, the
+    # weekly schedule, and any workflow_dispatch still analyse unconditionally
+    # (changed-paths.yml forces all outputs true off pull_request), so a CVE in
+    # a query pack or a rule update is still caught within a week.
+    #
+    # Scoped at the STEP level, not the job level. This job produces the
+    # required `Analyze Go Code (go)` context, and GitHub does not expand
+    # `strategy.matrix` for a job its job-level `if:` skipped — the skipped
+    # check run carries the literal unexpanded name, so the required context
+    # would never be reported and the PR would sit at "Expected — Waiting for
+    # status to be reported" forever. `!cancelled()` (rather than no `if:` at
+    # all) keeps a FAILED detector from skipping the job, because a skipped
+    # required check satisfies branch protection just as well as a passing one.
+    if: ${{ !cancelled() }}
+    env:
+      RUN_ANALYSIS: ${{ needs.changes.result != 'success' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -37,25 +65,38 @@ jobs:
 
     steps:
     - name: Checkout repository
+      if: env.RUN_ANALYSIS == 'true'
       uses: actions/checkout@v7
 
     - name: Set up Go
+      if: env.RUN_ANALYSIS == 'true'
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
         cache: true
 
     - name: Initialize CodeQL
+      if: env.RUN_ANALYSIS == 'true'
       uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
         queries: security-and-quality
 
     - name: Build project
+      if: env.RUN_ANALYSIS == 'true'
       run: |
         go build ./...
 
     - name: Perform CodeQL Analysis
+      if: env.RUN_ANALYSIS == 'true'
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
+
+    - name: Explain skipped analysis
+      if: env.RUN_ANALYSIS != 'true'
+      run: |
+        echo "::notice ::CodeQL skipped its steps: this PR changes no Go source,"
+        echo "::notice ::no build metadata, and no embedded build input, so the"
+        echo "::notice ::database would be byte-identical. The required context is"
+        echo "::notice ::still reported. See ADR-039."
