@@ -3,6 +3,7 @@
 # RELATED-SPEC: cmd/codex-hook-json/SPEC.md
 # RELATED-SPEC: cmd/credential-monitor/SPEC.md
 # RELATED-SPEC: cmd/gopls-watchdog/SPEC.md
+# RELATED-SPEC: cmd/infra-plan-policy/SPEC.md
 # RELATED-SPEC: cmd/log-rotate/SPEC.md
 # RELATED-SPEC: cmd/pretool-bash-write-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-fs-write-guard/SPEC.md
@@ -23,6 +24,7 @@ Feature: Root safety command guardrails
       | cmd/credential-monitor           |
       | cmd/drift-check                  |
       | cmd/gopls-watchdog               |
+      | cmd/infra-plan-policy            |
       | cmd/log-rotate                   |
       | cmd/pretool-bash-write-guard     |
       | cmd/pretool-fs-write-guard       |
