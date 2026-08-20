@@ -23,12 +23,6 @@ on:
 permissions:
   issues: write
   contents: read
-  # Reading the branch ruleset's version history — needed to know which checks
-  # were required at the moment each pull request merged, rather than which are
-  # required today. Without it the history call 403s, the audit silently falls
-  # back to today's set, and a newly-required check retroactively accuses every
-  # merge in the lookback window.
-  administration: read
 
 env:
   GIT_TERMINAL_PROMPT: "0"
@@ -55,6 +49,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days || '7' }}
+          # Optional. Only the ruleset-history calls use it, and only to learn
+          # which checks were required at each merge. Absent, the audit says so
+          # and reports its findings as unverified rather than as bypasses.
+          INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -96,11 +94,19 @@ jobs:
           # Rulesets carry a version history, so the set as it stood at a given
           # merge is recoverable. Fetch the version list once; per PR, take the
           # newest version whose updated_at precedes the merge.
+          # Ruleset reads need repository-administration rights, and the
+          # workflow GITHUB_TOKEN cannot be granted them: `administration` is a
+          # fine-grained-PAT permission, NOT one of the GITHUB_TOKEN workflow
+          # scopes. Naming it under `permissions:` makes the workflow file
+          # invalid — the run dies before a single job starts, which is exactly
+          # what #1324 did to main. Use an admin PAT when one is configured and
+          # degrade honestly when it is not.
           ruleset_id=$(gh api "repos/${REPO}/rules/branches/main" \
             --jq '[.[] | .ruleset_id] | unique | first // empty' 2>/dev/null || true)
           ruleset_history=""
           if [ -n "${ruleset_id}" ]; then
-            ruleset_history=$(gh api "repos/${REPO}/rulesets/${ruleset_id}/history" --paginate \
+            ruleset_history=$(GH_TOKEN="${INFRA_GITHUB_TOKEN:-$GH_TOKEN}" \
+              gh api "repos/${REPO}/rulesets/${ruleset_id}/history" --paginate \
               --jq '[.[] | {version_id, updated_at}] | sort_by(.updated_at)' 2>/dev/null || true)
           fi
           # Check the SHAPE, not just non-emptiness: a 403 body or an error
@@ -108,7 +114,7 @@ jobs:
           # as a usable history.
           if ! jq -e 'type == "array" and length > 0 and (.[0] | has("version_id"))' \
                <<<"${ruleset_history:-null}" >/dev/null 2>&1; then
-            echo "::warning::Ruleset history unavailable (needs Administration: read); classifying against the current required set. A recently-required check may produce anachronistic findings."
+            echo "::warning::Ruleset history unavailable (needs an admin PAT in INFRA_GITHUB_TOKEN); findings are UNVERIFIED against the rules in force at merge time."
             ruleset_history=""
           else
             echo "Ruleset history: $(jq -r 'length' <<<"${ruleset_history}") version(s) available."
@@ -137,7 +143,8 @@ jobs:
             fi
             cached="/tmp/ruleset-${version}.json"
             if [ ! -f "${cached}" ]; then
-              if ! gh api "repos/${REPO}/rulesets/${ruleset_id}/history/${version}" > "${cached}" 2>/dev/null; then
+              if ! GH_TOKEN="${INFRA_GITHUB_TOKEN:-$GH_TOKEN}" \
+                   gh api "repos/${REPO}/rulesets/${ruleset_id}/history/${version}" > "${cached}" 2>/dev/null; then
                 rm -f "${cached}"
                 echo "::warning::could not read ruleset version ${version}; using today's required set" >&2
                 printf '%s' "${required_checks}"; return
