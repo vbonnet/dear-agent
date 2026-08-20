@@ -9,6 +9,7 @@
 # RELATED-SPEC: cmd/merge-audit/SPEC.md
 # RELATED-SPEC: cmd/ai-review/SPEC.md
 # RELATED-SPEC: internal/prreviewer/SPEC.md
+# RELATED-SPEC: cmd/pr-size-audit/SPEC.md
 # RELATED-SPEC: internal/prconcern/SPEC.md
 # RELATED-SPEC: tools/pr-concern-lint/SPEC.md
 Feature: Root lifecycle command guardrails
@@ -32,6 +33,7 @@ Feature: Root lifecycle command guardrails
       | cmd/external-pr-reviewer |
       | cmd/merge-audit          |
       | cmd/mergeloop            |
+      | cmd/pr-size-audit        |
       | internal/mergeloop       |
       | internal/prconcern       |
       | internal/prreviewer      |
