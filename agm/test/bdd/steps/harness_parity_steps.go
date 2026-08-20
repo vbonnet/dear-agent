@@ -4348,7 +4348,7 @@ func executeCodexHookReviewBehaviorSuite(ctx context.Context) bddBehaviorSuiteRe
 	testCtx, cancel := context.WithTimeout(ctx, codexHookReviewBehaviorSuiteTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/session", "./agm/internal/ops", "./agm/cmd/agm",
-		"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate)$`,
+		"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexHookReviewFailsBeforeActivityUpdate)$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
