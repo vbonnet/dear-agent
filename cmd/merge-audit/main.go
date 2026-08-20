@@ -44,6 +44,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,11 +55,12 @@ import (
 
 // defaultLookbackDays is the audit window when --days is not given. Matches the
 // weekly cadence and the bypassed-merge-audit lookback.
-const defaultLookbackDays = 7
-
-// rulesetName is the name of the zero-bypass ruleset tracked in
-// .github/rulesets/main.json; live rulesets are matched against it by name.
-const rulesetName = "main-zero-bypass"
+const (
+	defaultLookbackDays              = 7
+	dearAgentRulesetID         int64 = 18061003
+	githubActionsIntegrationID int64 = 15368
+	legacyRulesetName                = "branch-protection"
+)
 
 // Violation is one detected safe-merge bypass. It is the unit of both the
 // human/JSON report and the per-violation bead.
@@ -83,6 +85,14 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+type runDependencies struct {
+	auditRepo         func(context.Context, string, time.Time, string) ([]Violation, error)
+	readFile          func(string) ([]byte, error)
+	stdout            io.Writer
+	stderr            io.Writer
+	persistViolations func([]Violation, options, io.Writer)
+}
+
 type options struct {
 	repos       []string
 	src         string
@@ -95,7 +105,53 @@ type options struct {
 }
 
 func run(args []string) int {
+	return runWithDependencies(args, runDependencies{
+		auditRepo:         auditRepo,
+		readFile:          os.ReadFile,
+		stdout:            os.Stdout,
+		stderr:            os.Stderr,
+		persistViolations: persistViolations,
+	})
+}
+
+// auditTimeout bounds a whole audit run. It is generous because the run scales
+// with the managed fleet and each repository costs several GitHub queries; it
+// exists to convert a hang into a reported incomplete audit, not to police
+// normal duration.
+const auditTimeout = 30 * time.Minute
+
+func runWithDependencies(args []string, deps runDependencies) int {
+	opts, exitCode := parseOptions(args, deps.stderr)
+	if exitCode != 0 {
+		return exitCode
+	}
+
+	// Every GitHub query below shells out to `gh`. An unbounded run in the
+	// scheduled workflow would hold a runner until the job timeout kills it,
+	// and a killed job reports no findings at all — the audit's worst
+	// outcome, since MAC-06 exists precisely so an unanswerable audit never
+	// reads as clean. A deadline lets the run end as an explicit incomplete
+	// audit instead.
+	ctx, cancel := context.WithTimeout(context.Background(), auditTimeout)
+	defer cancel()
+
+	repos, err := resolveRepositories(ctx, opts)
+	if err != nil {
+		return fail("%v", err)
+	}
+
+	violations, auditErrors := auditRepositories(ctx, repos, opts, deps.auditRepo)
+	if data, err := deps.readFile(overrideLogPath()); err == nil {
+		since := opts.now.AddDate(0, 0, -opts.days)
+		violations = append(violations, breakGlassViolations(data, since)...)
+	}
+	stampViolations(violations, opts.now)
+	return finishAudit(violations, auditErrors, opts, deps)
+}
+
+func parseOptions(args []string, stderr io.Writer) (options, int) {
 	fs := flag.NewFlagSet("merge-audit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	var (
 		reposCSV = fs.String("repos", "", "comma-separated owner/repo list (skips discovery)")
 		src      = fs.String("src", defaultSrcDir(), "discover repos under this dir")
@@ -106,7 +162,7 @@ func run(args []string) int {
 		dryRun   = fs.Bool("dry-run", false, "report only; do not file beads or append history")
 	)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return options{}, 2
 	}
 
 	opts := options{
@@ -122,86 +178,148 @@ func run(args []string) int {
 		opts.repos = splitCSV(*reposCSV)
 	}
 	if opts.days <= 0 {
-		return fail("--days must be a positive integer, got %d", opts.days)
+		return options{}, fail("--days must be a positive integer, got %d", opts.days)
 	}
+	return opts, 0
+}
 
-	ctx := context.Background()
+func resolveRepositories(ctx context.Context, opts options) ([]string, error) {
 	repos := opts.repos
 	if len(repos) == 0 {
 		discovered, err := discoverRepos(ctx, opts.src)
 		if err != nil {
-			return fail("discover repos under %s: %v", opts.src, err)
+			return nil, fmt.Errorf("discover repos under %s: %w", opts.src, err)
 		}
 		repos = discovered
 	}
 	if len(repos) == 0 {
-		return fail("no repos to audit (use --repos or --src)")
+		return nil, fmt.Errorf("no repos to audit (use --repos or --src)")
 	}
+	return repos, nil
+}
 
+func auditRepositories(ctx context.Context, repos []string, opts options, auditRepoFn func(context.Context, string, time.Time, string) ([]Violation, error)) ([]Violation, []string) {
 	since := opts.now.AddDate(0, 0, -opts.days)
 	var violations []Violation
+	var auditErrors []string
 	for _, repo := range repos {
-		vs, err := auditRepo(ctx, repo, since, opts.rulesetPath)
+		vs, err := auditRepoFn(ctx, repo, since, opts.rulesetPath)
+		// A repository audit may discover durable findings before a later,
+		// independent evidence source fails. Retain those findings while still
+		// marking the overall report incomplete.
+		violations = append(violations, vs...)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "merge-audit: %s: %v\n", repo, err)
+			auditErrors = append(auditErrors, fmt.Sprintf("%s: %v", repo, err))
 			continue
 		}
-		violations = append(violations, vs...)
 	}
+	return violations, auditErrors
+}
 
-	// Check 4: break-glass overrides are recorded locally (not per-repo), so the
-	// override-audit log is scanned once across the whole window.
-	if data, err := os.ReadFile(overrideLogPath()); err == nil {
-		violations = append(violations, breakGlassViolations(data, since)...)
-	}
-
-	stamp := opts.now.Format(time.RFC3339)
+func stampViolations(violations []Violation, now time.Time) {
+	stamp := now.Format(time.RFC3339)
 	for i := range violations {
 		violations[i].DetectedAt = stamp
 	}
+}
 
-	if err := report(violations, opts); err != nil {
+func finishAudit(violations []Violation, auditErrors []string, opts options, deps runDependencies) int {
+	// A partial audit must not masquerade as a valid JSON report. In particular,
+	// never emit [] when every selected repository failed before comparison.
+	if len(auditErrors) > 0 {
+		for _, auditErr := range auditErrors {
+			fmt.Fprintf(deps.stderr, "merge-audit: %s\n", auditErr)
+		}
+		if len(violations) > 0 {
+			fmt.Fprintln(deps.stderr, "merge-audit: partial findings retained from checks completed before the audit error:")
+			if err := writeReport(deps.stderr, violations, false); err != nil {
+				fmt.Fprintf(deps.stderr, "merge-audit: report partial findings: %v\n", err)
+			}
+			if !opts.dryRun {
+				deps.persistViolations(violations, opts, deps.stderr)
+			}
+		}
+		fmt.Fprintln(deps.stderr, "merge-audit: audit incomplete; refusing to emit a partial report on stdout")
+		return 1
+	}
+	if err := report(violations, opts, deps.stdout, deps.stderr, deps.persistViolations); err != nil {
 		return fail("%v", err)
 	}
 	return 0
 }
 
-// auditRepo runs all five checks against one repo and returns its violations.
+type repoAuditDependencies struct {
+	defaultBranch     func(context.Context, string) (string, error)
+	auditMergedPRs    func(context.Context, string, string, time.Time) ([]Violation, error)
+	auditDirectPushes func(context.Context, string, string, time.Time) ([]Violation, error)
+	auditRulesetDrift func(context.Context, string, string) ([]Violation, error)
+}
+
+// auditRepo runs all five checks against one repo and returns every finding
+// discovered before an evidence error. The caller treats a non-nil error as an
+// incomplete audit, even when the returned slice is non-empty.
 func auditRepo(ctx context.Context, repo string, since time.Time, rulesetPath string) ([]Violation, error) {
-	branch, err := defaultBranch(ctx, repo)
+	return auditRepoWithDependencies(ctx, repo, since, rulesetPath, repoAuditDependencies{
+		defaultBranch:     defaultBranch,
+		auditMergedPRs:    auditMergedPRs,
+		auditDirectPushes: auditDirectPushes,
+		auditRulesetDrift: auditRulesetDrift,
+	})
+}
+
+func auditRepoWithDependencies(ctx context.Context, repo string, since time.Time, rulesetPath string, deps repoAuditDependencies) ([]Violation, error) {
+	branch, err := deps.defaultBranch(ctx, repo)
 	if err != nil {
 		return nil, fmt.Errorf("default branch: %w", err)
 	}
 
 	var out []Violation
-	prVs, err := auditMergedPRs(ctx, repo, branch, since)
-	if err != nil {
-		return nil, err
-	}
+	prVs, err := deps.auditMergedPRs(ctx, repo, branch, since)
 	out = append(out, prVs...)
-
-	pushVs, err := auditDirectPushes(ctx, repo, branch, since)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	out = append(out, pushVs...)
 
-	out = append(out, auditRulesetDrift(ctx, repo, rulesetPath)...)
+	pushVs, err := deps.auditDirectPushes(ctx, repo, branch, since)
+	out = append(out, pushVs...)
+	if err != nil {
+		return out, err
+	}
+
+	rulesetVs, err := deps.auditRulesetDrift(ctx, repo, rulesetPath)
+	out = append(out, rulesetVs...)
+	if err != nil {
+		return out, err
+	}
 	return out, nil
 }
 
 // auditMergedPRs runs checks 1 (unresolved threads) and 2 (incomplete checks)
 // for every PR merged into branch in the window.
 func auditMergedPRs(ctx context.Context, repo, branch string, since time.Time) ([]Violation, error) {
-	prs, err := mergedPRs(ctx, repo, branch, since)
+	return auditMergedPRsWithDependencies(ctx, repo, branch, since, mergedPRAuditDependencies{
+		mergedPRs:             mergedPRs,
+		unresolvedThreadCount: unresolvedThreadCount,
+		checkRuns:             checkRuns,
+	})
+}
+
+type mergedPRAuditDependencies struct {
+	mergedPRs             func(context.Context, string, string, time.Time) ([]mergedPR, error)
+	unresolvedThreadCount func(context.Context, string, int) (int, error)
+	checkRuns             func(context.Context, string, string) ([]checkRun, error)
+}
+
+func auditMergedPRsWithDependencies(ctx context.Context, repo, branch string, since time.Time, deps mergedPRAuditDependencies) ([]Violation, error) {
+	prs, err := deps.mergedPRs(ctx, repo, branch, since)
 	if err != nil {
 		return nil, fmt.Errorf("merged PRs: %w", err)
 	}
 	var out []Violation
 	for _, pr := range prs {
-		threads, err := unresolvedThreadCount(ctx, repo, pr.Number)
+		threads, err := deps.unresolvedThreadCount(ctx, repo, pr.Number)
 		if err != nil {
-			return nil, fmt.Errorf("PR #%d threads: %w", pr.Number, err)
+			return out, fmt.Errorf("PR #%d threads: %w", pr.Number, err)
 		}
 		if threads > 0 {
 			out = append(out, Violation{
@@ -212,9 +330,9 @@ func auditMergedPRs(ctx context.Context, repo, branch string, since time.Time) (
 			})
 		}
 
-		runs, err := checkRuns(ctx, repo, pr.HeadSHA)
+		runs, err := deps.checkRuns(ctx, repo, pr.HeadSHA)
 		if err != nil {
-			return nil, fmt.Errorf("PR #%d checks: %w", pr.Number, err)
+			return out, fmt.Errorf("PR #%d checks: %w", pr.Number, err)
 		}
 		if red, pending := redOrPendingChecks(runs, pr.MergedAt); len(red) > 0 || len(pending) > 0 {
 			out = append(out, Violation{
@@ -248,27 +366,54 @@ func auditDirectPushes(ctx context.Context, repo, branch string, since time.Time
 	return out, nil
 }
 
+// canonicalRulesetSources declares the repositories whose checked-in policy is
+// authoritative. Other fleet repositories are intentionally inventory-owned,
+// so their lack of this file is not a failed comparison.
+var canonicalRulesetSources = map[string]string{
+	"vbonnet/dear-agent": ".github/rulesets/main.json",
+}
+
 // auditRulesetDrift runs check 5: live branch ruleset vs the checked-in source.
-// Missing local source or an absent live ruleset is treated as "nothing to
-// compare" (no violation), not an error.
-func auditRulesetDrift(ctx context.Context, repo, rulesetPath string) []Violation {
-	localPath := rulesetPath
-	if localPath == "" {
-		localPath = filepath.Join("/Users", currentUser(), "src", repoName(repo), ".github", "rulesets", "main.json")
+// An explicit --ruleset declares the source expected for every selected repo.
+// Missing, unreadable, malformed, or absent declared policy fails closed;
+// undeclared fleet repositories are skipped rather than made unauditable.
+func auditRulesetDrift(ctx context.Context, repo, rulesetPath string) ([]Violation, error) {
+	localPath, declared := canonicalRulesetPath(repo, rulesetPath)
+	if !declared {
+		return nil, nil
 	}
 	local, err := os.ReadFile(localPath) // #nosec G304 — operator-supplied audit input path
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read canonical ruleset %s: %w", localPath, err)
 	}
-	live, err := liveRuleset(ctx, repo)
-	if err != nil || live == nil {
-		return nil
+	expected, err := parseRuleset(local)
+	if err != nil {
+		return nil, fmt.Errorf("parse canonical ruleset %s: %w", localPath, err)
+	}
+	if err := validateCanonicalRuleset(expected); err != nil {
+		return nil, fmt.Errorf("validate canonical ruleset %s: %w", localPath, err)
+	}
+	live, err := liveRuleset(ctx, repo, expected.Name)
+	if err != nil {
+		return nil, fmt.Errorf("load expected ruleset %q: %w", expected.Name, err)
 	}
 	var out []Violation
 	for _, d := range rulesetDrift(local, live) {
 		out = append(out, Violation{Repo: repo, Type: typeRulesetDrift, Detail: d})
 	}
-	return out
+	return out, nil
+}
+
+func canonicalRulesetPath(repo, override string) (string, bool) {
+	if override != "" {
+		return override, true
+	}
+	canonicalRepo := strings.ToLower(strings.TrimSpace(repo))
+	relative, ok := canonicalRulesetSources[canonicalRepo]
+	if !ok {
+		return "", false
+	}
+	return filepath.Join(homeDir(), "src", repoName(canonicalRepo), filepath.FromSlash(relative)), true
 }
 
 // ---- pure classification (unit-tested) ----------------------------------
@@ -360,101 +505,6 @@ func digitsParenAfter(message string, i int) bool {
 	return n > 0 && j < len(message) && message[j] == ')'
 }
 
-// rulesetView is the normalized projection of a ruleset we compare for drift.
-// Comparing a projection (not the raw JSON) avoids false positives from
-// server-only fields (id, created_at, _links, node_id, source).
-type rulesetView struct {
-	Enforcement   string
-	BypassActors  int
-	RuleTypes     []string
-	RequiredCheck []string
-}
-
-// rulesetDrift returns a list of human-readable drift descriptions between the
-// local source-of-truth ruleset and the live ruleset. Empty slice means in sync.
-func rulesetDrift(localJSON, liveJSON []byte) []string {
-	local, err1 := parseRuleset(localJSON)
-	live, err2 := parseRuleset(liveJSON)
-	if err1 != nil || err2 != nil {
-		return []string{"ruleset drift: unable to parse local or live ruleset for comparison"}
-	}
-	var drift []string
-	if local.Enforcement != live.Enforcement {
-		drift = append(drift, fmt.Sprintf("ruleset enforcement drift: source=%q live=%q", local.Enforcement, live.Enforcement))
-	}
-	if local.BypassActors != live.BypassActors {
-		drift = append(drift, fmt.Sprintf("ruleset bypass_actors drift: source=%d live=%d", local.BypassActors, live.BypassActors))
-	}
-	if d := diffSet("rule types", local.RuleTypes, live.RuleTypes); d != "" {
-		drift = append(drift, d)
-	}
-	if d := diffSet("required status checks", local.RequiredCheck, live.RequiredCheck); d != "" {
-		drift = append(drift, d)
-	}
-	return drift
-}
-
-// parseRuleset normalizes a ruleset JSON document into a rulesetView.
-func parseRuleset(raw []byte) (rulesetView, error) {
-	var doc struct {
-		Enforcement  string            `json:"enforcement"`
-		BypassActors []json.RawMessage `json:"bypass_actors"`
-		Rules        []struct {
-			Type       string `json:"type"`
-			Parameters struct {
-				RequiredStatusChecks []struct {
-					Context string `json:"context"`
-				} `json:"required_status_checks"`
-			} `json:"parameters"`
-		} `json:"rules"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return rulesetView{}, err
-	}
-	v := rulesetView{Enforcement: doc.Enforcement, BypassActors: len(doc.BypassActors)}
-	for _, r := range doc.Rules {
-		v.RuleTypes = append(v.RuleTypes, r.Type)
-		for _, c := range r.Parameters.RequiredStatusChecks {
-			v.RequiredCheck = append(v.RequiredCheck, c.Context)
-		}
-	}
-	sort.Strings(v.RuleTypes)
-	sort.Strings(v.RequiredCheck)
-	return v, nil
-}
-
-// diffSet returns a drift description if the two string sets differ, else "".
-func diffSet(label string, a, b []string) string {
-	missing := setDiff(a, b) // in source, not live
-	extra := setDiff(b, a)   // in live, not source
-	if len(missing) == 0 && len(extra) == 0 {
-		return ""
-	}
-	var parts []string
-	if len(missing) > 0 {
-		parts = append(parts, "missing from live: "+strings.Join(missing, ", "))
-	}
-	if len(extra) > 0 {
-		parts = append(parts, "unexpected in live: "+strings.Join(extra, ", "))
-	}
-	return fmt.Sprintf("ruleset %s drift: %s", label, strings.Join(parts, "; "))
-}
-
-// setDiff returns elements present in a but absent from b.
-func setDiff(a, b []string) []string {
-	in := make(map[string]bool, len(b))
-	for _, x := range b {
-		in[x] = true
-	}
-	var out []string
-	for _, x := range a {
-		if !in[x] {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
 // ---- break-glass (override-audit) ---------------------------------------
 
 // overrideRecord is the subset of an override-audit.jsonl entry we surface. An
@@ -537,22 +587,33 @@ func beadTitle(v Violation) string {
 
 // ---- reporting + side effects -------------------------------------------
 
-func report(violations []Violation, opts options) error {
-	if opts.jsonOut {
-		enc := json.NewEncoder(os.Stdout)
+func report(violations []Violation, opts options, stdout, stderr io.Writer, persist func([]Violation, options, io.Writer)) error {
+	if err := writeReport(stdout, violations, opts.jsonOut); err != nil {
+		return err
+	}
+
+	if len(violations) > 0 && !opts.dryRun {
+		persist(violations, opts, stderr)
+	}
+	return nil
+}
+
+func writeReport(w io.Writer, violations []Violation, jsonOut bool) error {
+	if jsonOut {
+		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(violations); err != nil {
 			return err
 		}
 	} else {
-		printTable(violations)
+		printTable(w, violations)
 	}
+	return nil
+}
 
-	if len(violations) == 0 || opts.dryRun {
-		return nil
-	}
+func persistViolations(violations []Violation, opts options, stderr io.Writer) {
 	if err := appendHistory(violations); err != nil {
-		fmt.Fprintf(os.Stderr, "merge-audit: append history: %v\n", err)
+		fmt.Fprintf(stderr, "merge-audit: append history: %v\n", err)
 	}
 	for _, v := range violations {
 		title := beadTitle(v)
@@ -562,10 +623,9 @@ func report(violations []Violation, opts options) error {
 			continue
 		}
 		if err := fileBead(opts.beadsDB, v); err != nil {
-			fmt.Fprintf(os.Stderr, "merge-audit: file bead for %s: %v\n", title, err)
+			fmt.Fprintf(stderr, "merge-audit: file bead for %s: %v\n", title, err)
 		}
 	}
-	return nil
 }
 
 // beadExists reports whether an open/in-progress bead with exactly this title
@@ -594,15 +654,15 @@ func beadExists(db, title string) bool {
 	return false
 }
 
-func printTable(violations []Violation) {
+func printTable(w io.Writer, violations []Violation) {
 	if len(violations) == 0 {
-		fmt.Println("merge-audit: no violations in the audit window ✓")
+		fmt.Fprintln(w, "merge-audit: no violations in the audit window ✓")
 		return
 	}
-	fmt.Printf("merge-audit: %d violation(s) detected\n\n", len(violations))
-	fmt.Printf("%-22s  %-24s  %-14s  %s\n", "TYPE", "REPO", "REF", "DETAIL")
+	fmt.Fprintf(w, "merge-audit: %d violation(s) detected\n\n", len(violations))
+	fmt.Fprintf(w, "%-22s  %-24s  %-14s  %s\n", "TYPE", "REPO", "REF", "DETAIL")
 	for _, v := range violations {
-		fmt.Printf("%-22s  %-24s  %-14s  %s\n", v.Type, v.Repo, v.Ref, v.Detail)
+		fmt.Fprintf(w, "%-22s  %-24s  %-14s  %s\n", v.Type, v.Repo, v.Ref, v.Detail)
 	}
 }
 
@@ -766,30 +826,73 @@ func branchCommits(ctx context.Context, repo, branch string, since time.Time) ([
 	return out, nil
 }
 
-// liveRuleset returns the live JSON of the named ruleset, or nil if absent.
-func liveRuleset(ctx context.Context, repo string) ([]byte, error) {
-	list, err := ghJSON(ctx, "api", fmt.Sprintf("repos/%s/rulesets", repo))
+type rulesetSummary struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// liveRuleset returns the single live ruleset matching the declared identity.
+// Listing is exhaustive, and ambiguity is an audit failure. During dear-agent's
+// one-time rename, the legacy and current names both resolve only when the
+// selected object retains canonical ID 18061003.
+func liveRuleset(ctx context.Context, repo, expectedName string) ([]byte, error) {
+	pages, err := ghJSON(ctx, "api", "--paginate", "--slurp", fmt.Sprintf("repos/%s/rulesets?per_page=100", repo))
 	if err != nil {
 		return nil, err
 	}
-	var rulesets []struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
+	rulesets, err := parseRulesetSummaryPages(pages)
+	if err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(list, &rulesets); err != nil {
-		return nil, fmt.Errorf("parse rulesets list: %w", err)
+	selected, err := selectExpectedRuleset(repo, expectedName, rulesets)
+	if err != nil {
+		return nil, err
 	}
-	id := 0
-	for _, r := range rulesets {
-		if r.Name == rulesetName {
-			id = r.ID
-			break
+	return ghJSON(ctx, "api", fmt.Sprintf("repos/%s/rulesets/%d", repo, selected.ID))
+}
+
+func parseRulesetSummaryPages(raw []byte) ([]rulesetSummary, error) {
+	var pages [][]rulesetSummary
+	if err := json.Unmarshal(raw, &pages); err != nil {
+		return nil, fmt.Errorf("parse paginated rulesets list: %w", err)
+	}
+	var rulesets []rulesetSummary
+	for _, page := range pages {
+		rulesets = append(rulesets, page...)
+	}
+	return rulesets, nil
+}
+
+func selectExpectedRuleset(repo, expectedName string, rulesets []rulesetSummary) (rulesetSummary, error) {
+	isDearAgent := strings.EqualFold(strings.TrimSpace(repo), "vbonnet/dear-agent")
+	var matches []rulesetSummary
+	for _, ruleset := range rulesets {
+		if isDearAgent {
+			if ruleset.ID == dearAgentRulesetID || ruleset.Name == expectedName || ruleset.Name == legacyRulesetName {
+				matches = append(matches, ruleset)
+			}
+			continue
+		}
+		if ruleset.Name == expectedName {
+			matches = append(matches, ruleset)
 		}
 	}
-	if id == 0 {
-		return nil, nil
+	if len(matches) != 1 {
+		return rulesetSummary{}, fmt.Errorf("expected exactly one ruleset matching %q on %s, found %d", expectedName, repo, len(matches))
 	}
-	return ghJSON(ctx, "api", fmt.Sprintf("repos/%s/rulesets/%d", repo, id))
+	selected := matches[0]
+	if selected.ID <= 0 || strings.TrimSpace(selected.Name) == "" {
+		return rulesetSummary{}, fmt.Errorf("matching ruleset on %s has incomplete identity", repo)
+	}
+	if isDearAgent {
+		if selected.ID != dearAgentRulesetID {
+			return rulesetSummary{}, fmt.Errorf("dear-agent ruleset %q has ID %d, expected %d", selected.Name, selected.ID, dearAgentRulesetID)
+		}
+		if selected.Name != expectedName && selected.Name != legacyRulesetName {
+			return rulesetSummary{}, fmt.Errorf("dear-agent ruleset ID %d has unexpected name %q", selected.ID, selected.Name)
+		}
+	}
+	return selected, nil
 }
 
 // defaultBranch returns the repo's default branch name.
@@ -899,11 +1002,6 @@ func homeDir() string {
 		return h
 	}
 	return "."
-}
-
-func currentUser() string {
-	h := homeDir()
-	return filepath.Base(h)
 }
 
 func fail(format string, a ...any) int {

@@ -1,53 +1,36 @@
 name: Infra Repo Reconciliation
 
-# Enforces the standing policy that EVERY vbonnet/* and dear-labs/* repo is
-# managed by infra/ IaC. Creating a repo (`gh repo create`, the web UI) does
-# not auto-add it to the fleet, so unmanaged repos accumulate with no
-# IaC-enforced protection and untracked existence. This job lists all live
-# repos and diffs them against the managed inventory; any repo missing from the
-# IaC (or any IaC entry with no live repo) fails the run and opens an alert.
-#
-# Managed set is parsed from the HCL repo-name keys across infra/*.tf and
-# infra/*.tfvars, UNIONED with the TF_VAR_active_repos / TF_VAR_archived_repos
-# JSON secrets (see repos.auto.tfvars.example's CI note). The real inventory
-# lives in the gitignored infra/repos.auto.tfvars, which a public-runner
-# checkout never has — without the secrets, the HCL grep only ever sees the
-# example file's placeholder names, so every live repo would misreport as
-# unmanaged. The secrets are the source of truth once configured; the grep
-# stays as a fallback for a private runner that does have the real file.
+# Trusted-default-branch reconciliation of live provider inventory against the
+# complete private personal-account OpenTofu inventory. Organization-scoped
+# resources are reconciled by the full OpenTofu drift job until a distinct
+# organization repository inventory exists. Repository identities never enter
+# public logs, issues, comments, or artifacts; only aggregate counts are
+# published.
 #
 # REQUIRED SECRETS:
-#   INFRA_GITHUB_TOKEN     PAT that can LIST private repos for vbonnet +
-#                          dear-labs (the default GITHUB_TOKEN only sees this
-#                          repo).
-#   TF_VAR_active_repos,
-#   TF_VAR_archived_repos  the real inventory as JSON (same shape as
-#                          repos.auto.tfvars), so the managed set can be
-#                          computed without the gitignored file being present.
+#   INFRA_GITHUB_TOKEN   PAT that can list the private personal-account fleet
+#   INFRA_ACTIVE_REPOS   complete private active_repos JSON value
+#   INFRA_ARCHIVED_REPOS complete private archived_repos JSON value
 #
-# When the token/inventory are absent the reconciliation cannot run at all. It
-# used to `exit 1` on the scheduled path, which painted `main` red every day and
-# made main-health-watchdog file a fresh incident each time — for a condition no
-# commit caused and no code change can fix. The daily red carried one bit
-# ("still not provisioned") and drowned the failures that meant something.
-#
-# The preflight is now its own job, and it decides for BOTH triggers instead of
-# branching on the event name. When the inputs are missing it warns, records the
-# reason in the run summary, and leaves the reconcile job SKIPPED — visibly
-# not-run, rather than a green run claiming an audit happened. Provisioning the
-# secrets turns enforcement back on with no further change.
+# When those inputs are absent the reconciliation cannot run at all. Failing the
+# scheduled run painted `main` red every day and made main-health-watchdog file
+# a fresh incident each time, for a condition no commit caused and no code
+# change can fix (PR #1290). The preflight is therefore its own job, deciding
+# for both triggers rather than branching on the event name: with the inputs
+# missing it warns, records the reason in the run summary, and leaves the
+# reconcile job SKIPPED — visibly not-run, rather than a green run claiming an
+# audit happened. Provisioning the secrets turns enforcement back on with no
+# further change.
 
 on:
   schedule:
-    - cron: "37 8 * * *" # daily, offset from the drift job
-  workflow_dispatch: {}
-  pull_request:
-    paths:
-      - "infra/**"
+    - cron: "37 8 * * *"
+  repository_dispatch:
+    types: [infra-repo-reconcile]
 
 concurrency:
-  group: infra-reconcile-${{ github.event.pull_request.number || 'scheduled' }}
-  cancel-in-progress: true
+  group: infra-reconcile
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -61,37 +44,27 @@ jobs:
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
       - name: Token + inventory present
         id: check
         env:
           INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
-          TF_VAR_active_repos: ${{ secrets.TF_VAR_active_repos }}
+          ACTIVE_REPOS_JSON: ${{ secrets.INFRA_ACTIVE_REPOS }}
+          ARCHIVED_REPOS_JSON: ${{ secrets.INFRA_ARCHIVED_REPOS }}
         run: |
-          missing=""
-          [ -z "${INFRA_GITHUB_TOKEN}" ] && missing="${missing}INFRA_GITHUB_TOKEN "
-          # The real inventory lives in the gitignored infra/repos.auto.tfvars,
-          # which this (public-runner) checkout never has. Accept either the
-          # file (private runner / local run) or the TF_VAR_active_repos JSON
-          # secret — without one of the two, the HCL grep below only ever sees
-          # repos.auto.tfvars.example's placeholder names and every live repo
-          # would misreport as unmanaged.
-          if [ ! -f infra/repos.auto.tfvars ] && [ -z "${TF_VAR_active_repos}" ]; then
-            missing="${missing}TF_VAR_active_repos "
-          fi
-
-          if [ -z "${missing}" ]; then
+          missing=()
+          for v in INFRA_GITHUB_TOKEN ACTIVE_REPOS_JSON ARCHIVED_REPOS_JSON; do
+            [ -z "${!v}" ] && missing+=("$v")
+          done
+          if [ ${#missing[@]} -eq 0 ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "configured=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::reconciliation did not run — missing: ${missing}"
+          echo "::warning::reconciliation did not run — missing: ${missing[*]}"
           {
             echo "### Infra repo reconciliation did not run"
             echo
-            echo "Missing: \`${missing}\`"
+            echo "Missing repository secrets: \`${missing[*]}\`"
             echo
             echo "Live repositories were **not** diffed against the IaC inventory."
             echo "Configure the secrets (see this workflow's header) to enable enforcement."
@@ -105,83 +78,99 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout
+      - name: Checkout trusted inventory validator
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Reconcile live repos against IaC
+      - name: Reconcile complete provider and IaC inventories
         env:
           GH_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
-          TF_VAR_active_repos: ${{ secrets.TF_VAR_active_repos }}
-          TF_VAR_archived_repos: ${{ secrets.TF_VAR_archived_repos }}
+          ACTIVE_REPOS_JSON: ${{ secrets.INFRA_ACTIVE_REPOS }}
+          ARCHIVED_REPOS_JSON: ${{ secrets.INFRA_ARCHIVED_REPOS }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
 
-          # Live repos (personal + org), excluding forks. One name per line.
-          gh repo list vbonnet   --no-archived --limit 300 --json name,isFork \
-            --jq '.[] | select(.isFork|not) | .name' > /tmp/live.txt
-          if ! dear_labs="$(gh repo list dear-labs --no-archived --limit 300 --json name,isFork \
-            --jq '.[] | select(.isFork|not) | .name' 2>/tmp/dear-labs.err)"; then
-            echo "::warning::gh repo list dear-labs failed, continuing with vbonnet repos only: $(cat /tmp/dear-labs.err)"
-          else
-            echo "${dear_labs}" >> /tmp/live.txt
-          fi
-          sort -u -o /tmp/live.txt /tmp/live.txt
+          : "${GH_TOKEN:?INFRA_GITHUB_TOKEN is required for complete provider evidence}"
+          : "${ACTIVE_REPOS_JSON:?INFRA_ACTIVE_REPOS is required}"
+          : "${ARCHIVED_REPOS_JSON:?INFRA_ARCHIVED_REPOS is required}"
 
-          # Managed set: HCL keys `"<repo>" = {` across tracked infra/*.tf(vars)
-          # — catches locals.tf, a private repos.auto.tfvars if physically
-          # present (private runner), or a local run — UNIONED with the real
-          # inventory from the TF_VAR_active_repos / TF_VAR_archived_repos JSON
-          # secrets, which is the only source of truth on a public GH-hosted
-          # runner (see the file-header comment).
-          grep -rhoE '^[[:space:]]*"[a-z0-9][a-z0-9._-]+"[[:space:]]*=[[:space:]]*\{' infra/ \
-            | sed -E 's/.*"([a-z0-9][a-z0-9._-]+)".*/\1/' > /tmp/managed.txt
-          [ -n "${TF_VAR_active_repos}" ] && jq -r 'keys[]' <<<"${TF_VAR_active_repos}" >> /tmp/managed.txt
-          [ -n "${TF_VAR_archived_repos}" ] && jq -r 'keys[]' <<<"${TF_VAR_archived_repos}" >> /tmp/managed.txt
-          sort -u -o /tmp/managed.txt /tmp/managed.txt
+          private_dir="$(mktemp -d "${RUNNER_TEMP}/infra-reconcile.XXXXXX")"
+          trap 'rm -f -- "$private_dir/live.txt" "$private_dir/managed.txt" "$private_dir/unmanaged.txt" "$private_dir/stale.txt"; rmdir "$private_dir" 2>/dev/null || true' EXIT
 
-          echo "live (non-archived): $(wc -l < /tmp/live.txt) | managed: $(wc -l < /tmp/managed.txt)"
-
-          # (a) live repos absent from the IaC = the real gap.
-          unmanaged="$(comm -23 /tmp/live.txt /tmp/managed.txt || true)"
-          # (b) managed entries with no live non-archived repo = stale/renamed
-          #     (may be an archived_repos entry, which is fine — informational).
-          orphaned="$(comm -13 /tmp/live.txt /tmp/managed.txt || true)"
-
-          {
-            echo "## Infra repo reconciliation"
-            echo ""
-            if [ -n "${unmanaged}" ]; then
-              echo "### ❌ UNMANAGED live repos (not in infra/ IaC):"
-              echo '```'; echo "${unmanaged}"; echo '```'
-            else
-              echo "### ✅ every live repo is in the IaC"
-            fi
-            if [ -n "${orphaned}" ]; then
-              echo ""
-              echo "### ℹ️ IaC entries with no live active repo (archived or renamed — verify):"
-              echo '```'; echo "${orphaned}"; echo '```'
-            fi
-          } > /tmp/report.md
-          cat /tmp/report.md
-
-          if [ -n "${unmanaged}" ]; then
-            if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
-              existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --label infra-unmanaged-repo --json number --jq '.[0].number' 2>/dev/null || true)"
-              if [ -n "${existing}" ]; then
-                gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/report.md
-              else
-                gh issue create --repo "${GITHUB_REPOSITORY}" --title "Unmanaged repos not in IaC" \
-                  --label infra-unmanaged-repo --body-file /tmp/report.md || \
-                gh issue create --repo "${GITHUB_REPOSITORY}" --title "Unmanaged repos not in IaC" --body-file /tmp/report.md
-              fi
-            fi
-            echo "::error::unmanaged repos found — add them to infra/ (active_repos or archived_repos)"
+          if ! managed_repos=$(jq -cn \
+              --arg owner "$OWNER" \
+              --argjson active "$ACTIVE_REPOS_JSON" \
+              --argjson archived "$ARCHIVED_REPOS_JSON" \
+              '{owner: $owner, active: $active, archived: $archived}' \
+              | jq -L .github/infra -er -f .github/infra/managed-repositories.jq); then
+            echo "::error::private active and archived inventories are malformed, incomplete, or overlap"
             exit 1
           fi
 
-      - name: Comment on PR
-        if: github.event_name == 'pull_request' && always()
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88  # v3.0.5
-        with:
-          header: infra-reconcile
-          path: /tmp/report.md
+          if ! live_pages=$(gh api --paginate --slurp \
+              "user/repos?affiliation=owner&per_page=100" 2>/dev/null); then
+            echo "::error::complete provider repository evidence is unavailable"
+            exit 1
+          fi
+          if ! live_repos=$(jq -er --arg owner "$OWNER" \
+              -f .github/infra/owned-repositories.jq <<<"$live_pages"); then
+            echo "::error::complete provider repository evidence is malformed or belongs to another owner"
+            exit 1
+          fi
+          printf '%s\n' "$live_repos" >"$private_dir/live.txt"
+
+          printf '%s\n' "$managed_repos" >"$private_dir/managed.txt"
+
+          comm -23 "$private_dir/live.txt" "$private_dir/managed.txt" >"$private_dir/unmanaged.txt"
+          comm -13 "$private_dir/live.txt" "$private_dir/managed.txt" >"$private_dir/stale.txt"
+          live_count=$(wc -l <"$private_dir/live.txt" | tr -d ' ')
+          managed_count=$(wc -l <"$private_dir/managed.txt" | tr -d ' ')
+          unmanaged_count=$(wc -l <"$private_dir/unmanaged.txt" | tr -d ' ')
+          stale_count=$(wc -l <"$private_dir/stale.txt" | tr -d ' ')
+          finding_count=$((unmanaged_count + stale_count))
+
+          echo "Reconciled ${live_count} live and ${managed_count} managed repository identities; names withheld"
+          {
+            echo "live_count=$live_count"
+            echo "managed_count=$managed_count"
+            echo "unmanaged_count=$unmanaged_count"
+            echo "stale_count=$stale_count"
+            echo "finding_count=$finding_count"
+          } >> "$GITHUB_ENV"
+
+      - name: Open or update aggregate reconciliation issue
+        if: ${{ env.finding_count != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="infra inventory reconciliation drift detected"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="Infra reconciliation found ${unmanaged_count} live-but-unmanaged and ${stale_count} managed-but-absent repository identity record(s). Exact identities are intentionally withheld from this public issue. Re-run in a private trusted environment with the canonical inventory. Run: ${run_url}"
+          existing=$(gh issue list --repo "$REPO" --state open --label infra-unmanaged-repo --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --label infra-unmanaged-repo --body "$body"
+          fi
+
+      - name: Auto-close reconciliation issue after complete clean evidence
+        if: ${{ env.finding_count == '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --repo "$REPO" --state open --label infra-unmanaged-repo --json number --jq '.[].number')
+          for n in $existing; do
+            gh issue close "$n" --repo "$REPO" --comment "Complete aggregate provider/IaC inventory evidence is clean; identities remain private."
+          done
+
+      - name: Enforce reconciliation result
+        if: ${{ env.finding_count != '0' }}
+        run: |
+          echo "::error::${finding_count} aggregate inventory reconciliation finding(s); identities withheld"
+          exit 1
