@@ -323,17 +323,10 @@ func calibration(res scanResult, waiverCount, deadCount int, github bool) {
 // binary sibling is a hard failure rather than a warning.
 var binaryStoreExtensions = []string{".db", ".sqlite", ".sqlite3", ".db3"}
 
-func runVerifyStore(args []string) error {
-	fs := flag.NewFlagSet("verify-store", flag.ExitOnError)
-	repoRoot := fs.String("repo", ".", "repository root")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(filepath.Join(*repoRoot, storeDir))
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", storeDir, err)
-	}
+// binaryStoreOffenders returns store-directory entries whose extension
+// matches a known binary format, which would defeat the waiver store's
+// git-blame attributability requirement.
+func binaryStoreOffenders(entries []os.DirEntry) []string {
 	var offenders []string
 	for _, e := range entries {
 		if e.IsDir() {
@@ -346,6 +339,21 @@ func runVerifyStore(args []string) error {
 			}
 		}
 	}
+	return offenders
+}
+
+func runVerifyStore(args []string) error {
+	fs := flag.NewFlagSet("verify-store", flag.ExitOnError)
+	repoRoot := fs.String("repo", ".", "repository root")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(filepath.Join(*repoRoot, storeDir))
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", storeDir, err)
+	}
+	offenders := binaryStoreOffenders(entries)
 	if len(offenders) > 0 {
 		return fmt.Errorf("binary waiver store(s) present: %s\n"+
 			"The waiver store must stay a text format so each waiver is attributable with 'git blame'.\n"+
@@ -374,7 +382,9 @@ func runVerifyStore(args []string) error {
 		return fmt.Errorf("opening %s: %w", baselinePath, err)
 	}
 	baseline, berr := LoadBaseline(bf)
-	_ = bf.Close()
+	if cerr := bf.Close(); cerr != nil && berr == nil {
+		berr = cerr
+	}
 	if berr != nil {
 		return fmt.Errorf("%s: %w", baselinePath, berr)
 	}

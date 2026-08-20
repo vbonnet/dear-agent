@@ -62,9 +62,14 @@ func isShellSeparator(r rune) bool {
 // scriptRefs returns the basenames of every .sh path mentioned in a bats file.
 func scriptRefs(content string) []string {
 	var out []string
-	for _, tok := range strings.FieldsFunc(content, isShellSeparator) {
-		if strings.HasSuffix(tok, ".sh") {
-			out = append(out, path.Base(tok))
+	for line := range strings.SplitSeq(content, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		for _, tok := range strings.FieldsFunc(line, isShellSeparator) {
+			if strings.HasSuffix(tok, ".sh") {
+				out = append(out, path.Base(tok))
+			}
 		}
 	}
 	return out
