@@ -90,3 +90,106 @@ func idsEqual(ts []thread, want []string) bool {
 	}
 	return true
 }
+
+// mkNode builds a threadNode whose comment authors are the given logins, in
+// order. The first login is the thread's opening author.
+func mkNode(id string, outdated bool, authors ...string) threadNode {
+	var n threadNode
+	n.ID = id
+	n.IsOutdated = outdated
+	n.Path = "pkg/thing.go"
+	for _, a := range authors {
+		var c struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body string `json:"body"`
+		}
+		c.Author.Login = a
+		c.Body = "comment from " + a
+		n.Comments.Nodes = append(n.Comments.Nodes, c)
+	}
+	return n
+}
+
+// TestToThreadAnswered pins the evidence gate that resolve-all depends on.
+// Answered is the only signal standing between "we addressed the review" and
+// a blind bulk resolve, so each transition is asserted explicitly.
+func TestToThreadAnswered(t *testing.T) {
+	tests := []struct {
+		name         string
+		node         threadNode
+		wantAnswered bool
+		wantLast     string
+	}{
+		{
+			name:         "reviewer comment alone is unanswered",
+			node:         mkNode("1", false, "gemini-code-assist"),
+			wantAnswered: false,
+			wantLast:     "gemini-code-assist",
+		},
+		{
+			name:         "reply from someone else answers it",
+			node:         mkNode("2", false, "gemini-code-assist", "vbonnet"),
+			wantAnswered: true,
+			wantLast:     "vbonnet",
+		},
+		{
+			name:         "reviewer replying after us takes the ball back",
+			node:         mkNode("3", false, "gemini-code-assist", "vbonnet", "gemini-code-assist"),
+			wantAnswered: false,
+			wantLast:     "gemini-code-assist",
+		},
+		{
+			name:         "reviewer talking to itself is not an answer",
+			node:         mkNode("4", false, "gemini-code-assist", "gemini-code-assist"),
+			wantAnswered: false,
+			wantLast:     "gemini-code-assist",
+		},
+		{
+			name:         "outdated alone never answers a thread",
+			node:         mkNode("5", true, "chatgpt-codex-connector"),
+			wantAnswered: false,
+			wantLast:     "chatgpt-codex-connector",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toThread(tt.node)
+			if got.Answered != tt.wantAnswered {
+				t.Errorf("Answered = %t, want %t", got.Answered, tt.wantAnswered)
+			}
+			if got.LastAuthor != tt.wantLast {
+				t.Errorf("LastAuthor = %q, want %q", got.LastAuthor, tt.wantLast)
+			}
+		})
+	}
+}
+
+// TestToThreadOutdatedIsReportedNotActedOn guards the trap that motivated this
+// change: on dear-agent#1242 three outdated threads were live P1 findings, so
+// outdated must survive into output without ever implying resolvability.
+func TestToThreadOutdatedIsReportedNotActedOn(t *testing.T) {
+	got := toThread(mkNode("x", true, "chatgpt-codex-connector"))
+	if !got.IsOutdated {
+		t.Fatal("IsOutdated was dropped; refusals could not label the thread")
+	}
+	if got.Answered {
+		t.Fatal("an outdated thread was treated as answered")
+	}
+	if note := outdatedNote(got); note == "" {
+		t.Error("outdatedNote said nothing for an outdated thread")
+	}
+	if note := outdatedNote(toThread(mkNode("y", false, "bot"))); note != "" {
+		t.Errorf("outdatedNote spoke for a current thread: %q", note)
+	}
+}
+
+// TestToThreadNoComments covers the defensive path: a thread with no comments
+// must not panic on the last-comment lookup.
+func TestToThreadNoComments(t *testing.T) {
+	got := toThread(threadNode{ID: "empty"})
+	if got.Author != "unknown" || got.Answered {
+		t.Errorf("got %+v, want unknown author and unanswered", got)
+	}
+}

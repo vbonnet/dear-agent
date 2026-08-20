@@ -18,11 +18,34 @@
 //
 // # Usage
 //
-//	resolve-review-threads list        <owner> <repo> <pr>           # unresolved threads (JSON lines)
-//	resolve-review-threads list-all    <owner> <repo> <pr>           # every thread
-//	resolve-review-threads resolve     <threadId>                    # one thread by ID
-//	resolve-review-threads resolve-all <owner> <repo> <pr> [author]  # all unresolved, optional author filter
-//	resolve-review-threads unresolve   <threadId>                    # re-open a thread
+//	resolve-review-threads list          <owner> <repo> <pr>           # unresolved threads (JSON lines)
+//	resolve-review-threads list-all      <owner> <repo> <pr>           # every thread
+//	resolve-review-threads resolve       <threadId>                    # one thread by ID
+//	resolve-review-threads reply-resolve <threadId> <body>             # reply, then resolve
+//	resolve-review-threads resolve-all   <owner> <repo> <pr> [author]  # answered threads only
+//	resolve-review-threads unresolve     <threadId>                    # re-open a thread
+//
+// # Why resolve-all refuses unanswered threads
+//
+// Resolution is a claim that the reviewer's point was handled. Two opposite
+// failure modes have both shipped here: bulk-resolving every thread without
+// addressing any of them (silently discarding real findings), and replying to
+// every thread while resolving none (leaving the PR blocked forever). Both are
+// invisible after the fact, because a resolved thread looks identical whether
+// or not anyone read it.
+//
+// So resolution requires evidence, and the only evidence GitHub records
+// deterministically is a reply on the thread. A thread is ANSWERED when its
+// last comment comes from someone other than the reviewer who opened it. That
+// is a weak proof of correctness but a strong proof of engagement, and it is
+// checkable without judgment. `resolve-all` resolves ANSWERED threads and
+// refuses the rest by name; `reply-resolve` makes answer-then-resolve one
+// atomic step so the natural path closes the thread.
+//
+// isOutdated is deliberately NOT a licence to resolve. Outdated means the diff
+// hunk moved, not that the point was addressed: on dear-agent#1242, three
+// outdated threads were unaddressed P1 findings. It is reported, never acted
+// on.
 //
 // All GitHub calls go through `gh api graphql`, so authentication uses the gh
 // CLI's token (no git push, no keychain prompt). Requires gh (authenticated).
@@ -54,7 +77,7 @@ const listQuery = `query($owner:String!, $repo:String!, $pr:Int!, $after:String)
           isResolved
           isOutdated
           path
-          comments(first:1) { nodes { author { login } body } }
+          comments(first:100) { nodes { author { login } body } }
         }
       }
     }
@@ -73,6 +96,16 @@ const unresolveMutation = `mutation($threadId:ID!) {
   }
 }`
 
+// replyMutation posts a reply onto an existing review thread. Note the input
+// field here is pullRequestReviewThreadId, NOT the threadId that
+// resolveReviewThread takes — the two mutations disagree, which is why the
+// reply and the resolve are wrapped together rather than left to callers.
+const replyMutation = `mutation($threadId:ID!, $body:String!) {
+  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId, body:$body}) {
+    comment { id }
+  }
+}`
+
 // thread is the flattened view of a PullRequestReviewThread that we emit.
 type thread struct {
 	ID         string `json:"id"`
@@ -81,6 +114,12 @@ type thread struct {
 	Path       string `json:"path"`
 	Author     string `json:"author"`
 	Body       string `json:"body"`
+	// Answered reports whether anyone replied after the thread's opening
+	// author had the last word. It is the evidence gate for resolve-all.
+	Answered bool `json:"answered"`
+	// LastAuthor is the login of the most recent commenter, so a refusal can
+	// say who is holding the thread open.
+	LastAuthor string `json:"lastAuthor"`
 }
 
 func main() {
@@ -100,6 +139,8 @@ func run(args []string) int {
 		return cmdList(ctx, cmd, rest)
 	case "resolve", "unresolve":
 		return cmdMutate(ctx, cmd, rest)
+	case "reply-resolve":
+		return cmdReplyResolve(ctx, rest)
 	case "resolve-all":
 		return cmdResolveAll(ctx, rest)
 	default:
@@ -143,35 +184,101 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 	return 0
 }
 
-// cmdResolveAll resolves every unresolved thread on a PR, optionally limited to
-// a single comment author.
-func cmdResolveAll(ctx context.Context, rest []string) int {
-	if len(rest) < 3 || len(rest) > 4 {
-		return fail("usage: resolve-all <owner> <repo> <pr> [author]")
+// cmdReplyResolve posts a reply on one thread and then resolves it, so the
+// public justification and the resolution cannot drift apart. Resolving is
+// skipped when the reply fails, leaving the thread open rather than silently
+// closed with no explanation.
+func cmdReplyResolve(ctx context.Context, rest []string) int {
+	if len(rest) != 2 {
+		return fail("usage: reply-resolve <threadId> <body>")
 	}
-	pr, err := strconv.Atoi(rest[2])
+	threadID, body := rest[0], rest[1]
+	if len(bytes.TrimSpace([]byte(body))) == 0 {
+		return fail("reply body must not be empty: resolution needs a stated reason")
+	}
+	if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
+		"-f", "query="+replyMutation); err != nil {
+		return fail("reply failed, thread left unresolved: %v", err)
+	}
+	msg, err := mutateThread(ctx, "resolve", threadID)
 	if err != nil {
-		return fail("pr must be an integer, got %q", rest[2])
+		return fail("replied but could not resolve: %v", err)
+	}
+	fmt.Println(msg)
+	return 0
+}
+
+// cmdResolveAll resolves the unresolved threads on a PR that carry evidence of
+// a response, optionally limited to a single opening author. Unanswered threads
+// are refused by name: see the package comment for why resolution requires
+// evidence. Exits non-zero when anything was refused, so a caller driving a PR
+// to mergeable never mistakes a partial pass for reaching zero.
+func cmdResolveAll(ctx context.Context, rest []string) int {
+	force := false
+	args := make([]string, 0, len(rest))
+	for _, a := range rest {
+		if a == "--force" {
+			force = true
+			continue
+		}
+		args = append(args, a)
+	}
+	if len(args) < 3 || len(args) > 4 {
+		return fail("usage: resolve-all <owner> <repo> <pr> [author] [--force]")
+	}
+	pr, err := strconv.Atoi(args[2])
+	if err != nil {
+		return fail("pr must be an integer, got %q", args[2])
 	}
 	author := ""
-	if len(rest) == 4 {
-		author = rest[3]
+	if len(args) == 4 {
+		author = args[3]
 	}
-	threads, err := listThreads(ctx, rest[0], rest[1], pr)
+	threads, err := listThreads(ctx, args[0], args[1], pr)
 	if err != nil {
 		return fail("%v", err)
 	}
-	n := 0
+
+	resolved, refused := 0, 0
 	for _, t := range filterThreads(threads, author) {
+		if !t.Answered && !force {
+			refused++
+			fmt.Fprintf(os.Stderr, "REFUSED %s %s: unanswered (last word: @%s)%s\n",
+				t.ID, t.Path, t.LastAuthor, outdatedNote(t))
+			continue
+		}
 		msg, err := mutateThread(ctx, "resolve", t.ID)
 		if err != nil {
 			return fail("%v", err)
 		}
 		fmt.Println(msg)
-		n++
+		resolved++
 	}
-	fmt.Printf("resolved %d thread(s)\n", n)
-	return 0
+
+	fmt.Printf("resolved %d thread(s), refused %d\n", resolved, refused)
+	if refused == 0 {
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, `
+%d thread(s) were refused because nobody has replied to them. Resolving a
+thread asserts its point was handled; without a reply there is no record that
+it was even read. Address each one in code, then close it with its reason:
+
+  resolve-review-threads reply-resolve <threadId> "Fixed — <what changed>"
+
+--force overrides this and resolves unanswered threads. Reserve it for threads
+you are deliberately dismissing, and say so in a PR comment.
+`, refused)
+	return 1
+}
+
+// outdatedNote flags an outdated thread in refusal output. It is informational
+// only: outdated means the diff hunk moved, not that the point was addressed.
+func outdatedNote(t thread) string {
+	if t.IsOutdated {
+		return " [outdated: hunk moved, which is NOT evidence it was addressed]"
+	}
+	return ""
 }
 
 // filterThreads keeps only unresolved threads, optionally restricted to a
@@ -211,49 +318,14 @@ func listThreads(ctx context.Context, owner, repo string, pr int) ([]thread, err
 			return nil, err
 		}
 
-		var resp struct {
-			Data struct {
-				Repository struct {
-					PullRequest struct {
-						ReviewThreads struct {
-							PageInfo struct {
-								HasNextPage bool   `json:"hasNextPage"`
-								EndCursor   string `json:"endCursor"`
-							} `json:"pageInfo"`
-							Nodes []struct {
-								ID         string `json:"id"`
-								IsResolved bool   `json:"isResolved"`
-								IsOutdated bool   `json:"isOutdated"`
-								Path       string `json:"path"`
-								Comments   struct {
-									Nodes []struct {
-										Author struct {
-											Login string `json:"login"`
-										} `json:"author"`
-										Body string `json:"body"`
-									} `json:"nodes"`
-								} `json:"comments"`
-							} `json:"nodes"`
-						} `json:"reviewThreads"`
-					} `json:"pullRequest"`
-				} `json:"repository"`
-			} `json:"data"`
-		}
+		var resp threadsResponse
 		if err := json.Unmarshal(raw, &resp); err != nil {
 			return nil, fmt.Errorf("parse reviewThreads response: %w", err)
 		}
 
 		rt := resp.Data.Repository.PullRequest.ReviewThreads
 		for _, n := range rt.Nodes {
-			t := thread{ID: n.ID, IsResolved: n.IsResolved, IsOutdated: n.IsOutdated, Path: n.Path, Author: "unknown"}
-			if len(n.Comments.Nodes) > 0 {
-				c := n.Comments.Nodes[0]
-				if c.Author.Login != "" {
-					t.Author = c.Author.Login
-				}
-				t.Body = cleanBody(c.Body)
-			}
-			all = append(all, t)
+			all = append(all, toThread(n))
 		}
 		if !rt.PageInfo.HasNextPage {
 			break
@@ -261,6 +333,62 @@ func listThreads(ctx context.Context, owner, repo string, pr int) ([]thread, err
 		cursor = rt.PageInfo.EndCursor
 	}
 	return all, nil
+}
+
+// threadsResponse mirrors the reviewThreads GraphQL payload. It is a named
+// type so the flattening in toThread can be unit-tested without a network.
+type threadsResponse struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+					Nodes []threadNode `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
+type threadNode struct {
+	ID         string `json:"id"`
+	IsResolved bool   `json:"isResolved"`
+	IsOutdated bool   `json:"isOutdated"`
+	Path       string `json:"path"`
+	Comments   struct {
+		Nodes []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body string `json:"body"`
+		} `json:"nodes"`
+	} `json:"comments"`
+}
+
+// toThread flattens one GraphQL node, deriving the Answered evidence flag.
+//
+// A thread is answered when it has more than one comment and the last one
+// comes from someone other than the author who opened it. A reviewer who
+// comments again after our reply flips it back to unanswered, which is the
+// reading we want: the ball is in our court again.
+func toThread(n threadNode) thread {
+	t := thread{ID: n.ID, IsResolved: n.IsResolved, IsOutdated: n.IsOutdated, Path: n.Path, Author: "unknown"}
+	if len(n.Comments.Nodes) == 0 {
+		return t
+	}
+	if c := n.Comments.Nodes[0]; c.Author.Login != "" {
+		t.Author = c.Author.Login
+	}
+	t.Body = cleanBody(n.Comments.Nodes[0].Body)
+	t.LastAuthor = n.Comments.Nodes[len(n.Comments.Nodes)-1].Author.Login
+	if t.LastAuthor == "" {
+		t.LastAuthor = "unknown"
+	}
+	t.Answered = len(n.Comments.Nodes) > 1 && t.LastAuthor != t.Author
+	return t
 }
 
 // mutateThread resolves ("resolve") or re-opens ("unresolve") one thread and
@@ -341,13 +469,21 @@ func usage() {
 	fmt.Fprint(os.Stderr, `resolve-review-threads — list and resolve GitHub PR review threads
 
 usage:
-  resolve-review-threads list        <owner> <repo> <pr>           unresolved threads (JSON lines)
-  resolve-review-threads list-all    <owner> <repo> <pr>           every thread
-  resolve-review-threads resolve     <threadId>                    resolve one thread by ID
-  resolve-review-threads unresolve   <threadId>                    re-open one thread by ID
-  resolve-review-threads resolve-all <owner> <repo> <pr> [author]  resolve all unresolved
-                                                                   (optional author filter,
-                                                                    e.g. gemini-code-assist)
+  resolve-review-threads list          <owner> <repo> <pr>          unresolved threads (JSON lines)
+  resolve-review-threads list-all      <owner> <repo> <pr>          every thread
+  resolve-review-threads resolve       <threadId>                   resolve one thread by ID
+  resolve-review-threads unresolve     <threadId>                   re-open one thread by ID
+  resolve-review-threads reply-resolve <threadId> <body>            reply with the reason, then
+                                                                    resolve (the normal path)
+  resolve-review-threads resolve-all   <owner> <repo> <pr> [author] [--force]
+                                                                    resolve ANSWERED threads only;
+                                                                    refuses unanswered ones by name
+                                                                    and exits non-zero
+
+A thread counts as answered when someone other than its opening author had the
+last word. Resolving asserts the point was handled, so it needs that evidence;
+--force overrides it for threads you are deliberately dismissing. Outdated is
+reported but never sufficient: the hunk moving is not the point being fixed.
 
 Resolution is GraphQL-only; all calls go through an authenticated gh CLI.
 `)

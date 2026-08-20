@@ -238,7 +238,10 @@ func threadBlocker(st PRState, repo string, threads []ReviewThread) *Blocker {
 	return &Blocker{
 		Code:   BlockThreads,
 		Detail: detail,
-		Fix: fmt.Sprintf("address each thread in code, then resolve to ZERO: resolve-review-threads resolve-all %s %s %d [author]",
+		Fix: fmt.Sprintf("address each thread in code, then close it with its reason: "+
+			"resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\" "+
+			"(sweep the answered ones with: resolve-review-threads resolve-all %s %s %d [author]; "+
+			"it refuses threads nobody replied to)",
 			owner, name, st.Number),
 	}
 }

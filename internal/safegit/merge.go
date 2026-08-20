@@ -313,7 +313,10 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 			parts := strings.SplitN(cfg.Repo, "/", 2)
 			owner, repoName := parts[0], parts[1]
 			fmt.Fprintf(os.Stderr,
-				"safe-merge: guidance: resolve threads, then re-run safe-merge, or use:\n  resolve-review-threads resolve-all %s %s %d [author]\n",
+				"safe-merge: guidance: address each thread, then close it with its reason:\n"+
+					"  resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\"\n"+
+					"then sweep the answered ones and re-run safe-merge:\n"+
+					"  resolve-review-threads resolve-all %s %s %d [author]\n",
 				owner, repoName, cfg.PRNumber)
 			return fmt.Errorf("review-thread gate: %w", err)
 		}
