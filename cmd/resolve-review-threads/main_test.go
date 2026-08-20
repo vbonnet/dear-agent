@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -472,5 +473,40 @@ func TestClassifyPriorReplyMultiLine(t *testing.T) {
 	}
 	if got := classifyPriorReply(tail, reply); got != priorReplySuperseded {
 		t.Errorf("multi-line prior reply not recognised: got %v", got)
+	}
+}
+
+// TestParseReplyCommentID pins the anchor the whole reply-resolve safety
+// argument rests on. Resolution is allowed only when a NAMED comment is the
+// thread's last one, so a missing ID must be a hard error: a blank anchor
+// would compare equal to nothing and silently disable the check.
+func TestParseReplyCommentID(t *testing.T) {
+	good := []byte(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRRC_abc"}}}}`)
+	id, err := parseReplyCommentID(good)
+	if err != nil || id != "PRRC_abc" {
+		t.Fatalf("got (%q, %v), want (PRRC_abc, nil)", id, err)
+	}
+
+	bad := map[string][]byte{
+		"empty id":        []byte(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":""}}}}`),
+		"missing comment": []byte(`{"data":{"addPullRequestReviewThreadReply":{}}}`),
+		"empty payload":   []byte(`{}`),
+		"not json":        []byte(`<html>502</html>`),
+	}
+	for name, raw := range bad {
+		t.Run(name, func(t *testing.T) {
+			if id, err := parseReplyCommentID(raw); err == nil {
+				t.Errorf("want an error, got id=%q", id)
+			}
+		})
+	}
+}
+
+// TestReplyMutationRequestsCommentID guards the query itself: if the mutation
+// stopped selecting the comment ID, parseReplyCommentID would fail every time
+// and reply-resolve would never resolve anything.
+func TestReplyMutationRequestsCommentID(t *testing.T) {
+	if !strings.Contains(replyMutation, "comment { id }") {
+		t.Errorf("reply mutation must select the comment ID, got: %s", replyMutation)
 	}
 }

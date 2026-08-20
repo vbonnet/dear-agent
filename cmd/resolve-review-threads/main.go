@@ -247,9 +247,8 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	if len(bytes.TrimSpace([]byte(body))) == 0 {
 		return fail("reply body must not be empty: resolution needs a stated reason")
 	}
-	// Retry safety: if this exact reply is already the thread's last comment,
-	// a previous run posted it and only the resolve failed. Posting again
-	// would leave a duplicate public comment on every retry.
+	// Read first: to skip an already-resolved thread, and to notice a reply a
+	// previous run already posted so a retry does not duplicate it.
 	cur, err := fetchThread(ctx, threadID)
 	if err != nil {
 		// Without the current state we cannot tell whether a previous run
@@ -264,10 +263,10 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		return 0
 	}
 
-	// Pin what we read. If our reply does not land directly after this exact
-	// comment, someone spoke in the gap and our prewritten answer does not
-	// address them.
-	readLastID := cur.LastID
+	// anchorID is the comment that must be the thread's last one for
+	// resolution to be allowed: either the reply we post now, or the one a
+	// previous run already posted.
+	var anchorID string
 	switch classifyPriorReply(cur.Tail, body) {
 	case priorReplySuperseded:
 		// A previous run posted this reply and the reviewer has spoken since.
@@ -278,15 +277,22 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			"read the comment(s) after your reply and answer those:\n"+
 			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
 	case priorReplyIsLast:
+		// A previous run posted this and nothing has been said since, so the
+		// comment we matched is the anchor.
 		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
+		anchorID = cur.LastID
 	case noPriorReply:
-		if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
-			"-f", "query="+replyMutation); err != nil {
+		// The tail scan is only an optimisation against duplicate comments;
+		// if it missed an older reply the worst case is a duplicate, never a
+		// bad resolve, because the anchor below governs resolution.
+		id, err := postReply(ctx, threadID, body)
+		if err != nil {
 			return fail("reply failed, thread left unresolved: %v", err)
 		}
-		if code := verifyReplyLanded(ctx, threadID, readLastID); code != 0 {
-			return code
-		}
+		anchorID = id
+	}
+	if code := verifyLastComment(ctx, threadID, anchorID); code != 0 {
+		return code
 	}
 	msg, _, rErr := resolveWithEvidence(ctx, threadID, false)
 	if rErr != nil {
@@ -317,12 +323,53 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	return 0
 }
 
-// verifyReplyLanded checks that the reply we just posted sits directly after
-// the comment we had read. If anything intervened it now sits UNDER our reply,
-// which the answered check cannot see on its own: our comment is still last,
-// so the thread would look answered and be resolved with the new feedback
-// unread. Returns 0 when the reply landed cleanly.
-func verifyReplyLanded(ctx context.Context, threadID, readLastID string) int {
+// postReply posts a reply and returns the new comment's node ID. That ID is
+// the anchor for the whole safety argument: resolution is permitted only when
+// this exact comment is the thread's last one.
+func postReply(ctx context.Context, threadID, body string) (string, error) {
+	raw, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
+		"-f", "query="+replyMutation)
+	if err != nil {
+		return "", err
+	}
+	return parseReplyCommentID(raw)
+}
+
+// parseReplyCommentID extracts the new comment's node ID from the reply
+// mutation response. An absent ID is an error rather than an empty anchor:
+// without it there is nothing to prove our reply is the last comment, and
+// resolving on a blank anchor would defeat the check entirely.
+func parseReplyCommentID(raw []byte) (string, error) {
+	var resp struct {
+		Data struct {
+			AddPullRequestReviewThreadReply struct {
+				Comment struct {
+					ID string `json:"id"`
+				} `json:"comment"`
+			} `json:"addPullRequestReviewThreadReply"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", fmt.Errorf("parse reply response: %w", err)
+	}
+	id := resp.Data.AddPullRequestReviewThreadReply.Comment.ID
+	if id == "" {
+		return "", fmt.Errorf("reply posted but GitHub returned no comment ID")
+	}
+	return id, nil
+}
+
+// verifyLastComment checks that a specific comment is still the thread's last
+// one before resolution is allowed.
+//
+// This identity check, not any search window, is what keeps reply-resolve
+// safe. Earlier versions inferred "our reply is last" from body matching or
+// from the previous comment's ID, and each inference had a hole: a reply older
+// than the search window looked unposted, and a reposted body genuinely became
+// the last comment so a predecessor check passed. Naming the exact comment
+// removes the inference. If anything at all was said after it, the thread is
+// left unresolved.
+func verifyLastComment(ctx context.Context, threadID, wantLastID string) int {
 	after, err := fetchThread(ctx, threadID)
 	if err != nil {
 		return fail("your reply is posted but the thread state could not be "+
@@ -330,10 +377,10 @@ func verifyReplyLanded(ctx context.Context, threadID, readLastID string) int {
 			"do NOT re-run reply-resolve (it would repost); check the thread, then:\n"+
 			"  resolve-review-threads resolve %s", err, threadID)
 	}
-	if after.PrevID != readLastID {
-		return fail("your reply is posted, but someone commented in between and "+
-			"your reply does not answer them.\n"+
-			"thread %s was left UNRESOLVED on purpose: read the comment above "+
+	if after.LastID != wantLastID {
+		return fail("your reply is posted, but it is not the last comment on "+
+			"thread %s: someone spoke after it, and your reply does not answer them.\n"+
+			"the thread was left UNRESOLVED on purpose. Read what came after "+
 			"your reply, then answer it with:\n"+
 			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
 	}

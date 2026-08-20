@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 1.9
+**Version:** 2.0
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -74,6 +74,10 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-29** When `reply-resolve` finds its requested reply already present but followed by later comments, the system shall post nothing, leave the thread unresolved, and direct the user to answer those comments.
 
 **RESOLVE-REVIEW-THREADS-30** When `reply-resolve` finds the thread already resolved, the system shall report it as skipped and post no reply.
+
+**RESOLVE-REVIEW-THREADS-31** When `reply-resolve` resolves a thread, the system shall first confirm that a specific named comment, either the reply it just posted or a matching reply already present, is the thread's last comment.
+
+**RESOLVE-REVIEW-THREADS-32** When the reply mutation returns no comment ID, the system shall treat it as an error and shall not resolve the thread.
 
 ## BDD Traceability
 
