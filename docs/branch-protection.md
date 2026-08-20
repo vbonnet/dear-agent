@@ -34,6 +34,7 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 
 | Context | Produced by |
 |---------|-------------|
+| `CI Gateway` | `ci.yml` |
 | `Build & Test (ubuntu-latest)` | `ci.yml` |
 | `Build & Test (macos-latest)` | `ci.yml` |
 | `Analyze Go Code (go)` | `codeql.yml` |
@@ -42,6 +43,7 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 | `Vulnerability Scan` | `sbom-scan.yml` |
 | `Identity, index, and lifecycle parity` | `adr-integrity.yml` |
 | `Header block format` | `doc-header-lint.yml` |
+| `Structural Health (baselined)` | `structural-health.yml` |
 
 `5-Dimension AI Review` (`review.yml`) is **not** currently in this list. It was
 added by #991, then paused 2026-07-27 — `ANTHROPIC_API_KEY` was never funded
@@ -63,6 +65,22 @@ the top of `review.yml`.
 **Before adding/removing a required check, confirm a job emits a check run
 with that exact context name** (matrix suffixes included) on PRs to `main` —
 otherwise the gate becomes unsatisfiable.
+
+> [!WARNING]
+> A job-level `if:` that skips a **matrix** job does not emit the expanded
+> contexts. GitHub reports one skipped check run under the literal, unexpanded
+> job name — `AGM E2E Install (${{ matrix.distro }})` is what shows up in this
+> repo's PR runs, against `AGM E2E Install (ubuntu)` / `(debian)` on push runs.
+> Any job producing a required matrix context must therefore be scoped at the
+> *step* level, never the job level. `cmd/changed-paths/workflow_contract_test.go`
+> enforces this.
+>
+> Relatedly, `skipped` satisfies a required check. A path-scoped job whose
+> `if:` carries no status function inherits an implicit `success()`, so a
+> failed change detector skips it — and the gate disappears instead of turning
+> red. Every scoped condition carries `!cancelled()` and treats
+> `needs.changes.result != 'success'` as "run everything". See
+> [ADR-039](adr/ADR-039-ci-path-scoping-and-gateway.md).
 
 ## Applying the ruleset
 
