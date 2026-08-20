@@ -38,11 +38,11 @@ attempt history.
 
 **LLM-ROUTER-13** When a circuit-breaker fallback produces a response, the system shall identify the actual provider and model in response metadata and preserve the originally selected candidate separately.
 
-**LLM-ROUTER-14** When quota-aware routing is enabled, the system shall read provider quota state through a provider-neutral `QuotaReader` interface rather than coupling router policy to a specific tool.
+**LLM-ROUTER-14** When a quota meter is configured, the system shall order a role's candidates by remaining provider quota before attempting them, and shall retain every configured candidate.
 
-**LLM-ROUTER-15** When CodexBar is used as the quota source, the system shall invoke `codexbar dashboard --identity redacted` and shall not read provider credentials or browser cookies directly.
+**LLM-ROUTER-15** When a quota meter is absent or reports no usable reading for a candidate, the system shall attempt candidates in their configured order and shall omit quota fields from request and response metadata.
 
-**LLM-ROUTER-16** When quota policy evaluates a provider, the system shall use the most constrained active quota window and shall distinguish avoid, deprioritize, stale, and unavailable quota states.
+**LLM-ROUTER-16** When a quota-classified candidate is attempted, the system shall record its quota class, family, remaining percentage, and constraining window in request and response metadata.
 
 ## BDD Traceability
 

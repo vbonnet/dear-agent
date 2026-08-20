@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/internal/sqlite"
+	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 )
 
 // minimalBashWorkflow returns a one-node bash workflow YAML body that
@@ -175,4 +177,92 @@ func readFile(f *os.File) string {
 	}
 	b, _ := io.ReadAll(f)
 	return string(b)
+}
+
+// TestUsesDirectlyBilledCredentials guards against attaching a CodexBar
+// CLI/subscription reading to a family the router actually reaches through
+// a directly-billed API key or Vertex AI credential — a different billing
+// pool entirely (codex review on #1218).
+func TestUsesDirectlyBilledCredentials(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	if usesDirectlyBilledCredentials("anthropic") {
+		t.Error("no credential detected: want false")
+	}
+	if usesDirectlyBilledCredentials("ollama") {
+		t.Error("local family: want false")
+	}
+
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	if !usesDirectlyBilledCredentials("openai") {
+		t.Error("OPENAI_API_KEY set: want true")
+	}
+
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	if !usesDirectlyBilledCredentials("anthropic") {
+		t.Error("ANTHROPIC_API_KEY set: want true")
+	}
+
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "my-project")
+	if !usesDirectlyBilledCredentials("anthropic") {
+		t.Error("GOOGLE_CLOUD_PROJECT set (Vertex AI): want true")
+	}
+}
+
+// TestCredentialFilteredReaderDropsDirectlyBilledFamilies guards the
+// Reader wrapper itself: a snapshot family the router reaches through an
+// API key must not reach the meter's cache at all.
+func TestCredentialFilteredReaderDropsDirectlyBilledFamilies(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	snapshot := &quota.Snapshot{
+		GeneratedAt: time.Now(),
+		Providers: []quota.ProviderQuota{
+			{Family: "openai", Availability: quota.AvailabilityOK},
+			{Family: "anthropic", Availability: quota.AvailabilityOK},
+		},
+	}
+	reader := credentialFilteredReader{inner: fakeQuotaReader{snapshot: snapshot}}
+	got, err := reader.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got.Providers) != 1 || got.Providers[0].Family != "anthropic" {
+		t.Errorf("filtered providers = %+v, want only anthropic (openai is API-key billed)", got.Providers)
+	}
+}
+
+type fakeQuotaReader struct{ snapshot *quota.Snapshot }
+
+func (f fakeQuotaReader) Read(context.Context) (*quota.Snapshot, error) { return f.snapshot, nil }
+
+func TestMeetsMinCodexBarVersion(t *testing.T) {
+	tests := []struct {
+		name      string
+		installed string
+		want      bool
+	}{
+		{name: "audited version", installed: "0.49.0", want: true},
+		{name: "well above the floor", installed: "0.49.2", want: true},
+		{name: "future major version", installed: "1.0.0", want: true},
+		{name: "below the floor", installed: "0.48.9", want: false},
+		{name: "well below the floor", installed: "0.30.0", want: false},
+		{name: "unparseable version does not meet the floor", installed: "not-a-version", want: false},
+		{name: "empty version does not meet the floor", installed: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := meetsMinCodexBarVersion(tt.installed); got != tt.want {
+				t.Errorf("meetsMinCodexBarVersion(%q) = %t, want %t", tt.installed, got, tt.want)
+			}
+		})
+	}
 }
