@@ -525,3 +525,189 @@ func TestAlertRouterDerivesWorkspaceWithoutAConfig(t *testing.T) {
 		t.Fatalf("workspace = %q, want the detected workspace", router.workspace)
 	}
 }
+
+// The regression this fix exists for. The completion watcher stamps DONE
+// on every session that finishes a unit of work. When DONE counted as
+// terminal, that session immediately disqualified itself as a delivery
+// target, so an operator's explicitly configured relay target was
+// rejected and the alert queued behind "no live supervisor session
+// discovered" while the recipient sat idle at its composer.
+func TestAlertRouterDeliversToExplicitTargetThatHasCompletedWork(t *testing.T) {
+	router, sent := testRouter(t, testManifest("merge-non-dearagent-prs", manifest.StateDone, time.Now()))
+
+	rec, err := router.Route(context.Background(), AlertRequest{
+		Kind:          "completion",
+		Source:        "agm-completion-watcher",
+		Title:         "AGM session idle: worker-1",
+		Body:          "worker-1 finished working and is idle.",
+		Subject:       "worker-1",
+		Severity:      AlertSeverityInfo,
+		Actionability: AlertAgentActionable,
+		Target:        "merge-non-dearagent-prs",
+		OccurredAt:    time.Now(),
+		DedupeKey:     "worker-1:1",
+	})
+	if err != nil {
+		t.Fatalf("Route() error = %v", err)
+	}
+	if rec.Status != AlertStatusDispatched {
+		t.Fatalf("Status = %q (error %q), want dispatched to a DONE-but-live target",
+			rec.Status, rec.Error)
+	}
+	if rec.Target != "merge-non-dearagent-prs" {
+		t.Fatalf("Target = %q, want the explicitly configured relay target", rec.Target)
+	}
+	if len(*sent) != 1 || (*sent)[0] != "merge-non-dearagent-prs" {
+		t.Fatalf("sent = %v, want one delivery to merge-non-dearagent-prs", *sent)
+	}
+	if !rec.Delivered() {
+		t.Fatal("Delivered() = false for a dispatched alert")
+	}
+}
+
+// Discovery has to see completed supervisors too, or a Dispatch session
+// becomes unreachable as soon as it finishes its own first turn.
+func TestDiscoverSupervisorsIncludesSessionThatHasCompletedWork(t *testing.T) {
+	router, _ := testRouter(t,
+		testManifest("worker-1", manifest.StateWorking, time.Now()),
+		testManifest("vroom-dispatch", manifest.StateDone, time.Now()),
+	)
+	got := router.discoverSupervisors()
+	if len(got) != 1 || got[0] != "vroom-dispatch" {
+		t.Fatalf("discoverSupervisors() = %v, want the DONE-but-live vroom-dispatch", got)
+	}
+}
+
+// The reachability predicate is the seam the regression lived in, so it
+// is asserted directly: DONE is reachable, gone is not.
+func TestSessionIsReachableTreatsDoneAsLiveAndGoneAsNot(t *testing.T) {
+	archived := testManifest("archived-dispatch", manifest.StateReady, time.Now())
+	archived.Lifecycle = manifest.LifecycleArchived
+
+	for _, tc := range []struct {
+		name string
+		m    *manifest.Manifest
+		want bool
+	}{
+		{"done is reachable", testManifest("done-dispatch", manifest.StateDone, time.Now()), true},
+		{"ready is reachable", testManifest("ready-dispatch", manifest.StateReady, time.Now()), true},
+		{"working is reachable", testManifest("busy-dispatch", manifest.StateWorking, time.Now()), true},
+		{"offline is not", testManifest("offline-dispatch", manifest.StateOffline, time.Now()), false},
+		{"archived lifecycle is not", archived, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router, _ := testRouter(t, tc.m)
+			if got := router.sessionIsReachable(tc.m.Name); got != tc.want {
+				t.Fatalf("sessionIsReachable(%q with state %q) = %v, want %v",
+					tc.m.Name, tc.m.State, got, tc.want)
+			}
+		})
+	}
+}
+
+// An unknown session name is not reachable, so a stale relay target
+// cannot make the router type into a session that does not exist.
+func TestSessionIsReachableRejectsUnknownSession(t *testing.T) {
+	router, _ := testRouter(t, testManifest("dispatch", manifest.StateDone, time.Now()))
+	if router.sessionIsReachable("no-such-session") {
+		t.Fatal("sessionIsReachable() = true for an unknown session")
+	}
+}
+
+// idOnlyStorage mirrors the real Dolt adapter, whose GetSession runs
+// `WHERE id = ?` and so never matches a session name. The shared
+// mockStorage resolves by name as well, which is why the name-resolution
+// bug passed every unit test while failing on every real host.
+type idOnlyStorage struct{ *mockStorage }
+
+func (s *idOnlyStorage) GetSession(identifier string) (*manifest.Manifest, error) {
+	for _, m := range s.sessions {
+		if m.SessionID == identifier {
+			return m, nil
+		}
+	}
+	return nil, ErrSessionNotFound(identifier)
+}
+
+// testRouterIDOnly builds a router over storage with real ID-only
+// GetSession semantics.
+func testRouterIDOnly(t *testing.T, sessions ...*manifest.Manifest) (*AlertRouter, *[]string) {
+	t.Helper()
+	router := NewAlertRouter(&OpContext{Storage: &idOnlyStorage{&mockStorage{sessions: sessions}}})
+	router.SetQueuePath(filepath.Join(t.TempDir(), "alerts.jsonl"))
+	var sent []string
+	router.sendMessage = func(_ context.Context, recipient, _ string) error {
+		sent = append(sent, recipient)
+		return nil
+	}
+	return router, &sent
+}
+
+// `agm completion relay-target set` takes a session name, so a target
+// named that way has to resolve against storage that keys on ID.
+func TestSessionIsReachableResolvesTargetByName(t *testing.T) {
+	m := testManifest("merge-non-dearagent-prs", manifest.StateDone, time.Now())
+	router, _ := testRouterIDOnly(t, m)
+
+	if !router.sessionIsReachable("merge-non-dearagent-prs") {
+		t.Fatal("sessionIsReachable() = false for a live session named by name")
+	}
+}
+
+// Name matching is case-insensitive, matching how AGM accepts recipients
+// elsewhere.
+func TestSessionIsReachableResolvesTargetByNameCaseInsensitively(t *testing.T) {
+	m := testManifest("Dispatch", manifest.StateDone, time.Now())
+	router, _ := testRouterIDOnly(t, m)
+
+	if !router.sessionIsReachable("dispatch") {
+		t.Fatal("sessionIsReachable() = false for a name differing only in case")
+	}
+}
+
+// A UUID prefix is a valid recipient identifier, and must resolve.
+func TestSessionIsReachableResolvesTargetByIDPrefix(t *testing.T) {
+	m := testManifest("worker", manifest.StateDone, time.Now())
+	m.SessionID = "164eb3e7-6603-49d6-9c29-4ee88e9b7fe0"
+	router, _ := testRouterIDOnly(t, m)
+
+	if !router.sessionIsReachable("164eb3e7") {
+		t.Fatal("sessionIsReachable() = false for an 8-character session-ID prefix")
+	}
+	if router.sessionIsReachable("164e") {
+		t.Fatal("sessionIsReachable() = true for a prefix too short to be unambiguous")
+	}
+}
+
+// The end-to-end shape of the outage: an operator sets a relay target by
+// name, that session has completed work, and the completion must be
+// delivered to it rather than queued behind a discovery miss.
+func TestAlertRouterDeliversToNamedRelayTargetThatHasCompletedWork(t *testing.T) {
+	router, sent := testRouterIDOnly(t,
+		testManifest("continue-dearagent-drain", manifest.StateDone, time.Now()),
+		testManifest("merge-non-dearagent-prs", manifest.StateDone, time.Now()),
+	)
+
+	rec, err := router.Route(context.Background(), AlertRequest{
+		Kind:          "completion",
+		Source:        "agm-completion-watcher",
+		Title:         "AGM session idle: continue-dearagent-drain",
+		Body:          "continue-dearagent-drain finished working and is idle.",
+		Subject:       "continue-dearagent-drain",
+		Severity:      AlertSeverityInfo,
+		Actionability: AlertAgentActionable,
+		Target:        "merge-non-dearagent-prs",
+		OccurredAt:    time.Now(),
+		DedupeKey:     "continue-dearagent-drain:e2e",
+	})
+	if err != nil {
+		t.Fatalf("Route() error = %v", err)
+	}
+	if rec.Status != AlertStatusDispatched {
+		t.Fatalf("Status = %q (error %q), want dispatched to the named relay target",
+			rec.Status, rec.Error)
+	}
+	if len(*sent) != 1 || (*sent)[0] != "merge-non-dearagent-prs" {
+		t.Fatalf("sent = %v, want one delivery to merge-non-dearagent-prs", *sent)
+	}
+}

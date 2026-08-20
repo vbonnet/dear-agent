@@ -546,14 +546,83 @@ func (r *AlertRouter) DrainQueued(ctx context.Context) (int, error) {
 // not terminal. It deliberately applies no name heuristic: see
 // deliveryCandidates.
 func (r *AlertRouter) sessionIsReachable(name string) bool {
-	if r.ctx == nil || r.ctx.Storage == nil || name == "" {
-		return false
-	}
-	m, err := r.ctx.Storage.GetSession(name)
-	if err != nil || m == nil {
+	m := r.resolveTargetManifest(name)
+	if m == nil {
 		return false
 	}
 	return !sessionIsTerminal(m)
+}
+
+// minTargetIDPrefix is the shortest session-ID prefix a target may name.
+// Matching too eagerly would route an alert to an unrelated session, and
+// 8 hex characters make an accidental collision negligible.
+const minTargetIDPrefix = 8
+
+// resolveTargetManifest finds the session a delivery target names, across
+// every identifier AGM accepts for one: the session's name, its full
+// session ID, or a UUID prefix of that ID (see
+// ops.SendMessageRequest.Recipient).
+//
+// Storage.GetSession keys on session ID alone (`WHERE id = ?`), so
+// resolving a name through it never matched a row. Every explicitly
+// configured relay target was therefore judged unreachable and silently
+// dropped, even though `agm completion relay-target set` takes a session
+// name and the command's own help documents naming one. Routing then fell
+// through to discovery and recorded "no live supervisor session
+// discovered" while the configured recipient sat idle and reachable.
+func (r *AlertRouter) resolveTargetManifest(target string) *manifest.Manifest {
+	target = strings.TrimSpace(target)
+	if r.ctx == nil || r.ctx.Storage == nil || target == "" {
+		return nil
+	}
+	// An ID lookup is the cheap path and stays authoritative when the
+	// target really is an ID.
+	if m, err := r.ctx.Storage.GetSession(target); err == nil && m != nil {
+		return m
+	}
+	sessions, err := r.ctx.Storage.ListSessions(&dolt.SessionFilter{ExcludeArchived: true, Limit: 1000})
+	if err != nil {
+		return nil
+	}
+	// Name first: a session name is what the relay-target surfaces accept,
+	// and an exact name must never lose to another session's ID prefix.
+	for _, m := range sessions {
+		if matchesSessionName(m, target) {
+			return m
+		}
+	}
+	for _, m := range sessions {
+		if matchesSessionID(m, target) {
+			return m
+		}
+	}
+	return nil
+}
+
+// matchesSessionName reports whether target is m's name, case-insensitively.
+func matchesSessionName(m *manifest.Manifest, target string) bool {
+	if m == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(m.Name), target)
+}
+
+// matchesSessionID reports whether target is m's session ID or a
+// sufficiently long prefix of it.
+func matchesSessionID(m *manifest.Manifest, target string) bool {
+	if m == nil {
+		return false
+	}
+	id := strings.TrimSpace(m.SessionID)
+	if id == "" {
+		return false
+	}
+	if strings.EqualFold(id, target) {
+		return true
+	}
+	return len(target) >= minTargetIDPrefix &&
+		len(target) < len(id) &&
+		strings.EqualFold(id[:len(target)], target)
 }
 
 // discoverSupervisors lists live supervisor sessions in preference order.
@@ -603,12 +672,26 @@ var supervisorNamePreference = []string{"dispatch", "orchestrator", "overseer", 
 var supervisorRoleTags = []string{"role:orchestrator", "role:overseer", "role:supervisor", "role:meta-orchestrator"}
 
 // sessionIsTerminal reports whether a session can no longer receive input.
+//
+// DONE is deliberately not terminal. The completion watcher stamps DONE on
+// every session that finishes a unit of work, so treating it as terminal
+// made a session disqualify itself as a notification recipient the moment
+// it did any work. In steady state that left zero eligible targets: every
+// live session had completed something, ResolveTarget rejected the
+// operator's explicitly configured relay target, discovery returned
+// nothing, and every completion alert queued behind "no live supervisor
+// session discovered" while the intended recipient sat idle at its
+// composer, plainly able to receive.
+//
+// DONE means "finished a unit of work", which is the state in which a
+// harness is most able to accept input, not least. Only OFFLINE and
+// ARCHIVED describe a session that has actually gone away.
 func sessionIsTerminal(m *manifest.Manifest) bool {
 	if m == nil {
 		return true
 	}
 	state := strings.ToUpper(strings.TrimSpace(m.State))
-	if state == manifest.StateOffline || state == manifest.StateDone || state == "ARCHIVED" {
+	if state == manifest.StateOffline || state == "ARCHIVED" {
 		return true
 	}
 	return m.Lifecycle == manifest.LifecycleArchived
