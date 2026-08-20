@@ -64,11 +64,19 @@ func encodeGuardResult(result specguard.Result, outputLimit int) ([]byte, specgu
 	if outputLimit <= 0 {
 		return nil, specguard.Result{}, fmt.Errorf("guard JSON output limit must be positive")
 	}
-	encoded, err := json.MarshalIndent(result, "", "  ")
-	if err == nil && len(encoded)+1 <= outputLimit {
+	encoded, marshalErr := json.MarshalIndent(result, "", "  ")
+	if marshalErr == nil && len(encoded)+1 <= outputLimit {
 		return append(encoded, '\n'), result, nil
 	}
 
+	finding := specguard.Finding{
+		Code:    "json-output-limit",
+		Message: "guard result could not be emitted within its safety limit",
+	}
+	if marshalErr != nil {
+		finding.Code = "json-encode-failure"
+		finding.Message = fmt.Sprintf("guard result could not be JSON-encoded: %v", marshalErr)
+	}
 	fallback := specguard.Result{
 		SchemaVersion: specguard.SchemaVersion,
 		Scope:         specguard.GuardScope,
@@ -76,14 +84,11 @@ func encodeGuardResult(result specguard.Result, outputLimit int) ([]byte, specgu
 		Mode:          "",
 		Source:        "",
 		Changed:       []string{},
-		Findings: []specguard.Finding{{
-			Code:    "json-output-limit",
-			Message: "guard result could not be emitted within its safety limit",
-		}},
+		Findings:      []specguard.Finding{finding},
 		EvidenceClaim: specguard.EvidenceClaim,
 		TrustBoundary: specguard.TrustBoundary,
 	}
-	encoded, err = json.Marshal(fallback)
+	encoded, err := json.Marshal(fallback)
 	if err != nil {
 		return nil, fallback, fmt.Errorf("encode fail-closed guard result: %w", err)
 	}

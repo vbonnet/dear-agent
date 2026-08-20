@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -125,9 +124,7 @@ func runGitCommand(ctx context.Context, command *exec.Cmd, capture *commandCaptu
 		return gitCommandExecution{commandErr: err, contextCancellationObserved: true}
 	}
 	lifecycle := newGitProcessGroupLifecycle(command)
-	capture.onLimit = func() {
-		_ = lifecycle.cancel()
-	}
+	capture.onLimit = lifecycle.cancelForOutputLimit
 	if err := command.Start(); err != nil {
 		lifecycle.disable()
 		return gitCommandExecution{commandErr: err}
@@ -181,6 +178,20 @@ type gitProcessGroupLifecycle struct {
 	enabled                 bool
 	directChildExitObserved bool
 	terminationSignaled     bool
+}
+
+// cancelForOutputLimit is cancel's caller-facing form for the output-capture
+// limit callback, which has no return path of its own. Its error is
+// intentionally not surfaced: this is a best-effort early nudge fired while
+// draining the pipe, so the child having already exited on its own (the
+// common case for a short-lived process whose output happens to exceed the
+// limit) is expected, not exceptional. complete's later, guaranteed
+// termination attempt independently classifies a genuine, persistent
+// failure through cleanupErr; folding this early result into that path was
+// tried and reverted after it misclassified the ordinary already-exited
+// case as a termination failure (see TestBoundsFailClosed/Git_output).
+func (lifecycle *gitProcessGroupLifecycle) cancelForOutputLimit() {
+	_ = lifecycle.cancel()
 }
 
 func newGitProcessGroupLifecycle(command *exec.Cmd) *gitProcessGroupLifecycle {
@@ -255,8 +266,23 @@ func (lifecycle *gitProcessGroupLifecycle) terminateLocked() error {
 	return nil
 }
 
+// dedupePathEntries removes duplicates while preserving priority order.
+// slices.Compact only collapses adjacent duplicates, which is not enough
+// here since filepath.Dir(executable) can equal one of the fixed entries.
+func dedupePathEntries(entries ...string) []string {
+	seen := make(map[string]bool, len(entries))
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !seen[entry] {
+			seen[entry] = true
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 func cleanGitEnvironment(executable string) []string {
-	pathEntries := slices.Compact([]string{filepath.Dir(executable), "/usr/bin", "/bin"})
+	pathEntries := dedupePathEntries(filepath.Dir(executable), "/usr/bin", "/bin")
 	environment := []string{
 		"HOME=/var/empty",
 		"LANG=C",
