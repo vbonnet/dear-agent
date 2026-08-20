@@ -484,6 +484,37 @@ jobs:
 	}
 }
 
+// TestPrivilegedWorkflowEscalationTriggers_RequiredCheckOwner covers the gap
+// reported in PR #1205 review: a workflow that owns a provider-required
+// branch-protection status context (structural-health.yml owning `Structural
+// Health (baselined)`) can be gutted into an unconditional pass without
+// touching any write scope, secret, or privileged event, so none of the
+// other privileged-workflow rules would have escalated it.
+func TestPrivilegedWorkflowEscalationTriggers_RequiredCheckOwner(t *testing.T) {
+	ownerChanged := strings.Replace(ordinaryReadOnlyWorkflow, "go test ./...", "true", 1)
+	tests := []struct {
+		name string
+		path string
+		base *string
+		head *string
+		want bool
+	}{
+		{"required-check owner content change", ".github/workflows/structural-health.yml", new(ordinaryReadOnlyWorkflow), new(ownerChanged), true},
+		{"required-check owner unchanged content", ".github/workflows/structural-health.yml", new(ordinaryReadOnlyWorkflow), new(ordinaryReadOnlyWorkflow), false},
+		{"required-check owner new file", ".github/workflows/structural-health.yml", nil, new(ordinaryReadOnlyWorkflow), true},
+		{"non-owner ordinary path unaffected", ".github/workflows/candidate.yml", new(ordinaryReadOnlyWorkflow), new(ownerChanged), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, head, paths := workflowGitFixture(t, tt.path, tt.base, tt.head)
+			got := privilegedWorkflowEscalationTriggers(context.Background(), base, head, paths)
+			if (len(got) > 0) != tt.want {
+				t.Fatalf("workflow triggers = %v, want triggered=%t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildReviewPlan_PrivilegedWorkflowProducesKeylessCannotRunEvidence(t *testing.T) {
 	guardWeakened := strings.Replace(criticalWorkflow, `contains(fromJSON('["OWNER","MEMBER"]'), github.event.comment.author_association)`, "contains(github.event.comment.body, '@agent')", 1)
 	base, head, _ := workflowGitFixture(t, ".github/workflows/claude.yml", new(criticalWorkflow), new(guardWeakened))

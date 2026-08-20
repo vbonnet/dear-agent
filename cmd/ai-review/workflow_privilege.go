@@ -11,6 +11,40 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// requiredCheckOwningWorkflows are workflow files whose job `name:` is a
+// provider-required branch-protection status context in
+// .github/rulesets/main.json (audited 2026-08-20, PR #1205 review). Ownership
+// alone makes a content change to the file security relevant, independent of
+// the permission scopes or trigger events workflowPrivilegeReason and
+// changedWorkflowSchedule inspect: a job can be gutted into an unconditional
+// pass without ever touching a write scope, secret, or privileged event,
+// silently neutralizing the merge gate the context enforces.
+// structural-health.yml is the concrete case that motivated this rule: it
+// declares only `contents: read` on ordinary push/pull_request triggers, so
+// none of the other privileged-workflow rules fire for it, yet it is the sole
+// source of the required `Structural Health (baselined)` context. The other
+// entries are already privileged through an existing rule (workflow_call
+// delegation or a schedule trigger) today, but are listed here too so this
+// invariant does not silently lapse if that incidental coverage changes.
+var requiredCheckOwningWorkflows = map[string]bool{
+	".github/workflows/ci.yml":                true,
+	".github/workflows/codeql.yml":            true,
+	".github/workflows/language-policy.yml":   true,
+	".github/workflows/sbom-scan.yml":         true,
+	".github/workflows/adr-integrity.yml":     true,
+	".github/workflows/doc-header-lint.yml":   true,
+	".github/workflows/structural-health.yml": true,
+}
+
+// requiredCheckOwnerReason reports the escalation reason, if any, for a
+// changed workflow identity that owns a provider-required status context.
+func requiredCheckOwnerReason(path string) (string, bool) {
+	if requiredCheckOwningWorkflows[normalizedPathIdentity(path)] {
+		return "workflow owns a provider-required branch-protection status check", true
+	}
+	return "", false
+}
+
 func privilegedWorkflowEscalationTriggers(ctx context.Context, base, head string, changedPaths []string) []string {
 	trees, err := loadTreeIdentityEvidence(ctx, base, head)
 	if err != nil {
@@ -74,6 +108,9 @@ func changedWorkflowTrigger(path string, basePeers, headPeers, peers []workflowB
 	}
 	if equal {
 		return "", false
+	}
+	if reason, owns := requiredCheckOwnerReason(path); owns {
+		return fmt.Sprintf("privileged workflow authority change (%s; %s)", path, reason), true
 	}
 	for _, peer := range peers {
 		reason, privileged := workflowPrivilegeReason(peer.blob)
