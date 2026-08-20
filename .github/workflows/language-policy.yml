@@ -3,6 +3,18 @@ name: Language Policy Enforcement
 # Purpose: Enforce language-specific policies across the codebase
 # - Bash scripts must remain under 20 lines (bash-20-line-limit)
 #
+# The rule logic lives in Go (tools/language-policy), not in an inline shell
+# block. It was ~150 lines of embedded bash — a script the bash-20-line-limit
+# rule would have failed had it lived in a .sh file, and one that no test could
+# reach. The Go checker is unit-tested (tools/language-policy/*_test.go) and
+# reads the waiver store described below.
+#
+# The waiver store is `.github/language-policy/exceptions.jsonl`: one JSON
+# object per line, sorted by (rule, path). It replaced a committed SQLite
+# binary. Text means `git blame` attributes each waiver to the commit and
+# author that granted it, and a reviewer can read it without a database
+# client. `verify-store` fails the build if a binary store reappears.
+#
 # Scoping (ce-1234-ci-health): "Bash Script Size Check (20-line limit)" is a
 # required status check, so branch protection needs it to post on *every*
 # PR/push — a skipped-required-check leaves the PR blocked forever. That
@@ -102,13 +114,20 @@ jobs:
           git diff --name-only --diff-filter=ACMRT "$range" -- '*.sh' > /tmp/detect_sh.txt
 
           # The policy's own inputs count as changes. A PR editing this
-          # workflow or the waiver database, but no .sh file, would
-          # otherwise satisfy the required gate without ever exercising the
-          # enforcement code or waiver set it just changed — a broken
-          # checker or a revoked waiver could merge untested.
+          # workflow, the checker, or anything in the policy directory, but
+          # no .sh file, would otherwise satisfy the required gate without
+          # ever exercising the enforcement code or waiver set it just
+          # changed — a broken checker or a revoked waiver could merge
+          # untested.
+          #
+          # The whole policy directory is watched, not just the .jsonl: a PR
+          # that adds a binary waiver store beside it must trip the gate that
+          # rejects binary stores, and naming only the .jsonl would let that
+          # addition through unexamined.
           git diff --name-only --diff-filter=ACMRT "$range" \
             -- .github/workflows/language-policy.yml \
-               .github/language-policy/exceptions.db > /tmp/detect_policy.txt
+               .github/language-policy/ \
+               tools/language-policy/ > /tmp/detect_policy.txt
 
           # A policy-input change forces a FULL scan, not a diff-scoped one:
           # revoking a waiver can turn any tracked script into a violation,
@@ -138,10 +157,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y sqlite3
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Runs before the scan: if the waiver store is unreadable, unsorted, or
+      # has been replaced by a binary, that is the failure worth reporting.
+      # Scanning first would bury it under a wall of derived violations.
+      - name: Validate waiver store
+        run: go run ./tools/language-policy verify-store -repo .
 
       - name: List changed shell scripts
         id: files
@@ -161,195 +187,23 @@ jobs:
           else
             before="${{ github.event.before }}"
             if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
-              # NUL-delimited to match the git diff -z path below, so the
-              # consumer can use one `read -d ''` loop for both.
-              find . -type f -name "*.sh" \
-                -not -path "*/.archived/*" -not -path "*/node_modules/*" \
-                -not -path "*/vendor/*" -not -path "*/.git/*" \
-                -not -path "*/.worktrees/*" -printf '%P\0' > changed_sh_files.txt
+              git ls-files -z '*.sh' > changed_sh_files.txt
               exit 0
             fi
             range="${before}...${{ github.event.after }}"
           fi
           # -z emits NUL-delimited, *unquoted* pathnames. Without it Git
           # quotes and backslash-escapes any path with non-ASCII bytes or a
-          # newline, and the checker below then fails its -f test and
+          # newline, and the checker then fails its existence test and
           # silently skips that script while the gate still passes.
-          #
-          # Excluded directories are filtered in the consumer loop below,
-          # not here: NUL-delimited filtering would mean either awk with
-          # RS="\0" (unsupported outside gawk) or `grep -z -v` (exit 1
-          # when everything is filtered out, which `set -e` would treat as
-          # a failure). A plain `case` in the reader is portable and has
-          # no exit-code edge.
           git diff -z --name-only --diff-filter=ACMRT "$range" -- '*.sh' \
             > changed_sh_files.txt
 
+      # Directory exclusions (vendor, node_modules, .archived, .worktrees) and
+      # the countable-line definition live in the checker, next to the tests
+      # that pin them.
       - name: Check bash script line counts
-        run: |
-          #!/bin/bash
-          set -euo pipefail
-
-          # Configuration
-          EXCEPTIONS_DB="${GITHUB_WORKSPACE}/.github/language-policy/exceptions.db"
-          RULE_NAME="bash-20-line-limit"
-          LINE_LIMIT=20
-          EXIT_CODE=0
-
-          # Colors for output
-          RED='\033[0;31m'
-          GREEN='\033[0;32m'
-          YELLOW='\033[1;33m'
-          NC='\033[0m' # No Color
-
-          # Function to count non-empty, non-comment lines in a bash script
-          # Excludes: empty lines, comment-only lines, shebang
-          count_lines() {
-            local file="$1"
-            grep -v '^[[:space:]]*$' "$file" | \
-              grep -v '^[[:space:]]*#' | \
-              grep -v '^#!/' | \
-              wc -l | \
-              tr -d ' '
-          }
-
-          # Function to check if file has an exception in the database
-          has_exception() {
-            local file="$1"
-
-            # If database doesn't exist, no exceptions
-            if [[ ! -f "$EXCEPTIONS_DB" ]]; then
-              return 1
-            fi
-
-            # Query database for active exception
-            # Returns 0 if exception exists and is active (status='active')
-            local count
-            count=$(sqlite3 "$EXCEPTIONS_DB" \
-              "SELECT COUNT(*) FROM exceptions
-               WHERE rule_name='${RULE_NAME}'
-               AND file_path='${file}'
-               AND status='active'
-               AND (sunset_date IS NULL OR sunset_date > date('now'));" 2>/dev/null || echo "0")
-
-            [[ "$count" -gt 0 ]]
-          }
-
-          # Function to get exception details
-          get_exception_details() {
-            local file="$1"
-
-            if [[ ! -f "$EXCEPTIONS_DB" ]]; then
-              return
-            fi
-
-            sqlite3 "$EXCEPTIONS_DB" \
-              "SELECT reason, approver, sunset_date
-               FROM exceptions
-               WHERE rule_name='${RULE_NAME}'
-               AND file_path='${file}'
-               AND status='active'
-               AND (sunset_date IS NULL OR sunset_date > date('now'));" \
-              2>/dev/null | head -1
-          }
-
-          echo "=========================================="
-          echo "Bash Script Size Policy Enforcement"
-          echo "=========================================="
-          echo "Rule: bash-20-line-limit"
-          echo "Limit: ${LINE_LIMIT} lines (non-empty, non-comment, excluding shebang)"
-          echo "Scope: only .sh files changed in this push/PR"
-          echo ""
-
-          violations=()
-          exceptions_used=()
-          compliant=()
-
-          # -d '' consumes the NUL-delimited list written above, so paths
-          # containing spaces, non-ASCII bytes, or newlines survive intact.
-          while IFS= read -r -d '' file; do
-            # Match the excluded directory names as path *segments* at any
-            # depth, the way the previous `find -not -path "*/vendor/*"`
-            # predicates did. An anchored '^vendor/' would let
-            # third_party/vendor/tool.sh through and start failing PRs over
-            # vendored scripts this policy was never meant to cover.
-            case "/${file#./}" in
-              */.archived/*|*/node_modules/*|*/vendor/*|*/.worktrees/*) continue ;;
-            esac
-            file="./${file#./}"
-            # Skip if file doesn't exist (e.g. renamed away in a later commit)
-            [[ ! -f "$file" ]] && continue
-
-            # Count lines
-            line_count=$(count_lines "$file")
-
-            if [[ "$line_count" -gt "$LINE_LIMIT" ]]; then
-              # Check for exception
-              if has_exception "$file"; then
-                exception_details=$(get_exception_details "$file")
-                exceptions_used+=("$file|$line_count|$exception_details")
-              else
-                violations+=("$file|$line_count")
-                EXIT_CODE=1
-              fi
-            else
-              compliant+=("$file|$line_count")
-            fi
-          done < changed_sh_files.txt
-
-          # Report compliant files
-          if [[ ${#compliant[@]} -gt 0 ]]; then
-            echo -e "${GREEN}✓ Compliant scripts (${#compliant[@]}):${NC}"
-            for item in "${compliant[@]}"; do
-              IFS='|' read -r file count <<< "$item"
-              printf "  %-60s %3d lines\n" "$file" "$count"
-            done
-            echo ""
-          fi
-
-          # Report exceptions
-          if [[ ${#exceptions_used[@]} -gt 0 ]]; then
-            echo -e "${YELLOW}⚠ Scripts with active exceptions (${#exceptions_used[@]}):${NC}"
-            for item in "${exceptions_used[@]}"; do
-              IFS='|' read -r file count reason approver sunset <<< "$item"
-              printf "  %-60s %3d lines\n" "$file" "$count"
-              [[ -n "$reason" ]] && echo "    Reason: $reason"
-              [[ -n "$approver" ]] && echo "    Approver: $approver"
-              [[ -n "$sunset" ]] && echo "    Sunset: $sunset"
-            done
-            echo ""
-          fi
-
-          # Report violations
-          if [[ ${#violations[@]} -gt 0 ]]; then
-            echo -e "${RED}✗ POLICY VIOLATIONS (${#violations[@]}):${NC}"
-            echo ""
-            for item in "${violations[@]}"; do
-              IFS='|' read -r file count <<< "$item"
-              excess=$((count - LINE_LIMIT))
-              printf "  ${RED}%-60s %3d lines (+%d over limit)${NC}\n" "$file" "$count" "$excess"
-            done
-            echo ""
-            echo -e "${RED}=========================================="
-            echo "FAILURE: ${#violations[@]} bash script(s) exceed the 20-line limit"
-            echo -e "==========================================${NC}"
-            echo ""
-            echo "What to do:"
-            echo "1. RECOMMENDED: Refactor the script into Go, Python, or TypeScript"
-            echo "2. TEMPORARY: Split large scripts into smaller, focused scripts"
-            echo "3. EXCEPTION: Request an exception by adding to the exceptions database:"
-            echo "   - Database: ${EXCEPTIONS_DB}"
-            echo "   - Rule: ${RULE_NAME}"
-            echo "   - File: [path from violation above]"
-            echo "   - Include reason, approver, and sunset_date"
-            echo ""
-          else
-            echo -e "${GREEN}=========================================="
-            echo "SUCCESS: All bash scripts are compliant"
-            echo -e "==========================================${NC}"
-          fi
-
-          exit $EXIT_CODE
+        run: go run ./tools/language-policy check --files-from changed_sh_files.txt --github -repo .
 
   gate:
     # This job's name is the required-status-check context. It always
@@ -382,7 +236,7 @@ jobs:
   full-sweep:
     # The periodic owner the per-PR diff scoping deliberately gives up.
     # Diff-scoping means an over-limit script whose waiver quietly passed
-    # its sunset_date is invisible to every PR that does not touch it —
+    # its sunset date is invisible to every PR that does not touch it —
     # this nightly whole-repo scan is what still sees it.
     #
     # Deliberately NOT a required status check: it must never be able to
@@ -397,52 +251,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y sqlite3
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate waiver store
+        run: go run ./tools/language-policy verify-store -repo .
 
       - name: Scan every tracked shell script
         run: |
           set -euo pipefail
-          db="${GITHUB_WORKSPACE}/.github/language-policy/exceptions.db"
-          limit=20
-          rc=0
-
-          # `|| true` on each grep: a script that is only a shebang,
-          # comments, and blank lines makes grep exit 1 after producing no
-          # output, and under `set -euo pipefail` that aborts the whole
-          # sweep on a perfectly compliant file. Zero countable lines is a
-          # valid answer, not an error.
-          count_lines() {
-            { grep -vE '^\s*(#|$)' "$1" || true; } | { grep -vE '^#!' || true; } | wc -l | tr -d ' '
-          }
-
-          echo "== expired or expiring waivers =="
-          sqlite3 "$db" \
-            "SELECT file_path, sunset_date FROM exceptions
-             WHERE rule_name = 'bash-20-line-limit' AND status = 'active'
-               AND sunset_date IS NOT NULL AND sunset_date <= date('now');" \
-            | while IFS='|' read -r f d; do
-                echo "::warning::waiver for $f expired on $d"
-              done
-
-          echo "== over-limit scripts without an active waiver =="
-          while IFS= read -r -d '' file; do
-            case "/${file#./}" in
-              */.archived/*|*/node_modules/*|*/vendor/*|*/.worktrees/*) continue ;;
-            esac
-            n=$(count_lines "$file")
-            [[ "$n" -le "$limit" ]] && continue
-            waived=$(sqlite3 "$db" \
-              "SELECT COUNT(*) FROM exceptions
-               WHERE rule_name = 'bash-20-line-limit' AND status = 'active'
-                 AND file_path IN ('$file', './${file#./}')
-                 AND (sunset_date IS NULL OR sunset_date > date('now'));" 2>/dev/null || echo 0)
-            if [[ "$waived" == "0" ]]; then
-              echo "::error::$file is $n lines (limit $limit) with no active waiver"
-              rc=1
-            fi
-          done < <(git ls-files -z '*.sh')
-
-          exit $rc
+          git ls-files -z '*.sh' > all_sh_files.txt
+          go run ./tools/language-policy sweep --files-from all_sh_files.txt --github -repo .
