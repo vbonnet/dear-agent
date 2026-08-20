@@ -219,6 +219,15 @@ jobs:
             printf '%s\n' "$findings"
             echo "__EOF__"
           } >> "$GITHUB_ENV"
+          # Carry the verification state to the issue step. A finding produced
+          # without the at-merge ruleset is a suspicion, not a bypass, and the
+          # issue is what a human actually reads — saying so only in the run log
+          # leaves the artifact asserting more than the audit can support.
+          if [ -z "${ruleset_history}" ]; then
+            echo "verified=false" >> "$GITHUB_ENV"
+          else
+            echo "verified=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Open / update bypassed-merge issue
         if: env.findings != ''
@@ -227,8 +236,24 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          title="bypassed-merge: PRs merged with failing or pending required checks"
-          body="The Bypassed Merge Audit detected PRs merged to \`main\` while required CI checks were not all green:
+          if [ "${verified:-true}" = "false" ]; then
+            title="bypassed-merge: UNVERIFIED findings (required-set history unavailable)"
+            caveat="> **These findings are unverified.** The audit could not read the branch
+          > ruleset's version history, so it compared against the checks required
+          > **today** rather than those required when each pull request merged. A
+          > check made required recently will therefore appear to have been bypassed
+          > by every merge in the lookback window that had it red — a merge that broke
+          > no rule in force at the time.
+          >
+          > Configure an admin PAT in \`INFRA_GITHUB_TOKEN\` to resolve the required set
+          > per merge and make these findings authoritative.
+
+          "
+          else
+            title="bypassed-merge: PRs merged with failing or pending required checks"
+            caveat=""
+          fi
+          body="${caveat}The Bypassed Merge Audit examined PRs merged to \`main\` and found required CI checks that were not all green:
 
           ${findings}
 
@@ -250,10 +275,18 @@ jobs:
             --jq '.[0].number // empty')
 
           if [ -n "$existing" ]; then
+            # Track the title too, not just append a comment. The title is what
+            # shows in the issue list, so an issue opened while the required-set
+            # history was readable would keep asserting a bypass after the audit
+            # lost that access — and vice versa. Comments do not correct a title
+            # nobody expands to read.
+            timeout 30 gh issue edit "$existing" \
+              --repo "$REPO" \
+              --title "$title" || true
             timeout 30 gh issue comment "$existing" \
               --repo "$REPO" \
               --body "$body"
-            echo "Updated existing issue #${existing}"
+            echo "Updated existing issue #${existing} (title: ${title})"
           else
             timeout 30 gh issue create \
               --repo "$REPO" \
