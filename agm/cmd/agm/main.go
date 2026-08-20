@@ -360,7 +360,12 @@ func loadConfigWithFlags() (*config.Config, error) {
 	// from the ordinarily absent canonical default.
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
-		return nil, err
+		// The strict loader's errors (unknown field, malformed value, extra
+		// document, missing explicitly selected file) are all repairable
+		// configuration problems, not internal failures. Classify them as bad
+		// input (exit 3) so agent callers can branch on $? without parsing
+		// stderr, instead of falling through to the generic exit code 1.
+		return nil, &exitError{code: ExitBadInput, msg: err.Error()}
 	}
 
 	// Override with flags

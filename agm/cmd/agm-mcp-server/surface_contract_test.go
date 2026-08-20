@@ -373,7 +373,7 @@ func TestArchiveMCPHandlerPropagatesContextAndDryRun(t *testing.T) {
 	}
 }
 
-func TestMCPDiscoveryMatchesCompiledToolsWithExactGhosts(t *testing.T) {
+func TestMCPDiscoveryExactlyMatchesCompiledTools(t *testing.T) {
 	tools := registeredMCPTools(t, registerMCPTools)
 	compiled := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {
@@ -402,28 +402,9 @@ func TestMCPDiscoveryMatchesCompiledToolsWithExactGhosts(t *testing.T) {
 			t.Fatalf("DAH-002/discovery-missing-advertisement: compiled operation %q", name)
 		}
 	}
-
-	wantGhosts := map[string]string{
-		"get_status":      "DAH-002/discovery-get-status-ghost",
-		"list_workspaces": "DAH-002/discovery-list-workspaces-ghost",
-	}
-	consumed := make(map[string]bool, len(wantGhosts))
 	for name := range advertised {
-		if _, ok := compiled[name]; ok {
-			continue
-		}
-		id, ok := wantGhosts[name]
-		if !ok {
-			t.Fatalf("DAH-002/discovery-unaccounted-ghost: %q", name)
-		}
-		if consumed[name] {
-			t.Fatalf("%s: ghost consumed more than once", id)
-		}
-		consumed[name] = true
-	}
-	for name, id := range wantGhosts {
-		if !consumed[name] {
-			t.Fatalf("%s: stale discovery ghost record", id)
+		if _, ok := compiled[name]; !ok {
+			t.Fatalf("DAH-002/discovery-uncompiled-advertisement: %q", name)
 		}
 	}
 }

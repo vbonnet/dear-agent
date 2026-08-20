@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "An empty required-check list is an unprotected branch, not a valid canonical policy."
+}

@@ -6,8 +6,11 @@
 
 The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations. Every tool exposes metadata only, with one deliberate exception: `agm_get_session_output` returns captured pane content and is therefore the single conversation-content surface (see Privacy & Security).
 
-One private production registration seam owns the exact compiled tool set.
-The logical-registry-to-compiled-wire relationship and its finite compatibility
+One private production registration seam and its typed handlers own the exact
+compiled tool names and schemas. `surface.Registry` is logical comparator input,
+not an alternate registration source. `ops.ListOps` owns the `agm_list_ops`
+catalog and must exactly project the compiled logical names. The
+logical-registry-to-compiled-wire relationship and its finite compatibility
 matrix are defined in `agm/internal/surface/SPEC.md` and exercised through the
 actual SDK registration path.
 
@@ -57,6 +60,8 @@ actual SDK registration path.
 **MCS-18** When the server reports startup identity, the system shall use the same version identity that it advertises to an initialized MCP client.
 
 **MCS-19** When a build lacks release-version metadata, the system shall expose a nonempty development fallback identity without claiming a numbered release.
+
+**MCS-20** When `agm_list_ops` discovery is audited, the system shall advertise every compiled logical tool exactly once and no uncompiled operation.
 
 ## BDD Traceability
 

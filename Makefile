@@ -115,7 +115,6 @@ override _GOVERNED_BUILD_TARGETS := \
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
 #   lint-skills             Validate every tracked skill and command prompt
-#   verify-surface-codegen  Regenerate ignored AGM surface artifacts and fail on drift
 #   plugin-verify-hashes    Verify AGM plugin command and skill content hashes
 #   preflight               Fast local CI-parity gates: vet + build + AI skills + lint (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
@@ -251,14 +250,6 @@ lint-headers:
 # the repository contract in .dear-agent.yml.
 lint-adrs:
 	@go run ./tools/adr-lint -repo .
-
-verify-surface-codegen:
-	@set -e; \
-		before="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
-		cd agm && go run ./internal/surface/cmd/generate; \
-		cd ..; \
-		after="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
-		test "$$before" = "$$after" || { echo "generated AGM surface artifacts are stale" >&2; exit 1; }
 
 plugin-verify-hashes:
 	@cd agm && go run ./cmd/plugin-hash -check
@@ -440,7 +431,8 @@ install-configure-settings: build-configure-settings
 
 # Build safe-push: a git-push wrapper that resets the credential helper chain
 # to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
-# never force-pushes. See internal/safegit and vbonnet/engram-research
+# refuses force-pushes to protected branches. See internal/safegit and
+# vbonnet/engram-research
 # retrospectives/2026-06-08-git-push-credential-hang.md.
 build-safe-push:
 	@echo "Building safe-push..."

@@ -1,0 +1,120 @@
+{
+  "$schema_note": "Trigger/behavior eval cases for the research-pipeline skill. Positive cases assert the skill fires; negative cases assert it stays silent so a narrower path (single-shot research, plain transcript extraction) owns the task instead. Not yet wired into an automated eval runner in this repo (see ../../docs/skill-verification-criteria.md) — kept as executable-spec documentation of the trigger surface for review.",
+  "cases": [
+    {
+      "id": "research-pipeline-trigger-01",
+      "prompt": "Here's a YouTube talk on X — research it and turn it into a plan for how we'd apply this to our codebase.",
+      "harness": ["claude"],
+      "should_trigger": true,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)research-pipeline"},
+        {"type": "regex", "target": "trace", "pattern": "(?i)provenance\\.json"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-02",
+      "prompt": "Get an independent model to verify this research doc and write an application plan, then have another model split it into beads for Codex.",
+      "harness": ["claude"],
+      "should_trigger": true,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)research-pipeline"},
+        {"type": "regex", "target": "trace", "pattern": "(?i)independent model"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-03",
+      "prompt": "Ingest this conference talk video, land the transcript and a cited research doc in the research repo, and set it up for a second-model review.",
+      "harness": ["claude"],
+      "should_trigger": true,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)research-pipeline"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-04",
+      "prompt": "What does this article say about caching strategies? Just give me a summary, nothing else needed.",
+      "harness": ["claude"],
+      "should_trigger": false,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)research-pipeline"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-05",
+      "prompt": "Grab me the transcript of this YouTube video, I'll read it myself.",
+      "harness": ["claude"],
+      "should_trigger": false,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)research-pipeline"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-06",
+      "prompt": "Create a bead for this bug I just found in the parser.",
+      "harness": ["claude"],
+      "should_trigger": false,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)bd (create|--db)"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-07",
+      "prompt": "Run the full research-to-execution pipeline on this conference talk and get it into Codex's hands, dark-factory style.",
+      "harness": ["claude"],
+      "should_trigger": true,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)research-pipeline"},
+        {"type": "regex", "target": "trace", "pattern": "(?i)safe-pr|safe-merge"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-08",
+      "prompt": "Decompose this plan document into wayfinder beads.",
+      "harness": ["claude"],
+      "should_trigger": true,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)(canonical )?beads|bd (create|--db)"},
+        {"type": "regex", "target": "trace", "pattern": "(?i)wayfinder.{0,80}(does not|is not|cannot|doesn't)"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-09",
+      "prompt": "The independent reviewer flagged real problems with the plan, but let's just file the beads now so we don't lose momentum.",
+      "harness": ["claude"],
+      "should_trigger": true,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)research-pipeline"},
+        {"type": "regex", "target": "trace", "pattern": "(?i)(back to stage 3|re-?verify|fix.{0,20}re-?review|loop)"}
+      ],
+      "judge": null
+    },
+    {
+      "id": "research-pipeline-trigger-10",
+      "prompt": "This verified plan only needs three small beads with no phasing — decompose it and file them.",
+      "harness": ["claude"],
+      "should_trigger": true,
+      "trials": 3,
+      "expected_checks": [
+        {"type": "regex", "target": "trace", "pattern": "(?i)bd (create|--db)"}
+      ],
+      "judge": null
+    }
+  ]
+}

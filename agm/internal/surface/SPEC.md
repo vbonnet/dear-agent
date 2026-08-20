@@ -5,12 +5,20 @@
 ## Overview
 
 `agm/internal/surface` owns logical operation intent for session listing,
-lookup, search, status, archive, kill, and operation discovery. It generates
-CLI and build-ignored MCP reference output. The provider-visible MCP server is
-hand-registered and owns its established wire contract; a compiled-surface
-audit reconciles that contract with this registry through finite compatibility
-records. Installed plugin Markdown remains owned separately by the live Cobra
-tree.
+lookup, search, status, archive, kill, and operation discovery. It is a
+comparator input, not an executable MCP generator. The provider-visible MCP
+server is hand-registered and owns its established wire contract; a
+compiled-surface audit reconciles that contract with this registry through
+finite compatibility records. Installed plugin Markdown remains owned
+separately by the live Cobra tree.
+
+## Contract ownership
+
+| Contract | Owner | Enforcement |
+|---|---|---|
+| Provider-visible MCP names and schemas | `agm/cmd/agm-mcp-server/registerMCPTools` and its typed handlers | SDK discovery and compatibility tests |
+| Logical comparator input | `surface.Registry` | exact finite compatibility records |
+| `agm_list_ops` discovery catalog | `ops.ListOps` | exact projection test against compiled logical names |
 
 ## Compiled MCP compatibility
 
@@ -23,7 +31,7 @@ tree.
 | `get_status` | intentionally absent |
 | `archive_session` | `agm_archive_session`; required `identifier`; live `dry_run` extension |
 | `kill_session` | `agm_kill_session`; registry fields plus live `dry_run` extension |
-| `list_ops` | `agm_list_ops`; empty input; output from the independent `ops.ListOps` catalog |
+| `list_ops` | `agm_list_ops`; empty input; output from the compiled-logical-name projection in `ops.ListOps` |
 
 The finite schema exceptions are:
 
@@ -65,17 +73,16 @@ a wildcard.
 The compiled server also owns four exact non-registry tools:
 `agm_create_session`, `agm_send_message`,
 `engram_list_wayfinder_sessions`, and `engram_get_wayfinder_session`.
-`ops.ListOps` currently advertises two exact uncompiled MCP entries,
-`get_status` and `list_workspaces`; decision Bead `ce-1hu9.5` owns their later
-reconciliation and the compile-generated-versus-retire-reference-output choice.
+`ops.ListOps` projects these names together with the compiled logical registry
+operations and does not advertise uncompiled operations.
 
 ## Requirements
 
 **AGM-SURFACE-01** When operation surfaces are registered, the system shall include read operations, mutation operations, and meta operations in one registry.
 
-**AGM-SURFACE-02** When list-sessions surfaces are generated, the system shall expose status, harness, limit, and offset request fields.
+**AGM-SURFACE-02** When logical list-sessions intent is compared with the compiled MCP contract, the system shall account for status, harness, limit, and offset request fields.
 
-**AGM-SURFACE-03** When generated CLI commands validate enum inputs, the system shall reject values outside each operation's declared enum set.
+**AGM-SURFACE-03** When logical operation definitions declare enum inputs, the compiled-contract audit shall account for every enum addition, omission, and value change.
 
 **AGM-SURFACE-04** When a compiled MCP handler requires a shared operation context, the system shall create that context, defer cleanup, map operation errors to MCP errors, and return successful operation results; pure `list_ops` introspection shall remain context-free.
 
@@ -83,11 +90,11 @@ reconciliation and the compile-generated-versus-retire-reference-output choice.
 
 **AGM-SURFACE-06** When active harness filters are exposed, the system shall include Claude Code, Codex CLI, AGY, OpenCode, Pi, deprecated Gemini compatibility, and all-harness filtering.
 
-**AGM-SURFACE-07** When operation definitions change, the system shall keep generated reference output derived from the registry and shall reconcile the compiled MCP wire through exact compatibility records rather than unaccounted hand-maintained divergence.
+**AGM-SURFACE-07** When logical operation definitions change, the system shall reconcile the compiled MCP wire through exact compatibility records rather than unaccounted hand-maintained divergence.
 
 **AGM-SURFACE-08** While the Cobra tree owns installed plugin command contracts, the operation registry shall not declare a second Skill surface for those commands.
 
-**AGM-SURFACE-09** When the kill-session operation is generated for CLI or MCP, the request schema shall expose both the recent-activity `force` bypass and the active-harness `confirmed_stuck` confirmation used by the shared operation.
+**AGM-SURFACE-09** When the compiled kill-session MCP handler is registered, the system shall expose both the recent-activity `force` bypass and the active-harness `confirmed_stuck` confirmation used by the shared operation in its request schema.
 
 **AGM-SURFACE-10** When provider-visible MCP tools are registered, the system shall route production and contract tests through one private registration seam containing the exact compiled tool set; SDK discovery order shall not be treated as a wire contract.
 
@@ -99,9 +106,7 @@ reconciliation and the compile-generated-versus-retire-reference-output choice.
 
 **AGM-SURFACE-14** When compiled MCP input is mapped to shared operations, the system shall use production-called adapters that preserve list, search, get, archive, and kill request values, list field masks, and mutation dry-run state.
 
-**AGM-SURFACE-15** When MCP discovery output is audited, the system shall reconcile every compiled logical tool and shall consume only the exact temporary `get_status` and `list_workspaces` ghost records.
-
-**AGM-SURFACE-16** While build-ignored generated MCP output is not compilation-ready, the system shall not treat it as provider-visible proof or activate it without an explicit compatibility migration.
+**AGM-SURFACE-15** When MCP discovery output is audited, the system shall reconcile every compiled logical tool and shall reject every uncompiled advertisement.
 
 **AGM-SURFACE-17** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
 

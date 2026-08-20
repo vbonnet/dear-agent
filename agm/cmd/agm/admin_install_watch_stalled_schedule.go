@@ -13,9 +13,17 @@ import (
 const watchStalledPlistLabel = "com.dear-agent.watch-stalled"
 const watchStalledPlistFile = "schedules/com.dear-agent.watch-stalled.plist"
 
-// defaultStallOrchestrator is the VROOM mesh session that owns worker
-// monitoring; stall alerts route here unless --orchestrator overrides it.
-const defaultStallOrchestrator = "vroom-orchestrator"
+// defaultStallOrchestrator is the --orchestrator value the generated
+// schedule carries. It is empty on purpose: routing discovers a live
+// Dispatch/orchestrator/supervisor session at run time and queues durably
+// when none is reachable, so baking a name in at install time would pin
+// the schedule to a session that may since have died.
+//
+// There is deliberately no named default anywhere for this: under runtime
+// discovery, "who receives an alert" is only knowable at delivery time, so
+// a constant naming one session would be a confident wrong answer on any
+// host where that session is not the live supervisor.
+const defaultStallOrchestrator = ""
 
 var (
 	watchStalledOrchestrator string
@@ -39,14 +47,19 @@ Completion watching is on by default, so the installed daemon is not stall-only.
 It also emits one {"event_type":"completion"} object per session that finishes a
 unit of work, delivers each to the notify dispatchers (~/.agm/notify.yaml, or
 the stderr log dispatcher when that file is absent), and relays the result tail
-into the orchestrator session. Sessions whose names contain orchestrator,
-overseer, or meta- are excluded by default.
+to a live supervisor. Sessions whose names contain orchestrator, overseer, or
+meta- are excluded by default, as is whichever session routing has currently
+selected, so a supervisor's own completion is never relayed back into itself.
 
-Alert routing: the daemon runs with --orchestrator (default "vroom-orchestrator"),
-so every recovery action — permission-prompt alerts, no-commit nudges, error-loop
-diagnostics, and max-retry escalations — plus every surfaced completion is
-delivered to the orchestrator supervisor session via 'agm send', landing stall
-alerts and worker results in the VROOM mesh.
+Alert routing: by default the daemon leaves --orchestrator empty, so every
+recovery action (permission-prompt alerts, no-commit nudges, error-loop
+diagnostics, and max-retry escalations) plus every surfaced completion
+discovers a live Dispatch/orchestrator/supervisor session at run time and is
+tried against each in preference order. Passing --orchestrator names a
+preferred first candidate rather than pinning routing to it. An alert no live
+session accepts is written durably to ~/.agm/alerts/queue.jsonl with status
+"queued" and re-attempted on later scans, so a supervisor outage delays a
+stall alert rather than losing it ('agm alerts list --status queued').
 
 The plist is written to ~/Library/LaunchAgents/ and loaded immediately with
 'launchctl load'. Output (one JSON object per event) is logged to

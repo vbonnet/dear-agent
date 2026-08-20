@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// TestSurfaceParity verifies that the ops registry covers all expected operations.
-// This is the contract test that ensures CLI, MCP, and Skills all expose the same functionality.
+// TestSurfaceParity verifies the discovery catalog describes callable operations.
 func TestSurfaceParity_AllOpsRegistered(t *testing.T) {
 	result := ListOps()
 	if result == nil {
@@ -44,8 +43,9 @@ func TestSurfaceParity_AllOpsRegistered(t *testing.T) {
 	}
 }
 
-// TestSurfaceParity_CoreOpsExist verifies core operations are registered.
-func TestSurfaceParity_CoreOpsExist(t *testing.T) {
+// TestSurfaceParity_CoreCompiledOpsExist verifies the discovery catalog includes
+// core operations backed by a compiled MCP tool.
+func TestSurfaceParity_CoreCompiledOpsExist(t *testing.T) {
 	result := ListOps()
 	opsMap := make(map[string]OpInfo)
 	for _, op := range result.Operations {
@@ -56,13 +56,11 @@ func TestSurfaceParity_CoreOpsExist(t *testing.T) {
 		"list_sessions",
 		"get_session",
 		"search_sessions",
-		"get_status",
-		"list_workspaces",
 	}
 
 	for _, name := range coreOps {
 		if _, ok := opsMap[name]; !ok {
-			t.Errorf("core operation %q missing from ops registry", name)
+			t.Errorf("compiled operation %q missing from ops registry", name)
 		}
 	}
 }
@@ -91,7 +89,7 @@ func TestSurfaceParity_MCPMutationOpsRegistered(t *testing.T) {
 // TestSurfaceParity_ReadOpsAreRead verifies read operations are categorized correctly.
 func TestSurfaceParity_ReadOpsAreRead(t *testing.T) {
 	result := ListOps()
-	readOps := []string{"list_sessions", "get_session", "search_sessions", "get_status", "list_workspaces"}
+	readOps := []string{"list_sessions", "get_session", "search_sessions", "list_wayfinder_sessions", "get_wayfinder_session"}
 
 	opsMap := make(map[string]OpInfo)
 	for _, op := range result.Operations {
@@ -105,6 +103,18 @@ func TestSurfaceParity_ReadOpsAreRead(t *testing.T) {
 		}
 		if op.Category != "read" {
 			t.Errorf("operation %q should be category 'read', got %q", name, op.Category)
+		}
+	}
+}
+
+func TestSurfaceParity_UncompiledMCPOperationsAreNotAdvertised(t *testing.T) {
+	advertised := make(map[string]bool)
+	for _, operation := range ListOps().Operations {
+		advertised[operation.Name] = true
+	}
+	for _, name := range []string{"get_status", "list_workspaces"} {
+		if advertised[name] {
+			t.Errorf("uncompiled MCP operation %q must not be advertised", name)
 		}
 	}
 }

@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "A non-array produced field is malformed evidence, not an empty result set."
+}

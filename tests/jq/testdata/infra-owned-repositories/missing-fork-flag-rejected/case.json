@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/owned-repositories.jq",
+  "description": "Without the fork flag the filter cannot tell an owned repository from a fork, so it must not guess.",
+  "raw": true,
+  "args": {
+    "owner": "vbonnet"
+  }
+}

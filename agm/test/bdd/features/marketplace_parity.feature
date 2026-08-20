@@ -35,3 +35,4 @@ Feature: SKILL and plugin marketplace parity
       | agm       |
       | wayfinder |
       | youtube   |
+      | research-pipeline |

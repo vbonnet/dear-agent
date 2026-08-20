@@ -8,6 +8,7 @@
 # RELATED-SPEC: cmd/safe-rebase/SPEC.md
 # RELATED-SPEC: cmd/safe-unlock/SPEC.md
 # RELATED-SPEC: cmd/test-affected/SPEC.md
+# RELATED-SPEC: cmd/cleanup-worktrees/SPEC.md
 # RELATED-SPEC: scripts/SPEC.md
 # RELATED-SPEC: wayfinder/pkg/sandbox/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
@@ -107,6 +108,10 @@ Feature: Local development guardrails
     When Wayfinder cleanup overlaps a protected safe-pr transaction
     Then Wayfinder should preserve the protected worktree and reject cleanup
     And Wayfinder should remove the worktree after the safe-pr transaction
+
+  Scenario: Stale-worktree cleanup never reaps dirty or session-owned checkouts
+    When AGM runs the cleanup-worktrees classification regressions
+    Then stale-worktree cleanup should refuse dirty and active worktrees and fail closed on probe errors
 
   Scenario: Automated cleanup preserves active Git worktree locks
     When AGM runs the protected cleanup regressions

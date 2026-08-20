@@ -81,7 +81,7 @@
     "doc-path": [],
     "file-size": [
       "agm/cmd/agm-mcp-server/tools_test.go (1025 lines)",
-      "agm/cmd/agm/archive_test.go (1579 lines)",
+      "agm/cmd/agm/archive_test.go (1440 lines)",
       "agm/cmd/agm/new.go (1097 lines)",
       "agm/cmd/agm/send_msg.go (1191 lines)",
       "agm/cmd/agm/supervisor.go (1056 lines)",
@@ -105,10 +105,10 @@
       "agm/internal/tmux/prompt_detector.go (1751 lines)",
       "agm/internal/tmux/prompt_detector_test.go (1201 lines)",
       "agm/internal/tmux/readiness.go (1044 lines)",
-      "agm/internal/tmux/tmux.go (1283 lines)",
+      "agm/internal/tmux/tmux.go (1258 lines)",
       "agm/internal/tmux/tmux_test.go (1109 lines)",
       "agm/internal/ui/table.go (1054 lines)",
-      "agm/test/bdd/steps/harness_parity_steps.go (4862 lines)",
+      "agm/test/bdd/steps/harness_parity_steps.go (4859 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps.go (1608 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
       "agm/test/performance/eventbus_load_test.go (1061 lines)",
@@ -119,7 +119,7 @@
       "cmd/vroom-dispatch/main_test.go (1240 lines)",
       "engram/hooks-bin/internal/validator/validator_bdd_test.go (1009 lines)",
       "engram/internal/health/checks.go (1461 lines)",
-      "internal/safegit/merge.go (1228 lines)",
+      "internal/safegit/merge.go (1145 lines)",
       "pkg/headerlint/headerlint_test.go (1334 lines)",
       "pkg/instructionlint/instructionlint_test.go (1817 lines)",
       "pkg/instructionlint/segments.go (1988 lines)",
@@ -127,7 +127,7 @@
       "pkg/override/override.go (1036 lines)",
       "pkg/workflow/runner.go (1296 lines)",
       "tests/githooks/post_merge_test.go (1452 lines)",
-      "tools/specaudit/main.go (6090 lines)",
+      "tools/specaudit/main.go (6093 lines)",
       "tools/specaudit/main_test.go (3756 lines)",
       "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
     ],
@@ -137,7 +137,6 @@
       "agm/cmd/agm-bus/main.go:329",
       "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
-      "agm/cmd/agm/archive.go:902",
       "agm/cmd/agm/watch.go:110",
       "agm/cmd/agm/watch.go:111",
       "agm/cmd/agm/watch.go:112",
@@ -730,6 +729,114 @@
       },
       "reason": "main advanced under the branch: spec-contract and completion-pipeline files grew past the stale baseline; admitted at merge-main so the newly always-on PR check starts honest",
       "reference": "PR #1183 / ce-3knl.13.3"
+    },
+    {
+      "previous_baseline_sha256": "393dfe8a88494fc202bf15226ca07e86749873eeaacddaed97f602e5eaf4dfd9",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1440 lines)",
+          "agm/internal/tmux/tmux.go (1258 lines)",
+          "internal/safegit/merge.go (1145 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1579 lines)",
+          "agm/internal/tmux/tmux.go (1283 lines)",
+          "internal/safegit/merge.go (1228 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:902"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
+    },
+    {
+      "previous_baseline_sha256": "efd234e350e0c982634f79f8e45657ea791ecea23e090c97b81e9d9b23739557",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/harness_parity_steps.go (4859 lines)",
+          "tools/specaudit/main.go (6093 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/harness_parity_steps.go (4862 lines)",
+          "tools/specaudit/main.go (6090 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "specguard engine wiring adds 3 lines to tools/specaudit/main.go, tipping an already ~6090-line file's exact-match baseline entry",
+      "reference": "vbonnet/dear-agent#1301"
+    },
+    {
+      "previous_baseline_sha256": "7d6e9fa1675403030a65533561b0d78d43bbb852aaa89583016075368765e030",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/internal/infraattest"
+        ],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "internal/infraattest ships its schema/validator ahead of the adapter that wires it into production apply",
+      "reference": "ce-2i70b"
+    },
+    {
+      "previous_baseline_sha256": "b676b962886f5d911071fac44b7c0b4f7d1437fddaba474bc7ca2879eaf84a87",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/internal/infraattest"
+        ],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
     }
   ]
 }

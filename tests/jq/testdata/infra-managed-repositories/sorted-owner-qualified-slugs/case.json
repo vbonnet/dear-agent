@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "A well-formed inventory yields sorted owner/name slugs covering both active and archived repositories, lowercased so the comparison is case-insensitive.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

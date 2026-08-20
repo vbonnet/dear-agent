@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,6 +17,11 @@ import (
 )
 
 const gitInventoryTimeout = 10 * time.Second
+
+// ExecutableBDDFeatureRoot is the only repository path passed to the Godog
+// feature runner. Repository policy keeps executable features as direct
+// children so every catalog and coverage surface observes the same suite.
+const ExecutableBDDFeatureRoot = "agm/test/bdd/features"
 
 var excludedDirectoryNames = map[string]bool{
 	".git":         true,
@@ -44,6 +50,60 @@ func (f File) Name() string {
 // Executable reports whether any executable mode bit is set.
 func (f File) Executable() bool {
 	return f.Mode.Perm()&0o111 != 0
+}
+
+// IsGovernedPath reports whether a repository-relative path belongs to the
+// shared governance inventory rather than VCS, dependency, generated-output,
+// test-fixture, or nested-worktree storage.
+func IsGovernedPath(path string) bool {
+	path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	return path != "." && filepath.IsLocal(filepath.FromSlash(path)) && !excludedPath(path)
+}
+
+// IsExecutableBDDFeaturePath reports whether a canonical repository-relative
+// path belongs to the feature tree the real BDD runner executes.
+func IsExecutableBDDFeaturePath(filePath string) bool {
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(filePath)))
+	prefix := ExecutableBDDFeatureRoot + "/"
+	name := strings.TrimPrefix(filePath, prefix)
+	return cleaned == filePath && IsGovernedPath(filePath) && name != filePath &&
+		pathpkg.Base(name) == name && canonicalBDDFeatureName(name)
+}
+
+func canonicalBDDFeatureName(name string) bool {
+	stem := strings.TrimSuffix(name, ".feature")
+	if stem == name || stem == "" {
+		return false
+	}
+	for _, char := range stem {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// IsImplementationSource classifies source paths consistently for mutable
+// repository scans and immutable Git snapshots. Only regular files qualify;
+// executable is relevant only to extensionless hook or tool files.
+func IsImplementationSource(path string, regular, executable bool) bool {
+	if !regular || !IsGovernedPath(path) {
+		return false
+	}
+	name := filepath.Base(filepath.FromSlash(path))
+	switch strings.ToLower(name) {
+	case "dockerfile", "makefile":
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
+		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",
+		".json", ".toml", ".plist", ".service", ".dockerfile":
+		return true
+	}
+	return filepath.Ext(name) == "" && executable
 }
 
 // Paths projects a file inventory to its stable repository-relative paths.
@@ -90,7 +150,7 @@ func Scan(root string) ([]File, error) {
 	files := make([]File, 0, len(paths))
 	for _, path := range paths {
 		path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
-		if path == "." || !filepath.IsLocal(filepath.FromSlash(path)) || excludedPath(path) {
+		if !IsGovernedPath(path) {
 			continue
 		}
 		absolute := filepath.Join(absRoot, filepath.FromSlash(path))

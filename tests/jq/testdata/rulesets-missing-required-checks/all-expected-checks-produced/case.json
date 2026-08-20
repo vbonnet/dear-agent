@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "When every expected check appears with a matching app identity, nothing is missing and the audit passes."
+}

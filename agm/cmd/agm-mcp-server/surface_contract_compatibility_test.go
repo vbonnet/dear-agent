@@ -51,6 +51,8 @@ func TestMCPCompiledSurfaceMatchesFiniteCompatibilityContract(t *testing.T) {
 	wantNames := []string{
 		"agm_archive_session",
 		"agm_create_session",
+		"agm_get_completion_relay_target",
+		"agm_get_quota_status",
 		"agm_get_session_metadata",
 		"agm_get_session_output",
 		"agm_kill_session",
@@ -58,6 +60,7 @@ func TestMCPCompiledSurfaceMatchesFiniteCompatibilityContract(t *testing.T) {
 		"agm_list_sessions",
 		"agm_search_sessions",
 		"agm_send_message",
+		"agm_set_completion_relay_target",
 		"engram_get_wayfinder_session",
 		"engram_list_wayfinder_sessions",
 	}
@@ -67,7 +70,7 @@ func TestMCPCompiledSurfaceMatchesFiniteCompatibilityContract(t *testing.T) {
 	}
 	sort.Strings(gotNames)
 	if !slices.Equal(gotNames, wantNames) {
-		t.Fatalf("compiled tools = %v, want exact ten-tool set %v", gotNames, wantNames)
+		t.Fatalf("compiled tools = %v, want exact tool set %v", gotNames, wantNames)
 	}
 
 	logical := logicalRegistryContract(t)
@@ -172,14 +175,17 @@ func registeredMCPToolsWithOptions(
 func logicalRegistryContract(t *testing.T) map[string]contractTool {
 	t.Helper()
 	requestTypes := map[string]reflect.Type{
-		"ListSessionsRequest":   reflect.TypeFor[surface.ListSessionsRequest](),
-		"GetSessionRequest":       reflect.TypeFor[surface.GetSessionRequest](),
-		"GetSessionOutputRequest": reflect.TypeFor[surface.GetSessionOutputRequest](),
-		"SearchSessionsRequest": reflect.TypeFor[surface.SearchSessionsRequest](),
-		"GetStatusRequest":      reflect.TypeFor[surface.GetStatusRequest](),
-		"ArchiveSessionRequest": reflect.TypeFor[surface.ArchiveSessionRequest](),
-		"KillSessionRequest":    reflect.TypeFor[surface.KillSessionRequest](),
-		"ListOpsRequest":        reflect.TypeFor[surface.ListOpsRequest](),
+		"ListSessionsRequest":           reflect.TypeFor[surface.ListSessionsRequest](),
+		"GetSessionRequest":             reflect.TypeFor[surface.GetSessionRequest](),
+		"GetSessionOutputRequest":       reflect.TypeFor[surface.GetSessionOutputRequest](),
+		"SearchSessionsRequest":         reflect.TypeFor[surface.SearchSessionsRequest](),
+		"GetStatusRequest":              reflect.TypeFor[surface.GetStatusRequest](),
+		"GetCompletionRelayTargetInput": reflect.TypeFor[surface.GetCompletionRelayTargetInput](),
+		"QuotaStatusInput":              reflect.TypeFor[surface.QuotaStatusInput](),
+		"ArchiveSessionRequest":         reflect.TypeFor[surface.ArchiveSessionRequest](),
+		"KillSessionRequest":            reflect.TypeFor[surface.KillSessionRequest](),
+		"SetCompletionRelayTargetInput": reflect.TypeFor[surface.SetCompletionRelayTargetInput](),
+		"ListOpsRequest":                reflect.TypeFor[surface.ListOpsRequest](),
 	}
 	usedRequestTypes := make(map[string]bool, len(requestTypes))
 	for _, operation := range surface.Registry {
@@ -728,17 +734,20 @@ func findPathMove(records []compatibilityRecord, operation, registryPath string)
 
 func compiledLogicalNames() map[string]string {
 	return map[string]string{
-		"agm_list_sessions":              "list_sessions",
-		"agm_search_sessions":            "search_sessions",
-		"agm_get_session_metadata":       "get_session",
-		"agm_get_session_output":         "get_session_output",
-		"agm_archive_session":            "archive_session",
-		"agm_kill_session":               "kill_session",
-		"agm_create_session":             "create_session",
-		"agm_send_message":               "send_message",
-		"agm_list_ops":                   "list_ops",
-		"engram_list_wayfinder_sessions": "list_wayfinder_sessions",
-		"engram_get_wayfinder_session":   "get_wayfinder_session",
+		"agm_list_sessions":               "list_sessions",
+		"agm_search_sessions":             "search_sessions",
+		"agm_get_session_metadata":        "get_session",
+		"agm_get_session_output":          "get_session_output",
+		"agm_archive_session":             "archive_session",
+		"agm_kill_session":                "kill_session",
+		"agm_create_session":              "create_session",
+		"agm_send_message":                "send_message",
+		"agm_get_completion_relay_target": "get_completion_relay_target",
+		"agm_set_completion_relay_target": "set_completion_relay_target",
+		"agm_get_quota_status":            "get_quota_status",
+		"agm_list_ops":                    "list_ops",
+		"engram_list_wayfinder_sessions":  "list_wayfinder_sessions",
+		"engram_get_wayfinder_session":    "get_wayfinder_session",
 	}
 }
 

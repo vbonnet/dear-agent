@@ -1,6 +1,5 @@
 # OpenTofu / Terraform working state — never commit these
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
