@@ -1,3 +1,6 @@
+// Package hookparity performs a read-only trust and content audit of a
+// deployed terminal-hook helper against its built artifact, and verifies
+// process invocations against a content-addressed, digest-pinned path.
 package hookparity
 
 import (
