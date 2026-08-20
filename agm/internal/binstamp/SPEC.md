@@ -28,31 +28,39 @@ pre-fix error the whole time.
 
 Consumers: `agm/cmd/agm/watch_stalled.go`.
 
-## EARS Requirements
+## Requirements
 
 ### Stamping
 
-- WHEN asked to stamp a path, the system SHALL record the file's size, modification time, and inode.
-- WHEN asked to stamp the running executable, the system SHALL resolve the path via the operating system rather than from an argument, so the stamp cannot be pointed at a different file than the one executing.
-- WHERE a stamp cannot be taken because the file is absent or unreadable, the system SHALL report the failure rather than returning a zero stamp that would compare equal to another failure.
+**BINSTAMP-01** When asked to stamp a path, the system shall record the file's size, modification time, and inode.
+
+**BINSTAMP-02** When asked to stamp the running executable, the system shall resolve the path through the operating system rather than from an argument, so the stamp cannot be pointed at a different file than the one executing.
+
+**BINSTAMP-03** Where a stamp cannot be taken because the file is absent or unreadable, the system shall report the failure rather than returning a zero stamp that would compare equal to another failure.
 
 ### Replacement detection
 
-- WHEN the file at the watched path differs from the baseline in size, modification time, or inode, the system SHALL report the executable as replaced.
-- WHERE an install replaces the file by writing a temporary file and renaming it over the target, the system SHALL report the executable as replaced, because the path continues to resolve and only the inode changes.
-- WHERE an install rewrites the file in place without changing its size, the system SHALL report the executable as replaced, because the inode is unchanged and only the modification time moves.
-- WHILE the watched path cannot be stated, the system SHALL report the executable as not replaced, because an install is not atomic from the observer's side and exiting during that instant would restart the daemon onto a binary that has not yet been written.
-- WHERE the baseline could not be taken when the watcher was created, the system SHALL always report the executable as not replaced, so an unstampable binary leaves the daemon running rather than restarting it on every poll.
+**BINSTAMP-04** When the file at the watched path differs from the baseline in size, modification time, or inode, the system shall report the executable as replaced.
+
+**BINSTAMP-05** Where an install replaces the file by writing a temporary file and renaming it over the target, the system shall report the executable as replaced, because the path continues to resolve and only the inode changes.
+
+**BINSTAMP-06** Where an install rewrites the file in place without changing its size, the system shall report the executable as replaced, because the inode is unchanged and only the modification time moves.
+
+**BINSTAMP-07** While the watched path cannot be stated, the system shall report the executable as not replaced, because an install is not atomic from the observer's side and exiting during that instant would restart the daemon onto a binary that has not yet been written.
+
+**BINSTAMP-08** Where the baseline could not be taken when the watcher was created, the system shall report the executable as not replaced, so an unstampable binary leaves the daemon running rather than restarting it on every poll.
 
 ### Daemon integration
 
-- WHEN a watching daemon observes that its executable was replaced, the system SHALL exit cleanly so its supervisor restarts it on the new build.
-- WHERE the daemon exits because its executable was replaced, the system SHALL emit a `binary_replaced` event naming the binary, so an operator reading the log can tell a redeploy restart from a crash restart.
-- WHILE a watching daemon is running, the system SHALL check for replacement before performing each cycle's work, so a redeploy takes effect on the next cycle rather than after another full round of superseded behavior.
+**BINSTAMP-09** When a watching daemon observes that its executable was replaced, the system shall exit cleanly so its supervisor restarts it on the new build.
+
+**BINSTAMP-10** Where the daemon exits because its executable was replaced, the system shall emit a `binary_replaced` event naming the binary, so an operator reading the log can tell a redeploy restart from a crash restart.
+
+**BINSTAMP-11** While a watching daemon is running, the system shall check for replacement before performing each cycle's work, so a redeploy takes effect on the next cycle rather than after another full round of superseded behavior.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/spec_coverage.feature` (changed-package SPEC coverage gate)
+- Feature: `agm/test/bdd/features/spec_coverage.feature`
 
 ## Non-goals
 
