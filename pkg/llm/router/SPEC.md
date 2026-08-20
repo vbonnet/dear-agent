@@ -38,9 +38,16 @@ attempt history.
 
 **LLM-ROUTER-13** When a circuit-breaker fallback produces a response, the system shall identify the actual provider and model in response metadata and preserve the originally selected candidate separately.
 
+**LLM-ROUTER-14** When quota-aware routing is enabled, the system shall read provider quota state through a provider-neutral `QuotaReader` interface rather than coupling router policy to a specific tool.
+
+**LLM-ROUTER-15** When CodexBar is used as the quota source, the system shall invoke `codexbar dashboard --identity redacted` and shall not read provider credentials or browser cookies directly.
+
+**LLM-ROUTER-16** When quota policy evaluates a provider, the system shall use the most constrained active quota window and shall distinguish avoid, deprioritize, stale, and unavailable quota states.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/llm_runtime_guardrails.feature`
 - Package tests: `pkg/llm/router/config_test.go`
 - Package tests: `pkg/llm/router/router_test.go`
 - Package tests: `pkg/llm/router/executor_test.go`
+- Package tests: `pkg/llm/router/quota_test.go`

@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "A required check that never posts leaves a pull request blocked forever, so it is reported."
+}

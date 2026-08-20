@@ -468,6 +468,116 @@ func ModelFamilyForName(name string) string {
 	}
 }
 
+// ModelFamilyForHarnessModel resolves a harness's model alias to its provider
+// family, expanding the alias before inferring the vendor.
+//
+// ModelFamilyForName alone is not sufficient on a spawn path, and the reason
+// is systematic rather than incidental: every harness default is a bare tier
+// alias — claude-code "sonnet", codex-cli "5.5", agy "3.5-flash", pi-cli
+// "sonnet", plus the supervisor's "sonnet-200k" — and none of those strings
+// contains a vendor token. Inferring the family from the alias text alone
+// therefore yields "" for the default launch of every first-party provider.
+// A caller that gates on the family then sees the normal path as unmapped and
+// skips itself, so the guardrail is inert exactly where it matters most.
+//
+// This crosses the same registry, legacy, and cross-harness tables
+// ResolveModelFullName crosses, then infers the family from the resolved full
+// name. Unlike ResolveModelFullName it emits no advisory notes: it runs on the
+// admission path, before launch, where a mapping note would be noise.
+//
+// It returns "" only when the model is genuinely unrecognized for the harness.
+// The harness catalog is consulted before the identifier text, because the
+// catalog is authoritative and the text is only a guess. A tier alias means
+// whatever its harness says it means: "sonnet" on codex-cli launches gpt-5.5
+// and bills OpenAI, so reading the vendor out of the alias would misattribute
+// the budget rather than merely miss it.
+func ModelFamilyForHarnessModel(harnessName, model string) string {
+	harnessName = NormalizeHarnessName(harnessName)
+
+	// Alias tables chain: a legacy or cross-harness name maps to a native
+	// alias, which then resolves to a full name. Bound the walk so a
+	// malformed table cannot spin on the spawn path.
+	const maxAliasHops = 4
+	current := model
+	for range maxAliasHops {
+		normalized := NormalizeModelInput(harnessName, current)
+		if spec, ok := lookupModelSpec(harnessName, normalized); ok {
+			if family, ok := modelFamilyOverrides[spec.Alias]; ok {
+				return family
+			}
+			if family := ModelFamilyForName(spec.FullName); family != "" {
+				return family
+			}
+			if family := soleFamilyForHarness(harnessName); family != "" {
+				return family
+			}
+			break
+		}
+		mapped, ok := aliasHop(harnessName, normalized)
+		if !ok {
+			break
+		}
+		current = mapped
+	}
+
+	// Nothing in the catalog claimed it. Infer from the identifier itself, so
+	// an unregistered harness or a forward-compatible model the catalog has
+	// not caught up to can still name its own vendor. current is the most
+	// resolved form seen (model, if no alias hop matched at all, or the
+	// last successfully resolved alias) — a bare legacy alias like
+	// "legacy-gpt" carries no vendor token, but the name it resolves to
+	// usually does (gemini review on #1327).
+	return ModelFamilyForName(current)
+}
+
+// modelFamilyOverrides names the family for registered models whose public
+// label carries no vendor token. Claude Code's "opusplan" is the live case:
+// it plans with Opus and executes with Sonnet, so it draws down the Anthropic
+// budget despite naming neither vendor nor a resolvable model id.
+var modelFamilyOverrides = map[string]string{
+	"opusplan": "anthropic",
+}
+
+// lookupModelSpec finds a harness's registered model by alias or full name.
+func lookupModelSpec(harnessName, model string) (ModelSpec, bool) {
+	for _, spec := range GetModelsForHarness(harnessName) {
+		if spec.Alias == model || spec.FullName == model {
+			return spec, true
+		}
+	}
+	return ModelSpec{}, false
+}
+
+// aliasHop follows one legacy or cross-harness alias mapping.
+func aliasHop(harnessName, model string) (string, bool) {
+	if legacy, ok := legacyModelAliases[harnessName]; ok {
+		if mapped, ok := legacy[model]; ok {
+			return mapped, true
+		}
+	}
+	if cross, ok := CrossHarnessAliases[harnessName]; ok {
+		if mapped, ok := cross[model]; ok {
+			return mapped, true
+		}
+	}
+	return "", false
+}
+
+// soleFamilyForHarness returns the harness's only reachable provider family,
+// or "" when it can reach more than one.
+//
+// A registered model whose label names no vendor still draws down a real
+// budget — claude-code's "opusplan" is the live example. On a harness that can
+// only reach one family, that budget is not ambiguous, so naming it is better
+// than reporting the model as unmapped.
+func soleFamilyForHarness(harnessName string) string {
+	families := ModelFamiliesForHarness(harnessName)
+	if len(families) == 1 {
+		return families[0]
+	}
+	return ""
+}
+
 // ModelFamiliesForHarness returns the supported model families reachable from
 // a harness's configured model aliases.
 func ModelFamiliesForHarness(harnessName string) []string {

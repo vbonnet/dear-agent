@@ -20,18 +20,17 @@ name: Tofu Drift Detection
 # These are the same credentials used for a local `tofu apply`; nothing new is
 # invented here.
 #
-# When the credentials are absent the enforcement cannot run at all. It used
-# to `exit 1` on the scheduled path, which painted `main` red every single day
-# and made main-health-watchdog file a fresh incident each time — for a
-# condition that no commit caused and no code change can fix. The daily red
-# carried exactly one bit ("still not provisioned") and drowned the failures
-# that did mean something.
+# When the credentials are absent the enforcement cannot run at all. Failing the
+# job paints `main` red every single day and makes main-health-watchdog file a
+# fresh incident each time — for a condition no commit caused and no code change
+# can fix. The daily red carries exactly one bit ("still not provisioned") and
+# drowns the failures that mean something.
 #
-# The preflight is now its own job. When the secrets are missing it warns
-# loudly, writes the reason into the run summary, and leaves the enforcement
-# job SKIPPED — visibly not-run, which is honest, rather than a green run that
-# would claim a check happened. Provisioning the secrets turns enforcement back
-# on with no further change.
+# So the preflight is its own job. When the secrets are missing it warns loudly,
+# writes the reason into the run summary, and leaves the enforcement job SKIPPED
+# — visibly not-run, which is honest, rather than a green run that would claim a
+# drift check happened. Provisioning the secrets turns enforcement back on with
+# no further change.
 
 on:
   schedule:
@@ -100,7 +99,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
-          tofu_version: latest
+          tofu_version: 1.12.5
 
       - name: tofu init (real R2 backend)
         env:
@@ -123,8 +122,29 @@ jobs:
           TF_VAR_claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set +e
-          tofu plan -detailed-exitcode -no-color 2>&1 | tee /tmp/drift.txt
-          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          private_output="${RUNNER_TEMP}/tofu-drift.txt"
+          trap 'rm -f "${private_output}"' EXIT
+          # This plan is inspected in-run and never saved. Supply the enforced
+          # plan encryption method with fresh process-local randomness; never
+          # derive encryption material from a public workflow/run identifier.
+          plan_passphrase="$(openssl rand -hex 32)"
+          export TF_ENCRYPTION
+          TF_ENCRYPTION="$(printf '%s\n' \
+            'key_provider "pbkdf2" "speculative" {' \
+            "  passphrase = \"${plan_passphrase}\"" \
+            '}' \
+            'method "aes_gcm" "speculative" {' \
+            '  keys = key_provider.pbkdf2.speculative' \
+            '}' \
+            'plan {' \
+            '  method = method.aes_gcm.speculative' \
+            '}')"
+          unset plan_passphrase
+          # Provider/state evidence is private. Capture it only in the runner's
+          # ephemeral directory and publish the exit status, never plan bytes.
+          tofu plan -detailed-exitcode -no-color >"${private_output}" 2>&1
+          plan_exit=$?
+          echo "exitcode=${plan_exit}" >> "$GITHUB_OUTPUT"
 
       - name: Evaluate result
         env:
@@ -137,8 +157,8 @@ jobs:
             2)
               echo "::warning::DRIFT DETECTED — live settings differ from IaC."
               # De-dupe: reuse an open drift issue if one exists, else open one.
-              body="$(printf 'Scheduled `tofu plan -detailed-exitcode` found drift between live GitHub settings and infra/ IaC on %s (run %s).\n\n```\n%s\n```\n\nResolve by either `tofu apply` (adopt IaC) or updating infra/ to match an intentional change.' \
-                "$(date -u +%Y-%m-%dT%H:%MZ)" "${GITHUB_RUN_ID}" "$(tail -c 8000 /tmp/drift.txt)")"
+              body="$(printf 'Scheduled infrastructure reconciliation detected provider-visible drift on %s (run %s). Private plan, state, inventory, and provider evidence were withheld. Reconcile only through an authorized private environment.' \
+                "$(date -u +%Y-%m-%dT%H:%MZ)" "${GITHUB_RUN_ID}")"
               existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --label infra-drift --json number --jq '.[0].number' 2>/dev/null || true)"
               if [ -n "${existing}" ]; then
                 gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body "${body}"

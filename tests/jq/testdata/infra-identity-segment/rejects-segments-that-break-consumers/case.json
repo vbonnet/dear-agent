@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/identity-segment.jq",
+  "description": "A newline splits one `jq -r` record into two repositories; a slash yields a bogus owner/name slug; a quote yields an invalid OpenTofu state address or import ID; a leading dash or dot is not a legal GitHub name.",
+  "filter": "include \"identity-segment\"; map(is_identity_segment)",
+  "library_paths": [
+    ".github/infra"
+  ]
+}

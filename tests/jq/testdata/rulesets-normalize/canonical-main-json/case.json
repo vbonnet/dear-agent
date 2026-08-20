@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "The checked-in canonical ruleset normalizes to a stable projection; this is the golden the audit compares live state against."
+}

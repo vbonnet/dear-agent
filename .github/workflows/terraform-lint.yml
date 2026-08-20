@@ -1,0 +1,84 @@
+name: Terraform Lint
+
+# Static gates for the OpenTofu sources under infra/.
+#
+# Before this workflow the only automated check on any .tf file was the
+# `tofu validate` step inside `tofu-plan.yml`, which runs on a paths filter and
+# produces no linting at all. Formatting drift and unpinned providers could
+# reach main unchallenged.
+#
+# This workflow is credential-free by construction: `-backend=false` and
+# `tflint` never contact the state backend or the GitHub API, so it is safe on
+# pull requests from any source. It deliberately does NOT plan; a plan needs
+# provider credentials and the private inventory, and belongs in the workflow
+# that already owns that boundary.
+#
+# The same three gates are reachable locally: `go test ./infra/` runs fmt and
+# validate, and `tflint --chdir infra` runs the linter.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-lint.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-lint.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-lint:
+    name: OpenTofu fmt, validate and tflint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
+        with:
+          tofu_version: latest
+          # The wrapper rewrites stdout and swallows exit codes, which would
+          # let a failing `fmt -check` report success.
+          tofu_wrapper: false
+
+      - name: Setup tflint
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a  # v6.3.0
+        with:
+          # Pinned rather than "latest": a new tflint minor can add rules, and
+          # this gate is blocking, so the linter version has to move in a
+          # reviewable commit instead of overnight.
+          tflint_version: v0.64.0
+
+      - name: tofu fmt
+        run: tofu fmt -check -recursive -diff
+
+      - name: tofu init (no backend)
+        run: tofu init -backend=false -input=false -no-color
+
+      - name: tofu validate
+        run: tofu validate -no-color
+
+      - name: tflint
+        # --recursive covers the root and every module under modules/. --force
+        # is deliberately omitted so any issue is a failure.
+        run: |
+          tflint --init
+          tflint --recursive --format compact

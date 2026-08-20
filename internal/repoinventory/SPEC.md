@@ -1,6 +1,6 @@
 # Repository Inventory Specification
 
-<!-- Last audited at: 2026-07-17 -->
+<!-- Last audited at: 2026-08-08 -->
 
 ## Overview
 
@@ -28,6 +28,8 @@ nested-worktree, and VCS directories.
 **REPO-INV-08** When the non-Git fallback encounters an unreadable entry, the system shall skip that entry and continue inventorying other reachable files.
 
 **REPO-INV-09** When Git inventory fails with diagnostic output, the system shall include that output in the returned error without permitting an interactive Git prompt.
+
+**REPO-INV-10** When governance tools classify executable BDD evidence, the system shall admit only canonical `.feature` paths whose direct-child basename under `agm/test/bdd/features` uses the shared ASCII letter, digit, dot, underscore, and hyphen grammar; the executable suite shall reject nested or unparseable feature files so catalog and coverage discovery cannot omit runner input.
 
 ## BDD Traceability
 

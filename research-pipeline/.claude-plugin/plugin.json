@@ -1,0 +1,9 @@
+{
+  "name": "research-pipeline",
+  "version": "0.1.0",
+  "description": "Provider-routed research pipeline: ingest an external source, produce cited research, get independent cross-model verification and planning, decompose into sized beads, and execute",
+  "author": {
+    "name": "dear-agent"
+  },
+  "skills": ["./skills/"]
+}

@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A non-empty bypass_actors list is well formed and normalizes; detecting that it should be empty is the audit's decision, not this parser's."
+}

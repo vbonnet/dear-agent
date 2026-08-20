@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "An owner carrying a slash produces a bogus owner/name slug for every repository in the fleet.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

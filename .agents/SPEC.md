@@ -1,4 +1,4 @@
-# AGY Configuration Surface Specification
+# AGENTS-Compatible Configuration Surface Specification
 
 <!-- Last audited at: 2026-07-08 -->
 

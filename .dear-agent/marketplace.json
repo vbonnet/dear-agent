@@ -27,6 +27,13 @@
       "description": "Extract transcripts and metadata from YouTube videos",
       "version": "0.1.0",
       "capabilities": ["commands"]
+    },
+    {
+      "name": "research-pipeline",
+      "source": "./research-pipeline",
+      "description": "Provider-routed research pipeline: ingest, cited research, independent cross-model verification/planning, beads decomposition, execution",
+      "version": "0.1.0",
+      "capabilities": ["skills"]
     }
   ],
   "harnesses": [

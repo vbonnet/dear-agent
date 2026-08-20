@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/owned-repositories.jq",
+  "description": "A repository belonging to another owner means the request was scoped wrongly; reconciling against it would act on someone else's repositories.",
+  "raw": true,
+  "args": {
+    "owner": "vbonnet"
+  }
+}

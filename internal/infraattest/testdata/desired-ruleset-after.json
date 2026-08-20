@@ -1,0 +1,16 @@
+{
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": ["~DEFAULT_BRANCH"]
+    }
+  },
+  "enforcement": "active",
+  "id": "18061003",
+  "name": "main-zero-bypass",
+  "repository": "dear-agent",
+  "ruleset_id": 18061003,
+  "rules": [{"type": "required_linear_history"}],
+  "target": "branch"
+}

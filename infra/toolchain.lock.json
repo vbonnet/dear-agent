@@ -1,0 +1,52 @@
+{
+  "schema": "dear-agent.opentofu-toolchain-lock/v1",
+  "dependency_lockfile_sha256": "9beeedb2853295abb3e657a304d936e8f819cc7cf04f3d43a839868e8dbc2e4b",
+  "opentofu": {
+    "source_repository": "https://github.com/opentofu/opentofu",
+    "version": "1.12.5",
+    "tag": "v1.12.5",
+    "tag_commit": "230349e959a44fb8eb7b83754f9d9b012f3bdb42",
+    "checksums_url": "https://github.com/opentofu/opentofu/releases/download/v1.12.5/tofu_1.12.5_SHA256SUMS",
+    "checksums_sha256": "120345f8a2493375aebbca072106de425b2eb227837f8064440b8d911e36f987",
+    "signing_key_fingerprint": "E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80"
+  },
+  "provider": {
+    "source_repository": "https://github.com/integrations/terraform-provider-github",
+    "address": "registry.opentofu.org/integrations/github",
+    "version": "6.13.0",
+    "tag": "v6.13.0",
+    "tag_commit": "20728bb30c112287ac3e8243cdb0307a45c6a0a0",
+    "checksums_url": "https://github.com/integrations/terraform-provider-github/releases/download/v6.13.0/terraform-provider-github_6.13.0_SHA256SUMS",
+    "checksums_sha256": "2d688e8383ff669297bbb6461f7eb05168f53fe76d3233fdb431e318efedb98f",
+    "signing_key_fingerprint": "F31928FACE52F1A13A6C60EA38027F80D7FD5FB2"
+  },
+  "platforms": [
+    {
+      "platform": "darwin_arm64",
+      "opentofu_archive": "tofu_1.12.5_darwin_arm64.zip",
+      "opentofu_archive_sha256": "dbb5a5bae9b0cabf622cd81a80ea02230eae8a3813215400df41a2cb89b47157",
+      "opentofu_binary_sha256": "96557429623614140cf41afeb147b8a7e1fbe53e55923b63e7b581bc608d60ca",
+      "provider_archive": "terraform-provider-github_6.13.0_darwin_arm64.zip",
+      "provider_archive_sha256": "c26a9bca4865665084e7f59b1402d7aff34ee63a418d7401a0658fa280cad4d4",
+      "provider_binary_sha256": "b7e4601361cdd0afdcc83d9dfdc4a274dea693af291339c2bc9a915ec4ba62b6"
+    },
+    {
+      "platform": "linux_amd64",
+      "opentofu_archive": "tofu_1.12.5_linux_amd64.zip",
+      "opentofu_archive_sha256": "dade9650e6b74fc7a8b986bd8717497d32f9e09cf82e479afef4977fa3085536",
+      "opentofu_binary_sha256": "36dae7ca1e4f1552a6faef27179dc16ef403203e956f31416c17b3d87a38c3f4",
+      "provider_archive": "terraform-provider-github_6.13.0_linux_amd64.zip",
+      "provider_archive_sha256": "5dd05dee677f6ebdbed00cbb1b9be444ab2d1062d345cbc9ec50a47cb41b8622",
+      "provider_binary_sha256": "8b50ca47bbf54d9c3471326bc15bfa2fab748275180d20915e34cf93169d38bc"
+    },
+    {
+      "platform": "linux_arm64",
+      "opentofu_archive": "tofu_1.12.5_linux_arm64.zip",
+      "opentofu_archive_sha256": "528f4eea63452bbddb30fa4f1780b57fac8d7676f9dda0f772e847bb62c1260a",
+      "opentofu_binary_sha256": "e4035d38b5b95fc1490c3205ad798bc77b25c6b93049a279fded4883d020420c",
+      "provider_archive": "terraform-provider-github_6.13.0_linux_arm64.zip",
+      "provider_archive_sha256": "0ab29fc21699f34345cf0bbbe44745fd1b143b7c73b410c1dc4abe05ffad0a84",
+      "provider_binary_sha256": "35e6f87007ce6b686b2f327ba7597a0abd5553ef17435dc8094065bbf39e45a2"
+    }
+  ]
+}

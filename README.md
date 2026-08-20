@@ -28,6 +28,7 @@ something breaks you open a terminal, not a dashboard.
 | **AGM** | `agm/` | Agent Gateway Manager — sessions, loops, orchestration |
 | **Engram** | `engram/` | Persistent memory with cue-based retrieval |
 | **Wayfinder** | `wayfinder/` | 9-phase SDLC workflow plugin with validation gates |
+| **Research Pipeline** | `research-pipeline/` | Independent research, review, decomposition, and execution skill |
 
 ## Writing specifications
 
@@ -55,11 +56,11 @@ go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
 go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 ```
 
-### Install the Claude Code plugins (`/agm:*`, Wayfinder skill, `/youtube`)
+### Install the Claude Code plugins (AGM, Wayfinder, YouTube, Research Pipeline)
 
 This repo also ships as a Claude Code plugin marketplace. The Wayfinder skill
 delegates to the `wayfinder` binary installed above. To install the namespaced
-AGM/YouTube commands and the Wayfinder skill, run:
+AGM/YouTube commands plus the Wayfinder and Research Pipeline skills, run:
 
 ```bash
 ./scripts/install-claude-plugins.sh             # from a local clone (default)

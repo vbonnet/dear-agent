@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "Live evidence must carry the app that posted each check; without it the app comparison silently degrades to a name match."
+}

@@ -35,7 +35,7 @@ creation.
 
 **SAFE-PR-10** When safe-pr runs the repository full preflight, the system shall allow at least sixty minutes before terminating the gate.
 
-**SAFE-PR-11** When `create --draft` succeeds, the system shall leave the pull request unarmed for a human to advance.
+**SAFE-PR-11** When `create --draft` succeeds, the system shall leave the pull request unarmed for its owner to advance. For the autonomous-merge carve-out categories that owner is a human; for an ordinary pull request the authoring agent may advance it.
 
 **SAFE-PR-12** When pull request creation succeeds, the system shall not invoke a merge command after creation.
 
