@@ -142,6 +142,35 @@ jobs:
             if grep -qE "^permissions:[[:space:]]*write-all" "$f"; then
               findings="${findings}\n- ${f}: \`permissions: write-all\`"
             fi
+            # 3) A key GITHUB_TOKEN does not accept. GitHub rejects the whole
+            #    workflow file, so the run dies before any job starts — no job
+            #    log, no failing step, just a red workflow. `administration:
+            #    read` did exactly that to bypassed-merge-audit.yml and took
+            #    main red: it is a fine-grained-PAT repository permission, not
+            #    a GITHUB_TOKEN scope, and the two are easy to confuse because
+            #    the API docs describe the requirement in PAT terms.
+            #    Scans EVERY permissions: block, not just the top-level one:
+            #    job-level blocks take the same GITHUB_TOKEN scopes and an
+            #    invalid key there rejects the file just as hard.
+            bad=$(awk '
+              # A bare `permissions:` opens a block; the inline forms
+              # (`{}`, `read-all`, `write-all`) have no keys to check.
+              match($0, /^[[:space:]]*permissions:[[:space:]]*$/) {
+                inblock = 1
+                blockindent = index($0, "p") - 1
+                next
+              }
+              # Blank and comment lines never close a block.
+              /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+              inblock {
+                indent = match($0, /[^[:space:]]/) - 1
+                if (indent <= blockindent) { inblock = 0; next }
+                key = $1; sub(/:.*/, "", key); print key
+              }
+            ' "$f" | grep -vxE "actions|attestations|checks|contents|deployments|discussions|id-token|issues|models|packages|pages|pull-requests|security-events|statuses" | sort -u || true)
+            if [ -n "$bad" ]; then
+              findings="${findings}\n- ${f}: invalid \`permissions:\` key(s) — $(echo "$bad" | tr '\n' ' ')(GitHub rejects the file; the run dies before any job starts)"
+            fi
           done
           if [ -n "$findings" ]; then
             {
