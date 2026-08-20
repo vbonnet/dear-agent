@@ -70,5 +70,11 @@ go test ./test/bdd/...
 ## CI
 
 The root `ci.yml` "Build & Test" job runs `go test -race -count=1 ./...`,
-which executes this package (godog features, invariant tests, contract drift)
-on every PR. There is no separate opt-in target to forget to call.
+which executes this package (godog features, invariant tests, contract drift).
+There is no separate opt-in target to forget to call.
+
+Since ADR-038 the job's steps are scoped: they run on every PR that touches a
+build input — Go source, build metadata, or an embedded/hash-verified asset —
+and are skipped on a pure documentation PR, which cannot change this package.
+The job itself always reports, so the required check stays satisfiable, and the
+`CI Gateway` check fails if a relevant job was skipped.
