@@ -226,7 +226,30 @@ func (m *Meter) decide(snapshot *Snapshot, now time.Time, modelID string) Decisi
 			Reason:       "model is not mapped to a provider family",
 		}
 	}
-	return Evaluate(snapshot, canonicalProviderFamily(family), now, m.policy)
+	canonical := canonicalProviderFamily(family)
+	if unimplementedProviderFamilies[canonical] {
+		return Decision{
+			Class:        ClassUnknown,
+			Availability: AvailabilityUnavailable,
+			Reason:       "provider family has no constructible transport yet; excluded from quota promotion",
+		}
+	}
+	return Evaluate(snapshot, canonical, now, m.policy)
+}
+
+// unimplementedProviderFamilies lists provider families whose factory
+// construction always fails today (provider.Factory's newGeminiProvider
+// is a stub for both auth methods). A candidate in one of these families
+// is pinned to ClassUnknown regardless of its quota reading, so it stays
+// exactly where roles.yaml configured it and is never promoted ahead of
+// a candidate that can actually serve the request: a good quota band
+// would otherwise place it first, and since a construction failure is
+// never cached, every request would repeat the same impossible attempt
+// before falling through, and the "capacity" it advertises could never
+// receive traffic (review on #1218). Remove an entry once its provider
+// is implemented.
+var unimplementedProviderFamilies = map[string]bool{
+	"gemini": true,
 }
 
 // providerFamilyAliases canonicalizes provider.Resolver's supported

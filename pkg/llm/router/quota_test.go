@@ -85,8 +85,10 @@ func newQuotaRouter(t *testing.T, meter *quota.Meter, providers map[string]provi
 func TestRouterRoutesToTheRoomiestProvider(t *testing.T) {
 	providers := quotaProviders()
 	// The configured primary (Anthropic) is nearly spent; Gemini has the
-	// most headroom, so it should take the request even though roles.yaml
-	// ranks it last.
+	// most headroom of all three, but gemini is excluded from quota
+	// promotion (no constructible provider yet — review on #1218), so
+	// OpenAI, the roomiest candidate that can actually be promoted, takes
+	// the request even though roles.yaml ranks it after Anthropic.
 	meter := meterWith(t, map[string]float64{
 		"anthropic": 8,
 		"openai":    55,
@@ -98,11 +100,14 @@ func TestRouterRoutesToTheRoomiestProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if resp.Model != "gemini-3.1-pro" {
-		t.Errorf("routed to %q, want gemini-3.1-pro", resp.Model)
+	if resp.Model != "gpt-5.5-pro" {
+		t.Errorf("routed to %q, want gpt-5.5-pro", resp.Model)
 	}
 	if got := providers["anthropic|claude-opus-4-8"].(*fakeProvider).calls; got != 0 {
 		t.Errorf("the near-limit provider was called %d times, want 0", got)
+	}
+	if got := providers["gemini|gemini-3.1-pro"].(*fakeProvider).calls; got != 0 {
+		t.Errorf("the unimplemented-provider family was called %d times, want 0", got)
 	}
 }
 
