@@ -287,6 +287,20 @@ jobs:
             diff, never placeholders. Say explicitly that each step must land on main before
             the next opens, so every PR gets the five-dimension review.
 
+            Frame the proposal so THIS pull request stays as the TIP of the stack. The lower
+            slices are extracted into new PRs beneath it, and this PR is retargeted onto the
+            topmost slice — it is never closed and replaced by a fresh PR for the remainder.
+            Say so explicitly, and give the two commands:
+              git rebase --onto <top-slice-branch> <cut-point> <this-branch>
+              gh pr edit ${{ github.event.pull_request.number }} --base <top-slice-branch>
+            Note that safe-rebase has no --onto mode (ce-x2ekc), so that restack is manual.
+            Never propose closing this PR and opening a new top PR: an open PR carries the
+            review threads, bot findings, and CI history that a later retrospective reads to
+            reconstruct the decision, and closing it discards that while git keeps the code
+            either way. Closing is correct only if the slices absorb the change completely and
+            nothing remains at the tip; say that only when it is true, and say which PRs would
+            supersede it.
+
             ATOMIC — only when the change genuinely cannot be split: a mechanical rename across
             many call sites, a generated-file refresh, a vendored dependency update, or a change
             where any smaller step would leave main broken. State which of those it is and why.
