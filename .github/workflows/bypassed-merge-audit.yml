@@ -23,6 +23,12 @@ on:
 permissions:
   issues: write
   contents: read
+  # Reading the branch ruleset's version history — needed to know which checks
+  # were required at the moment each pull request merged, rather than which are
+  # required today. Without it the history call 403s, the audit silently falls
+  # back to today's set, and a newly-required check retroactively accuses every
+  # merge in the lookback window.
+  administration: read
 
 env:
   GIT_TERMINAL_PROMPT: "0"
@@ -97,28 +103,54 @@ jobs:
             ruleset_history=$(gh api "repos/${REPO}/rulesets/${ruleset_id}/history" --paginate \
               --jq '[.[] | {version_id, updated_at}] | sort_by(.updated_at)' 2>/dev/null || true)
           fi
-          if [ -z "${ruleset_history}" ] || [ "${ruleset_history}" = "[]" ]; then
-            echo "::notice::Ruleset history unavailable; classifying against the current required set. A check required recently may produce anachronistic findings."
+          # Check the SHAPE, not just non-emptiness: a 403 body or an error
+          # object still parses as "something", and the first cut treated that
+          # as a usable history.
+          if ! jq -e 'type == "array" and length > 0 and (.[0] | has("version_id"))' \
+               <<<"${ruleset_history:-null}" >/dev/null 2>&1; then
+            echo "::warning::Ruleset history unavailable (needs Administration: read); classifying against the current required set. A recently-required check may produce anachronistic findings."
             ruleset_history=""
+          else
+            echo "Ruleset history: $(jq -r 'length' <<<"${ruleset_history}") version(s) available."
           fi
 
           # required_at <merged_at> — echoes the contexts required at that
           # instant, falling back to the current set when history cannot answer.
+          # Every fallback path announces itself. The first cut of this was silent
+          # on failure, so a 403 on the history endpoint looked identical to a
+          # successful lookup: the log printed a required set with no hint it was
+          # today's rather than the merge's, and the finding it produced was
+          # indistinguishable from a real one.
           required_at() {
-            local merged="$1" version cached
-            [ -z "${ruleset_history}" ] && { printf '%s' "${required_checks}"; return; }
+            local merged="$1" version cached contexts
+            if [ -z "${ruleset_history}" ]; then
+              printf '%s' "${required_checks}"; return
+            fi
             version=$(jq -r --arg m "${merged}" \
               '[.[] | select(.updated_at <= $m)] | last | .version_id // empty' <<<"${ruleset_history}")
             # A merge older than every recorded version: the oldest version is
             # the closest evidence available, and is still better than today's.
             [ -z "${version}" ] && version=$(jq -r 'first | .version_id // empty' <<<"${ruleset_history}")
-            [ -z "${version}" ] && { printf '%s' "${required_checks}"; return; }
+            if [ -z "${version}" ]; then
+              echo "::warning::no ruleset version resolvable for a merge at ${merged}; using today's required set" >&2
+              printf '%s' "${required_checks}"; return
+            fi
             cached="/tmp/ruleset-${version}.json"
-            [ -f "${cached}" ] || gh api "repos/${REPO}/rulesets/${ruleset_id}/history/${version}" \
-              > "${cached}" 2>/dev/null || { printf '%s' "${required_checks}"; return; }
-            jq -c '[.state.rules[]? | select(.type == "required_status_checks")
-                    | .parameters.required_status_checks[]?.context] | unique' "${cached}" \
-              2>/dev/null || printf '%s' "${required_checks}"
+            if [ ! -f "${cached}" ]; then
+              if ! gh api "repos/${REPO}/rulesets/${ruleset_id}/history/${version}" > "${cached}" 2>/dev/null; then
+                rm -f "${cached}"
+                echo "::warning::could not read ruleset version ${version}; using today's required set" >&2
+                printf '%s' "${required_checks}"; return
+              fi
+            fi
+            contexts=$(jq -c '[.state.rules[]? | select(.type == "required_status_checks")
+                    | .parameters.required_status_checks[]?.context] | unique' "${cached}" 2>/dev/null || true)
+            if [ -z "${contexts}" ] || [ "${contexts}" = "null" ]; then
+              echo "::warning::ruleset version ${version} carried no required-status-checks rule; using today's required set" >&2
+              printf '%s' "${required_checks}"; return
+            fi
+            echo "ruleset-version=${version}" >&2
+            printf '%s' "${contexts}"
           }
 
           findings=""
