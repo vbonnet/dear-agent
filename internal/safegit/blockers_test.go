@@ -78,6 +78,9 @@ func TestClassifyBlockers_OutdatedUnresolvedThreadBlocks(t *testing.T) {
 	if !strings.Contains(bs[0].Detail, "outdated") {
 		t.Errorf("outdated threads must be called out, got: %s", bs[0].Detail)
 	}
+	if !strings.Contains(bs[0].Fix, "resolve-review-threads reply-resolve") {
+		t.Errorf("thread fix must lead with reply-resolve, got: %s", bs[0].Fix)
+	}
 	if !strings.Contains(bs[0].Fix, "resolve-review-threads resolve-all owner repo 42") {
 		t.Errorf("thread fix must name resolve-review-threads, got: %s", bs[0].Fix)
 	}
