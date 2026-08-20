@@ -8,6 +8,7 @@
 # RELATED-SPEC: internal/earslint/SPEC.md
 # RELATED-SPEC: internal/fileutil/SPEC.md
 # RELATED-SPEC: internal/gittest/SPEC.md
+# RELATED-SPEC: internal/infraattest/SPEC.md
 # RELATED-SPEC: internal/logrotate/SPEC.md
 # RELATED-SPEC: internal/sqlite/SPEC.md
 # RELATED-SPEC: internal/tracking/SPEC.md
@@ -33,6 +34,7 @@ Feature: Internal foundation guardrails
       | internal/earslint  |
       | internal/fileutil  |
       | internal/gittest   |
+      | internal/infraattest |
       | internal/logrotate |
       | internal/override  |
       | internal/sqlite    |
