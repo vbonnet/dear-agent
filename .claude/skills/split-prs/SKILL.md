@@ -50,6 +50,43 @@ costs most.
 Never put a rename and the new code that depends on it in one PR: the reviewer
 cannot tell which lines moved and which are new.
 
+## If the PR is already open: keep it as the tip
+
+**The original PR stays as the top of the stack.** Extract the lower slices into
+new PRs beneath it. Never close it and open a fresh PR for the remainder.
+
+An open PR accumulates review threads, bot findings, CI history, and the
+argument about why the change looks the way it does. That record is the most
+valuable thing it owns, and it is what a later retrospective reads to
+reconstruct the decision. Closing the PR discards the discussion while keeping
+the code — backwards, because git keeps the code either way.
+
+Both failure modes are in this repo's history:
+
+- **#1307** — closed unmerged after 7 reviews, while its branch went on to be
+  #1314's base and merged. The work landed; the review history did not.
+- **#1133** — 22 comments and 44 reviews, split into #1301-#1304 on four new
+  `stack/*` branches with one review each. #1133 stayed open but detached from
+  the stack that replaced it, so its history is stranded.
+
+```sh
+# 1. cut the lower slices onto their own branches, open them bottom-up
+# 2. rebase the original branch onto the topmost slice
+git rebase --onto <top-slice-branch> <cut-point> <original-branch>
+# 3. retarget the original PR
+gh pr edit <number> --base <top-slice-branch>
+```
+
+The original keeps its number, threads, and CI history, and its diff shrinks to
+the remainder as each slice lands beneath it.
+
+Step 2 is the one part not supported end to end — `safe-rebase` has no `--onto`
+mode (`ce-x2ekc`), so restack by hand rather than reaching for close-and-reopen.
+
+Close the original **only** if the slices absorb all of it and nothing is left
+at the tip; then name the superseding PRs in the closing comment so the thread
+stays reachable.
+
 ## If the whole thing is already in one branch
 
 Re-commit it in that order rather than opening one mixed PR:
@@ -86,8 +123,13 @@ Before opening the PR, both must hold:
 
 If either fails, split before opening rather than after. Splitting a branch you
 have not yet published costs one `git reset --soft`; splitting a PR that is
-already open and reviewed costs a restack, which this repository does not
-support end to end (see CONTRIBUTING.md).
+already open and reviewed costs a manual `--onto` restack (see above).
+
+When you split a PR that is already open, one more check: the **original PR
+number must still be open and sitting at the top of the stack**, with its base
+retargeted onto the topmost extracted slice. If you find yourself closing it and
+opening a new PR for the remainder, stop — you are about to discard the review
+history that makes the change auditable later.
 
 If you open it anyway, say in the PR description which of the atomic cases
 applies and why. An unexplained over-budget PR is the failure this skill exists

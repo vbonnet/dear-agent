@@ -173,6 +173,48 @@ the full review protocol (see the caveat below). If you have already written the
 whole thing in one branch, `git reset --soft <base>` and re-commit it in that
 order rather than opening one PR that mixes all three.
 
+##### Splitting a PR that is already open: keep it as the tip
+
+When the PR already exists, **the original PR stays as the top of the stack.**
+Extract the lower slices into new PRs beneath it; never close it and open a
+fresh PR for the remainder.
+
+An open PR accumulates review threads, bot findings, CI history, and the
+argument about *why* the change looks the way it does. That record is the most
+valuable thing the PR owns — it is what a later retrospective reads to
+reconstruct a decision. Closing the PR throws it away while keeping the code,
+which is exactly backwards: the code survives in git either way, the discussion
+does not.
+
+Both failure modes have happened here:
+
+- **#1307** was closed unmerged after accumulating 7 reviews, while its branch
+  lived on as the base of #1314 and merged. The work landed; the review history
+  did not.
+- **#1133** (22 comments, 44 reviews) was split into #1301–#1304 on four new
+  `stack/*` branches carrying one review each. #1133 was left open but detached
+  from the stack that replaced it, so its history is stranded rather than
+  carried forward.
+
+The mechanics:
+
+1. Cut the lower slices onto their own branches and open them bottom-up.
+2. Rebase the original branch onto the topmost extracted slice:
+   `git rebase --onto <top-slice-branch> <cut-point> <original-branch>`.
+3. Retarget the original PR onto that branch:
+   `gh pr edit <number> --base <top-slice-branch>`.
+
+The original keeps its number, its threads, and its CI history, and its diff
+shrinks to just the remainder as each slice lands beneath it.
+
+Step 2 is the one place this is not yet supported end to end: `safe-rebase` has
+no `--onto` mode, so the restack is manual (tracked as `ce-x2ekc`). Do it by
+hand rather than reaching for close-and-reopen.
+
+Close the original **only** when the slices absorb all of it and nothing remains
+at the tip. Then say in the closing comment which PRs superseded it, so the
+thread is still reachable from the work that replaced it.
+
 Each PR in the stack must stand on its own: it should have a clear purpose,
 pass the relevant tests, and be independently understandable from its diff and
 description. Do not bundle unrelated concerns into one monster PR just because
