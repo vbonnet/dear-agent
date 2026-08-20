@@ -142,14 +142,25 @@ func ModuleAddress(repo, resource string) string {
 	return fmt.Sprintf("module.managed_repos[%q].%s", repo, resource)
 }
 
-// EncodePlan renders a plan as one tab-separated record per line, which is what
-// infra/import.sh reads. Tabs, not spaces: an address contains quotes and
-// brackets but never a tab, so the script can split on it without quoting
-// rules of its own.
+// FieldSeparator delimits the fields of an encoded plan record.
+//
+// ASCII Unit Separator, not a tab. Tab is IFS whitespace in the shell, so bash
+// collapses a run of them into one delimiter: a skip step, whose import ID is
+// empty, would emit two adjacent tabs, and `read` would slide the reason into
+// the import-ID variable and leave the reason empty. US is not IFS whitespace,
+// so an empty field stays an empty field, and it cannot occur in an address or
+// in prose.
+const FieldSeparator = "\x1f"
+
+// EncodePlan renders a plan as one record per line, which is what
+// infra/import.sh reads.
 func EncodePlan(steps []Step) string {
 	var out strings.Builder
 	for _, step := range steps {
-		fmt.Fprintf(&out, "%s\t%s\t%s\t%s\n", step.Verb, step.Address, step.ImportID, step.Reason)
+		out.WriteString(strings.Join(
+			[]string{string(step.Verb), step.Address, step.ImportID, step.Reason},
+			FieldSeparator,
+		) + "\n")
 	}
 	return out.String()
 }

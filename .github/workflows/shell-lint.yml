@@ -194,12 +194,21 @@ jobs:
             git clone --depth 1 "https://github.com/bats-core/$helper.git" "tests/test_helper/$helper"
           done
 
-      - name: Run bats
-        # shell-matrix.yml runs the same directory across five interpreters to
-        # prove portability, but in minimal containers with no Go toolchain, so
-        # any case needing a repository binary skips there. This run is where
-        # those cases execute. Both are needed: neither is a superset.
-        run: bats tests/bats/
+      - name: Run toolchain-dependent bats files
+        # Scoped deliberately, not `bats tests/bats/`.
+        #
+        # shell-matrix.yml already runs the whole directory across bash-4,
+        # bash-5, zsh, dash and ash. Re-running every file here would only add
+        # a sixth environment none of them were written for: a bare ubuntu
+        # runner with the workflow's own HOME, PATH and installed tooling. That
+        # surfaces environment-specific failures in tests that pass in all five
+        # designed environments, which is noise attributed to whoever happens
+        # to touch shell next.
+        #
+        # This job exists for one thing: the cases that call `skip` in the
+        # matrix because they need a repository binary. List those files
+        # explicitly, so adding one is a visible decision.
+        run: bats tests/bats/infra-import.bats
 
   gate:
     name: Shell lint

@@ -69,12 +69,25 @@ run_import() {
   run bash ./import.sh
 }
 
+# assert_output_contains fails with the actual output and the recorded stub
+# call sequence, so a CI-only failure is diagnosable from the log alone.
+assert_output_contains() {
+  local needle="$1"
+  if [[ "${output}" != *"${needle}"* ]]; then
+    printf 'expected output to contain: %s\n' "${needle}" >&2
+    printf -- '--- status ---\n%s\n' "${status}" >&2
+    printf -- '--- output ---\n%s\n' "${output}" >&2
+    printf -- '--- stub calls ---\n%s\n' "$(cat "${STUB_LOG}" 2>/dev/null)" >&2
+    return 1
+  fi
+}
+
 @test "imports every managed resource exactly once" {
   stub_healthy_fleet
   run_import
 
   [ "${status}" -eq 0 ]
-  [[ "${output}" == *"Import complete"* ]]
+  assert_output_contains "Import complete"
 
   # The three managed-repo resources, at their module-qualified addresses.
   grep -qF 'tofu import module.managed_repos["dear-agent"].github_repository.this dear-agent' "${STUB_LOG}"
@@ -106,7 +119,7 @@ run_import() {
   run_import
 
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *"GITHUB_TOKEN is not set"* ]]
+  assert_output_contains "GITHUB_TOKEN is not set"
   # Nothing was attempted.
   [ ! -s "${STUB_LOG}" ]
 }
@@ -156,8 +169,8 @@ esac'
   run_import
 
   [ "${status}" -eq 0 ]
-  [[ "${output}" == *"will be CREATED by plan"* ]]
-  [[ "${output}" == *"Import complete"* ]]
+  assert_output_contains "will be CREATED by plan"
+  assert_output_contains "Import complete"
 }
 
 @test "an unrecognized provider failure aborts the run" {
@@ -171,8 +184,8 @@ esac'
   run_import
 
   [ "${status}" -ne 0 ]
-  [[ "${output}" == *"failed to import"* ]]
-  [[ "${output}" == *"403 Forbidden"* ]]
+  assert_output_contains "failed to import"
+  assert_output_contains "403 Forbidden"
 }
 
 @test "a repository already in state is skipped rather than re-imported" {
@@ -192,7 +205,7 @@ esac'
   run_import
 
   [ "${status}" -eq 0 ]
-  [[ "${output}" == *"already imported and verified"* ]]
+  assert_output_contains "already imported and verified"
   # Only the Dependabot resource was missing from state.
   [ "$(grep -c 'tofu import' "${STUB_LOG}")" -eq 1 ]
   grep -qF 'github_repository_dependabot_security_updates.this' "${STUB_LOG}"

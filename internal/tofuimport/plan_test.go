@@ -169,17 +169,37 @@ func TestBuildPlanRequiresACanonicalRulesetName(t *testing.T) {
 	}
 }
 
-func TestEncodePlanIsTabSeparatedAndUnambiguous(t *testing.T) {
+func TestEncodePlanKeepsEveryFieldAddressable(t *testing.T) {
 	steps := []Step{{Verb: VerbImport, Address: `module.managed_repos["a"].x`, ImportID: "a", Reason: "not yet in state"}}
-	encoded := EncodePlan(steps)
-	fields := strings.Split(strings.TrimSuffix(encoded, "\n"), "\t")
+	fields := strings.Split(strings.TrimSuffix(EncodePlan(steps), "\n"), FieldSeparator)
 	if len(fields) != 4 {
-		t.Fatalf("expected 4 tab-separated fields, got %d: %q", len(fields), encoded)
+		t.Fatalf("expected 4 fields, got %d: %q", len(fields), EncodePlan(steps))
 	}
-	// An address carries quotes and brackets but never a tab, which is why the
-	// script can split on tabs without quoting rules of its own.
-	if strings.Contains(fields[1], "\t") || fields[1] != `module.managed_repos["a"].x` {
+	if fields[1] != `module.managed_repos["a"].x` {
 		t.Fatalf("address field is not intact: %q", fields[1])
+	}
+}
+
+// TestEncodePlanPreservesAnEmptyImportID is the regression test for a real
+// defect: the encoding used tabs, tab is IFS whitespace, and bash collapses a
+// run of IFS whitespace into one delimiter. A skip step has no import ID, so
+// its record carried two adjacent separators, `read` slid the reason into the
+// import-ID variable, and import.sh printed an empty reason.
+func TestEncodePlanPreservesAnEmptyImportID(t *testing.T) {
+	steps := []Step{{Verb: VerbSkip, Address: "addr", Reason: "already imported and verified against a:1"}}
+	fields := strings.Split(strings.TrimSuffix(EncodePlan(steps), "\n"), FieldSeparator)
+	if len(fields) != 4 {
+		t.Fatalf("an empty import id collapsed the record into %d fields: %q", len(fields), EncodePlan(steps))
+	}
+	if fields[2] != "" {
+		t.Fatalf("import id field should be empty, got %q", fields[2])
+	}
+	if fields[3] != "already imported and verified against a:1" {
+		t.Fatalf("reason field did not survive the empty import id: %q", fields[3])
+	}
+	// The separator must not be something the shell folds together.
+	if strings.ContainsAny(FieldSeparator, " \t\n") {
+		t.Fatalf("field separator %q is IFS whitespace; the shell will collapse runs of it", FieldSeparator)
 	}
 }
 

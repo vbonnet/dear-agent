@@ -47,7 +47,7 @@ done < <("$planner" repos --inventory "$work/inventory.json")
   --rulesets-dir "$work/rulesets" > "$work/plan.tsv"
 
 # Execute.
-while IFS=$'\t' read -r verb address import_id reason; do
+while IFS=$'\x1f' read -r verb address import_id reason; do
   case "$verb" in
     skip | create) echo "$verb: $address ($reason)" ;;
     import)
