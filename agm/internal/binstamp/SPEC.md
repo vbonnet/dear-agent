@@ -46,9 +46,13 @@ Consumers: `agm/cmd/agm/watch_stalled.go`.
 
 ### Daemon integration
 
-- WHEN a watching daemon observes that its executable was replaced, it SHALL exit cleanly so its supervisor restarts it on the new build.
-- WHERE the daemon exits for this reason, it SHALL emit a `binary_replaced` event naming the binary, so an operator reading the log can tell a redeploy restart from a crash restart.
-- WHEN the daemon checks for replacement, it SHALL do so before performing that cycle's work, so a redeploy takes effect on the next cycle rather than after another full round of superseded behavior.
+- WHEN a watching daemon observes that its executable was replaced, the system SHALL exit cleanly so its supervisor restarts it on the new build.
+- WHERE the daemon exits because its executable was replaced, the system SHALL emit a `binary_replaced` event naming the binary, so an operator reading the log can tell a redeploy restart from a crash restart.
+- WHILE a watching daemon is running, the system SHALL check for replacement before performing each cycle's work, so a redeploy takes effect on the next cycle rather than after another full round of superseded behavior.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/spec_coverage.feature` (changed-package SPEC coverage gate)
 
 ## Non-goals
 
