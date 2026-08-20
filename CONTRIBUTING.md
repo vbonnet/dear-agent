@@ -131,6 +131,127 @@ test independently. When a change is large, split it into a GitHub stacked PR
 series: land mechanical refactors, renames, generated updates, or pure test
 scaffolding first, then put the risky behavior change in a focused follow-up PR.
 
+#### Size budget
+
+Aim for **at most 400 changed lines and at most 15 changed files** in one PR.
+
+That is a *target to design toward*, not a limit to creep up to. It is derived
+from what this repository already does: across the 200 most recent merges to
+`main`, the median PR was 238 changed lines, and 59% already met both numbers.
+It is a description of a normal change here, not an aspiration.
+
+The CI thresholds are **ceilings, not targets**. `.github/workflows/pr-size-scope.yml`
+comments once a PR crosses 1,000 changed lines, 50 changed files, or 4 top-level
+areas. A PR at 999 lines is not "within budget" — it is four times over budget
+and one line under the alarm. Do not treat the alarm as the goal.
+
+Two reasons the budget is about review quality, not tidiness:
+
+- **Human review stops happening.** Past a few hundred lines a reviewer skims
+  rather than reads, and approval starts meaning "nothing obviously alarming"
+  instead of "I checked this."
+- **Agent review degrades too.** A large diff spends the reviewer's attention on
+  bulk rather than on the few lines that carry the risk, so specific defects get
+  missed in exactly the PRs where a miss is most expensive.
+
+When a change genuinely cannot fit — a mechanical rename across many call sites,
+a generated-file refresh, a vendored update — say so explicitly in the PR
+description, and separate the mechanical part from anything hand-written so a
+reviewer can skip the bulk and concentrate on the rest.
+
+##### A chain of base branches is not yet a stack
+
+Pointing each PR's base at the branch below it builds a valid *chain*, and that
+much this repository already does. It is not the same as a **registered stack**.
+When GitHub shows *"This pull request can be stacked with other pull requests"*,
+it has recognised a correctly-formed chain and is offering to formalise it — the
+banner means the branches are right and the registration is missing, not that
+the chain is wrong.
+
+Registering matters because the stack, not the chain, is what
+[`gh stack`](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-stacked-pull-requests)
+operates on: `gh stack sync` cascade-rebases every member onto its updated
+parent and switches to `--onto` automatically once a lower PR has merged. An
+unregistered chain gets none of that, which is why restacking after a squash
+landing used to be manual.
+
+So finish the job: build the chain, then register it.
+
+##### How to split, in order
+
+1. **Mechanical first.** Renames, moves, generated output, formatting. These
+   should be reviewable by confirming nothing changed but names and locations.
+2. **Enabling refactor next.** New seams, extracted interfaces, signature
+   changes — still no behavior change.
+3. **Behavior last.** The actual new logic, built on names and seams that are
+   already on `main`.
+
+When the work has not been published yet, build the stack with `gh stack`
+directly rather than opening branches by hand:
+
+```sh
+gh stack init <first-slice-branch>   # first branch on top of trunk;
+                                     # existing branches are adopted
+gh stack add  <next-slice-branch>    # once per further slice, bottom-up
+gh stack submit                      # push every branch and open the PRs
+```
+
+Land each step before opening the next, so every PR is based on `main` and gets
+the full review protocol (see the caveat below). If you have already written the
+whole thing in one branch, `git reset --soft <base>` and re-commit it in that
+order rather than opening one PR that mixes all three.
+
+##### Splitting a PR that is already open: keep it as the tip
+
+When the PR already exists, **the original PR stays as the top of the stack.**
+Extract the lower slices into new PRs beneath it; never close it and open a
+fresh PR for the remainder.
+
+An open PR accumulates review threads, bot findings, CI history, and the
+argument about *why* the change looks the way it does. That record is the most
+valuable thing the PR owns — it is what a later retrospective reads to
+reconstruct a decision. Closing the PR throws it away while keeping the code,
+which is exactly backwards: the code survives in git either way, the discussion
+does not.
+
+Both failure modes have happened here:
+
+- **#1307** was closed unmerged after accumulating 7 reviews, while its branch
+  lived on as the base of #1314 and merged. The work landed; the review history
+  did not.
+- **#1133** (22 comments, 44 reviews) was split into #1301–#1304 on four new
+  `stack/*` branches carrying one review each. #1133 was left open but detached
+  from the stack that replaced it, so its history is stranded rather than
+  carried forward.
+
+The mechanics — use `gh stack`, not hand-rolled rebases:
+
+```sh
+gh extension install github/gh-stack   # once per machine
+
+# 1. cut the lower slices onto their own branches (bottom-up), then
+# 2. register the whole chain as a real stack, tip last.
+#    Accepts branch names or PR numbers; branches that already have an open PR
+#    keep that PR, so the original keeps its number, threads, and CI history.
+gh stack link <slice-1-branch> <slice-2-branch> <original-branch>
+
+# after a lower PR merges, re-align the whole chain in one step
+gh stack sync
+```
+
+`gh stack sync` is what makes this practical. It fetches, reconciles the remote
+stack, fast-forwards trunk, and cascade-rebases every branch onto its updated
+parent — and when a branch's PR has already merged it switches to `--onto` mode
+automatically, which is exactly the squash-merge case that used to have to be
+done by hand.
+
+The original keeps its number, its threads, and its CI history, and its diff
+shrinks to just the remainder as each slice lands beneath it.
+
+Close the original **only** when the slices absorb all of it and nothing remains
+at the tip. Then say in the closing comment which PRs superseded it, so the
+thread is still reachable from the work that replaced it.
+
 Each PR in the stack must stand on its own: it should have a clear purpose,
 pass the relevant tests, and be independently understandable from its diff and
 description. Do not bundle unrelated concerns into one monster PR just because
