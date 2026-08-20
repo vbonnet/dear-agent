@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 1.2
+**Version:** 1.3
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -50,6 +50,14 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-17** When about to resolve a thread, the system shall re-read that thread and re-evaluate its answered state immediately before issuing the mutation.
 
 **RESOLVE-REVIEW-THREADS-18** When a thread is already resolved, the system shall report it as skipped rather than issuing a redundant mutation.
+
+**RESOLVE-REVIEW-THREADS-19** When either the opening or the most recent comment author login is unavailable, the system shall not mark the thread answered.
+
+**RESOLVE-REVIEW-THREADS-20** When `resolve-all` encounters an error that is not an evidence refusal, the system shall abort the sweep and report how many threads were resolved and refused before it stopped.
+
+**RESOLVE-REVIEW-THREADS-21** When `reply-resolve` finds its requested reply is already the thread's most recent comment, the system shall skip posting and proceed to resolution.
+
+**RESOLVE-REVIEW-THREADS-22** When `reply-resolve` posts a reply but cannot resolve the thread, the system shall state that the reply is posted, warn against re-running the command, and name the resolution-only command to finish.
 
 ## BDD Traceability
 

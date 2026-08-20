@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestCleanBody(t *testing.T) {
 	tests := []struct {
@@ -117,8 +120,10 @@ func mkNode(id string, outdated bool, authors ...string) threadNode {
 		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
+		Body string `json:"body"`
 	}
 	last.Author.Login = authors[len(authors)-1]
+	last.Body = "comment from " + authors[len(authors)-1]
 	n.Recent.Nodes = append(n.Recent.Nodes, last)
 	return n
 }
@@ -237,5 +242,71 @@ func TestToThreadSingleCommentNeverAnswered(t *testing.T) {
 	n := mkNode("solo", false, "gemini-code-assist")
 	if got := toThread(n); got.Answered {
 		t.Errorf("single-comment thread counted as answered: %+v", got)
+	}
+}
+
+// mkNodeLogins builds a thread from explicit logins so the empty-login cases
+// (deleted or hidden accounts) can be exercised directly.
+func mkNodeLogins(id, opening, latest string, total int) threadNode {
+	var n threadNode
+	n.ID = id
+	n.Path = "pkg/thing.go"
+	n.Opening.TotalCount = total
+	var open struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		Body string `json:"body"`
+	}
+	open.Author.Login = opening
+	n.Opening.Nodes = append(n.Opening.Nodes, open)
+	var last struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		Body string `json:"body"`
+	}
+	last.Author.Login = latest
+	n.Recent.Nodes = append(n.Recent.Nodes, last)
+	return n
+}
+
+// TestToThreadFailsClosedOnMissingAuthor pins that a missing login never
+// manufactures the second participant that Answered asserts. Comparing an
+// absent login against the "unknown" display placeholder would read as two
+// distinct actors and license resolving a finding nobody answered.
+func TestToThreadFailsClosedOnMissingAuthor(t *testing.T) {
+	tests := []struct {
+		name            string
+		opening, latest string
+	}{
+		{"latest author missing", "gemini-code-assist", ""},
+		{"opening author missing", "", "vbonnet"},
+		{"both missing", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toThread(mkNodeLogins("x", tt.opening, tt.latest, 2)); got.Answered {
+				t.Errorf("answered on unobservable authors: %+v", got)
+			}
+		})
+	}
+
+	// Control: two observed, distinct logins still answer the thread.
+	if got := toThread(mkNodeLogins("y", "gemini-code-assist", "vbonnet", 2)); !got.Answered {
+		t.Errorf("two observed authors should answer the thread: %+v", got)
+	}
+}
+
+// TestUnansweredErrorIsDistinguishable pins the sweep's error split: an
+// evidence refusal must be recognisable via errors.As so operational failures
+// (auth, permissions, outage) can abort instead of repeating per thread.
+func TestUnansweredErrorIsDistinguishable(t *testing.T) {
+	var target *unansweredError
+	if !errors.As(error(&unansweredError{msg: "unanswered"}), &target) {
+		t.Fatal("unansweredError not matched by errors.As")
+	}
+	if errors.As(errors.New("gh api graphql: permission denied"), &target) {
+		t.Error("an operational error was misclassified as an evidence refusal")
 	}
 }

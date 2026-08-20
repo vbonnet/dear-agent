@@ -55,6 +55,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -78,7 +79,7 @@ const listQuery = `query($owner:String!, $repo:String!, $pr:Int!, $after:String)
           isOutdated
           path
           opening: comments(first:1) { totalCount nodes { author { login } body } }
-          recent: comments(last:1) { nodes { author { login } } }
+          recent: comments(last:1) { nodes { author { login } body } }
         }
       }
     }
@@ -96,7 +97,7 @@ const threadByIDQuery = `query($id:ID!) {
       isOutdated
       path
       opening: comments(first:1) { totalCount nodes { author { login } body } }
-      recent: comments(last:1) { nodes { author { login } } }
+      recent: comments(last:1) { nodes { author { login } body } }
     }
   }
 }`
@@ -137,6 +138,9 @@ type thread struct {
 	// LastAuthor is the login of the most recent commenter, so a refusal can
 	// say who is holding the thread open.
 	LastAuthor string `json:"lastAuthor"`
+	// LastBody is the most recent comment, used to recognise a reply this
+	// tool already posted so a retry does not duplicate it.
+	LastBody string `json:"-"`
 }
 
 func main() {
@@ -234,13 +238,21 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	if len(bytes.TrimSpace([]byte(body))) == 0 {
 		return fail("reply body must not be empty: resolution needs a stated reason")
 	}
-	if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
+	// Retry safety: if this exact reply is already the thread's last comment,
+	// a previous run posted it and only the resolve failed. Posting again
+	// would leave a duplicate public comment on every retry.
+	if cur, err := fetchThread(ctx, threadID); err == nil &&
+		cur.LastAuthor != cur.Author && cur.LastBody == cleanBody(body) {
+		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
+	} else if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
 		"-f", "query="+replyMutation); err != nil {
 		return fail("reply failed, thread left unresolved: %v", err)
 	}
 	msg, err := resolveWithEvidence(ctx, threadID, false)
 	if err != nil {
-		return fail("replied but did not resolve: %v", err)
+		return fail("the reply is posted but the thread is NOT resolved: %v\n"+
+			"do NOT re-run reply-resolve (it would repost); finish with:\n"+
+			"  resolve-review-threads resolve %s", err, threadID)
 	}
 	fmt.Println(msg)
 	return 0
@@ -287,6 +299,13 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 		}
 		msg, err := resolveWithEvidence(ctx, t.ID, force)
 		if err != nil {
+			var unanswered *unansweredError
+			if !errors.As(err, &unanswered) {
+				// Auth, permissions, or a GraphQL outage. Retrying it once per
+				// remaining thread would just repeat a denied call and then
+				// report the pile as "nobody replied".
+				return fail("aborting sweep after %d resolved, %d refused: %v", resolved, refused, err)
+			}
 			// A thread that went unanswered between the listing and now is a
 			// refusal, not a fatal error: keep sweeping the rest.
 			refused++
@@ -418,6 +437,7 @@ type threadNode struct {
 			Author struct {
 				Login string `json:"login"`
 			} `json:"author"`
+			Body string `json:"body"`
 		} `json:"nodes"`
 	} `json:"recent"`
 }
@@ -437,11 +457,22 @@ func toThread(n threadNode) thread {
 		t.Author = login
 	}
 	t.Body = cleanBody(n.Opening.Nodes[0].Body)
-	t.LastAuthor = "unknown"
-	if len(n.Recent.Nodes) > 0 && n.Recent.Nodes[0].Author.Login != "" {
-		t.LastAuthor = n.Recent.Nodes[0].Author.Login
+	openLogin := n.Opening.Nodes[0].Author.Login
+	lastLogin := ""
+	if len(n.Recent.Nodes) > 0 {
+		lastLogin = n.Recent.Nodes[0].Author.Login
+		t.LastBody = n.Recent.Nodes[0].Body
 	}
-	t.Answered = n.Opening.TotalCount > 1 && t.LastAuthor != t.Author
+	t.LastAuthor = "unknown"
+	if lastLogin != "" {
+		t.LastAuthor = lastLogin
+	}
+	// Both logins must be observed. A deleted or hidden account leaves an
+	// empty login, and comparing it against the "unknown" placeholder would
+	// manufacture a second participant that was never seen. Answered is a
+	// licence to close someone's finding, so absence of evidence is treated
+	// as evidence of absence in the safe direction only.
+	t.Answered = n.Opening.TotalCount > 1 && openLogin != "" && lastLogin != "" && lastLogin != openLogin
 	return t
 }
 
@@ -465,6 +496,14 @@ func fetchThread(ctx context.Context, threadID string) (thread, error) {
 	return toThread(resp.Data.Node), nil
 }
 
+// unansweredError marks a thread that was refused on evidence, as opposed to
+// a GraphQL or permission failure. The sweep continues past the former and
+// stops on the latter, so a globally denied operation is not retried once per
+// thread and then misreported as "nobody replied".
+type unansweredError struct{ msg string }
+
+func (e *unansweredError) Error() string { return e.msg }
+
 // resolveWithEvidence re-reads the thread and resolves it only if it is still
 // answered, so a reviewer comment arriving between the decision and the
 // mutation cannot be resolved away. force skips the evidence check, never the
@@ -478,9 +517,9 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool) (stri
 		return fmt.Sprintf("skipped %s (already resolved)", threadID), nil
 	}
 	if !cur.Answered && !force {
-		return "", fmt.Errorf("%s %s: unanswered (last word: @%s)%s\n"+
+		return "", &unansweredError{msg: fmt.Sprintf("%s %s: unanswered (last word: @%s)%s\n"+
 			"reply with the reason instead: resolve-review-threads reply-resolve %s \"Fixed - <what changed>\"",
-			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)
+			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)}
 	}
 	return mutateThread(ctx, "resolve", threadID)
 }
