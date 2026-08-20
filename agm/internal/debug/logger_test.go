@@ -260,9 +260,13 @@ func TestClose_ReleasesHandleAndIsIdempotent(t *testing.T) {
 
 	mu.Lock()
 	handle := globalLogger.file
+	stillEnabled := globalLogger.enabled
 	mu.Unlock()
 	if handle != nil {
 		t.Error("Close() should drop the file handle so a later write cannot reach a closed descriptor")
+	}
+	if stillEnabled {
+		t.Error("Close() should clear enabled so Log() short-circuits instead of touching a nil file")
 	}
 
 	// The descriptor really is closed, not just forgotten.

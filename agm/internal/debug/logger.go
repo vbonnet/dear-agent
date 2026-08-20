@@ -108,6 +108,7 @@ func Close() {
 		slog.Error("Failed to close debug log", "path", path, "error", err)
 	}
 	globalLogger.file = nil
+	globalLogger.enabled = false
 }
 
 // Log writes a timestamped debug message
