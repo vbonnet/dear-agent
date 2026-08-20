@@ -1,0 +1,23 @@
+{
+  "schema": "dear-agent.opentofu-migration-surface/v1",
+  "backend": {
+    "type": "s3",
+    "configuration": {
+      "bucket": "DA_PRIVATE_SENTINEL_7c96b2ca",
+      "key": "private/state/path",
+      "use_lockfile": true
+    }
+  },
+  "state_encryption": "disabled",
+  "plan_encryption": "enforced",
+  "moved_blocks": [],
+  "removed_blocks": [],
+  "import_blocks": [],
+  "providers": [
+    {
+      "address": "registry.opentofu.org/integrations/github",
+      "version": "6.13.0"
+    }
+  ],
+  "workspace": "default"
+}

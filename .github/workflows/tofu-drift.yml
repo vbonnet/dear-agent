@@ -18,7 +18,19 @@ name: Tofu Drift Detection
 #   R2_SECRET_ACCESS_KEY    R2 S3 secret access key.
 #   CLAUDE_CODE_OAUTH_TOKEN OAuth token applied to opted-in review repos.
 # These are the same credentials used for a local `tofu apply`; nothing new is
-# invented here. If any secret is absent the job fails loudly (see preflight).
+# invented here.
+#
+# When the credentials are absent the enforcement cannot run at all. Failing the
+# job paints `main` red every single day and makes main-health-watchdog file a
+# fresh incident each time — for a condition no commit caused and no code change
+# can fix. The daily red carries exactly one bit ("still not provisioned") and
+# drowns the failures that mean something.
+#
+# So the preflight is its own job. When the secrets are missing it warns loudly,
+# writes the reason into the run summary, and leaves the enforcement job SKIPPED
+# — visibly not-run, which is honest, rather than a green run that would claim a
+# drift check happened. Provisioning the secrets turns enforcement back on with
+# no further change.
 
 on:
   schedule:
@@ -34,19 +46,15 @@ permissions:
   issues: write # to open/update the drift alert issue
 
 jobs:
-  drift:
-    name: Tofu Drift Detection
+  preflight:
+    name: Credentials preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: infra
-
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Preflight — required secrets present
+      - name: Required secrets present
+        id: check
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
@@ -59,13 +67,37 @@ jobs:
           for v in R2_ACCOUNT_ID R2_STATE_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY INFRA_GITHUB_TOKEN CLAUDE_CODE_OAUTH_TOKEN; do
             [ -z "${!v}" ] && missing+=("$v")
           done
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::missing required secrets: ${missing[*]}"
-            exit 1
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::drift detection did not run — missing secrets: ${missing[*]}"
+          {
+            echo "### Tofu drift detection did not run"
+            echo
+            echo "Missing repository secrets: \`${missing[*]}\`"
+            echo
+            echo "Live infrastructure was **not** compared against \`infra/\`."
+            echo "Configure the secrets (see this workflow's header) to enable enforcement."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  drift:
+    name: Tofu Drift Detection
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v2
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           tofu_version: 1.12.5
 
