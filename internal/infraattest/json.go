@@ -67,13 +67,6 @@ func CanonicalPrivateJSON(raw []byte, maxRawBytes int) ([]byte, error) {
 	return canonicalJSONWithLimits(raw, maxRawBytes, MaxJSONStringBytes)
 }
 
-// CanonicalPrivateJSON canonicalises bounded private JSON, rejecting duplicated
-// keys, trailing bytes, oversized input, and unsupported encodings so callers
-// outside this package can satisfy INFRA-ATTEST-06 with the same parser.
-func CanonicalPrivateJSON(raw []byte, maxRawBytes int) ([]byte, error) {
-	return canonicalJSONWithLimits(raw, maxRawBytes, MaxJSONStringBytes)
-}
-
 func canonicalJSON(raw []byte) ([]byte, error) {
 	return canonicalJSONWithLimits(raw, MaxEvidenceBytes, MaxJSONStringBytes)
 }
