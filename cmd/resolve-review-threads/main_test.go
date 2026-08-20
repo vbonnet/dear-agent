@@ -616,3 +616,22 @@ func TestClassifyPriorReplyBeyondTail(t *testing.T) {
 			len(history)-2, got)
 	}
 }
+
+// TestCheckCursorAdvances pins the pagination progress guard. A response
+// claiming another page while returning an empty or repeated cursor would
+// otherwise loop forever, so reply-resolve would never finish and would
+// hammer the API while not finishing.
+func TestCheckCursorAdvances(t *testing.T) {
+	if err := checkCursorAdvances("cursor2", "cursor1"); err != nil {
+		t.Errorf("a genuinely advancing cursor was rejected: %v", err)
+	}
+	if err := checkCursorAdvances("cursor1", "cursor1"); err == nil {
+		t.Error("a repeated cursor must abort pagination")
+	}
+	if err := checkCursorAdvances("", "cursor1"); err == nil {
+		t.Error("an empty cursor must abort pagination")
+	}
+	if err := checkCursorAdvances("", ""); err == nil {
+		t.Error("an empty first cursor must abort pagination")
+	}
+}

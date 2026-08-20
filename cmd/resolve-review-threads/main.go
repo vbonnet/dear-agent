@@ -246,7 +246,7 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 		fmt.Println(msg)
 		return 0
 	}
-	msg, _, err := resolveWithEvidence(ctx, args[0], force)
+	msg, _, err := resolveWithEvidence(ctx, args[0], force, "")
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -289,6 +289,17 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	if err != nil {
 		return fail("cannot read thread history, nothing posted: %v", err)
 	}
+	// Paging a long thread takes time, so re-read state before acting on it:
+	// another actor may have resolved it meanwhile, and replying then would
+	// comment on a settled conversation.
+	cur, err = fetchThread(ctx, threadID)
+	if err != nil {
+		return fail("cannot re-read thread state, nothing posted: %v", err)
+	}
+	if cur.IsResolved {
+		fmt.Printf("skipped %s (already resolved)\n", threadID)
+		return 0
+	}
 
 	// anchorID must be the thread's last comment, and anchorPrevID must be the
 	// comment before it, for resolution to be allowed. Both are required: see
@@ -320,7 +331,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID); code != 0 {
 		return code
 	}
-	msg, _, rErr := resolveWithEvidence(ctx, threadID, false)
+	msg, _, rErr := resolveWithEvidence(ctx, threadID, false, anchorID)
 	if rErr != nil {
 		var unanswered *unansweredError
 		if errors.As(rErr, &unanswered) {
@@ -484,7 +495,7 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 		// since, and refusing on stale state would report "nobody replied"
 		// about a thread that is currently answered. resolveWithEvidence
 		// re-reads and is the single place that decides.
-		msg, mutated, err := resolveWithEvidence(ctx, t.ID, force)
+		msg, mutated, err := resolveWithEvidence(ctx, t.ID, force, "")
 		if err != nil {
 			var unanswered *unansweredError
 			if !errors.As(err, &unanswered) {
@@ -757,10 +768,20 @@ func (e *unansweredError) Error() string { return e.msg }
 // answered, so a reviewer comment arriving between the decision and the
 // mutation cannot be resolved away. force skips the evidence check, never the
 // re-read: an already-resolved thread is still reported as a no-op.
-func resolveWithEvidence(ctx context.Context, threadID string, force bool) (msg string, mutated bool, err error) {
+// wantLastID, when non-empty, names the comment that must still be the
+// thread's last one. reply-resolve passes the reply it posted so that SPEC-31
+// is enforced at the pre-mutation read rather than only at an earlier check:
+// between the two, another process on the same login could comment, and the
+// answered test alone cannot tell that apart from our own reply.
+func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantLastID string) (msg string, mutated bool, err error) {
 	cur, err := fetchThread(ctx, threadID)
 	if err != nil {
 		return "", false, err
+	}
+	if wantLastID != "" && cur.LastID != wantLastID {
+		return "", false, &unansweredError{msg: fmt.Sprintf(
+			"%s %s: the comment this resolution was based on is no longer last "+
+				"(someone commented after it)", threadID, cur.Path)}
 	}
 	if cur.IsResolved {
 		// Someone else closed it between the listing and now. Report it, but
@@ -793,6 +814,17 @@ func isAccessDenied(err error) bool {
 		}
 	}
 	return false
+}
+
+// checkCursorAdvances rejects a page cursor that has not moved. A response
+// claiming another page while returning an empty or repeated cursor would
+// otherwise loop forever, hammering the API and never letting the caller
+// finish. Mirrors the guard in internal/safegit/threads.go.
+func checkCursorAdvances(endCursor, current string) error {
+	if endCursor == "" || endCursor == current {
+		return fmt.Errorf("pagination did not advance")
+	}
+	return nil
 }
 
 // fetchAllComments returns every comment on a thread, oldest first, following
@@ -837,6 +869,9 @@ func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, erro
 		}
 		if !c.PageInfo.HasNextPage {
 			return all, nil
+		}
+		if err := checkCursorAdvances(c.PageInfo.EndCursor, cursor); err != nil {
+			return nil, fmt.Errorf("paging comments for %s: %w", threadID, err)
 		}
 		cursor = c.PageInfo.EndCursor
 	}

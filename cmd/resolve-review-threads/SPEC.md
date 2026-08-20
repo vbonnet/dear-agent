@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 2.1
+**Version:** 2.2
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -84,6 +84,12 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-34** When `resolve-all` evaluates a candidate thread, the system shall decide refusal from a fresh per-thread read rather than from the listing snapshot.
 
 **RESOLVE-REVIEW-THREADS-35** When `-h`, `--help`, or `help` is requested, the system shall print usage and exit zero.
+
+**RESOLVE-REVIEW-THREADS-36** When comment pagination reports a further page with an empty or unchanged cursor, the system shall abort with an error rather than request the same page again.
+
+**RESOLVE-REVIEW-THREADS-37** When resolving on behalf of a reply, the system shall verify at the pre-mutation read that the named reply is still the last comment.
+
+**RESOLVE-REVIEW-THREADS-38** When the thread becomes resolved while its history is being paged, the system shall report it as skipped and post no reply.
 
 ## BDD Traceability
 
