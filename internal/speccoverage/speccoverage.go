@@ -714,7 +714,7 @@ func readGovernedInventoryFile(root *os.Root, files map[string]repoinventory.Fil
 	if !ok {
 		return nil, fmt.Errorf("path is absent from the governed repository inventory")
 	}
-	if !file.Mode.IsRegular() || file.Mode&os.ModeSymlink != 0 {
+	if !file.Mode.IsRegular() {
 		return nil, fmt.Errorf("governed path is not a regular non-symlink file")
 	}
 	handle, err := root.Open(filepath.FromSlash(filePath))
