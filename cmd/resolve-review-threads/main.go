@@ -242,18 +242,24 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// Retry safety: if this exact reply is already the thread's last comment,
 	// a previous run posted it and only the resolve failed. Posting again
 	// would leave a duplicate public comment on every retry.
-	if cur, err := fetchThread(ctx, threadID); err == nil &&
-		cur.LastAuthor != cur.Author && sameReplyBody(cur.LastBody, body) {
+	cur, err := fetchThread(ctx, threadID)
+	if err != nil {
+		// Without the current state we cannot tell whether a previous run
+		// already posted this reply, and posting blind is the duplicate this
+		// guard exists to prevent. Leave the thread untouched.
+		return fail("cannot read thread state, nothing posted: %v", err)
+	}
+	if cur.LastAuthor != cur.Author && sameReplyBody(cur.LastBody, body) {
 		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
 	} else if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
 		"-f", "query="+replyMutation); err != nil {
 		return fail("reply failed, thread left unresolved: %v", err)
 	}
-	msg, err := resolveWithEvidence(ctx, threadID, false)
-	if err != nil {
+	msg, rErr := resolveWithEvidence(ctx, threadID, false)
+	if rErr != nil {
 		return fail("the reply is posted but the thread is NOT resolved: %v\n"+
 			"do NOT re-run reply-resolve (it would repost); finish with:\n"+
-			"  resolve-review-threads resolve %s", err, threadID)
+			"  resolve-review-threads resolve %s", rErr, threadID)
 	}
 	fmt.Println(msg)
 	return 0

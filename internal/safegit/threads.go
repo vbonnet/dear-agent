@@ -184,6 +184,9 @@ func reviewThreadError(threads []ReviewThread) error {
 				body = string([]rune(body)[:80]) + "…"
 			}
 			label = fmt.Sprintf("  • @%s%s: %q", author, tag, body)
+			if t.ID != "" {
+				label += " [" + t.ID + "]"
+			}
 		}
 		unresolved = append(unresolved, label)
 	}
@@ -208,9 +211,11 @@ func threadRemediationGuidance(repo string, pr int) string {
 		owner, name = parts[0], parts[1]
 	}
 	return fmt.Sprintf(
-		"safe-merge: guidance: address each thread, then close it with its reason:\n"+
+		"safe-merge: guidance: address each thread, then close it with its reason.\n"+
+			"Thread IDs are in brackets above, or list them again with:\n"+
+			"  resolve-review-threads list %s %s %d\n"+
 			"  resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\"\n"+
 			"then sweep the answered ones and re-run safe-merge:\n"+
 			"  resolve-review-threads resolve-all %s %s %d [author]\n",
-		owner, name, pr)
+		owner, name, pr, owner, name, pr)
 }
