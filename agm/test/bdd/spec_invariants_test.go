@@ -11,6 +11,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/internal/repoinventory"
 )
 
 // TestSPECInvariants_TrustProtocol validates SPEC-trust-protocol.md invariants
@@ -404,10 +405,9 @@ func TestSPECInvariants_SessionLifecycle(t *testing.T) {
 	})
 }
 
-// TestBDDFeatureFileLocation enforces the structural invariant from
-// ADR-027: every .feature file must live under agm/test/bdd/features/,
-// which is the exact path TestFeatures passes to godog. A feature file
-// placed elsewhere would be silently skipped by TestFeatures.
+// TestBDDFeatureFileLocation enforces the structural invariant shared by the
+// runner, catalog, parity registry, and coverage scanners: every .feature file
+// must be a canonically named direct child of agm/test/bdd/features/.
 func TestBDDFeatureFileLocation(t *testing.T) {
 	t.Parallel()
 	// Walk the parent directory (agm/test/bdd) and fail if any .feature
@@ -425,11 +425,12 @@ func TestBDDFeatureFileLocation(t *testing.T) {
 			return nil
 		}
 		if strings.HasSuffix(strings.ToLower(d.Name()), ".feature") {
-			// Is this file inside the features/ subdirectory?
-			rel, relErr := filepath.Rel(featuresDir, path)
-			if relErr != nil || strings.HasPrefix(rel, "..") {
-				t.Errorf(".feature file outside features/: %s — move it under agm/test/bdd/features/ "+
-					"or TestFeatures will silently skip it (see ADR-027)", path)
+			// Executable features are flat direct children. Godog walks the
+			// configured directory recursively, so a nested feature would run
+			// while basename-oriented catalogs and registries omitted it.
+			if !isCanonicalDirectBDDFeaturePath(featuresDir, path) {
+				t.Errorf(".feature file must be a canonically named direct child of features/: %s — move or rename it in agm/test/bdd/features/ "+
+					"so TestFeatures, catalogs, and registries observe one suite", path)
 			}
 		}
 		return nil
@@ -437,6 +438,36 @@ func TestBDDFeatureFileLocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WalkDir failed: %v", err)
 	}
+}
+
+func TestCanonicalDirectBDDFeaturePathRejectsNestedOutsideAndUnparseableFiles(t *testing.T) {
+	t.Parallel()
+	featuresDir := filepath.Join("agm", "test", "bdd", "features")
+	tests := map[string]bool{
+		filepath.Join(featuresDir, "example.feature"):           true,
+		filepath.Join(featuresDir, "nested", "example.feature"): false,
+		filepath.Join(featuresDir, "example feature.feature"):   false,
+		filepath.Join("agm", "test", "bdd", "example.feature"):  false,
+		filepath.Join("docs", "example.feature"):                false,
+	}
+	for path, want := range tests {
+		if got := isCanonicalDirectBDDFeaturePath(featuresDir, path); got != want {
+			t.Errorf("isCanonicalDirectBDDFeaturePath(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+func isCanonicalDirectBDDFeaturePath(featuresDir, path string) bool {
+	rel, err := filepath.Rel(featuresDir, path)
+	if err != nil {
+		return false
+	}
+	outside := rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	if rel == "." || outside || filepath.Dir(rel) != "." {
+		return false
+	}
+	repositoryPath := repoinventory.ExecutableBDDFeatureRoot + "/" + filepath.ToSlash(rel)
+	return repoinventory.IsExecutableBDDFeaturePath(repositoryPath)
 }
 
 // TestBDDCatalogListsEveryFeatureFile keeps the living BDD catalog in sync with
