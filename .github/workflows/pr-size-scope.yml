@@ -290,10 +290,20 @@ jobs:
             Frame the proposal so THIS pull request stays as the TIP of the stack. The lower
             slices are extracted into new PRs beneath it, and this PR is retargeted onto the
             topmost slice — it is never closed and replaced by a fresh PR for the remainder.
-            Say so explicitly, and give the two commands:
-              git rebase --onto <top-slice-branch> <cut-point> <this-branch>
-              gh pr edit ${{ github.event.pull_request.number }} --base <top-slice-branch>
-            Note that safe-rebase has no --onto mode (ce-x2ekc), so that restack is manual.
+
+            Prescribe GitHub's native stacking, and give the exact commands. Pointing each
+            base at the branch below builds a valid chain, but a chain is not a registered
+            stack: `gh stack sync` only cascade-rebases members of a registered stack, and it
+            is what switches to `--onto` automatically once a lower PR merges. So the proposal
+            must end with the registration step, tip LAST, and must reuse this PR number:
+              gh extension install github/gh-stack   # once per machine
+              gh stack link <slice-1-branch> <slice-2-branch> <this-branch>
+              gh stack sync                          # after anything lands beneath it
+            `gh stack link` accepts PR numbers and reuses the open PR on a branch, so this PR
+            keeps its number, threads, and CI history by construction. Do not propose
+            `git rebase --onto` with `gh pr edit --base`; that hand-rolled recipe is
+            superseded.
+
             Never propose closing this PR and opening a new top PR: an open PR carries the
             review threads, bot findings, and CI history that a later retrospective reads to
             reconstruct the decision, and closing it discards that while git keeps the code
