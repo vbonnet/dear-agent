@@ -79,6 +79,16 @@ func (r Retro) Body() string {
 
 	fmt.Fprintf(&b, "## Audit — did the fix hold?\n\n")
 	fmt.Fprintf(&b, "_Nothing to audit yet. Record whether `main` went green and whether the prevention below was actually landed._\n\n")
+	// The sweep reads the newest CONCLUSIVE run of the workflow. For one that
+	// only runs on a schedule, that is still the pre-fix failure until the next
+	// cron fires — so closing on the strength of a merged PR gets the incident
+	// reopened within minutes, quoting a run that predates the fix. It reads as
+	// a recurrence to anyone who was not watching. This bit four incidents in a
+	// single session before anyone wrote it down.
+	fmt.Fprintf(&b, "> **Before closing:** the sweep judges recovery by the newest *concluded* run of this workflow. ")
+	fmt.Fprintf(&b, "If it only runs on a schedule, merging the fix does not produce one — run `gh workflow run <workflow> --ref main`, ")
+	fmt.Fprintf(&b, "**wait for it to conclude**, and cite that run when closing. ")
+	fmt.Fprintf(&b, "Closing first, or while the dispatch is still in flight, reopens this issue against the pre-fix run.\n\n")
 
 	fmt.Fprintf(&b, "## Retro — prevention (provisional)\n\n")
 	for _, action := range r.Finding.SuggestedActions {
