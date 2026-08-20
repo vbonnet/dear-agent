@@ -51,7 +51,9 @@ while IFS=$'\x1f' read -r verb address import_id reason; do
   case "$verb" in
     skip | create) echo "$verb: $address ($reason)" ;;
     import)
-      if tofu import "$address" "$import_id" > "$work/import.log" 2>&1; then
+      # -input=false so a provider that would prompt fails instead of hanging
+      # a CI job until its timeout, which reports nothing at all.
+      if tofu import -input=false "$address" "$import_id" > "$work/import.log" 2>&1; then
         echo "imported: $address"
       elif "$planner" classify --provider-output "$work/import.log" > /dev/null; then
         echo "not imported (will be CREATED by plan): $address"

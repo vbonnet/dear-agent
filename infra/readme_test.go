@@ -33,7 +33,7 @@ func TestReadmePostApplyRulesetIDAssertion(t *testing.T) {
 	script := `set -euo pipefail
 state="$(<"$1")"
 ` + strings.Join(assertions, "\n")
-	cmd := exec.Command("bash", "-c", script, "post-apply-verification", fixture)
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", script, "post-apply-verification", fixture)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("documented ruleset ID assertions rejected pinned-provider state: %v: %s", err, output)
 	}

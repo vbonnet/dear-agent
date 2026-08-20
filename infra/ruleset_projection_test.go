@@ -272,7 +272,7 @@ func pullRequestParameters(t *testing.T, canonical map[string]any) map[string]an
 
 func runTofuMutationCommand(t *testing.T, dir string, env []string, wantSuccess bool, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("tofu", args...)
+	cmd := exec.CommandContext(t.Context(), "tofu", args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	output, err := cmd.CombinedOutput()
