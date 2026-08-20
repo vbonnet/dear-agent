@@ -86,7 +86,14 @@ func (r Retro) Body() string {
 	// a recurrence to anyone who was not watching. This bit four incidents in a
 	// single session before anyone wrote it down.
 	fmt.Fprintf(&b, "> **Before closing:** the sweep judges recovery by the newest *concluded* run of this workflow. ")
-	fmt.Fprintf(&b, "If it only runs on a schedule, merging the fix does not produce one — run `gh workflow run <workflow> --ref main`, ")
+	// Name the workflow when it is known: the fixer should not have to go and
+	// look up what to dispatch. `gh workflow run` accepts the display name, and
+	// %q quotes it so a name with spaces survives the shell.
+	if r.WorkflowName != "" {
+		fmt.Fprintf(&b, "If it only runs on a schedule, merging the fix does not produce one — run `gh workflow run %q --ref main`, ", r.WorkflowName)
+	} else {
+		fmt.Fprintf(&b, "If it only runs on a schedule, merging the fix does not produce one — run `gh workflow run <workflow> --ref main`, ")
+	}
 	fmt.Fprintf(&b, "**wait for it to conclude**, and cite that run when closing. ")
 	fmt.Fprintf(&b, "Closing first, or while the dispatch is still in flight, reopens this issue against the pre-fix run.\n\n")
 
