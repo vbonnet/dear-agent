@@ -80,7 +80,7 @@ const listQuery = `query($owner:String!, $repo:String!, $pr:Int!, $after:String)
           isOutdated
           path
           opening: comments(first:1) { totalCount nodes { author { login } body } }
-          recent: comments(last:2) { nodes { id author { login } body } }
+          recent: comments(last:20) { nodes { id author { login } body } }
         }
       }
     }
@@ -98,7 +98,7 @@ const threadByIDQuery = `query($id:ID!) {
       isOutdated
       path
       opening: comments(first:1) { totalCount nodes { author { login } body } }
-      recent: comments(last:2) { nodes { id author { login } body } }
+      recent: comments(last:20) { nodes { id author { login } body } }
     }
   }
 }`
@@ -147,6 +147,9 @@ type thread struct {
 	// PrevID to match it, which proves no comment slipped in underneath.
 	LastID string `json:"-"`
 	PrevID string `json:"-"`
+	// Tail is the recent comments, oldest first, so a prior reply can be
+	// located even when it is no longer the last comment.
+	Tail []tailComment `json:"-"`
 }
 
 func main() {
@@ -254,31 +257,36 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		// guard exists to prevent. Leave the thread untouched.
 		return fail("cannot read thread state, nothing posted: %v", err)
 	}
+	if cur.IsResolved {
+		// Someone closed it first. Replying now would add a public comment to
+		// a settled conversation.
+		fmt.Printf("skipped %s (already resolved)\n", threadID)
+		return 0
+	}
+
 	// Pin what we read. If our reply does not land directly after this exact
 	// comment, someone spoke in the gap and our prewritten answer does not
 	// address them.
 	readLastID := cur.LastID
-	alreadyPosted := cur.LastAuthor != cur.Author && sameReplyBody(cur.LastBody, body)
-	if alreadyPosted {
-		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
-	} else if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
-		"-f", "query="+replyMutation); err != nil {
-		return fail("reply failed, thread left unresolved: %v", err)
-	} else if after, err := fetchThread(ctx, threadID); err != nil {
-		return fail("your reply is posted but the thread state could not be "+
-			"re-read, so it was NOT resolved: %v\n"+
-			"do NOT re-run reply-resolve (it would repost); check the thread, then:\n"+
-			"  resolve-review-threads resolve %s", err, threadID)
-	} else if after.PrevID != readLastID {
-		// A comment landed between our read and our post, so it now sits
-		// UNDER our reply. The re-read alone cannot see this: our comment is
-		// still last, so the thread would look answered and be resolved with
-		// the new feedback unread.
-		return fail("your reply is posted, but someone commented in between and "+
-			"your reply does not answer them.\n"+
-			"thread %s was left UNRESOLVED on purpose: read the comment above "+
-			"your reply, then answer it with:\n"+
+	switch classifyPriorReply(cur.Tail, body) {
+	case priorReplySuperseded:
+		// A previous run posted this reply and the reviewer has spoken since.
+		// Reposting would duplicate the comment AND put our copy last, making
+		// the thread look answered while the follow-up went unread.
+		return fail("your earlier reply is already on thread %s and the reviewer "+
+			"has commented since; nothing was posted.\n"+
+			"read the comment(s) after your reply and answer those:\n"+
 			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+	case priorReplyIsLast:
+		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
+	case noPriorReply:
+		if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
+			"-f", "query="+replyMutation); err != nil {
+			return fail("reply failed, thread left unresolved: %v", err)
+		}
+		if code := verifyReplyLanded(ctx, threadID, readLastID); code != 0 {
+			return code
+		}
 	}
 	msg, _, rErr := resolveWithEvidence(ctx, threadID, false)
 	if rErr != nil {
@@ -306,6 +314,29 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			"  resolve-review-threads resolve %s", rErr, threadID)
 	}
 	fmt.Println(msg)
+	return 0
+}
+
+// verifyReplyLanded checks that the reply we just posted sits directly after
+// the comment we had read. If anything intervened it now sits UNDER our reply,
+// which the answered check cannot see on its own: our comment is still last,
+// so the thread would look answered and be resolved with the new feedback
+// unread. Returns 0 when the reply landed cleanly.
+func verifyReplyLanded(ctx context.Context, threadID, readLastID string) int {
+	after, err := fetchThread(ctx, threadID)
+	if err != nil {
+		return fail("your reply is posted but the thread state could not be "+
+			"re-read, so it was NOT resolved: %v\n"+
+			"do NOT re-run reply-resolve (it would repost); check the thread, then:\n"+
+			"  resolve-review-threads resolve %s", err, threadID)
+	}
+	if after.PrevID != readLastID {
+		return fail("your reply is posted, but someone commented in between and "+
+			"your reply does not answer them.\n"+
+			"thread %s was left UNRESOLVED on purpose: read the comment above "+
+			"your reply, then answer it with:\n"+
+			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+	}
 	return 0
 }
 
@@ -451,6 +482,50 @@ func listThreads(ctx context.Context, owner, repo string, pr int) ([]thread, err
 	return all, nil
 }
 
+// tailComment is one comment from the tail of a thread.
+type tailComment struct {
+	ID    string
+	Login string
+	Body  string
+}
+
+// priorReplyState describes what a previous reply-resolve run left behind.
+type priorReplyState int
+
+const (
+	// noPriorReply means this body is not present in the thread tail.
+	noPriorReply priorReplyState = iota
+	// priorReplyIsLast means a previous run already posted it and nothing has
+	// been said since, so only the resolve remains.
+	priorReplyIsLast
+	// priorReplySuperseded means a previous run posted it and someone has
+	// commented afterwards, so the prewritten body no longer answers the
+	// thread.
+	priorReplySuperseded
+)
+
+// classifyPriorReply reports whether this exact reply already sits in the
+// thread and, if so, whether anyone has spoken after it. Reposting a
+// superseded reply would both duplicate the comment and, because our copy
+// would then be last, make the thread look answered while the follow-up went
+// unread.
+func classifyPriorReply(tail []tailComment, body string) priorReplyState {
+	idx := -1
+	for i, c := range tail {
+		if sameReplyBody(c.Body, body) {
+			idx = i
+		}
+	}
+	switch {
+	case idx < 0:
+		return noPriorReply
+	case idx == len(tail)-1:
+		return priorReplyIsLast
+	default:
+		return priorReplySuperseded
+	}
+}
+
 // threadsResponse mirrors the reviewThreads GraphQL payload. It is a named
 // type so the flattening in toThread can be unit-tested without a network.
 type threadsResponse struct {
@@ -487,9 +562,9 @@ type threadNode struct {
 			Body string `json:"body"`
 		} `json:"nodes"`
 	} `json:"opening"`
-	// Recent holds the last two comments, newest last. Two rather than one so
-	// reply-resolve can verify its reply landed directly after the comment it
-	// had read, rather than after an unseen follow-up.
+	// Recent holds the tail of the thread, newest last. More than two because
+	// reply-resolve must be able to find a reply a previous run already posted
+	// even when the reviewer has spoken since.
 	Recent struct {
 		Nodes []struct {
 			ID     string `json:"id"`
@@ -526,6 +601,10 @@ func toThread(n threadNode) thread {
 		t.LastID = last.ID
 		if k > 1 {
 			t.PrevID = n.Recent.Nodes[k-2].ID
+		}
+		t.Tail = make([]tailComment, 0, k)
+		for _, c := range n.Recent.Nodes {
+			t.Tail = append(t.Tail, tailComment{ID: c.ID, Login: c.Author.Login, Body: c.Body})
 		}
 	}
 	t.LastAuthor = "unknown"

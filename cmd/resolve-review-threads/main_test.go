@@ -409,3 +409,68 @@ func TestToThreadPrevIDEmptyOnSingleComment(t *testing.T) {
 		t.Error("LastID must still be populated")
 	}
 }
+
+// TestClassifyPriorReply covers the retry-after-follow-up fail-open. If a run
+// posts a reply and dies before resolving, and the reviewer then comments, a
+// naive last-comment check reposts the same body; our copy becomes the last
+// comment, the thread reads as answered, and the follow-up is resolved away
+// unread. The classifier must see the prior reply wherever it sits.
+func TestClassifyPriorReply(t *testing.T) {
+	reply := "Fixed - moved the check into the helper."
+	tests := []struct {
+		name string
+		tail []tailComment
+		want priorReplyState
+	}{
+		{
+			name: "not posted yet",
+			tail: []tailComment{{Login: "bot", Body: "P1: fix this"}},
+			want: noPriorReply,
+		},
+		{
+			name: "posted and still last",
+			tail: []tailComment{{Login: "bot", Body: "P1: fix this"}, {Login: "vbonnet", Body: reply}},
+			want: priorReplyIsLast,
+		},
+		{
+			name: "posted then reviewer followed up",
+			tail: []tailComment{
+				{Login: "bot", Body: "P1: fix this"},
+				{Login: "vbonnet", Body: reply},
+				{Login: "bot", Body: "That does not cover the nil case."},
+			},
+			want: priorReplySuperseded,
+		},
+		{
+			name: "empty tail",
+			tail: nil,
+			want: noPriorReply,
+		},
+		{
+			name: "similar but different reply is not ours",
+			tail: []tailComment{{Login: "vbonnet", Body: "Fixed - something else entirely."}},
+			want: noPriorReply,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPriorReply(tt.tail, reply); got != tt.want {
+				t.Errorf("classifyPriorReply = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestClassifyPriorReplyMultiLine pins that the prior-reply scan uses the same
+// lossless comparison as the retry guard, since real replies are multi-line.
+func TestClassifyPriorReplyMultiLine(t *testing.T) {
+	reply := "Fixed in abc1234.\n\nCovered by TestThing, mutation-checked."
+	tail := []tailComment{
+		{Login: "bot", Body: "P2: consider this"},
+		{Login: "vbonnet", Body: reply},
+		{Login: "bot", Body: "Still wrong."},
+	}
+	if got := classifyPriorReply(tail, reply); got != priorReplySuperseded {
+		t.Errorf("multi-line prior reply not recognised: got %v", got)
+	}
+}
