@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "Every pull_request parameter must be stated; an omitted one would silently inherit whatever GitHub defaults to."
+}

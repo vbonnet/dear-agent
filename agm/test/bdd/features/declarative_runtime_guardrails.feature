@@ -1,6 +1,10 @@
 # SPEC: .github/workflows/SPEC.md
 # RELATED-SPEC: agm/test/coverage/SPEC.md
 # RELATED-SPEC: .agents/skills/beads/agents/SPEC.md
+# RELATED-SPEC: .agents/skills/research-pipeline/agents/SPEC.md
+# RELATED-SPEC: .opencode/skills/research-pipeline/SPEC.md
+# RELATED-SPEC: research-pipeline/.claude-plugin/SPEC.md
+# RELATED-SPEC: research-pipeline/skills/research-pipeline/SPEC.md
 # RELATED-SPEC: .github/SPEC.md
 # RELATED-SPEC: .github/act/SPEC.md
 # RELATED-SPEC: .github/rulesets/SPEC.md
@@ -17,6 +21,7 @@
 # RELATED-SPEC: agm/test/e2e/docker/cmd/seed-session/SPEC.md
 # RELATED-SPEC: agm/youtube-plugin/.claude-plugin/SPEC.md
 # RELATED-SPEC: cmd/dear-agent-bumblebee/templates/SPEC.md
+# RELATED-SPEC: cmd/shellcheck-diff/SPEC.md
 # RELATED-SPEC: config/SPEC.md
 # RELATED-SPEC: configs/workflows/SPEC.md
 # RELATED-SPEC: deploy/SPEC.md
@@ -24,6 +29,7 @@
 # RELATED-SPEC: pkg/codeintel/rules/go/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/python/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/typescript/SPEC.md
+# RELATED-SPEC: tests/jq/SPEC.md
 # RELATED-SPEC: wayfinder/.claude-plugin/SPEC.md
 Feature: Declarative runtime guardrails
   Runtime configuration is executable product behavior. Plugin manifests,
@@ -38,10 +44,12 @@ Feature: Declarative runtime guardrails
     Examples:
       | directory                                                                    |
       | .agents/skills/beads/agents                                                  |
+      | .agents/skills/research-pipeline/agents                                      |
       | .github                                                                      |
       | .github/act                                                                  |
       | .github/rulesets                                                             |
       | .github/workflows                                                            |
+      | .opencode/skills/research-pipeline                                           |
       | agm/.claude-plugin                                                           |
       | agm/.github/workflows                                                        |
       | agm/agm-plugin/.claude-plugin                                                |
@@ -62,6 +70,8 @@ Feature: Declarative runtime guardrails
       | pkg/codeintel/rules/go                                                       |
       | pkg/codeintel/rules/python                                                   |
       | pkg/codeintel/rules/typescript                                               |
+      | research-pipeline/.claude-plugin                                             |
+      | research-pipeline/skills/research-pipeline                                   |
       | wayfinder/.claude-plugin                                                     |
 
   Scenario Outline: Declarative contracts are invariant across active routes
@@ -106,6 +116,22 @@ Feature: Declarative runtime guardrails
       | pi-cli        | deepseek  |
       | pi-cli        | nemotron  |
       | pi-cli        | qwen      |
+
+  Scenario: Non-Go sources carry their own CI gates
+    Given the non-Go source gates are configured
+    When AGM validates non-Go source coverage
+    Then shell changes should be gated on the lines they introduce
+    And the whole repository should stay ShellCheck clean at error severity
+    And the changed-line verdict should come from a tested command
+    And OpenTofu sources should be formatted, validated and linted
+    And the OpenTofu gates should require no credentials
+
+  Scenario: Checked-in jq policy programs are replayed against fixtures
+    Given the jq policy gate is configured
+    When AGM validates jq policy coverage
+    Then every checked-in jq program should have a fixture case
+    And jq fixtures should assert output and refusal alike
+    And the jq gate should fail rather than skip when jq is absent from CI
 
   Scenario: CI schedules credential-free Codex contract evidence
     Given the repository CI workflow is configured

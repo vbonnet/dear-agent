@@ -29,6 +29,37 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### Provider-Neutral SPEC Guard
+
+**File:** [`spec_guard.feature`](../test/bdd/features/spec_guard.feature)
+
+**Drives:** the `internal/specguard` source-result interface shared by local and
+CI callers.
+
+**Key scenarios:**
+- Malformed mode/base combinations fail closed through the same typed result.
+- Every result identifies the guard as provider-neutral source validation.
+- Semantic evidence is limited to immutable Git objects; staged mode separately
+  admits bounded tracked and nonignored untracked path/status metadata without
+  parsing mutable worktree bodies.
+- Governed tracked modifications/deletions and nonignored untracked additions
+  block staged evaluation until the intended contract state is staged or the
+  dirty path is resolved.
+- Source evidence explicitly disclaims provider and runtime verification.
+- Trust disclosure names checkpointed worktree, Git-directory, common-directory,
+  ancestor, and selector identity controls without claiming atomic filesystem
+  binding between checkpoints.
+- Repository-local terminal adapters disclose that mutable checkout code offers
+  cooperative feedback only and is not tamper-resistant. Any mandatory
+  immutable enforcement requires a separately reviewed changed-SPEC CI and
+  provider rollout; local results do not attest that it is deployed, has run,
+  or is provider-required.
+
+**Why this matters:** A deterministic source guard must neither skip governed
+dirty paths nor become another harness-owned policy copy. Local hook behavior
+must not be overstated as immutable, installed, provider-visible, or live
+enforcement.
+
 ### AGY Saved-Session Discovery
 
 **File:** [`agy_saved_session_discovery.feature`](../test/bdd/features/agy_saved_session_discovery.feature)
@@ -1661,8 +1692,10 @@ make test-bdd          # godog feature tests (TestFeatures)
 go test ./test/bdd/... # features + SPEC invariants + contract drift
 ```
 
-CI runs this package on every PR via the root `ci.yml` "Build & Test" job
-(`go test -race ./...`).
+CI runs this package via the root `ci.yml` "Build & Test" job
+(`go test -race ./...`), on every PR that touches a build input — Go source,
+build metadata, or an embedded/hash-verified asset. A pure documentation PR
+skips the job's steps (ADR-039); it also cannot change this package.
 
 ---
 

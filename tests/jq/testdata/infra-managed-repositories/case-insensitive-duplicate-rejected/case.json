@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "GitHub repository names are case-insensitive, so two keys differing only in case are one repository declared twice.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

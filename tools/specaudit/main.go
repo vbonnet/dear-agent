@@ -490,6 +490,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "guard":
+		return runGuard(args[1:], stdout, stderr)
 	case "inventory":
 		return runInventory(args[1:], stdout, stderr)
 	case "validate":
@@ -508,6 +510,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func usage(out io.Writer) {
 	fmt.Fprintln(out, "Usage:")
+	fmt.Fprintln(out, "  go run ./tools/specaudit guard (-staged | -base <revision>) [-repo <path>]")
 	fmt.Fprintln(out, "  go run ./tools/specaudit inventory -repo <path> -repository <owner/name> -revision <commit>")
 	fmt.Fprintln(out, "  go run ./tools/specaudit validate -input <report.json> -inventory <inventory.json> -repo <path>")
 	fmt.Fprintln(out, "  go run ./tools/specaudit render -input <report.json> -inventory <inventory.json> -repo <path>")

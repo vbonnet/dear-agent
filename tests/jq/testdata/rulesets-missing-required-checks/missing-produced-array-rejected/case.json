@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "Evidence without a produced array is incomplete; reporting nothing missing from it would be a false pass."
+}

@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/identity-segment.jq",
+  "description": "The GitHub grammar for a repository or owner segment: ASCII alphanumerics, dot, dash and underscore, with an alphanumeric first character.",
+  "filter": "include \"identity-segment\"; map(is_identity_segment)",
+  "library_paths": [
+    ".github/infra"
+  ]
+}

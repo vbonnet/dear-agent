@@ -34,6 +34,35 @@ func TestScanUsesGitIgnoreRules(t *testing.T) {
 	}
 }
 
+func TestExecutableBDDFeaturePathUsesCanonicalRunnerRoot(t *testing.T) {
+	t.Parallel()
+	for _, filePath := range []string{
+		"agm/test/bdd/features/example.feature",
+	} {
+		if !IsExecutableBDDFeaturePath(filePath) {
+			t.Errorf("executable BDD feature %q was rejected", filePath)
+		}
+	}
+	for _, filePath := range []string{
+		"docs/contracts/example.feature",
+		"features/example.feature",
+		"agm/test/bdd/features-archive/example.feature",
+		"AGM/test/bdd/features/example.feature",
+		"agm/test/bdd/features/../example.feature",
+		"agm/test/bdd/features/nested/example.feature",
+		"agm/test/bdd/features/example.md",
+		"agm/test/bdd/features/.feature",
+		"agm/test/bdd/features/example feature.feature",
+		"agm/test/bdd/features/example).feature",
+		"agm/test/bdd/features/example`.feature",
+		"agm/test/bdd/features/examplé.feature",
+	} {
+		if IsExecutableBDDFeaturePath(filePath) {
+			t.Errorf("non-executable BDD feature %q was admitted", filePath)
+		}
+	}
+}
+
 func TestScanFallbackSkipsRepositoryOutputsAndDependencies(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -98,6 +127,38 @@ func TestScanReturnsStableRelativePathsAndExecutableMode(t *testing.T) {
 	}
 	if files[1].Executable() {
 		t.Fatalf("ordinary source reported executable: %+v", files[1])
+	}
+}
+
+func TestImplementationSourcePolicyIsSharedAndExcludesGeneratedPaths(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"internal/example/example.go",
+		"services/web/index.ts",
+		"config/runtime/settings.yaml",
+		"containers/service/Dockerfile",
+		"automation/Makefile",
+	} {
+		if !IsImplementationSource(path, true, false) {
+			t.Errorf("supported implementation source %q was rejected", path)
+		}
+	}
+	if !IsImplementationSource("hooks/pretool", true, true) || IsImplementationSource("hooks/pretool", true, false) {
+		t.Fatal("extensionless source did not honor executable metadata")
+	}
+	if IsImplementationSource("hooks/pretool", false, true) || IsImplementationSource("internal/example/example.go", false, true) {
+		t.Fatal("nonregular source entry was accepted")
+	}
+	for _, path := range []string{
+		"vendor/pkg/source.go",
+		"node_modules/pkg/index.js",
+		"dist/generated.js",
+		"testdata/fixture.go",
+		"docs/guide.md",
+	} {
+		if IsImplementationSource(path, true, true) {
+			t.Errorf("non-governed or non-source path %q was accepted", path)
+		}
 	}
 }
 

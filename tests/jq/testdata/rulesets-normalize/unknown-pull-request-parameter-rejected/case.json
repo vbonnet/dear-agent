@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "An unrecognized pull_request parameter would be dropped from the projection and escape comparison."
+}
