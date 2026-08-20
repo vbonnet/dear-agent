@@ -159,6 +159,24 @@ a generated-file refresh, a vendored update — say so explicitly in the PR
 description, and separate the mechanical part from anything hand-written so a
 reviewer can skip the bulk and concentrate on the rest.
 
+##### A chain of base branches is not yet a stack
+
+Pointing each PR's base at the branch below it builds a valid *chain*, and that
+much this repository already does. It is not the same as a **registered stack**.
+When GitHub shows *"This pull request can be stacked with other pull requests"*,
+it has recognised a correctly-formed chain and is offering to formalise it — the
+banner means the branches are right and the registration is missing, not that
+the chain is wrong.
+
+Registering matters because the stack, not the chain, is what
+[`gh stack`](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-stacked-pull-requests)
+operates on: `gh stack sync` cascade-rebases every member onto its updated
+parent and switches to `--onto` automatically once a lower PR has merged. An
+unregistered chain gets none of that, which is why restacking after a squash
+landing used to be manual.
+
+So finish the job: build the chain, then register it.
+
 ##### How to split, in order
 
 1. **Mechanical first.** Renames, moves, generated output, formatting. These
@@ -167,6 +185,16 @@ reviewer can skip the bulk and concentrate on the rest.
    changes — still no behavior change.
 3. **Behavior last.** The actual new logic, built on names and seams that are
    already on `main`.
+
+When the work has not been published yet, build the stack with `gh stack`
+directly rather than opening branches by hand:
+
+```sh
+gh stack init <first-slice-branch>   # first branch on top of trunk;
+                                     # existing branches are adopted
+gh stack add  <next-slice-branch>    # once per further slice, bottom-up
+gh stack submit                      # push every branch and open the PRs
+```
 
 Land each step before opening the next, so every PR is based on `main` and gets
 the full review protocol (see the caveat below). If you have already written the
@@ -196,20 +224,29 @@ Both failure modes have happened here:
   from the stack that replaced it, so its history is stranded rather than
   carried forward.
 
-The mechanics:
+The mechanics — use `gh stack`, not hand-rolled rebases:
 
-1. Cut the lower slices onto their own branches and open them bottom-up.
-2. Rebase the original branch onto the topmost extracted slice:
-   `git rebase --onto <top-slice-branch> <cut-point> <original-branch>`.
-3. Retarget the original PR onto that branch:
-   `gh pr edit <number> --base <top-slice-branch>`.
+```sh
+gh extension install github/gh-stack   # once per machine
+
+# 1. cut the lower slices onto their own branches (bottom-up), then
+# 2. register the whole chain as a real stack, tip last.
+#    Accepts branch names or PR numbers; branches that already have an open PR
+#    keep that PR, so the original keeps its number, threads, and CI history.
+gh stack link <slice-1-branch> <slice-2-branch> <original-branch>
+
+# after a lower PR merges, re-align the whole chain in one step
+gh stack sync
+```
+
+`gh stack sync` is what makes this practical. It fetches, reconciles the remote
+stack, fast-forwards trunk, and cascade-rebases every branch onto its updated
+parent — and when a branch's PR has already merged it switches to `--onto` mode
+automatically, which is exactly the squash-merge case that used to have to be
+done by hand.
 
 The original keeps its number, its threads, and its CI history, and its diff
 shrinks to just the remainder as each slice lands beneath it.
-
-Step 2 is the one place this is not yet supported end to end: `safe-rebase` has
-no `--onto` mode, so the restack is manual (tracked as `ce-x2ekc`). Do it by
-hand rather than reaching for close-and-reopen.
 
 Close the original **only** when the slices absorb all of it and nothing remains
 at the tip. Then say in the closing comment which PRs superseded it, so the

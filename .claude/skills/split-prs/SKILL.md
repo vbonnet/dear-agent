@@ -39,6 +39,23 @@ diff spends the reviewer's attention on bulk instead of on the few lines that
 carry the risk, so specific defects get missed in exactly the PRs where a miss
 costs most.
 
+## A chain of base branches is not yet a stack
+
+Pointing each PR's base at the branch below builds a valid *chain*. That is not
+a **registered stack**. When GitHub shows *"This pull request can be stacked
+with other pull requests"*, it has recognised a correctly-formed chain and is
+offering to formalise it — the banner means the branches are right and the
+registration is missing, not that the chain is wrong.
+
+Registration is what `gh stack` operates on. Without it there is no
+`gh stack sync`, so every restack after a lower PR merges is manual. Build the
+chain, then register it.
+
+```sh
+gh extension install github/gh-stack   # once per machine
+gh stack --help                        # confirm it is available before relying on it
+```
+
 ## Split in this order
 
 1. **Mechanical** — renames, moves, generated output, formatting. Reviewable by
@@ -70,22 +87,39 @@ Both failure modes are in this repo's history:
   the stack that replaced it, so its history is stranded.
 
 ```sh
-# 1. cut the lower slices onto their own branches, open them bottom-up
-# 2. rebase the original branch onto the topmost slice
-git rebase --onto <top-slice-branch> <cut-point> <original-branch>
-# 3. retarget the original PR
-gh pr edit <number> --base <top-slice-branch>
+# 1. cut the lower slices onto their own branches, bottom-up
+# 2. register the chain as a real stack, tip LAST.
+#    Takes branch names or PR numbers; a branch that already has an open PR
+#    keeps it, so the original keeps its number, threads, and CI history.
+gh stack link <slice-1-branch> <slice-2-branch> <original-branch>
 ```
 
 The original keeps its number, threads, and CI history, and its diff shrinks to
 the remainder as each slice lands beneath it.
 
-Step 2 is the one part not supported end to end — `safe-rebase` has no `--onto`
-mode (`ce-x2ekc`), so restack by hand rather than reaching for close-and-reopen.
+Do NOT hand-roll `git rebase --onto` plus `gh pr edit --base`. That was the old
+recipe here and it is superseded: `gh stack sync` cascade-rebases every member
+onto its updated parent and switches to `--onto` automatically once a lower PR
+has merged, which is the squash-merge case that used to be manual.
 
 Close the original **only** if the slices absorb all of it and nothing is left
 at the tip; then name the superseding PRs in the closing comment so the thread
 stays reachable.
+
+## Starting fresh: build the stack with gh stack
+
+When the work is not published yet, do not open branches by hand:
+
+```sh
+gh stack init <first-slice-branch>   # first branch on top of trunk;
+                                     # existing branches are adopted
+gh stack add  <next-slice-branch>    # once per further slice, bottom-up
+gh stack submit                      # push every branch and open the PRs
+gh stack view                        # confirm the stack registered
+```
+
+Keep using it afterwards: `gh stack sync` after anything lands beneath you,
+`gh stack checkout` / `up` / `down` to move around the stack.
 
 ## If the whole thing is already in one branch
 
@@ -125,11 +159,18 @@ If either fails, split before opening rather than after. Splitting a branch you
 have not yet published costs one `git reset --soft`; splitting a PR that is
 already open and reviewed costs a manual `--onto` restack (see above).
 
-When you split a PR that is already open, one more check: the **original PR
-number must still be open and sitting at the top of the stack**, with its base
-retargeted onto the topmost extracted slice. If you find yourself closing it and
-opening a new PR for the remainder, stop — you are about to discard the review
-history that makes the change auditable later.
+When you split a PR that is already open, two more checks:
+
+- The **original PR number is still open and sitting at the top of the stack**,
+  with its base pointing at the topmost extracted slice. If you find yourself
+  closing it and opening a new PR for the remainder, stop — you are about to
+  discard the review history that makes the change auditable later.
+- The chain is **registered**, not merely aligned. `gh stack view` shows the
+  members; GitHub still offering *"This pull request can be stacked with other
+  pull requests"* means it is not registered yet and `gh stack link` has not
+  been run. A correct chain that is only a chain still works as a review
+  sequence, but it forfeits `gh stack sync`, so every later restack falls back
+  to manual `--onto`.
 
 If you open it anyway, say in the PR description which of the atomic cases
 applies and why. An unexplained over-budget PR is the failure this skill exists
@@ -142,3 +183,6 @@ the answer.
 - `.github/workflows/pr-size-scope.yml`: the deterministic gate and the
   split-request job that asks when it trips.
 - `cmd/pr-size-audit`: the weekly sweep that reports merged offenders.
+- [Creating stacked pull requests](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-stacked-pull-requests)
+  and `github/gh-stack`: the `init` / `add` / `submit` / `link` / `sync`
+  commands this skill uses.
