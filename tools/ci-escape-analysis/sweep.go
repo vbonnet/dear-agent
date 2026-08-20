@@ -264,10 +264,21 @@ func latestRunPerWorkflowOnMain(opts sweepOptions, stderr io.Writer) (map[string
 	latest := map[string]mainRun{}
 	complete := true
 	for _, workflow := range workflows {
+		// Ask whether this workflow can run against main BEFORE looking for a
+		// run, not after. claude.yml fires only on issue and review events, so
+		// every one of its runs is filtered out as non-main-evaluating; with
+		// more than a page of them it looked like "could not see far enough"
+		// rather than "nothing here to see", and set complete=false on every
+		// sweep. That permanently disabled stale-retro reconciliation, so no
+		// recovered incident was ever auto-closed and the backlog only grew.
+		if !opts.MainEvaluatingFile(workflow) {
+			continue
+		}
 		run, seen := latestRunOnMain(repo, workflow, stderr)
 		switch seen {
 		case lookupFailed:
 			// Record the gap rather than letting silence pass for health.
+			fmt.Fprintf(stderr, "ci-escape-analysis: %s: no conclusive main run within the fetch cap; reconciliation will be skipped\n", workflow)
 			complete = false
 			continue
 		case observedNoRun:
