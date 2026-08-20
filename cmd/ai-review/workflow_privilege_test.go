@@ -215,15 +215,18 @@ func TestWorkflowPrivilegeReason_CurrentTreeGolden(t *testing.T) {
 	// requests and so carries merge-gate authority (see
 	// TestMergeGateLabelScopesAreNeverLowBlast).
 	want := []string{
+		"adr-integrity.yml",
 		"branch-protection-audit.yml",
 		"bypassed-merge-audit.yml",
 		"ci-health-monitor.yml",
+		"ci.yml",
 		"claude-code-review.yml",
 		"claude.yml",
 		"codeql.yml",
 		"deepsec.yml",
 		"dependabot-automerge.yml",
 		"dependency-freshness.yml",
+		"doc-header-lint.yml",
 		"gemini-review.yml",
 		"go-ci-reusable.yml",
 		"go-toolchain-bump.yml",
@@ -232,6 +235,7 @@ func TestWorkflowPrivilegeReason_CurrentTreeGolden(t *testing.T) {
 		"merge-audit.yml",
 		"monthly-audit.yml",
 		"pr-review-agent.yml",
+		"pr-size-audit.yml",
 		"pr-size-scope.yml",
 		"release.yml",
 		"review.yml",
