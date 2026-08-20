@@ -20,7 +20,7 @@
 //
 //	resolve-review-threads list          <owner> <repo> <pr>           # unresolved threads (JSON lines)
 //	resolve-review-threads list-all      <owner> <repo> <pr>           # every thread
-//	resolve-review-threads resolve       <threadId>                    # one thread by ID
+//	resolve-review-threads resolve       <threadId> [--force]           # one thread by ID
 //	resolve-review-threads reply-resolve <threadId> <body>             # reply, then resolve
 //	resolve-review-threads resolve-all   <owner> <repo> <pr> [author]  # answered threads only
 //	resolve-review-threads unresolve     <threadId>                    # re-open a thread
@@ -77,9 +77,26 @@ const listQuery = `query($owner:String!, $repo:String!, $pr:Int!, $after:String)
           isResolved
           isOutdated
           path
-          comments(first:100) { nodes { author { login } body } }
+          opening: comments(first:1) { totalCount nodes { author { login } body } }
+          recent: comments(last:1) { nodes { author { login } } }
         }
       }
+    }
+  }
+}`
+
+// threadByIDQuery re-reads one thread. Resolution decisions are re-derived
+// from this immediately before each mutation, so a reviewer comment landing
+// mid-sweep cannot be resolved away on stale state.
+const threadByIDQuery = `query($id:ID!) {
+  node(id:$id) {
+    ... on PullRequestReviewThread {
+      id
+      isResolved
+      isOutdated
+      path
+      opening: comments(first:1) { totalCount nodes { author { login } body } }
+      recent: comments(last:1) { nodes { author { login } } }
     }
   }
 }`
@@ -172,11 +189,32 @@ func cmdList(ctx context.Context, cmd string, rest []string) int {
 }
 
 // cmdMutate handles "resolve" and "unresolve" of a single thread by ID.
+// "resolve" enforces the same evidence rule as resolve-all: a single-thread
+// path that skipped it would be a documented way around the gate. "unresolve"
+// re-opens a thread, which is never the unsafe direction, so it goes straight
+// through.
 func cmdMutate(ctx context.Context, cmd string, rest []string) int {
-	if len(rest) != 1 {
-		return fail("usage: %s <threadId>", cmd)
+	force := false
+	args := make([]string, 0, len(rest))
+	for _, a := range rest {
+		if a == "--force" {
+			force = true
+			continue
+		}
+		args = append(args, a)
 	}
-	msg, err := mutateThread(ctx, cmd, rest[0])
+	if len(args) != 1 {
+		return fail("usage: %s <threadId> [--force]", cmd)
+	}
+	if cmd == "unresolve" {
+		msg, err := mutateThread(ctx, cmd, args[0])
+		if err != nil {
+			return fail("%v", err)
+		}
+		fmt.Println(msg)
+		return 0
+	}
+	msg, err := resolveWithEvidence(ctx, args[0], force)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -200,9 +238,9 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		"-f", "query="+replyMutation); err != nil {
 		return fail("reply failed, thread left unresolved: %v", err)
 	}
-	msg, err := mutateThread(ctx, "resolve", threadID)
+	msg, err := resolveWithEvidence(ctx, threadID, false)
 	if err != nil {
-		return fail("replied but could not resolve: %v", err)
+		return fail("replied but did not resolve: %v", err)
 	}
 	fmt.Println(msg)
 	return 0
@@ -247,9 +285,13 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 				t.ID, t.Path, t.LastAuthor, outdatedNote(t))
 			continue
 		}
-		msg, err := mutateThread(ctx, "resolve", t.ID)
+		msg, err := resolveWithEvidence(ctx, t.ID, force)
 		if err != nil {
-			return fail("%v", err)
+			// A thread that went unanswered between the listing and now is a
+			// refusal, not a fatal error: keep sweeping the rest.
+			refused++
+			fmt.Fprintf(os.Stderr, "REFUSED %v\n", err)
+			continue
 		}
 		fmt.Println(msg)
 		resolved++
@@ -358,14 +400,26 @@ type threadNode struct {
 	IsResolved bool   `json:"isResolved"`
 	IsOutdated bool   `json:"isOutdated"`
 	Path       string `json:"path"`
-	Comments   struct {
-		Nodes []struct {
+	// Opening is the first comment (the reviewer's point) plus the thread's
+	// total comment count. Recent is the single most recent comment. Asking
+	// GitHub for each end directly keeps the answered check exact on threads
+	// of any length, instead of paging to find the end.
+	Opening struct {
+		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
 			Author struct {
 				Login string `json:"login"`
 			} `json:"author"`
 			Body string `json:"body"`
 		} `json:"nodes"`
-	} `json:"comments"`
+	} `json:"opening"`
+	Recent struct {
+		Nodes []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		} `json:"nodes"`
+	} `json:"recent"`
 }
 
 // toThread flattens one GraphQL node, deriving the Answered evidence flag.
@@ -376,19 +430,59 @@ type threadNode struct {
 // reading we want: the ball is in our court again.
 func toThread(n threadNode) thread {
 	t := thread{ID: n.ID, IsResolved: n.IsResolved, IsOutdated: n.IsOutdated, Path: n.Path, Author: "unknown"}
-	if len(n.Comments.Nodes) == 0 {
+	if len(n.Opening.Nodes) == 0 {
 		return t
 	}
-	if c := n.Comments.Nodes[0]; c.Author.Login != "" {
-		t.Author = c.Author.Login
+	if login := n.Opening.Nodes[0].Author.Login; login != "" {
+		t.Author = login
 	}
-	t.Body = cleanBody(n.Comments.Nodes[0].Body)
-	t.LastAuthor = n.Comments.Nodes[len(n.Comments.Nodes)-1].Author.Login
-	if t.LastAuthor == "" {
-		t.LastAuthor = "unknown"
+	t.Body = cleanBody(n.Opening.Nodes[0].Body)
+	t.LastAuthor = "unknown"
+	if len(n.Recent.Nodes) > 0 && n.Recent.Nodes[0].Author.Login != "" {
+		t.LastAuthor = n.Recent.Nodes[0].Author.Login
 	}
-	t.Answered = len(n.Comments.Nodes) > 1 && t.LastAuthor != t.Author
+	t.Answered = n.Opening.TotalCount > 1 && t.LastAuthor != t.Author
 	return t
+}
+
+// fetchThread re-reads a single thread by node ID.
+func fetchThread(ctx context.Context, threadID string) (thread, error) {
+	raw, err := ghGraphQL(ctx, "-f", "id="+threadID, "-f", "query="+threadByIDQuery)
+	if err != nil {
+		return thread{}, err
+	}
+	var resp struct {
+		Data struct {
+			Node threadNode `json:"node"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return thread{}, fmt.Errorf("parse thread %s: %w", threadID, err)
+	}
+	if resp.Data.Node.ID == "" {
+		return thread{}, fmt.Errorf("no review thread with ID %s", threadID)
+	}
+	return toThread(resp.Data.Node), nil
+}
+
+// resolveWithEvidence re-reads the thread and resolves it only if it is still
+// answered, so a reviewer comment arriving between the decision and the
+// mutation cannot be resolved away. force skips the evidence check, never the
+// re-read: an already-resolved thread is still reported as a no-op.
+func resolveWithEvidence(ctx context.Context, threadID string, force bool) (string, error) {
+	cur, err := fetchThread(ctx, threadID)
+	if err != nil {
+		return "", err
+	}
+	if cur.IsResolved {
+		return fmt.Sprintf("skipped %s (already resolved)", threadID), nil
+	}
+	if !cur.Answered && !force {
+		return "", fmt.Errorf("%s %s: unanswered (last word: @%s)%s\n"+
+			"reply with the reason instead: resolve-review-threads reply-resolve %s \"Fixed - <what changed>\"",
+			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)
+	}
+	return mutateThread(ctx, "resolve", threadID)
 }
 
 // mutateThread resolves ("resolve") or re-opens ("unresolve") one thread and
@@ -471,7 +565,8 @@ func usage() {
 usage:
   resolve-review-threads list          <owner> <repo> <pr>          unresolved threads (JSON lines)
   resolve-review-threads list-all      <owner> <repo> <pr>          every thread
-  resolve-review-threads resolve       <threadId>                   resolve one thread by ID
+  resolve-review-threads resolve       <threadId> [--force]          resolve one thread by ID
+                                                                    (same evidence rule as resolve-all)
   resolve-review-threads unresolve     <threadId>                   re-open one thread by ID
   resolve-review-threads reply-resolve <threadId> <body>            reply with the reason, then
                                                                     resolve (the normal path)

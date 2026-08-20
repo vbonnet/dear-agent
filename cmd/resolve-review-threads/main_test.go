@@ -92,23 +92,43 @@ func idsEqual(ts []thread, want []string) bool {
 }
 
 // mkNode builds a threadNode whose comment authors are the given logins, in
-// order. The first login is the thread's opening author.
+// order, mirroring what the opening/recent GraphQL aliases return: the first
+// login opens the thread, the last one had the most recent word.
 func mkNode(id string, outdated bool, authors ...string) threadNode {
 	var n threadNode
 	n.ID = id
 	n.IsOutdated = outdated
 	n.Path = "pkg/thing.go"
-	for _, a := range authors {
-		var c struct {
-			Author struct {
-				Login string `json:"login"`
-			} `json:"author"`
-			Body string `json:"body"`
-		}
-		c.Author.Login = a
-		c.Body = "comment from " + a
-		n.Comments.Nodes = append(n.Comments.Nodes, c)
+	n.Opening.TotalCount = len(authors)
+	if len(authors) == 0 {
+		return n
 	}
+	var open struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		Body string `json:"body"`
+	}
+	open.Author.Login = authors[0]
+	open.Body = "comment from " + authors[0]
+	n.Opening.Nodes = append(n.Opening.Nodes, open)
+
+	var last struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	}
+	last.Author.Login = authors[len(authors)-1]
+	n.Recent.Nodes = append(n.Recent.Nodes, last)
+	return n
+}
+
+// mkLongNode builds a thread whose comment count exceeds any single page, to
+// prove the answered check reads the true last commenter rather than the end
+// of a fetched page.
+func mkLongNode(id string, total int, opening, latest string) threadNode {
+	n := mkNode(id, false, opening, latest)
+	n.Opening.TotalCount = total
 	return n
 }
 
@@ -191,5 +211,31 @@ func TestToThreadNoComments(t *testing.T) {
 	got := toThread(threadNode{ID: "empty"})
 	if got.Author != "unknown" || got.Answered {
 		t.Errorf("got %+v, want unknown author and unanswered", got)
+	}
+}
+
+// TestToThreadLongThreadUsesTrueLastCommenter covers the pagination finding:
+// with more comments than one page holds, the verdict must still come from the
+// genuinely most recent comment, which the `recent` alias supplies directly.
+func TestToThreadLongThreadUsesTrueLastCommenter(t *testing.T) {
+	answered := toThread(mkLongNode("long-1", 250, "gemini-code-assist", "vbonnet"))
+	if !answered.Answered || answered.LastAuthor != "vbonnet" {
+		t.Errorf("250-comment thread ending with our reply: got %+v, want answered by vbonnet", answered)
+	}
+
+	// The dangerous direction: the reviewer got the last word far past any
+	// page boundary. This must not be treated as answered.
+	reopened := toThread(mkLongNode("long-2", 250, "gemini-code-assist", "gemini-code-assist"))
+	if reopened.Answered {
+		t.Error("reviewer had the last word on a long thread but it counted as answered")
+	}
+}
+
+// TestToThreadSingleCommentNeverAnswered pins that a lone opening comment is
+// unanswered no matter what, since TotalCount is the only length signal.
+func TestToThreadSingleCommentNeverAnswered(t *testing.T) {
+	n := mkNode("solo", false, "gemini-code-assist")
+	if got := toThread(n); got.Answered {
+		t.Errorf("single-comment thread counted as answered: %+v", got)
 	}
 }

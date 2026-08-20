@@ -75,12 +75,19 @@ thread counts as ANSWERED when someone other than its opening author had the
 last word:
 
 ```sh
+# thread IDs: pr-blockers prints them in brackets, or list them directly
+resolve-review-threads list <owner> <repo> <n>
+
 # the normal path: state the reason and close the thread in one step
 resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"
 
 # sweep: resolves ANSWERED threads, refuses the rest by name, exits non-zero
 resolve-review-threads resolve-all <owner> <repo> <n> [author]
 ```
+
+Every resolve path enforces this, including single-thread `resolve <threadId>`,
+and each one re-reads the thread immediately before mutating it, so a reviewer
+comment landing mid-sweep is never resolved away on stale state.
 
 `resolve-all --force` resolves unanswered threads. Use it only to dismiss a
 finding deliberately, and say why in a PR comment. Never reach for it to make

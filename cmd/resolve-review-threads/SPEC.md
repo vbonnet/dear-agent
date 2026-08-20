@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 1.1
+**Version:** 1.2
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -42,6 +42,14 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-13** When a thread is outdated, the system shall report that fact and shall not treat it as evidence the thread may be resolved.
 
 **RESOLVE-REVIEW-THREADS-14** When `reply-resolve` is requested, the system shall require a thread node ID and a non-empty body, post the reply, and resolve the thread only after the reply succeeds.
+
+**RESOLVE-REVIEW-THREADS-15** When `resolve` is requested for a single unanswered thread and `--force` is absent, the system shall refuse to resolve it and exit non-zero.
+
+**RESOLVE-REVIEW-THREADS-16** When determining whether a thread is answered, the system shall derive the most recent comment author from the thread's last comment rather than from a bounded page of comments.
+
+**RESOLVE-REVIEW-THREADS-17** When about to resolve a thread, the system shall re-read that thread and re-evaluate its answered state immediately before issuing the mutation.
+
+**RESOLVE-REVIEW-THREADS-18** When a thread is already resolved, the system shall report it as skipped rather than issuing a redundant mutation.
 
 ## BDD Traceability
 

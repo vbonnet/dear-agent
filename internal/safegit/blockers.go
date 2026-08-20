@@ -220,7 +220,11 @@ func threadBlocker(st PRState, repo string, threads []ReviewThread) *Blocker {
 		if where == "" {
 			where = "(no file)"
 		}
-		lines = append(lines, fmt.Sprintf("@%s %s%s", author, where, tag))
+		if t.ID != "" {
+			lines = append(lines, fmt.Sprintf("@%s %s%s [%s]", author, where, tag, t.ID))
+		} else {
+			lines = append(lines, fmt.Sprintf("@%s %s%s", author, where, tag))
+		}
 	}
 	if len(lines) == 0 {
 		return nil
@@ -238,11 +242,13 @@ func threadBlocker(st PRState, repo string, threads []ReviewThread) *Blocker {
 	return &Blocker{
 		Code:   BlockThreads,
 		Detail: detail,
-		Fix: fmt.Sprintf("address each thread in code, then close it with its reason: "+
-			"resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\" "+
-			"(sweep the answered ones with: resolve-review-threads resolve-all %s %s %d [author]; "+
-			"it refuses threads nobody replied to)",
-			owner, name, st.Number),
+		Fix: fmt.Sprintf("address each thread in code, then close it with its reason using the "+
+			"thread ID in brackets above: resolve-review-threads reply-resolve <threadId> "+
+			"\"Fixed - <what changed>\" (list them again any time with: "+
+			"resolve-review-threads list %s %s %d; sweep the answered ones with: "+
+			"resolve-review-threads resolve-all %s %s %d [author], which refuses threads "+
+			"nobody replied to)",
+			owner, name, st.Number, owner, name, st.Number),
 	}
 }
 
