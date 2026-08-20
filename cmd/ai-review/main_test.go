@@ -788,3 +788,68 @@ func chdir(t *testing.T, dir string) {
 	t.Helper()
 	t.Chdir(dir)
 }
+
+// paddedSpecDocument returns a syntactically valid SPEC whose size clears the
+// changed-contract review bound. The padding is ordinary prose carrying no
+// requirement and no feature link, so every governance check still passes and
+// the only reason the plan records is the AIREV-22 bound proof.
+func paddedSpecDocument(id, body, feature string, lines int) string {
+	pad := strings.Repeat("Explanatory prose that states no requirement and links no feature.\n", lines)
+	return specDocument(id, body, feature) + "\n" + pad
+}
+
+func TestRun_KeylessBoundProofTakesCannotRunExit(t *testing.T) {
+	// A bound proof reports that no admissible prompt or verdict for this diff
+	// fits the reviewer's own budgets, so no verdict was ever reachable. That
+	// is a cannot-run disposition, not a conclusive governance finding, and
+	// keyless it takes the AIREV-26 code the workflow publishes as neutral.
+	repo := newReviewRepo(t)
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	writeReviewFile(t, repo, "module/SPEC.md", paddedSpecDocument("MOD-01", "When checked, the system shall report it.", "features/module.feature", 5000))
+	writeReviewFile(t, repo, "features/module.feature", featureDocument("# SPEC: module/SPEC.md\n", "contract"))
+	gittest.Run(t, repo, "add", "module/SPEC.md", "features/module.feature")
+	gittest.Run(t, repo, "commit", "-m", "oversized contract")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.capacityOnly() {
+		t.Fatalf("fixture did not produce a bound-proof-only plan: %v", plan.HumanReasons)
+	}
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	if got := run(c); got != exitKeylessCannotRun {
+		t.Fatalf("keyless bound proof: run() = %d, want cannot-run code %d", got, exitKeylessCannotRun)
+	}
+}
+
+func TestRun_KeylessBoundProofMixedWithGovernanceFindingStaysHardFailure(t *testing.T) {
+	// One conclusive governance finding makes the whole verdict conclusive. A
+	// bound proof must never launder a SPEC.owner ownership edge into the
+	// neutral cannot-run disposition.
+	repo := newReviewRepo(t)
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	writeReviewFile(t, repo, "module/SPEC.md", paddedSpecDocument("MOD-01", "When checked, the system shall report it.", "features/module.feature", 5000))
+	writeReviewFile(t, repo, "features/module.feature", featureDocument("# SPEC: module/SPEC.md\n", "contract"))
+	writeReviewFile(t, repo, "module/SPEC.owner", "module/SPEC.md\n")
+	gittest.Run(t, repo, "add", "module/SPEC.md", "features/module.feature", "module/SPEC.owner")
+	gittest.Run(t, repo, "commit", "-m", "oversized contract and ownership edge")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.capacityOnly() {
+		t.Fatalf("ownership edge classified as a bound proof: %v", plan.HumanReasons)
+	}
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	if got := run(c); got != 1 {
+		t.Fatalf("keyless mixed verdict: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
+	}
+}
