@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A condition beyond ref_name changes which refs the ruleset governs."
+}

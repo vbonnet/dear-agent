@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "A repository entry must be an object; a bare string carries no visibility or check configuration.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

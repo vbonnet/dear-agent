@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/owned-repositories.jq",
+  "description": "An empty result is far more likely to be a failed or unauthenticated request than an account with no repositories; treating it as an empty fleet would report every managed repository as missing.",
+  "raw": true,
+  "args": {
+    "owner": "vbonnet"
+  }
+}

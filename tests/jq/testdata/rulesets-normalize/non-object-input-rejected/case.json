@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A non-object input (for example a GitHub error body) must not read as an empty policy."
+}

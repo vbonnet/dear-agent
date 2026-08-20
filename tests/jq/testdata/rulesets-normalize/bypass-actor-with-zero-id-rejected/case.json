@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A malformed bypass actor must fail loudly rather than normalize into a set that looks empty."
+}

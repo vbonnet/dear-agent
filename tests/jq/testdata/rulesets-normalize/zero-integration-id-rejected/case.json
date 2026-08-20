@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "Zero is not a GitHub App id; accepting it would pin a check to a nonexistent app."
+}

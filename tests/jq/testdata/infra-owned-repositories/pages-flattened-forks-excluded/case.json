@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/owned-repositories.jq",
+  "description": "The GitHub listing arrives paginated; pages are flattened, forks dropped, names lowercased and deduplicated, so the result is comparable to the managed inventory.",
+  "raw": true,
+  "args": {
+    "owner": "vbonnet"
+  }
+}

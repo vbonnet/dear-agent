@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "A repository that is both active and archived would be managed and ignored at the same time.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

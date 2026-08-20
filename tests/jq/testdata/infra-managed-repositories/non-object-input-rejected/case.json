@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "A non-object input (for example an error body) must not read as an empty fleet.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}
