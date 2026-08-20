@@ -1,20 +1,21 @@
 name: Branch Protection Audit
 
-# Daily check that the `main` branch on every repo we care about has its
-# protection rules configured (required status checks, PR reviews, no force
-# push, no deletion). Opens a single rolling `branch-protection` issue when
-# anything is missing and auto-closes it once every repo is back in spec.
+# Daily fail-closed audit of the private managed-repository inventory. Exact
+# repository identities and provider responses stay in shell memory on the
+# trusted default-branch run; public logs and issues contain aggregate results
+# only.
 #
-# This workflow needs cross-repo read access. The default GITHUB_TOKEN can
-# only see the repo it runs in, so it reads a PAT from `secrets.AUDIT_PAT`
-# with `repo` + `read:org` scope. If the secret is absent the job no-ops
-# with a warning rather than failing — the CI Health Monitor will catch any
-# resulting issue.
+# REQUIRED SECRETS:
+#   INFRA_GITHUB_TOKEN  cross-repo PAT with repo + read:org scope
+#   INFRA_ACTIVE_REPOS  complete private active_repos JSON value
 
 on:
   schedule:
     - cron: "0 14 * * *"
-  workflow_dispatch:
+  # repository_dispatch always runs the last commit on the default branch; it
+  # cannot select an untrusted ref for this secret-bearing audit.
+  repository_dispatch:
+    types: [branch-protection-audit]
 
 permissions:
   issues: write
@@ -22,193 +23,341 @@ permissions:
 
 env:
   GIT_TERMINAL_PROMPT: "0"
+  CHECK_EVIDENCE_MAX_AGE_DAYS: "30"
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Audit branch protections across repos
+      - name: Checkout trusted canonical policy
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Audit branch protections across managed repos
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          ACTIVE_REPOS_JSON: ${{ secrets.INFRA_ACTIVE_REPOS }}
           OWNER: ${{ github.repository_owner }}
-          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::No GH_TOKEN available; skipping branch protection audit."
-            echo "skipped=true" >> "$GITHUB_ENV"
-            exit 0
+          : "${GH_TOKEN:?INFRA_GITHUB_TOKEN is required for complete cross-repo evidence}"
+          : "${ACTIVE_REPOS_JSON:?INFRA_ACTIVE_REPOS is required for the private managed inventory}"
+
+          if ! repo_lines=$(jq -er '
+              if type == "object" and (keys | length) > 0 and has("dear-agent")
+              then keys | sort | .[]
+              else error("active inventory must be a non-empty object containing dear-agent")
+              end
+            ' <<<"$ACTIVE_REPOS_JSON"); then
+            echo "::error::INFRA_ACTIVE_REPOS is not a valid managed inventory"
+            exit 1
           fi
 
-          # Repos under audit. Edit this list when new repos come online.
-          repos=(
-            "dear-agent"
-            "brain-v2"
-            "vbonnet.ai"
-            "gdoc-sync"
-            "engram-research"
-            "engram-kb"
-          )
+          finding_count=0
+          audited_count=0
+          total_count=$(wc -l <<<"$repo_lines" | tr -d ' ')
+          if [[ ! "$CHECK_EVIDENCE_MAX_AGE_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::CHECK_EVIDENCE_MAX_AGE_DAYS must be a positive integer"
+            exit 1
+          fi
+          check_evidence_cutoff_epoch=$(( $(date -u +%s) - CHECK_EVIDENCE_MAX_AGE_DAYS * 86400 ))
 
-          findings=""
+          record_finding() {
+            finding_count=$((finding_count + 1))
+            echo "::warning::$1; managed repository identity withheld"
+          }
 
-          for repo in "${repos[@]}"; do
+          while IFS= read -r repo; do
+            audited_count=$((audited_count + 1))
             slug="${OWNER}/${repo}"
-            echo "=== $slug ==="
+            echo "Auditing managed repository ${audited_count}/${total_count} (identity withheld)"
 
-            # 404 from this endpoint = no *classic* protection. A repo may
-            # instead (or also) be protected by a repository ruleset, which
-            # lives at a different endpoint and returns 404 here. Treat an
-            # active default-branch ruleset that enforces required checks +
-            # pull_request with no bypass actors as equivalent protection.
-            if ! protection=$(timeout 30 gh api \
-                "repos/${slug}/branches/main/protection" \
-                -H "Accept: application/vnd.github+json" 2>/dev/null); then
-              # Distinguish "repo not found" from "no protection set".
-              if ! timeout 30 gh api "repos/${slug}" >/dev/null 2>&1; then
-                echo "  skip — repo not accessible (private or missing)"
-                continue
-              fi
-              # Look for a qualifying active ruleset before flagging.
-              ruleset_ok=""
-              ids=$(timeout 30 gh api "repos/${slug}/rulesets" 2>/dev/null \
-                | jq -r '.[] | select(.target == "branch" and .enforcement == "active") | .id' || true)
-              for rid in $ids; do
-                detail=$(timeout 30 gh api "repos/${slug}/rulesets/${rid}" 2>/dev/null || true)
-                [ -z "$detail" ] && continue
-                if echo "$detail" | jq -e '
-                    (.conditions.ref_name.include // [] | index("~DEFAULT_BRANCH"))
-                    and ((.bypass_actors // []) | length == 0)
-                    and ([.rules[].type] | index("required_status_checks"))
-                    and ([.rules[].type] | index("pull_request"))
-                  ' >/dev/null 2>&1; then
-                  ruleset_ok="yes"
-                  break
-                fi
-              done
-              if [ -n "$ruleset_ok" ]; then
-                echo "  ok — protected by repository ruleset"
-                continue
-              fi
-              findings="${findings}\n- **${slug}**: branch \`main\` has no protection rules (no classic protection and no qualifying ruleset)"
+            if ! repo_data=$(timeout 30 gh api "repos/${slug}" 2>/dev/null); then
+              record_finding "repository evidence is inaccessible"
+              continue
+            fi
+            if ! default_branch=$(jq -er '.default_branch | strings | select(length > 0)' <<<"$repo_data"); then
+              record_finding "default-branch evidence is malformed"
+              continue
+            fi
+            if ! default_branch_path=$(jq -rn --arg value "$default_branch" '$value | @uri'); then
+              record_finding "default-branch path cannot be encoded"
+              continue
+            fi
+            if ! repo_config=$(jq -cer --arg repo "$repo" '.[$repo] | select(type == "object")' <<<"$ACTIVE_REPOS_JSON"); then
+              record_finding "private inventory entry is malformed"
               continue
             fi
 
-            problems=$(echo "$protection" | jq -r '
-              [
-                (if (.required_status_checks // null) == null
-                  then "missing required_status_checks"
-                  else empty end),
-                (if (.required_pull_request_reviews // null) == null
-                  then "missing required_pull_request_reviews"
-                  else empty end),
-                (if (.allow_force_pushes.enabled // false)
-                  then "force pushes enabled"
-                  else empty end),
-                (if (.allow_deletions.enabled // false)
-                  then "branch deletion enabled"
-                  else empty end),
-                (if (.required_pull_request_reviews.required_approving_review_count // 0) < 1
-                  then "approving_review_count < 1"
-                  else empty end)
-              ] | join(", ")
-            ')
-
-            if [ -n "$problems" ]; then
-              findings="${findings}\n- **${slug}**: ${problems}"
-              echo "  PROBLEMS: $problems"
+            if [[ "$repo" == "dear-agent" ]]; then
+              if ! expected=$(jq -cS -f .github/rulesets/normalize.jq .github/rulesets/main.json); then
+                echo "::error::canonical ruleset source is malformed"
+                exit 1
+              fi
             else
-              echo "  ok"
-            fi
-
-            # Phantom required-check detection (informational, non-blocking):
-            # the checks above only confirm that required_status_checks EXISTS,
-            # never that each required context is actually produced by a
-            # workflow. A required context that no check run ever produces (the
-            # Trivy context lingered this way from 2026-05-11 through multiple
-            # PR cascades while this audit stayed silent) blocks every merge yet
-            # passes the audit. Cross-reference required contexts against the
-            # contexts produced by recent check runs on main and warn on any
-            # gap. Warnings only — this is diagnostic, never a merge gate, so it
-            # is deliberately kept out of $findings / issue creation.
-            required_contexts=$(echo "$protection" \
-              | jq -r '.required_status_checks.contexts // [] | .[]' 2>/dev/null \
-              | sort || true)
-            produced_contexts=$(timeout 30 gh api \
-              "repos/${slug}/commits/main/check-runs?per_page=100" \
-              --jq '[.check_runs[].name] | unique | .[]' 2>/dev/null \
-              | sort || true)
-            if [ -z "$required_contexts" ]; then
-              : # no required contexts to cross-reference
-            elif [ -z "$produced_contexts" ]; then
-              # An empty produced set (merge-commit HEAD with no checks, or an
-              # API hiccup) would flag every context as phantom — skip instead
-              # of crying wolf.
-              echo "  note — no check runs on main HEAD; skipping phantom detection"
-            else
-              phantom=$(comm -23 \
-                <(printf '%s\n' "$required_contexts") \
-                <(printf '%s\n' "$produced_contexts"))
-              if [ -n "$phantom" ]; then
-                echo "::warning::${slug}: phantom required contexts (required for merge but never produced by any recent check run):"
-                printf '%s\n' "$phantom" | sed 's/^/  ::warning::  /'
-                echo "  These contexts block merges but no workflow produces them — workflow deleted, context renamed, or the producing app is uninstalled."
-              else
-                echo "  ok — all required contexts produced by recent check runs"
+              if ! expected_policy=$(jq -cn --argjson cfg "$repo_config" '
+                  (if ($cfg | has("required_check_identities")) and $cfg.required_check_identities != null then
+                     $cfg.required_check_identities
+                   else
+                     (if ($cfg | has("required_checks")) and $cfg.required_checks != null then
+                        $cfg.required_checks
+                      else []
+                      end) as $legacy_checks
+                     | [$legacy_checks[] | {context: ., integration_id: null}]
+                   end)
+                  | map({context, integration_id: (if has("integration_id") then .integration_id else null end)}) as $checks
+                  | {
+                      name: "branch-protection",
+                      target: "branch",
+                      enforcement: "active",
+                      bypass_actors: [],
+                      conditions: {ref_name: {include: ["~DEFAULT_BRANCH"], exclude: []}},
+                      rules: ([
+                        {type: "deletion"},
+                        {type: "non_fast_forward"},
+                        {type: "required_linear_history"},
+                        {type: "pull_request", parameters: {
+                          required_approving_review_count: 0,
+                          dismiss_stale_reviews_on_push: true,
+                          require_code_owner_review: false,
+                          require_last_push_approval: false,
+                          required_review_thread_resolution: true,
+                          required_reviewers: [],
+                          allowed_merge_methods: ["squash"]
+                        }}
+                      ] + if ($checks | length) > 0 then [{
+                        type: "required_status_checks",
+                        parameters: {
+                          strict_required_status_checks_policy: false,
+                          do_not_enforce_on_create: false,
+                          required_status_checks: $checks
+                        }
+                      }] else [] end)
+                    }
+                '); then
+                record_finding "private inventory policy is malformed"
+                continue
+              fi
+              if ! expected=$(jq -cS -f .github/rulesets/normalize.jq <<<"$expected_policy"); then
+                record_finding "private inventory policy cannot be normalized"
+                continue
               fi
             fi
-          done
 
-          # Persist findings (use newline-delimited heredoc so the body
-          # round-trips through GITHUB_ENV cleanly).
+            # Rulesets are the sole managed protection mechanism. Distinguish
+            # the expected 404 (no classic protection) from an unreadable API.
+            if classic_result=$(timeout 30 gh api \
+                "repos/${slug}/branches/${default_branch_path}/protection" \
+                -H "Accept: application/vnd.github+json" 2>&1); then
+              record_finding "legacy classic protection exists"
+            elif [[ "$classic_result" != *"HTTP 404"* ]]; then
+              record_finding "classic-protection evidence is unavailable"
+              continue
+            fi
+
+            # Ask GitHub which rules actually apply to this concrete branch.
+            # Inspecting only ruleset include markers misses explicit ref
+            # patterns such as refs/heads/main and can hide competing authority.
+            if ! evaluated_rule_pages=$(timeout 30 gh api --paginate --slurp \
+                "repos/${slug}/rules/branches/${default_branch_path}?per_page=100" 2>/dev/null); then
+              record_finding "evaluated branch-rules evidence is unavailable"
+              continue
+            fi
+            if ! evaluated_ruleset_ids=$(jq -ce '
+                if type == "array"
+                    and all(.[];
+                      type == "array"
+                      and all(.[];
+                        type == "object"
+                        and (.ruleset_id | type) == "number"
+                        and .ruleset_id > 0))
+                then flatten(1) | map(.ruleset_id) | unique
+                else error("unexpected evaluated branch-rules response")
+                end
+              ' <<<"$evaluated_rule_pages"); then
+              record_finding "evaluated branch-rules evidence is malformed"
+              continue
+            fi
+
+            active_default_rulesets=$(jq -r 'length' <<<"$evaluated_ruleset_ids")
+            if [[ "$active_default_rulesets" -ne 1 ]]; then
+              record_finding "default branch does not have exactly one active ruleset authority"
+              continue
+            fi
+
+            canonical_matches=0
+            ruleset_detail=""
+            rid=$(jq -r '.[0]' <<<"$evaluated_ruleset_ids")
+            if ! detail=$(timeout 30 gh api "repos/${slug}/rulesets/${rid}" 2>/dev/null); then
+              record_finding "ruleset-detail evidence is unavailable"
+              continue
+            fi
+            if live_policy=$(jq -cS -f .github/rulesets/normalize.jq <<<"$detail") && [[ "$live_policy" == "$expected" ]]; then
+              canonical_matches=1
+              ruleset_detail="$detail"
+            fi
+            if [[ "$canonical_matches" -ne 1 ]]; then
+              record_finding "active ruleset does not match the complete canonical policy"
+              continue
+            fi
+            echo "  exactly one canonical repository ruleset"
+
+            if ! required_checks=$(jq -ce '
+                [.rules[] | select(.type == "required_status_checks")][0]
+                .parameters.required_status_checks // []
+                | map({context, integration_id: (.integration_id // null)})
+              ' <<<"$ruleset_detail"); then
+              record_finding "required-check policy evidence is malformed"
+              continue
+            fi
+            if [[ "$(jq -r 'length' <<<"$required_checks")" -eq 0 ]]; then
+              continue
+            fi
+
+            produced_checks='[]'
+            collect_check_runs() {
+              local ref="$1" ref_path check_pages page_checks
+              if ! ref_path=$(jq -rn --arg value "$ref" '$value | @uri'); then
+                return 2
+              fi
+              if ! check_pages=$(timeout 30 gh api --paginate --slurp \
+                  "repos/${slug}/commits/${ref_path}/check-runs?filter=all&per_page=100" 2>/dev/null); then
+                return 1
+              fi
+              if ! page_checks=$(jq -ce --argjson cutoff "$check_evidence_cutoff_epoch" '
+                  if type == "array"
+                      and all(.[];
+                        type == "object"
+                        and (.check_runs | type) == "array"
+                        and all(.check_runs[];
+                          (.name | type) == "string"
+                          and (.name | length) > 0
+                          and (.app | type) == "object"
+                          and (.app.id | type) == "number"
+                          and ((.completed_at // .started_at) | type) == "string"
+                          and (try ((.completed_at // .started_at) | fromdateiso8601) catch null) != null))
+                  then [
+                    .[].check_runs[]
+                    | {
+                        context: .name,
+                        integration_id: .app.id,
+                        produced_at: ((.completed_at // .started_at) | fromdateiso8601)
+                      }
+                    | select(.produced_at >= $cutoff)
+                    | {context, integration_id}
+                  ]
+                  else error("unexpected paginated check-run response")
+                  end
+                ' <<<"$check_pages"); then
+                return 2
+              fi
+              if ! produced_checks=$(jq -cn \
+                  --argjson prior "$produced_checks" \
+                  --argjson current "$page_checks" \
+                  '$prior + $current | unique_by(.context, .integration_id)'); then
+                return 2
+              fi
+            }
+
+            evidence_error=""
+            if collect_check_runs "$default_branch"; then
+              :
+            else
+              case $? in
+                1) evidence_error="required-check production evidence is unavailable" ;;
+                *) evidence_error="required-check production evidence is malformed" ;;
+              esac
+            fi
+            if [[ -z "$evidence_error" ]]; then
+              if ! missing_checks=$(jq -cn \
+                  --argjson expected "$required_checks" \
+                  --argjson produced "$produced_checks" \
+                  '{expected: $expected, produced: $produced}' \
+                  | jq -ce -f .github/rulesets/missing-required-checks.jq); then
+                evidence_error="required-check production evidence is malformed"
+              fi
+            fi
+
+            # Checks can be PR-only or path-filtered, so broaden a still-missing
+            # default-branch result to the twenty most recently updated PR heads
+            # whose pull requests target that same default branch.
+            if [[ -z "$evidence_error" && "$(jq -r 'length' <<<"$missing_checks")" -gt 0 ]]; then
+              if ! pull_heads=$(timeout 30 gh api \
+                  "repos/${slug}/pulls?base=${default_branch_path}&state=all&sort=updated&direction=desc&per_page=20" 2>/dev/null); then
+                evidence_error="required-check production evidence is unavailable"
+              elif ! recent_refs=$(jq -ce '
+                  if type == "array"
+                      and all(.[];
+                        type == "object"
+                        and (.head | type) == "object"
+                        and (.head.sha | type) == "string"
+                        and (.head.sha | length) > 0)
+                  then [.[0:20][].head.sha] | unique
+                  else error("unexpected pull-request response")
+                  end
+                ' <<<"$pull_heads"); then
+                evidence_error="required-check production evidence is malformed"
+              else
+                while IFS= read -r candidate_ref; do
+                  if collect_check_runs "$candidate_ref"; then
+                    :
+                  else
+                    case $? in
+                      1) evidence_error="required-check production evidence is unavailable" ;;
+                      *) evidence_error="required-check production evidence is malformed" ;;
+                    esac
+                    break
+                  fi
+                  if ! missing_checks=$(jq -cn \
+                      --argjson expected "$required_checks" \
+                      --argjson produced "$produced_checks" \
+                      '{expected: $expected, produced: $produced}' \
+                      | jq -ce -f .github/rulesets/missing-required-checks.jq); then
+                    evidence_error="required-check production evidence is malformed"
+                    break
+                  fi
+                  if [[ "$(jq -r 'length' <<<"$missing_checks")" -eq 0 ]]; then
+                    break
+                  fi
+                done < <(jq -r '.[]' <<<"$recent_refs")
+              fi
+            fi
+
+            if [[ -n "$evidence_error" ]]; then
+              record_finding "$evidence_error"
+            elif [[ "$(jq -r 'length' <<<"$missing_checks")" -gt 0 ]]; then
+              record_finding "required check identities lack recent check-run evidence (maximum age ${CHECK_EVIDENCE_MAX_AGE_DAYS} days)"
+            fi
+          done <<<"$repo_lines"
+
           {
-            echo "findings<<__EOF__"
-            printf '%b\n' "$findings"
-            echo "__EOF__"
+            echo "finding_count=$finding_count"
+            echo "audited_count=$audited_count"
+            echo "total_count=$total_count"
           } >> "$GITHUB_ENV"
 
-      - name: Open / update branch-protection issue
-        if: ${{ env.skipped != 'true' && env.findings != '' }}
+      - name: Open or update aggregate branch-protection issue
+        if: ${{ env.finding_count != '0' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          title="branch-protection: misconfigured repos detected"
-          body=$(cat <<EOF
-          The Branch Protection Audit found one or more repos missing required protections as of $(date -u +"%Y-%m-%dT%H:%M:%SZ"):
-
-          ${findings}
-
-          **Required for every repo** — satisfied by EITHER classic branch
-          protection OR an active default-branch repository ruleset.
-
-          Classic protection must have:
-          - \`required_status_checks\` configured
-          - \`required_pull_request_reviews\` with \`required_approving_review_count >= 1\`
-          - \`allow_force_pushes.enabled = false\`
-          - \`allow_deletions.enabled = false\`
-
-          A ruleset qualifies when it is \`active\`, targets \`~DEFAULT_BRANCH\`,
-          has empty \`bypass_actors\`, and includes \`required_status_checks\` +
-          \`pull_request\` rules (see \`.github/rulesets/main.json\`).
-
-          To fix a repo: \`gh api -X PUT repos/<owner>/<repo>/branches/main/protection ...\` (classic) or apply a ruleset — see [GitHub's branch protection docs](https://docs.github.com/en/rest/branches/branch-protection) and [rulesets docs](https://docs.github.com/en/rest/repos/rules).
-
-          Auto-managed by \`.github/workflows/branch-protection-audit.yml\`; closes once every repo passes.
-          EOF
-          )
+          title="branch-protection: managed inventory drift detected"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="Branch Protection Audit found ${finding_count} finding(s) across ${audited_count}/${total_count} managed repositories. Exact identities and provider details are intentionally withheld from this public issue. Re-run the same audit in a private trusted environment with the canonical inventory, then reconcile through the independently verified OpenTofu saved-plan workflow. Run: ${run_url}"
           existing=$(timeout 30 gh issue list --repo "$REPO" --label branch-protection --state open --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
+          if [[ -n "$existing" ]]; then
             timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
           else
             timeout 30 gh issue create --repo "$REPO" --title "$title" --body "$body" --label branch-protection
           fi
 
-      - name: Auto-close branch-protection issue when all repos pass
-        if: ${{ env.skipped != 'true' && env.findings == '' }}
+      - name: Auto-close branch-protection issue after complete clean evidence
+        if: ${{ env.finding_count == '0' && env.audited_count == env.total_count }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -216,5 +365,11 @@ jobs:
           set -euo pipefail
           existing=$(timeout 30 gh issue list --repo "$REPO" --label branch-protection --state open --json number --jq '.[].number')
           for n in $existing; do
-            timeout 30 gh issue close "$n" --repo "$REPO" --comment "All audited repos have branch protection configured; auto-closing."
+            timeout 30 gh issue close "$n" --repo "$REPO" --comment "Complete aggregate audit is clean; exact managed identities remain private."
           done
+
+      - name: Enforce aggregate audit result
+        if: ${{ env.finding_count != '0' }}
+        run: |
+          echo "::error::${finding_count} managed branch-protection finding(s); details withheld"
+          exit 1
