@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/binstamp"
 	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
@@ -162,6 +163,13 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
+	// A KeepAlive LaunchAgent restarts this daemon when it crashes, never
+	// when its binary is merely reinstalled: the running process keeps the
+	// old inode and serves pre-fix behavior indefinitely. Watching our own
+	// executable turns a redeploy into a clean exit that launchd answers by
+	// starting the new build.
+	selfBinary := binstamp.NewWatcher()
+
 	// Create detector and recovery handler
 	detector := ops.NewStallDetector(opCtx)
 	detector.PermissionTimeout = stalledPermissionTimeout
@@ -195,6 +203,20 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
 			return nil
 		case <-ticker.C:
+			// Checked before the scan so a redeploy takes effect on the next
+			// tick rather than after another full round of old-code work.
+			if selfBinary.Replaced() {
+				out := binaryReplacedOutput{
+					Timestamp: time.Now().Format(time.RFC3339),
+					EventType: "binary_replaced",
+					Binary:    selfBinary.Path(),
+					Action:    "exiting for supervisor restart",
+				}
+				data, _ := json.Marshal(out)
+				fmt.Println(string(data))
+				fmt.Fprintf(os.Stderr, "%s was replaced on disk; exiting so the supervisor restarts this daemon on the new build\n", selfBinary.Path())
+				return nil
+			}
 			// Drain first: an alert queued on an earlier scan reached nobody,
 			// and this loop is the only thing that reliably notices a
 			// supervisor has come back. Without it, an alert raised during a
@@ -306,4 +328,14 @@ func drainQueuedAlerts(ctx context.Context, opCtx *ops.OpContext) {
 		})
 		fmt.Println(string(data))
 	}
+}
+
+// binaryReplacedOutput is the JSON event emitted when the daemon notices
+// its own executable was reinstalled and exits so the supervisor can
+// restart it on the new build.
+type binaryReplacedOutput struct {
+	Timestamp string `json:"timestamp"`
+	EventType string `json:"event_type"`
+	Binary    string `json:"binary"`
+	Action    string `json:"action"`
 }
