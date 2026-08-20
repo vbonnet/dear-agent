@@ -181,14 +181,13 @@ func TestBuildReportWithNoSnapshot(t *testing.T) {
 }
 
 func TestBuildRolesShowsTheQuotaAwareOrder(t *testing.T) {
-	// openai is in a lower band than gemini, so a role that configures
-	// openai first should show gemini promoted above it.
+	// openai is in a lower band than anthropic, so a role that configures
+	// openai first should show anthropic promoted above it.
 	snapshot := &quota.Snapshot{
 		Source:      "codexbar",
 		GeneratedAt: time.Now(),
 		Providers: []quota.ProviderQuota{
 			readableProvider("openai", 40),
-			readableProvider("gemini", 99),
 			readableProvider("anthropic", 99),
 		},
 	}
@@ -199,7 +198,7 @@ func TestBuildRolesShowsTheQuotaAwareOrder(t *testing.T) {
 roles:
   reviewer:
     primary: gpt-5.5-pro
-    secondary: gemini-3.1-pro
+    secondary: claude-opus-4-8
 `
 	if err := os.WriteFile(registry, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -216,11 +215,53 @@ roles:
 	if !got.Reordered {
 		t.Error("want the role marked as reordered")
 	}
-	if got.Effective[0] != "gemini-3.1-pro" {
-		t.Errorf("effective order = %v, want gemini first", got.Effective)
+	if got.Effective[0] != "claude-opus-4-8" {
+		t.Errorf("effective order = %v, want claude first", got.Effective)
 	}
 	if got.Configured[0] != "gpt-5.5-pro" {
 		t.Errorf("configured order = %v, want the file's order preserved", got.Configured)
+	}
+}
+
+// TestBuildRolesNeverPromotesTheUnimplementedGeminiProvider guards the
+// same exclusion pkg/llm/quota/meter.go enforces at the CLI-preview
+// level: gemini has no constructible provider yet
+// (provider.Factory's newGeminiProvider is a stub for both auth
+// methods), so a role must never show it promoted ahead of a working
+// candidate on the strength of a great quota reading it can never
+// redeem (review on #1218).
+func TestBuildRolesNeverPromotesTheUnimplementedGeminiProvider(t *testing.T) {
+	snapshot := &quota.Snapshot{
+		Source:      "codexbar",
+		GeneratedAt: time.Now(),
+		Providers: []quota.ProviderQuota{
+			readableProvider("openai", 40),
+			readableProvider("gemini", 99),
+		},
+	}
+	meter := warmedMeter(t, snapshot)
+
+	registry := filepath.Join(t.TempDir(), "roles.yaml")
+	body := `version: 1
+roles:
+  reviewer:
+    primary: gpt-5.5-pro
+    secondary: gemini-3.1-pro
+`
+	if err := os.WriteFile(registry, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reports, _ := buildRoles(meter, registry)
+	if len(reports) != 1 {
+		t.Fatalf("got %d roles, want 1", len(reports))
+	}
+	got := reports[0]
+	if got.Reordered {
+		t.Errorf("want no reordering (gemini excluded from promotion), got Effective = %v", got.Effective)
+	}
+	if got.Effective[0] != "gpt-5.5-pro" {
+		t.Errorf("effective order = %v, want the configured order preserved", got.Effective)
 	}
 }
 
