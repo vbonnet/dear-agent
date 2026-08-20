@@ -236,7 +236,7 @@ func parseCount(s string) (int, error) {
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		return 0, fmt.Errorf("unparseable line count %q", s)
+		return 0, fmt.Errorf("unparseable line count %q: %w", s, err)
 	}
 	return n, nil
 }
