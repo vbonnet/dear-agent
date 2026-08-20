@@ -124,7 +124,9 @@ provider has separately made that exact check required.
 **Keyless exception (skip-with-warning).** While `ANTHROPIC_API_KEY` is not
 configured as a repository secret, a same-repository, non-override run whose
 *sole* blocker is the absent credential — an otherwise-reviewable changed
-SPEC, or a §3 escalation whose accompanying model review cannot run — exits
+SPEC, a §3 escalation whose accompanying model review cannot run, or a
+bounded-wire proof that no admissible prompt or complete verdict for the diff
+fits the reviewer's own budgets — exits
 with the distinct code 78 ("review cannot run"), and the workflow publishes
 that one disposition as a **neutral-with-warning** check instead of a
 failure: no approval is claimed, the command still posts its
@@ -132,8 +134,12 @@ failure: no approval is claimed, the command still posts its
 human review is recommended before merge. Conclusive SPEC-governance verdicts
 that need no model (ownership edges, reviewer-dependency changes,
 traceability failures, stale-base evidence) stay blocking even keyless, as do
-fork PRs, plan build errors, expired deadlines, override audit failures, and
-any failure while a key *is* configured. Configuring the secret makes exit 78
+any verdict mixing such a finding with a bounded-wire proof, fork PRs, plan
+build errors, expired deadlines, override audit failures, and
+any failure while a key *is* configured. A bound proof is not a conclusive
+verdict: it reports that no verdict was reachable, its remedy is ours rather
+than the contributor's, and its size tracks the repository's SPEC tree rather
+than the diff. Configuring the secret makes exit 78
 unreachable and restores the full fail-closed contract above with no further
 change.
 
