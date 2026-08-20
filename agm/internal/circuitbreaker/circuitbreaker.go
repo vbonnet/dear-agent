@@ -269,7 +269,7 @@ type ProcCounter interface {
 
 // GateResult describes the outcome of a single gate check.
 type GateResult struct {
-	Gate             string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs", "admission_brake"
+	Gate             string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs", "admission_brake", "provider_quota"
 	Passed           bool
 	RequiresOverride bool // true only when this exact refusal may be crossed by its scoped override
 	Message          string
@@ -307,9 +307,11 @@ func RequiresAdmissionBrakeOverride(result CheckResult) bool {
 // existing callers and tests compile unchanged; production wires all three
 // through WithDiskReader / WithProcCounter / WithBrakeReader.
 type checkOptions struct {
-	dr DiskReader
-	pc ProcCounter
-	br BrakeReader
+	dr         DiskReader
+	pc         ProcCounter
+	br         BrakeReader
+	quotaGate  ProviderQuotaGate
+	quotaModel string
 }
 
 // CheckOption injects an optional admission-control reader into Check.
@@ -403,6 +405,17 @@ func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemRea
 		brakeGate := checkAdmissionBrake(o.br)
 		result.Gates = append(result.Gates, brakeGate)
 		if !brakeGate.Passed {
+			result.Allowed = false
+		}
+	}
+
+	// Gate 8: provider subscription quota (fails OPEN; runs only when wired).
+	// See provider_quota.go for why this gate inverts the fail-closed rule
+	// the resource gates above follow.
+	if o.quotaGate != nil && o.quotaModel != "" {
+		quotaGate := checkProviderQuota(o.quotaGate, o.quotaModel)
+		result.Gates = append(result.Gates, quotaGate)
+		if !quotaGate.Passed {
 			result.Allowed = false
 		}
 	}
