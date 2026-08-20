@@ -1,0 +1,122 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.12.5",
+  "prior_state": {
+    "format_version": "1.2",
+    "terraform_version": "1.12.5",
+    "values": {
+      "outputs": {
+        "private": {
+          "sensitive": true,
+          "value": "DA_PRIVATE_SENTINEL_7c96b2ca"
+        }
+      }
+    }
+  },
+  "configuration": {},
+  "planned_values": {},
+  "variables": {
+    "private_inventory": {
+      "value": "DA_PRIVATE_SENTINEL_7c96b2ca"
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "module.managed_repos[\"dear-agent\"].github_repository_ruleset.branch_protection",
+      "module_address": "module.managed_repos[\"dear-agent\"]",
+      "mode": "managed",
+      "type": "github_repository_ruleset",
+      "name": "branch_protection",
+      "provider_name": "registry.opentofu.org/integrations/github",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": ["~DEFAULT_BRANCH"]
+            }
+          },
+          "enforcement": "evaluate",
+          "id": "18061003",
+          "name": "main-zero-bypass",
+          "repository": "dear-agent",
+          "ruleset_id": 18061003,
+          "rules": [{"type": "required_linear_history"}],
+          "target": "branch"
+        },
+        "after": {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": ["~DEFAULT_BRANCH"]
+            }
+          },
+          "enforcement": "active",
+          "id": "18061003",
+          "name": "main-zero-bypass",
+          "repository": "dear-agent",
+          "ruleset_id": 18061003,
+          "rules": [{"type": "required_linear_history"}],
+          "target": "branch"
+        },
+        "after_unknown": {},
+        "before_sensitive": false,
+        "after_sensitive": false
+      }
+    }
+  ],
+  "resource_drift": [
+    {
+      "address": "module.managed_repos[\"dear-agent\"].github_repository_ruleset.branch_protection",
+      "module_address": "module.managed_repos[\"dear-agent\"]",
+      "mode": "managed",
+      "type": "github_repository_ruleset",
+      "name": "branch_protection",
+      "provider_name": "registry.opentofu.org/integrations/github",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": ["~DEFAULT_BRANCH"]
+            }
+          },
+          "enforcement": "active",
+          "id": "18061003",
+          "name": "main-zero-bypass",
+          "repository": "dear-agent",
+          "ruleset_id": 18061003,
+          "rules": [{"type": "required_linear_history"}],
+          "target": "branch"
+        },
+        "after": {
+          "bypass_actors": [],
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": ["~DEFAULT_BRANCH"]
+            }
+          },
+          "enforcement": "evaluate",
+          "id": "18061003",
+          "name": "main-zero-bypass",
+          "repository": "dear-agent",
+          "ruleset_id": 18061003,
+          "rules": [{"type": "required_linear_history"}],
+          "target": "branch"
+        },
+        "after_unknown": {},
+        "before_sensitive": false,
+        "after_sensitive": false
+      }
+    }
+  ],
+  "errored": false,
+  "complete": true,
+  "timestamp": "2026-08-11T01:00:00Z"
+}

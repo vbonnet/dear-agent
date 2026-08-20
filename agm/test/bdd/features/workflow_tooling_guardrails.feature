@@ -1,6 +1,7 @@
 # SPEC: cmd/agm-worktree-audit/SPEC.md
 # RELATED-SPEC: cmd/resolve-review-threads/SPEC.md
 # RELATED-SPEC: cmd/pr-blockers/SPEC.md
+# RELATED-SPEC: cmd/changed-paths/SPEC.md
 Feature: Workflow tooling guardrails
   Agent workflow support commands should have explicit SPEC coverage and BDD
   traceability so cleanup and review-thread tooling cannot drift outside the
@@ -16,3 +17,4 @@ Feature: Workflow tooling guardrails
       | agm-worktree-audit     |
       | resolve-review-threads |
       | pr-blockers            |
+      | changed-paths          |

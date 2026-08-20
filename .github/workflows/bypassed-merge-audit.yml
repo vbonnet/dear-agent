@@ -49,6 +49,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days || '7' }}
+          # Optional. Only the ruleset-history calls use it, and only to learn
+          # which checks were required at each merge. Absent, the audit says so
+          # and reports its findings as unverified rather than as bypasses.
+          INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -90,35 +94,70 @@ jobs:
           # Rulesets carry a version history, so the set as it stood at a given
           # merge is recoverable. Fetch the version list once; per PR, take the
           # newest version whose updated_at precedes the merge.
+          # Ruleset reads need repository-administration rights, and the
+          # workflow GITHUB_TOKEN cannot be granted them: `administration` is a
+          # fine-grained-PAT permission, NOT one of the GITHUB_TOKEN workflow
+          # scopes. Naming it under `permissions:` makes the workflow file
+          # invalid — the run dies before a single job starts, which is exactly
+          # what #1324 did to main. Use an admin PAT when one is configured and
+          # degrade honestly when it is not.
           ruleset_id=$(gh api "repos/${REPO}/rules/branches/main" \
             --jq '[.[] | .ruleset_id] | unique | first // empty' 2>/dev/null || true)
           ruleset_history=""
           if [ -n "${ruleset_id}" ]; then
-            ruleset_history=$(gh api "repos/${REPO}/rulesets/${ruleset_id}/history" --paginate \
+            ruleset_history=$(GH_TOKEN="${INFRA_GITHUB_TOKEN:-$GH_TOKEN}" \
+              gh api "repos/${REPO}/rulesets/${ruleset_id}/history" --paginate \
               --jq '[.[] | {version_id, updated_at}] | sort_by(.updated_at)' 2>/dev/null || true)
           fi
-          if [ -z "${ruleset_history}" ] || [ "${ruleset_history}" = "[]" ]; then
-            echo "::notice::Ruleset history unavailable; classifying against the current required set. A check required recently may produce anachronistic findings."
+          # Check the SHAPE, not just non-emptiness: a 403 body or an error
+          # object still parses as "something", and the first cut treated that
+          # as a usable history.
+          if ! jq -e 'type == "array" and length > 0 and (.[0] | has("version_id"))' \
+               <<<"${ruleset_history:-null}" >/dev/null 2>&1; then
+            echo "::warning::Ruleset history unavailable (needs an admin PAT in INFRA_GITHUB_TOKEN); findings are UNVERIFIED against the rules in force at merge time."
             ruleset_history=""
+          else
+            echo "Ruleset history: $(jq -r 'length' <<<"${ruleset_history}") version(s) available."
           fi
 
           # required_at <merged_at> — echoes the contexts required at that
           # instant, falling back to the current set when history cannot answer.
+          # Every fallback path announces itself. The first cut of this was silent
+          # on failure, so a 403 on the history endpoint looked identical to a
+          # successful lookup: the log printed a required set with no hint it was
+          # today's rather than the merge's, and the finding it produced was
+          # indistinguishable from a real one.
           required_at() {
-            local merged="$1" version cached
-            [ -z "${ruleset_history}" ] && { printf '%s' "${required_checks}"; return; }
+            local merged="$1" version cached contexts
+            if [ -z "${ruleset_history}" ]; then
+              printf '%s' "${required_checks}"; return
+            fi
             version=$(jq -r --arg m "${merged}" \
               '[.[] | select(.updated_at <= $m)] | last | .version_id // empty' <<<"${ruleset_history}")
             # A merge older than every recorded version: the oldest version is
             # the closest evidence available, and is still better than today's.
             [ -z "${version}" ] && version=$(jq -r 'first | .version_id // empty' <<<"${ruleset_history}")
-            [ -z "${version}" ] && { printf '%s' "${required_checks}"; return; }
+            if [ -z "${version}" ]; then
+              echo "::warning::no ruleset version resolvable for a merge at ${merged}; using today's required set" >&2
+              printf '%s' "${required_checks}"; return
+            fi
             cached="/tmp/ruleset-${version}.json"
-            [ -f "${cached}" ] || gh api "repos/${REPO}/rulesets/${ruleset_id}/history/${version}" \
-              > "${cached}" 2>/dev/null || { printf '%s' "${required_checks}"; return; }
-            jq -c '[.state.rules[]? | select(.type == "required_status_checks")
-                    | .parameters.required_status_checks[]?.context] | unique' "${cached}" \
-              2>/dev/null || printf '%s' "${required_checks}"
+            if [ ! -f "${cached}" ]; then
+              if ! GH_TOKEN="${INFRA_GITHUB_TOKEN:-$GH_TOKEN}" \
+                   gh api "repos/${REPO}/rulesets/${ruleset_id}/history/${version}" > "${cached}" 2>/dev/null; then
+                rm -f "${cached}"
+                echo "::warning::could not read ruleset version ${version}; using today's required set" >&2
+                printf '%s' "${required_checks}"; return
+              fi
+            fi
+            contexts=$(jq -c '[.state.rules[]? | select(.type == "required_status_checks")
+                    | .parameters.required_status_checks[]?.context] | unique' "${cached}" 2>/dev/null || true)
+            if [ -z "${contexts}" ] || [ "${contexts}" = "null" ]; then
+              echo "::warning::ruleset version ${version} carried no required-status-checks rule; using today's required set" >&2
+              printf '%s' "${required_checks}"; return
+            fi
+            echo "ruleset-version=${version}" >&2
+            printf '%s' "${contexts}"
           }
 
           findings=""
@@ -180,6 +219,15 @@ jobs:
             printf '%s\n' "$findings"
             echo "__EOF__"
           } >> "$GITHUB_ENV"
+          # Carry the verification state to the issue step. A finding produced
+          # without the at-merge ruleset is a suspicion, not a bypass, and the
+          # issue is what a human actually reads — saying so only in the run log
+          # leaves the artifact asserting more than the audit can support.
+          if [ -z "${ruleset_history}" ]; then
+            echo "verified=false" >> "$GITHUB_ENV"
+          else
+            echo "verified=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Open / update bypassed-merge issue
         if: env.findings != ''
@@ -188,8 +236,24 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          title="bypassed-merge: PRs merged with failing or pending required checks"
-          body="The Bypassed Merge Audit detected PRs merged to \`main\` while required CI checks were not all green:
+          if [ "${verified:-true}" = "false" ]; then
+            title="bypassed-merge: UNVERIFIED findings (required-set history unavailable)"
+            caveat="> **These findings are unverified.** The audit could not read the branch
+          > ruleset's version history, so it compared against the checks required
+          > **today** rather than those required when each pull request merged. A
+          > check made required recently will therefore appear to have been bypassed
+          > by every merge in the lookback window that had it red — a merge that broke
+          > no rule in force at the time.
+          >
+          > Configure an admin PAT in \`INFRA_GITHUB_TOKEN\` to resolve the required set
+          > per merge and make these findings authoritative.
+
+          "
+          else
+            title="bypassed-merge: PRs merged with failing or pending required checks"
+            caveat=""
+          fi
+          body="${caveat}The Bypassed Merge Audit examined PRs merged to \`main\` and found required CI checks that were not all green:
 
           ${findings}
 
@@ -211,10 +275,18 @@ jobs:
             --jq '.[0].number // empty')
 
           if [ -n "$existing" ]; then
+            # Track the title too, not just append a comment. The title is what
+            # shows in the issue list, so an issue opened while the required-set
+            # history was readable would keep asserting a bypass after the audit
+            # lost that access — and vice versa. Comments do not correct a title
+            # nobody expands to read.
+            timeout 30 gh issue edit "$existing" \
+              --repo "$REPO" \
+              --title "$title" || true
             timeout 30 gh issue comment "$existing" \
               --repo "$REPO" \
               --body "$body"
-            echo "Updated existing issue #${existing}"
+            echo "Updated existing issue #${existing} (title: ${title})"
           else
             timeout 30 gh issue create \
               --repo "$REPO" \
