@@ -18,6 +18,8 @@
 
 **DBG-05** When debug logging is enabled, the system shall enforce owner-only permissions on the debug directory and log file, including when either path already exists with broader permissions.
 
+**DBG-06** When the logger is closed, the system shall flush the log to disk, report a failed flush or close through the process logger rather than discarding it, and release the file handle.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_diagnostics_package_guardrails.feature`

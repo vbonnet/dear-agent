@@ -77,19 +77,37 @@ func Init(enabled bool, sessionName string) error {
 	return nil
 }
 
-// Close closes the debug logger
+// Close flushes and closes the debug logger.
+//
+// The handle is writable, so a failed flush or close means the tail of the
+// log on disk is not what the process actually recorded. There is no caller
+// that could retry -- a debug log is read after the fact, by a human -- but
+// discarding the error silently produces a short log that reads as complete,
+// which is the opposite of what a debug log is for. Report it through slog
+// instead, and drop the handle either way so that a second Close, or a Log
+// after Close, stays a no-op rather than touching a closed descriptor.
 func Close() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if globalLogger != nil && globalLogger.file != nil {
-		// Write final log entry directly (can't call Log() while holding mutex)
-		elapsed := time.Since(globalLogger.startTime)
-		timestamp := time.Now().Format("15:04:05.000")
-		fmt.Fprintf(globalLogger.file, "[%s] +%7dms | Debug session ended (total: %v)\n",
-			timestamp, elapsed.Milliseconds(), elapsed)
-		globalLogger.file.Close()
+	if globalLogger == nil || globalLogger.file == nil {
+		return
 	}
+
+	// Write final log entry directly (can't call Log() while holding mutex)
+	elapsed := time.Since(globalLogger.startTime)
+	timestamp := time.Now().Format("15:04:05.000")
+	fmt.Fprintf(globalLogger.file, "[%s] +%7dms | Debug session ended (total: %v)\n",
+		timestamp, elapsed.Milliseconds(), elapsed)
+
+	path := globalLogger.file.Name()
+	if err := globalLogger.file.Sync(); err != nil {
+		slog.Error("Failed to flush debug log", "path", path, "error", err)
+	}
+	if err := globalLogger.file.Close(); err != nil {
+		slog.Error("Failed to close debug log", "path", path, "error", err)
+	}
+	globalLogger.file = nil
 }
 
 // Log writes a timestamped debug message
