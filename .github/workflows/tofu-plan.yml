@@ -28,9 +28,18 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
+        uses: opentofu/setup-opentofu@v2
         with:
-          tofu_version: latest
+          tofu_version: 1.12.5
+
+      - name: Check OpenTofu formatting
+        run: tofu fmt -check -recursive
+
+      - name: Stage backendless speculative configuration
+        # A configured s3 backend still requires initialization even when the
+        # plan disables refresh. This disposable checkout is moved to the
+        # implicit local backend; the production backend file remains tracked.
+        run: mv -f backend.tf /tmp/tofu-plan-backend.tf
 
       - name: tofu init (no backend)
         run: tofu init -backend=false
@@ -41,11 +50,33 @@ jobs:
       - name: tofu plan
         id: plan
         continue-on-error: true
-        run: tofu plan -refresh=false -no-color 2>&1 | tee /tmp/plan-output.txt
+        run: |
+          # The checked-in configuration refuses every plan without an
+          # encryption method. This speculative plan is never saved, so use a
+          # fresh cryptographic random passphrase scoped to this process. A
+          # public run identifier is intentionally not key material.
+          plan_passphrase="$(openssl rand -hex 32)"
+          export TF_ENCRYPTION
+          TF_ENCRYPTION="$(printf '%s\n' \
+            'key_provider "pbkdf2" "speculative" {' \
+            "  passphrase = \"${plan_passphrase}\"" \
+            '}' \
+            'method "aes_gcm" "speculative" {' \
+            '  keys = key_provider.pbkdf2.speculative' \
+            '}' \
+            'plan {' \
+            '  method = method.aes_gcm.speculative' \
+            '}')"
+          unset plan_passphrase
+          tofu plan -refresh=false -no-color 2>&1 | tee /tmp/plan-output.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TF_VAR_personal_owner: vbonnet
           TF_VAR_org_name: dear-labs
+          # The private fleet inventory is deliberately unavailable to a PR
+          # workflow. Empty maps still exercise the root/module type contract.
+          TF_VAR_active_repos: "{}"
+          TF_VAR_archived_repos: "{}"
           # This PR workflow executes contributor-controlled Terraform, so it
           # must never receive the personal OAuth credential. The plan is
           # backendless and refreshless; a non-empty placeholder exercises the
@@ -67,7 +98,7 @@ jobs:
 
       - name: Post plan as PR comment
         if: always()
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88  # v3.0.5
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: tofu-plan
           path: /tmp/plan-comment.md

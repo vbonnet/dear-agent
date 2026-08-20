@@ -62,14 +62,17 @@ everything else is codified (workflow files + OpenTofu).
    every PR, same as the public repos. The remaining PII repos (engram-kb,
    brain-v2, ai-conversation-logs) stay a commented opt-in block —
    enabling review on those is a data-handling call this IaC deliberately
-   does not make for you. Once `repos.auto.tfvars` reflects your choice:
+   does not make for you. Once `repos.auto.tfvars` reflects your choice,
+   configure a fresh process-local `TF_ENCRYPTION` method by following
+   [Plan encryption](../infra/README.md#plan-encryption) in the same shell;
+   the checked-in configuration rejects bare plan/apply invocations:
    ```
    cd infra
    export GITHUB_TOKEN="$(gh auth token)"
    export TF_VAR_claude_code_oauth_token="<token from step 1>"
    tofu init -backend-config=backend.hcl
-   tofu plan   # review before applying
-   tofu apply  # opens or updates a rollout PR; review and merge that PR normally
+   tofu plan   # requires the fresh TF_ENCRYPTION method configured above
+   tofu apply  # reuses that method and opens or updates a rollout PR
    ```
    After the rollout PR merges, set `claude_review_rollout = false` and apply
    again. GitHub deletes merged PR branches, so this removes the transient

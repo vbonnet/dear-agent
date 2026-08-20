@@ -48,6 +48,33 @@ The token must have:
 - `repo` scope — to manage `vbonnet/*` repositories and branch protection
 - `admin:org` scope — to create/manage `dear-labs` org rulesets
 
+## Plan encryption
+
+The checked-in OpenTofu configuration refuses to create a plan unless a plan
+encryption method is configured. For an interactive plan that is not saved,
+create a fresh process-local method before running `tofu plan` or `tofu apply`:
+
+```bash
+plan_passphrase="$(openssl rand -hex 32)"
+export TF_ENCRYPTION="$(printf '%s\n' \
+  'key_provider "pbkdf2" "interactive" {' \
+  "  passphrase = \"${plan_passphrase}\"" \
+  '}' \
+  'method "aes_gcm" "interactive" {' \
+  '  keys = key_provider.pbkdf2.interactive' \
+  '}' \
+  'plan {' \
+  '  method = method.aes_gcm.interactive' \
+  '}')"
+unset plan_passphrase
+```
+
+Do not print or persist `TF_ENCRYPTION`. A saved `-out` plan must retain the
+exact method long enough for authorized decryption and must never upload its
+plaintext `tofu show -json` representation. The automated production path owns
+that transport and key lifetime; ad hoc workflows must not invent a stable key
+from a run ID, commit, branch, or other public value.
+
 ## Remote state
 
 State is **not** local. It lives in a Cloudflare R2 bucket via OpenTofu's

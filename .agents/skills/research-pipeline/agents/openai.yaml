@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Pipeline"
+  short_description: "Research, verify, plan, and decompose"
+  default_prompt: "Use $research-pipeline to run cited, cross-model-verified research through to a reviewed plan and beads decomposition."
