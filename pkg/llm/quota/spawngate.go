@@ -106,6 +106,15 @@ type SpawnGate struct {
 
 	// ReadState overrides the state loader. Nil reads Path.
 	ReadState func(path string) (*State, error)
+
+	// resolveDefaultPath caches the one-time DefaultStateFilePath()
+	// lookup. Admission checks every spawn twice, and the default path
+	// never changes for the life of a gate, so re-resolving it on every
+	// check — os.UserHomeDir() and an env lookup — is pure repeated cost
+	// on the spawn hot path (gemini review on #1325).
+	resolveDefaultPath sync.Once
+	defaultPath        string
+	defaultPathErr     error
 }
 
 // ModelFamilyHeuristic maps a model id to a provider family by vendor
@@ -164,8 +173,13 @@ func (g *SpawnGate) family(model string) string {
 func (g *SpawnGate) AllowSpawn(model string) SpawnDecision {
 	// failOpen allows a spawn the guardrail could not evaluate, and says so
 	// on both channels: Evaluated=false for callers, Warn for operators.
-	failOpen := func(reason string, family string) SpawnDecision {
-		g.warn(fmt.Sprintf(
+	// cause is a small fixed category used only to dedupe the warning;
+	// reason is the full, detail-bearing message that gets printed — they
+	// diverge on purpose so a reading that keeps getting staler by the
+	// second doesn't mint a fresh warnedCauses entry every call (gemini
+	// review on #1325).
+	failOpen := func(cause string, reason string, family string) SpawnDecision {
+		g.warn(cause+"|"+family, fmt.Sprintf(
 			"quota guardrail: allowing this spawn without checking %s quota — %s",
 			familyLabel(family), reason))
 		return SpawnDecision{
@@ -177,16 +191,16 @@ func (g *SpawnGate) AllowSpawn(model string) SpawnDecision {
 		}
 	}
 	if g == nil {
-		return failOpen("no quota guardrail is wired on this spawn path", "")
+		return failOpen("no-gate", "no quota guardrail is wired on this spawn path", "")
 	}
 	if overrideEngaged() {
-		return failOpen(fmt.Sprintf("%s disables the guardrail for this process",
+		return failOpen("override", fmt.Sprintf("%s disables the guardrail for this process",
 			SpawnGateOverrideEnvVar), "")
 	}
 
 	family := g.family(model)
 	if family == "" {
-		return failOpen(fmt.Sprintf(
+		return failOpen("unmapped-model", fmt.Sprintf(
 			"model %q is not mapped to a metered provider; if this model does draw"+
 				" down a subscription budget, its family resolver is missing an alias", model), "")
 	}
@@ -194,24 +208,24 @@ func (g *SpawnGate) AllowSpawn(model string) SpawnDecision {
 	state, err := g.loadState()
 	switch {
 	case err != nil:
-		return failOpen(fmt.Sprintf("no usable quota reading (%v)", err), family)
+		return failOpen("read-error", fmt.Sprintf("no usable quota reading (%v)", err), family)
 	case state == nil:
-		return failOpen("no usable quota reading", family)
+		return failOpen("no-state", "no usable quota reading", family)
 	}
 
 	if maxAge := g.maxAge(); maxAge > 0 {
 		if age := state.Age(g.now()); age > maxAge {
-			return failOpen(fmt.Sprintf("quota reading is %s old, past the %s gating limit",
+			return failOpen("stale-reading", fmt.Sprintf("quota reading is %s old, past the %s gating limit",
 				age.Round(time.Second), maxAge), family)
 		}
 	}
 
 	provider, ok := state.Provider(family)
 	if !ok {
-		return failOpen(fmt.Sprintf("no quota reading for provider family %q", family), family)
+		return failOpen("unmapped-family", fmt.Sprintf("no quota reading for provider family %q", family), family)
 	}
 	if !provider.Readable {
-		return failOpen(fmt.Sprintf("quota for %s is unreadable, not exhausted (%s)",
+		return failOpen("unreadable", fmt.Sprintf("quota for %s is unreadable, not exhausted (%s)",
 			family, provider.Availability), family)
 	}
 	if BreakerState(provider.BreakerState) != BreakerOpen {
@@ -256,14 +270,17 @@ func familyLabel(family string) string {
 // Warn and does its own accounting.
 var warnedCauses sync.Map
 
-// warn announces a fail-open. A nil gate still warns: "no gate wired" is
-// precisely the condition an operator needs to hear about.
-func (g *SpawnGate) warn(msg string) {
+// warn announces a fail-open, deduped by cause rather than by the full
+// message text so a detail that changes on every call (age, error text)
+// can't turn a "once per cause" warning into one entry per call. A nil
+// gate still warns: "no gate wired" is precisely the condition an
+// operator needs to hear about.
+func (g *SpawnGate) warn(cause, msg string) {
 	if g != nil && g.Warn != nil {
 		g.Warn(msg)
 		return
 	}
-	if _, seen := warnedCauses.LoadOrStore(msg, struct{}{}); seen {
+	if _, seen := warnedCauses.LoadOrStore(cause, struct{}{}); seen {
 		return
 	}
 	fmt.Fprintln(os.Stderr, msg)
@@ -283,11 +300,13 @@ func (g *SpawnGate) loadState() (*State, error) {
 	}
 	path := g.Path
 	if path == "" {
-		resolved, err := DefaultStateFilePath()
-		if err != nil {
-			return nil, err
+		g.resolveDefaultPath.Do(func() {
+			g.defaultPath, g.defaultPathErr = DefaultStateFilePath()
+		})
+		if g.defaultPathErr != nil {
+			return nil, g.defaultPathErr
 		}
-		path = resolved
+		path = g.defaultPath
 	}
 	return read(path)
 }

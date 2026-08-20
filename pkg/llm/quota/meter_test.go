@@ -121,6 +121,32 @@ func TestMeterNeverDropsACandidate(t *testing.T) {
 	}
 }
 
+// TestMeterOrderModelsPinsUnknownDecisionsToTheirOriginalIndex guards a
+// transitivity bug: an earlier comparator returned "equivalent" for any
+// pair involving an unknown decision, which is not a valid strict weak
+// order once two unknowns sit between known decisions of different bands
+// (gemini review on #1325). OrderModels now pins every unknown decision
+// to its original index and only reorders the known decisions among the
+// remaining positions.
+func TestMeterOrderModelsPinsUnknownDecisionsToTheirOriginalIndex(t *testing.T) {
+	snapshot := snapshotAt(time.Now(),
+		readable("anthropic", window("Weekly", 90)), // band 0, best
+		readable("openai", window("Weekly", 5)),     // band 3, worst
+	)
+	meter := newTestMeter(t, snapshot, quota.Policy{})
+
+	// gemini has no reading at all, so it decides unknown. Configured
+	// between the best and worst known candidate, it must stay exactly
+	// there — never pulled ahead by its synthetic band-0 tie, never
+	// pushed back by the known reordering around it.
+	configured := []string{"gpt-5.5-pro", "gemini-3.1-pro", "claude-opus-4-8"}
+	got, decisions := meter.OrderModels(configured)
+	assertOrder(t, got, []string{"claude-opus-4-8", "gemini-3.1-pro", "gpt-5.5-pro"})
+	if decisions[1].Known() {
+		t.Fatalf("gemini decision = %+v, want unknown", decisions[1])
+	}
+}
+
 func TestMeterOrderModelsDoesNotMutateInput(t *testing.T) {
 	meter := liveMeter(t, quota.Policy{})
 	configured := []string{"claude-opus-4-8", "gpt-5.5-pro", "gemini-3.1-pro"}
@@ -218,6 +244,72 @@ func TestMeterRefreshKeepsThePreviousReadingOnFailure(t *testing.T) {
 	if got := meter.DecisionFor("openai"); got.Class != quota.ClassHealthy {
 		t.Errorf("Class = %q, want healthy from the retained reading", got.Class)
 	}
+}
+
+// syncClock is a mutable, goroutine-safe clock for a test that advances
+// time across a background refresh running on another goroutine.
+type syncClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *syncClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *syncClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+// TestMeterSnapshotBacksOffBetweenFailedRefreshesOfAnEmptyCache guards
+// against a spawn storm: an empty cache with a reader that fails instantly
+// (codexbar missing) never sets readAt, so every Snapshot call saw the
+// cache as stale and, once the previous background refresh finished,
+// kicked off another one immediately — with no floor on how often that
+// could happen (gemini review on #1325).
+func TestMeterSnapshotBacksOffBetweenFailedRefreshesOfAnEmptyCache(t *testing.T) {
+	reader := &stubReader{err: errors.New("codexbar not installed")}
+	clock := &syncClock{now: time.Now()}
+	meter := quota.New(quota.Options{
+		Reader:          reader,
+		RefreshInterval: time.Millisecond, // the cache is always "stale" on its own
+		Now:             clock.Now,
+	})
+
+	waitForReads := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if reader.readCount() >= want {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("reader was called %d times, want at least %d", reader.readCount(), want)
+	}
+
+	_, _, _ = snapshotOf(meter)
+	waitForReads(1)
+
+	// The cache is still empty and the failed attempt just landed. A
+	// burst of callers checking quota right after must not retrigger a
+	// read for each one.
+	for range 20 {
+		_, _, _ = snapshotOf(meter)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := reader.readCount(); got != 1 {
+		t.Fatalf("reader was called %d times right after a failed empty-cache read, want 1 (backoff should suppress the retry storm)", got)
+	}
+
+	// Once the backoff window has passed, a Snapshot call may retry.
+	clock.Advance(31 * time.Second)
+	_, _, _ = snapshotOf(meter)
+	waitForReads(2)
 }
 
 func TestMeterSnapshotServesTheCacheWithoutReReading(t *testing.T) {

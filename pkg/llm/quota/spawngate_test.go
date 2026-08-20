@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -305,6 +306,58 @@ func TestSpawnGateWarnsOnEveryFailOpen(t *testing.T) {
 	}
 	if !strings.Contains(warnings[0], "without checking") {
 		t.Errorf("warning does not say the spawn went unchecked: %s", warnings[0])
+	}
+}
+
+// TestSpawnGateDedupesWarningsByCauseNotByMessage guards against a memory
+// leak: the default (nil Warn) path dedupes fail-open warnings so a
+// long-running process gets one line per cause instead of wallpaper. The
+// dedup key used to be the full formatted message, which embeds dynamic
+// detail (a reading's age, an error's text) that changes on every call —
+// so a gate stuck failing open for the same static reason would still
+// grow the dedup set forever. Two calls whose only difference is dynamic
+// detail must now print once, not twice (gemini review on #1325).
+func TestSpawnGateDedupesWarningsByCauseNotByMessage(t *testing.T) {
+	attempt := 0
+	gate := &quota.SpawnGate{
+		ReadState: func(string) (*quota.State, error) {
+			attempt++
+			// A distinct message on every call — e.g. a wrapped OS error
+			// whose text embeds a syscall detail that varies by run — but
+			// the same underlying cause each time.
+			return nil, errors.New(strings.Repeat("x", attempt) + " read failed")
+		},
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	original := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = original })
+
+	for range 3 {
+		gate.AllowSpawn("claude-opus-4-8")
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	os.Stderr = original
+	var buf strings.Builder
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+
+	lines := 0
+	for line := range strings.SplitSeq(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if line != "" {
+			lines++
+		}
+	}
+	if lines != 1 {
+		t.Fatalf("printed %d warning line(s) for three fail-opens with the same cause, want 1:\n%s", lines, buf.String())
 	}
 }
 

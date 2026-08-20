@@ -60,12 +60,21 @@ type Meter struct {
 	refreshInterval time.Duration
 	now             func() time.Time
 
-	mu         sync.Mutex
-	snapshot   *Snapshot
-	readAt     time.Time
-	readErr    error
-	refreshing bool
+	mu          sync.Mutex
+	snapshot    *Snapshot
+	readAt      time.Time
+	lastAttempt time.Time
+	readErr     error
+	refreshing  bool
 }
+
+// emptyCacheRetryBackoff is the minimum spacing between refresh attempts
+// while the cache is still empty and failing. Without it, a codexbar
+// that fails instantly (missing binary, immediate exec error) combines
+// with readAt staying zero to retrigger a background refresh on every
+// single Snapshot() call with no delay at all — a spawn storm under any
+// caller that polls quota in a loop (gemini review on #1325).
+const emptyCacheRetryBackoff = 30 * time.Second
 
 // New builds a Meter. It performs no I/O; the first reading arrives from
 // Refresh or from the first background refresh.
@@ -108,6 +117,7 @@ func (m *Meter) Refresh(ctx context.Context) (*Snapshot, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.lastAttempt = m.now()
 	if err == nil || m.snapshot != nil {
 		// Only record this attempt's time when it leaves the cache in a
 		// usable state: a successful read, or a failed one that still has
@@ -116,7 +126,8 @@ func (m *Meter) Refresh(ctx context.Context) (*Snapshot, error) {
 		// "fresh" and wait out the full refresh interval before retrying,
 		// so a transient startup failure could leave an entire short-lived
 		// workflow running without quota-aware routing (codex review on
-		// #1218).
+		// #1218). lastAttempt is recorded unconditionally instead, so an
+		// empty, failing cache still backs off between attempts.
 		m.readAt = m.now()
 	}
 	m.readErr = err
@@ -137,7 +148,8 @@ func (m *Meter) Snapshot() (*Snapshot, error) {
 	m.mu.Lock()
 	snapshot, err := m.snapshot, m.readErr
 	stale := m.readAt.IsZero() || m.now().Sub(m.readAt) >= m.refreshInterval
-	shouldRefresh := stale && !m.refreshing && m.refreshInterval > 0
+	backedOff := m.snapshot == nil && !m.lastAttempt.IsZero() && m.now().Sub(m.lastAttempt) < emptyCacheRetryBackoff
+	shouldRefresh := stale && !backedOff && !m.refreshing && m.refreshInterval > 0
 	if shouldRefresh {
 		m.refreshing = true
 	}
@@ -270,24 +282,34 @@ func (m *Meter) OrderModels(models []string) ([]string, []Decision) {
 		}
 	}
 
+	// An unknown decision must never cross a configured position: Band
+	// scores ClassUnknown as 0 (same as the top real band) so it never
+	// demotes anything, but a single sort.SliceStable comparator that
+	// falls back to "equivalent" whenever either side is unknown is not a
+	// valid strict weak order — two unknowns each "equivalent" to a
+	// different known band would need those two known bands to also be
+	// equivalent to each other by transitivity, which they are not (gemini
+	// review on #1325). Instead, keep every unknown decision pinned to its
+	// original index and only reorder the known decisions among the
+	// remaining positions, by band.
 	index := make([]int, len(ordered))
-	for i := range index {
+	knownIndex := make([]int, 0, len(ordered))
+	for i, d := range decisions {
 		index[i] = i
-	}
-	sort.SliceStable(index, func(a, b int) bool {
-		da, db := decisions[index[a]], decisions[index[b]]
-		if !da.Known() || !db.Known() {
-			// An unknown decision must never cross a configured position:
-			// Band scores ClassUnknown as 0 (same as the top real band) so
-			// it never demotes anything, but comparing that 0 against a
-			// known candidate's band would let unknown leapfrog ahead of a
-			// known candidate that isn't in the top band (codex review on
-			// #1218). Report the pair as equivalent instead, so the stable
-			// sort preserves their original configured order.
-			return false
+		if d.Known() {
+			knownIndex = append(knownIndex, i)
 		}
-		return Band(da) < Band(db)
+	}
+	sort.SliceStable(knownIndex, func(a, b int) bool {
+		return Band(decisions[knownIndex[a]]) < Band(decisions[knownIndex[b]])
 	})
+	next := 0
+	for pos, d := range decisions {
+		if d.Known() {
+			index[pos] = knownIndex[next]
+			next++
+		}
+	}
 
 	sortedModels := make([]string, len(ordered))
 	sortedDecisions := make([]Decision, len(ordered))
