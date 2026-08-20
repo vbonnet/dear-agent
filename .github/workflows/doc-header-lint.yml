@@ -32,30 +32,67 @@ jobs:
   header-lint:
     name: Header block format
     needs: changes
-    # This linter reads Markdown and nothing else. A PR that touches no
-    # Markdown cannot introduce a header-block violation, so running it there
-    # was pure setup cost to reprove the previous answer.
-    #
-    # Path-scoped but NOT diff-scoped, deliberately. The two pre-existing
-    # violations were fixed when the linter landed, so the tree is clean and a
-    # whole-repo pass costs the same as a changed-files pass while catching
-    # strictly more (e.g. a violation introduced by a file rename). Diff-scoping
-    # a check with no backlog trades coverage away for nothing.
-    if: >-
-      !cancelled() && (needs.changes.result != 'success' ||
-      needs.changes.outputs.docs == 'true' ||
-      needs.changes.outputs.global == 'true')
+    # Always runs so the required context always reports (see the checkout/
+    # relevance step below for the actual scoping — job-level `if:` would skip
+    # the whole job, including the check that lets a change to the linter's
+    # own implementation re-arm it).
+    if: "!cancelled()"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history: the relevance check below diffs base...head itself,
+          # same as changed-paths.yml, rather than trusting a shallow clone to
+          # contain both endpoints.
+          fetch-depth: 0
+
+      - name: Determine relevance
+        id: relevance
+        # This linter reads Markdown and nothing else, so `docs`/`global` from
+        # the shared taxonomy (job `changes`, above) cover almost every case
+        # that matters — except one the shared taxonomy can't see: a change to
+        # the linter's OWN implementation. pkg/headerlint and tools/header-lint
+        # are Go, not Markdown, so a PR that only edits them left `docs` and
+        # `global` both false and skipped the one check that would exercise
+        # the new code against the real tree. Checked locally, not added as a
+        # new central taxonomy output, to keep this narrow and specific to
+        # this one workflow.
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          DOCS: ${{ needs.changes.outputs.docs }}
+          GLOBAL: ${{ needs.changes.outputs.global }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          relevant=false
+          if [ "$CHANGES_RESULT" != "success" ] || [ "$DOCS" = "true" ] || [ "$GLOBAL" = "true" ]; then
+            relevant=true
+          fi
+
+          if [ "$relevant" != "true" ]; then
+            if [ "$EVENT_NAME" != "pull_request" ] || [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+              # Same fail-safe contract as changed-paths.yml: an unknowable
+              # change set says everything is relevant.
+              relevant=true
+            elif git diff --name-only "${BASE_SHA}...${HEAD_SHA}" | grep -qE '^(tools/header-lint/|pkg/headerlint/)'; then
+              relevant=true
+            fi
+          fi
+
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Validate doc metadata header format
+        if: steps.relevance.outputs.relevant == 'true'
         run: go run ./tools/header-lint -repo .
