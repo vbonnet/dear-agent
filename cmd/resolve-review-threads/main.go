@@ -60,6 +60,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 )
 
 // bodyPreviewLen caps the comment-body preview surfaced in list output.
@@ -242,7 +243,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// a previous run posted it and only the resolve failed. Posting again
 	// would leave a duplicate public comment on every retry.
 	if cur, err := fetchThread(ctx, threadID); err == nil &&
-		cur.LastAuthor != cur.Author && cur.LastBody == cleanBody(body) {
+		cur.LastAuthor != cur.Author && sameReplyBody(cur.LastBody, body) {
 		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
 	} else if _, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
 		"-f", "query="+replyMutation); err != nil {
@@ -591,6 +592,14 @@ func cleanBody(s string) string {
 		return string(r[:bodyPreviewLen])
 	}
 	return collapsed
+}
+
+// sameReplyBody reports whether a thread's most recent comment is the reply we
+// are about to post. It compares the bodies losslessly apart from surrounding
+// whitespace: cleanBody collapses runs and truncates to a preview length, so
+// using it here would fail to match any multi-line or long reply and repost it.
+func sameReplyBody(lastBody, want string) bool {
+	return strings.TrimSpace(lastBody) == strings.TrimSpace(want)
 }
 
 func fail(format string, a ...any) int {

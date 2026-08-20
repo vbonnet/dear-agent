@@ -310,3 +310,31 @@ func TestUnansweredErrorIsDistinguishable(t *testing.T) {
 		t.Error("an operational error was misclassified as an evidence refusal")
 	}
 }
+
+// TestSameReplyBody pins the retry guard's comparison. cleanBody collapses
+// whitespace and truncates to a preview, so using it here would fail to match
+// any multi-line or long reply and repost it on every retry.
+func TestSameReplyBody(t *testing.T) {
+	multiline := "Fixed in abc1234 — moved the check.\n\nCovered by TestThing."
+	long := repeat("x", bodyPreviewLen+80)
+
+	tests := []struct {
+		name       string
+		last, want string
+		match      bool
+	}{
+		{"identical", "Fixed - one line", "Fixed - one line", true},
+		{"multiline survives", multiline, multiline, true},
+		{"longer than the preview survives", long, long, true},
+		{"surrounding whitespace ignored", "  Fixed - one line\n", "Fixed - one line", true},
+		{"different replies do not match", "Fixed - A", "Fixed - B", false},
+		{"truncated preview is not the reply", cleanBody(long), long, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sameReplyBody(tt.last, tt.want); got != tt.match {
+				t.Errorf("sameReplyBody = %t, want %t", got, tt.match)
+			}
+		})
+	}
+}
