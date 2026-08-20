@@ -90,13 +90,16 @@ Every `resolve-review-threads` path enforces this, including single-thread
 mutating it, so a reviewer comment landing mid-sweep is never resolved away on
 stale state.
 
-**One sanctioned exception:** `mergeloop` auto-resolves unresolved threads whose
-every comment is from a known review bot, so a purely advisory finding cannot
-park a green PR on required conversation resolution forever. That is a
-deliberate throughput trade, not an oversight, and it now posts a notice on each
-thread saying the finding was auto-resolved and never read by a person. Treat
-those notices as a work queue: an auto-resolved thread is an unreviewed finding,
-not a handled one.
+**Known gap, do not assume it is covered:** `mergeloop` resolves threads through
+its own GraphQL mutation in `cmd/mergeloop/threads.go`, not through
+`resolve-review-threads`, so the evidence rule does not reach it. It
+auto-resolves any unresolved thread whose every comment is from a known review
+bot, which is exactly an unanswered bot finding, and it runs unattended. That is
+a deliberate throughput trade (an advisory finding should not park a green PR on
+required conversation resolution forever) but it means a resolved thread on a
+mergeloop-touched PR is NOT evidence a person read it. Whether that path should
+annotate, gate, or stop auto-resolving is an open policy question, tracked
+separately.
 
 `resolve-all --force` resolves unanswered threads. Use it only to dismiss a
 finding deliberately, and say why in a PR comment. Never reach for it to make

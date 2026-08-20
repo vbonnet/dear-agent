@@ -1,9 +1,6 @@
 package main
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestIsKnownBotAuthor(t *testing.T) {
 	cases := []struct {
@@ -39,44 +36,10 @@ func TestAllCommentsFromKnownBots(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			comments := make([]threadComment, len(c.logins))
-			for i, l := range c.logins {
-				comments[i] = threadComment{login: l, body: "a comment"}
-			}
-			if got := allCommentsFromKnownBots(comments); got != c.want {
+			if got := allCommentsFromKnownBots(c.logins); got != c.want {
 				t.Errorf("allCommentsFromKnownBots(%v) = %v, want %v", c.logins, got, c.want)
 			}
 		})
-	}
-}
-
-// TestAllCommentsFromKnownBots_NoticeKeepsEligibility pins the retry path: the
-// auto-resolve notice is posted by the authenticated gh user, not a bot, so a
-// naive author check would strand any thread whose notice landed but whose
-// resolution failed. It would never be selected again and would block required
-// conversation resolution forever.
-func TestAllCommentsFromKnownBots_NoticeKeepsEligibility(t *testing.T) {
-	withNotice := []threadComment{
-		{login: "chatgpt-codex-connector", body: "P1: fix this"},
-		{login: "vbonnet", body: autoResolveNotice},
-	}
-	if !allCommentsFromKnownBots(withNotice) {
-		t.Error("a thread carrying only mergeloop's own notice must stay eligible for retry")
-	}
-	if !hasAutoResolveNotice(withNotice) {
-		t.Error("hasAutoResolveNotice did not recognise the notice")
-	}
-
-	// A real human reply still disqualifies the thread.
-	withHuman := []threadComment{
-		{login: "chatgpt-codex-connector", body: "P1: fix this"},
-		{login: "vbonnet", body: "Actually this is wrong because..."},
-	}
-	if allCommentsFromKnownBots(withHuman) {
-		t.Error("a human reply must still disqualify the thread")
-	}
-	if hasAutoResolveNotice(withHuman) {
-		t.Error("a human reply was mistaken for the auto-resolve notice")
 	}
 }
 
@@ -112,29 +75,5 @@ func TestSplitOwnerRepo(t *testing.T) {
 			t.Errorf("splitOwnerRepo(%q) = (%q,%q,%v), want (%q,%q,%v)",
 				c.in, owner, name, ok, c.owner, c.name, c.ok)
 		}
-	}
-}
-
-// TestAutoResolveNoticeIsHonest pins the wording of the notice mergeloop posts
-// before auto-resolving. The whole point is that a reader can tell an
-// auto-resolved thread from one a person actually handled, so the notice must
-// say it was not reviewed and must offer a way back.
-func TestAutoResolveNoticeIsHonest(t *testing.T) {
-	for _, want := range []string{"Auto-resolved by mergeloop", "NOT reviewed by a person", "reopen"} {
-		if !strings.Contains(autoResolveNotice, want) {
-			t.Errorf("auto-resolve notice missing %q, got: %s", want, autoResolveNotice)
-		}
-	}
-}
-
-// TestThreadReplyMutationUsesCorrectInputField guards the one-character trap
-// between the two mutations: resolveReviewThread takes threadId while
-// addPullRequestReviewThreadReply takes pullRequestReviewThreadId.
-func TestThreadReplyMutationUsesCorrectInputField(t *testing.T) {
-	if !strings.Contains(threadReplyMutation, "pullRequestReviewThreadId:$threadId") {
-		t.Errorf("reply mutation must use pullRequestReviewThreadId, got: %s", threadReplyMutation)
-	}
-	if !strings.Contains(threadResolveMutation, "threadId:$threadId") {
-		t.Errorf("resolve mutation must use threadId, got: %s", threadResolveMutation)
 	}
 }
