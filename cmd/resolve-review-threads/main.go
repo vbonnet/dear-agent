@@ -263,10 +263,10 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		return 0
 	}
 
-	// anchorID is the comment that must be the thread's last one for
-	// resolution to be allowed: either the reply we post now, or the one a
-	// previous run already posted.
-	var anchorID string
+	// anchorID must be the thread's last comment, and anchorPrevID must be the
+	// comment before it, for resolution to be allowed. Both are required: see
+	// checkReplyPlacement.
+	var anchorID, anchorPrevID string
 	switch classifyPriorReply(cur.Tail, body) {
 	case priorReplySuperseded:
 		// A previous run posted this reply and the reviewer has spoken since.
@@ -280,18 +280,20 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		// A previous run posted this and nothing has been said since, so the
 		// comment we matched is the anchor.
 		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
-		anchorID = cur.LastID
+		anchorID, anchorPrevID = cur.LastID, cur.PrevID
 	case noPriorReply:
 		// The tail scan is only an optimisation against duplicate comments;
 		// if it missed an older reply the worst case is a duplicate, never a
 		// bad resolve, because the anchor below governs resolution.
+		// Our reply must land directly after the comment we just read.
+		anchorPrevID = cur.LastID
 		id, err := postReply(ctx, threadID, body)
 		if err != nil {
 			return fail("reply failed, thread left unresolved: %v", err)
 		}
 		anchorID = id
 	}
-	if code := verifyLastComment(ctx, threadID, anchorID); code != 0 {
+	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID); code != 0 {
 		return code
 	}
 	msg, _, rErr := resolveWithEvidence(ctx, threadID, false)
@@ -359,17 +361,41 @@ func parseReplyCommentID(raw []byte) (string, error) {
 	return id, nil
 }
 
-// verifyLastComment checks that a specific comment is still the thread's last
-// one before resolution is allowed.
+// replyPlacement describes where our reply ended up relative to what we read.
+type replyPlacement int
+
+const (
+	// replyExact means our reply is the last comment AND it directly follows
+	// the comment we had read: nobody spoke on either side of it.
+	replyExact replyPlacement = iota
+	// replyBuried means something was said after our reply.
+	replyBuried
+	// replyJumped means something was said between our read and our reply, so
+	// our reply sits on top of a comment we never saw.
+	replyJumped
+)
+
+// checkReplyPlacement is the whole safety argument, as a pure function.
 //
-// This identity check, not any search window, is what keeps reply-resolve
-// safe. Earlier versions inferred "our reply is last" from body matching or
-// from the previous comment's ID, and each inference had a hole: a reply older
-// than the search window looked unposted, and a reposted body genuinely became
-// the last comment so a predecessor check passed. Naming the exact comment
-// removes the inference. If anything at all was said after it, the thread is
-// left unresolved.
-func verifyLastComment(ctx context.Context, threadID, wantLastID string) int {
+// Two conditions are needed and neither implies the other. wantLast proves
+// nothing came AFTER our reply; wantPrev proves nothing arrived between our
+// read and our post, which would leave our reply sitting on top of an unread
+// comment while still being last. An earlier revision replaced the second
+// check with the first and silently reopened that race, which is why this
+// lives in a tested pure function instead of inline in the command.
+func checkReplyPlacement(gotPrev, gotLast, wantPrev, wantLast string) replyPlacement {
+	if gotLast != wantLast {
+		return replyBuried
+	}
+	if gotPrev != wantPrev {
+		return replyJumped
+	}
+	return replyExact
+}
+
+// verifyReplyPlacement re-reads the thread and applies checkReplyPlacement.
+// Returns 0 when the reply is exactly where we expect it.
+func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID string) int {
 	after, err := fetchThread(ctx, threadID)
 	if err != nil {
 		return fail("your reply is posted but the thread state could not be "+
@@ -377,12 +403,22 @@ func verifyLastComment(ctx context.Context, threadID, wantLastID string) int {
 			"do NOT re-run reply-resolve (it would repost); check the thread, then:\n"+
 			"  resolve-review-threads resolve %s", err, threadID)
 	}
-	if after.LastID != wantLastID {
+	switch checkReplyPlacement(after.PrevID, after.LastID, wantPrevID, wantLastID) {
+	case replyBuried:
 		return fail("your reply is posted, but it is not the last comment on "+
 			"thread %s: someone spoke after it, and your reply does not answer them.\n"+
 			"the thread was left UNRESOLVED on purpose. Read what came after "+
 			"your reply, then answer it with:\n"+
 			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+	case replyJumped:
+		return fail("your reply is posted, but someone commented between the "+
+			"moment this command read thread %s and the moment it replied, so "+
+			"your reply sits on top of a comment it does not answer.\n"+
+			"the thread was left UNRESOLVED on purpose. Read the comment above "+
+			"your reply, then answer it with:\n"+
+			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+	case replyExact:
+		return 0
 	}
 	return 0
 }

@@ -510,3 +510,68 @@ func TestReplyMutationRequestsCommentID(t *testing.T) {
 		t.Errorf("reply mutation must select the comment ID, got: %s", replyMutation)
 	}
 }
+
+// TestCheckReplyPlacement pins BOTH conditions reply-resolve depends on, and
+// exists because dropping one of them is exactly how this regressed.
+//
+// SPEC-28 required verifying that our reply directly follows the comment we
+// read. A later revision introduced an identity check on the reply itself and
+// REPLACED the predecessor check with it, which silently reopened the race: a
+// follow-up landing between the read and the post leaves our reply last, so
+// the identity check passes while our reply sits on top of an unread comment.
+// Neither condition implies the other, so both are asserted here.
+func TestCheckReplyPlacement(t *testing.T) {
+	const (
+		read    = "PRRC_read"    // last comment when we looked
+		ours    = "PRRC_ours"    // the reply we posted
+		sneaked = "PRRC_sneaked" // a comment we never saw
+		later   = "PRRC_later"   // a comment posted after ours
+	)
+	tests := []struct {
+		name             string
+		gotPrev, gotLast string
+		want             replyPlacement
+	}{
+		{
+			name:    "clean: ours is last and follows what we read",
+			gotPrev: read, gotLast: ours,
+			want: replyExact,
+		},
+		{
+			name:    "buried: someone spoke after our reply",
+			gotPrev: ours, gotLast: later,
+			want: replyBuried,
+		},
+		{
+			name:    "jumped: a comment arrived between our read and our post",
+			gotPrev: sneaked, gotLast: ours,
+			want: replyJumped,
+		},
+		{
+			name:    "buried takes precedence when both went wrong",
+			gotPrev: sneaked, gotLast: later,
+			want: replyBuried,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkReplyPlacement(tt.gotPrev, tt.gotLast, read, ours)
+			if got != tt.want {
+				t.Errorf("checkReplyPlacement = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCheckReplyPlacementRejectsBlankAnchors guards the degenerate case: an
+// empty expected ID must not compare equal to an empty observed one and wave
+// the resolution through. A single-comment thread legitimately has no
+// predecessor, so that pairing is the one blank case allowed.
+func TestCheckReplyPlacementRejectsBlankAnchors(t *testing.T) {
+	if got := checkReplyPlacement("", "", "PRRC_read", "PRRC_ours"); got == replyExact {
+		t.Error("blank observed IDs must not satisfy a named anchor")
+	}
+	if got := checkReplyPlacement("PRRC_x", "", "", ""); got == replyExact {
+		t.Error("blank expected last ID must not be satisfied by a real comment")
+	}
+}
