@@ -1,0 +1,7 @@
+# Used only by the pull-request fixture plan. The workflow copies this file to
+# the module root as ci_backend_override.tf so OpenTofu can plan without
+# production R2 credentials or state. Production commands must use the S3
+# backend declared in backend.tf.
+terraform {
+  backend "local" {}
+}

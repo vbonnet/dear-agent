@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "infra/**"
+      - ".github/rulesets/main.json"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -46,6 +47,28 @@ jobs:
 
       - name: tofu validate
         run: tofu validate
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Canonical ruleset projection assertions
+        # `validate` proves the configuration parses; it cannot see a malformed
+        # canonical ruleset document being projected into a weaker provider
+        # resource. These tests can: each copies infra/ into a temporary
+        # repository wired to an ephemeral local backend, plans the checked-in
+        # fixture inventory for real, and asserts on what the plan says.
+        #
+        # Self-contained by construction — own temp tree, own backend, own
+        # credential-free environment — so they neither read nor disturb the
+        # speculative plan below.
+        working-directory: ${{ github.workspace }}
+        env:
+          DEAR_AGENT_RUN_TOFU_MUTATION_TESTS: "1"
+        run: |
+          go test -count=1 -run '^(TestCanonicalRulesetProjectionPlansCleanly|TestCanonicalRulesetProjectionRejectsInvalidRequiredReviewers|TestCanonicalRulesetProjectionRequiresDefaultBranchTarget)$' ./infra/
 
       - name: tofu plan
         id: plan

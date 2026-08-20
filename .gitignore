@@ -122,3 +122,8 @@ infra/*.tfvars
 
 # Compiled docref-lint binary (built into the repo root by `go build ./tools/docref-lint`)
 /docref-lint
+
+# Binaries built by `go build ./cmd/<name>` land at the repository root under
+# the command's own name. They are large and easy to sweep in with `git add -A`.
+/tofu-import-plan
+/shellcheck-diff
