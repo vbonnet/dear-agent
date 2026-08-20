@@ -70,8 +70,11 @@ func loadStore(repoRoot string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening waiver store: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-	return LoadStore(f)
+	store, err := LoadStore(f)
+	if cerr := f.Close(); cerr != nil && err == nil {
+		err = fmt.Errorf("closing waiver store: %w", cerr)
+	}
+	return store, err
 }
 
 // readNULList parses a NUL-delimited pathname list. NUL delimiting is what lets
@@ -80,7 +83,7 @@ func loadStore(repoRoot string) (*Store, error) {
 func readNULList(path string) ([]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	var out []string
 	for part := range bytes.SplitSeq(b, []byte{0}) {
@@ -164,9 +167,12 @@ func scan(repoRoot string, store *Store, paths []string, now time.Time) (scanRes
 			continue
 		}
 		n, cerr := CountLines(f)
-		_ = f.Close()
+		closeErr := f.Close()
 		if cerr != nil {
 			return res, fmt.Errorf("counting %s: %w", p, cerr)
+		}
+		if closeErr != nil {
+			return res, fmt.Errorf("closing %s: %w", full, closeErr)
 		}
 		switch {
 		case n <= lineLimit:
@@ -313,7 +319,7 @@ func runFormat(args []string) error {
 	// a tracked file in place and has no business changing its permissions.
 	st, err := os.Stat(target)
 	if err != nil {
-		return err
+		return fmt.Errorf("stating %s: %w", target, err)
 	}
 	f, err := os.Open(target)
 	if err != nil {
@@ -332,7 +338,7 @@ func runFormat(args []string) error {
 		return err
 	}
 	if err := os.WriteFile(target, buf.Bytes(), st.Mode().Perm()); err != nil {
-		return err
+		return fmt.Errorf("writing %s: %w", target, err)
 	}
 	fmt.Printf("format: rewrote %s (%d waivers)\n", storePath, len(store.All))
 	return nil

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -26,7 +27,7 @@ func CountLines(r io.Reader) (int, error) {
 		n++
 	}
 	if err := sc.Err(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("scanning lines: %w", err)
 	}
 	return n, nil
 }
