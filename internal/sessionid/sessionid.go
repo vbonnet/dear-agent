@@ -164,7 +164,13 @@ func Describe(findings []Finding) string {
 		if _, seen := lines[k]; !seen {
 			order = append(order, k)
 		}
-		lines[k] = append(lines[k], f.Line)
+		// Scan returns findings sorted by position, so line numbers for a given
+		// key arrive non-decreasing; skip a repeat so two matches of the same
+		// key on one line don't print "(line 1, 1)".
+		existing := lines[k]
+		if len(existing) == 0 || existing[len(existing)-1] != f.Line {
+			lines[k] = append(existing, f.Line)
+		}
 	}
 	var b strings.Builder
 	for _, k := range order {

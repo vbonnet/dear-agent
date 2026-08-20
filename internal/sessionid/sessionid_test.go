@@ -148,6 +148,20 @@ func TestDescribeCollapsesRepeatedMatches(t *testing.T) {
 	}
 }
 
+func TestDescribeDedupesRepeatedMatchOnSameLine(t *testing.T) {
+	text := synthID + " " + synthID + "\n"
+	got := sessionid.Describe(sessionid.Scan(text))
+	if n := strings.Count(got, "\n"); n != 1 {
+		t.Errorf("Describe emitted %d lines, want 1 collapsed bullet:\n%s", n, got)
+	}
+	if !strings.Contains(got, "(line 1)") {
+		t.Errorf("Describe should list the shared line once, got:\n%s", got)
+	}
+	if strings.Contains(got, "line 1, 1") {
+		t.Errorf("Describe should not repeat a line number for the same line, got:\n%s", got)
+	}
+}
+
 func TestDescribeEmpty(t *testing.T) {
 	if got := sessionid.Describe(nil); got != "" {
 		t.Errorf("Describe(nil) = %q, want empty", got)
