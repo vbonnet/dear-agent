@@ -111,7 +111,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithTimeout(ctx, sweepTimeout)
 	defer cancel()
 
-	merges, err := sweep(ctx, repo, base, limit)
+	merges, err := sweep(ctx, stderr, repo, base, limit)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr-size-audit: %v\n", err)
 		return exitUsage
@@ -120,8 +120,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// sweep measures the most recent `limit` commits on base.
-func sweep(ctx context.Context, repo, base string, limit int) ([]merge, error) {
+// sweep measures the most recent `limit` commits on base. A commit that
+// can't be read or diffed (e.g. the repository's root commit, which has no
+// parent) is skipped rather than voiding the whole sweep, but noted on
+// stderr: a partial report still shows the trend, and a silent zero would
+// read as "no offenders" instead of "something went wrong".
+func sweep(ctx context.Context, stderr io.Writer, repo, base string, limit int) ([]merge, error) {
 	shas, err := revList(ctx, repo, base, limit)
 	if err != nil {
 		return nil, err
@@ -133,14 +137,13 @@ func sweep(ctx context.Context, repo, base string, limit int) ([]merge, error) {
 		}
 		subject, err := commitSubject(ctx, repo, sha)
 		if err != nil {
-			// One unreadable commit must not void the whole sweep: a partial
-			// report still shows the trend, and a silent zero would read as
-			// "no offenders".
+			fmt.Fprintf(stderr, "pr-size-audit: skipping %s: read commit subject: %v\n", sha, err)
 			continue
 		}
-		changes, err := prconcern.Collect(ctx, repo, sha+"^", sha)
+		changes, err := prconcern.Collect(ctx, repo, sha+"^1", sha)
 		if err != nil {
-			continue // e.g. a root commit with no parent
+			fmt.Fprintf(stderr, "pr-size-audit: skipping %s %q: %v\n", sha, subject, err)
+			continue
 		}
 		m := merge{SHA: sha, Subject: subject}
 		if g := prNumber.FindStringSubmatch(subject); g != nil {
@@ -162,11 +165,14 @@ func sweep(ctx context.Context, repo, base string, limit int) ([]merge, error) {
 }
 
 func revList(ctx context.Context, repo, base string, limit int) ([]string, error) {
+	if strings.HasPrefix(base, "-") {
+		return nil, fmt.Errorf("invalid base revision: %q", base)
+	}
 	args := []string{}
 	if repo != "" {
 		args = append(args, "-C", repo)
 	}
-	args = append(args, "rev-list", fmt.Sprintf("--max-count=%d", limit), base)
+	args = append(args, "rev-list", "--first-parent", fmt.Sprintf("--max-count=%d", limit), base)
 	out, err := exec.CommandContext(ctx, "git", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("cannot list merges on %s: %w", base, err)

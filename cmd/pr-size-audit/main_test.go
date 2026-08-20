@@ -60,6 +60,8 @@ func buildHistory(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
+	sb.Run(t, dir, "commit", "--allow-empty", "-m", "initial commit")
+
 	write("small.go", "package a\n\nvar Small = 1\n")
 	sb.Run(t, dir, "add", "-A")
 	sb.Run(t, dir, "commit", "-m", "feat: a small change (#11)")
