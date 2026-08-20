@@ -21,6 +21,8 @@ func skipUnreliablePerfEnvironment(t *testing.T) {
 		t.Skip("perf P95 test skipped in CI: shared runners produce unreliable latency numbers (set CI= to run)")
 	}
 	if raceEnabled {
+		// SLA-RACE-SKIP: discovered by agm/test/bdd's race-skipped-SLA coverage
+		// check, which publishes this package to the ordinary (non-race) run.
 		t.Skip("perf P95 test skipped under race instrumentation: run go test without -race to enforce latency targets")
 	}
 }

@@ -47,6 +47,8 @@ type PerformanceReport struct {
 func assertP99Latency(t *testing.T, testName string, latency time.Duration) {
 	t.Helper()
 	if raceEnabled {
+		// SLA-RACE-SKIP: discovered by agm/test/bdd's race-skipped-SLA coverage
+		// check, which publishes this package to the ordinary (non-race) run.
 		t.Logf("%s p99 latency %v observed under race instrumentation; SLA enforcement remains in the ordinary test pass", testName, latency)
 		return
 	}

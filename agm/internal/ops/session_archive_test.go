@@ -296,8 +296,8 @@ func TestCleanupSandboxDirWithChecker_AbsentSandboxIsNotAFailure(t *testing.T) {
 
 	checker := &sandboxgc.Checker{
 		Base:          base,
-		ListMounts:    func() ([]string, error) { return nil, nil },
-		ListProcPaths: func() ([]sandboxgc.ProcPath, error) { return nil, nil },
+		ListMounts:    func(context.Context) ([]string, error) { return nil, nil },
+		ListProcPaths: func(context.Context) ([]sandboxgc.ProcPath, error) { return nil, nil },
 		Unmount:       func(string) error { return nil },
 		Remove:        os.RemoveAll,
 	}
@@ -511,7 +511,7 @@ func TestCleanupSandboxDirWithChecker_RefreshesSettingsDuringRetryGrace(t *testi
 	}
 	currentTime := time.Unix(1_000, 0)
 	var shutdownWriteErr error
-	removed := cleanupSandboxDirWithCheckerAndRetry(
+	removed, _, _ := cleanupSandboxDirWithCheckerAndRetry(
 		sessionID,
 		mergedPath,
 		base,

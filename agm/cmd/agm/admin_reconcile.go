@@ -255,7 +255,7 @@ func reconcileLifecycleMismatch(adapter reconcileLifecycleStorage, mm mismatch) 
 	return reconcileLifecycleMismatchWithLocker(
 		adapter,
 		mm,
-		ops.WithSessionLock,
+		ops.WithArchiveCleanupAwareSessionLock,
 		tmux.HasSessionStrict,
 	)
 }
@@ -296,6 +296,9 @@ func applyReconcileLifecycleMismatch(
 	m, err := adapter.GetSession(mm.SessionID)
 	if err != nil {
 		return false, err
+	}
+	if m == nil {
+		return false, fmt.Errorf("session %s not found", mm.SessionID)
 	}
 	if m.Tmux.SessionName == "" {
 		return false, nil

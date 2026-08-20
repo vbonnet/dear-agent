@@ -202,7 +202,7 @@ func restoreArchivedSession(adapter unarchiveStorage, archived *session.Archived
 		}
 	}
 
-	return restoreArchivedSessionTransaction(adapter, archived, ops.WithSessionLock)
+	return restoreArchivedSessionTransaction(adapter, archived, ops.WithArchiveCleanupAwareSessionLock)
 }
 
 func restoreArchivedSessionTransaction(
@@ -224,19 +224,41 @@ func restoreArchivedSessionTransaction(
 					"  • Check database connection", archived.SessionID))
 			return err
 		}
+		if current == nil {
+			return fmt.Errorf("session %s not found", archived.SessionID)
+		}
 		if current.Lifecycle != manifest.LifecycleArchived {
 			ui.PrintWarning(fmt.Sprintf("Session '%s' is not archived", archived.Name))
 			fmt.Printf("\nSession is already active.\n")
 			return nil
 		}
-		return restoreArchivedSessionLocked(adapter, archived, current)
+		manifestPath := resolveArchivedManifestPath(archived.SessionID, archived.ManifestPath)
+		return restoreArchivedSessionLocked(adapter, archived, current, manifestPath)
 	})
+}
+
+// resolveArchivedManifestPath finds where sessionID's manifest actually lives
+// on disk right now, preferring the legacy .archive-old-format/ location over
+// the caller-supplied fallback. session.FindArchived synthesizes ManifestPath
+// deterministically from the session ID without reading disk, so a session
+// discovered before this call acquired the archive lock can since have been
+// relocated by an in-flight archive's legacy-directory move (see
+// archiveLegacySessionDir). Re-resolving here, under the same lock, keeps
+// restore from misclassifying a relocated session as an in-place one and
+// leaving it stranded under .archive-old-format.
+func resolveArchivedManifestPath(sessionID, fallback string) string {
+	legacyPath := filepath.Join(cfg.SessionsDir, ".archive-old-format", sessionID, "manifest.yaml")
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+	return fallback
 }
 
 func restoreArchivedSessionLocked(
 	adapter unarchiveStorage,
 	archived *session.ArchivedSession,
 	m *manifest.Manifest,
+	manifestPath string,
 ) error {
 	// Atomically claim the active name before restoring the durable lifecycle.
 	reactivation, reactivateErr := adapter.ReactivateSession(m)
@@ -255,10 +277,10 @@ func restoreArchivedSessionLocked(
 	}
 
 	// Auto-commit manifest change if in git repo
-	_ = git.CommitManifest(archived.ManifestPath, "unarchive", archived.Name) // Errors logged internally
+	_ = git.CommitManifest(manifestPath, "unarchive", archived.Name) // Errors logged internally
 
 	// Check if session is in archive directory and needs to be moved
-	sessionDir := filepath.Dir(archived.ManifestPath)
+	sessionDir := filepath.Dir(manifestPath)
 	archiveDir := filepath.Join(cfg.SessionsDir, ".archive-old-format")
 	inArchiveDir := filepath.Dir(sessionDir) == archiveDir
 

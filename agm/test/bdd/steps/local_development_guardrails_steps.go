@@ -910,11 +910,18 @@ func fullPreflightOrdinaryPerformanceGateIsConfigured(ctx context.Context) error
 	})
 }
 
+// raceSkippedSLAMarker is the structural token a wall-clock SLA assertion
+// must carry at its `raceEnabled` skip/downgrade site (see
+// docs/policies/harness-hygiene.ai.md#L31-L32: "encode a binary requirement
+// as prose the model self-checks" is a documented anti-pattern here).
+// sourceHasRaceSuppressedSLA keys discovery off this exact token instead of
+// matching one of several known skip/log sentences, so rewording a
+// human-readable skip message can't silently drop a package from "every
+// race-skipped SLA published to preflight.sh" coverage.
+const raceSkippedSLAMarker = "SLA-RACE-SKIP"
+
 func sourceHasRaceSuppressedSLA(source string) bool {
-	return strings.Contains(source, "raceEnabled") &&
-		(strings.Contains(source, "enforced without race instrumentation") ||
-			strings.Contains(source, "skipped under race instrumentation") ||
-			strings.Contains(source, "SLA enforcement remains in the ordinary test pass"))
+	return strings.Contains(source, "raceEnabled") && strings.Contains(source, raceSkippedSLAMarker)
 }
 
 func agmValidatesRaceSkippedWallClockSLACoverage(ctx context.Context) error {

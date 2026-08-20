@@ -158,34 +158,39 @@ func TestWorkflowJobTimeoutMinutesStaysWithinNamedJob(t *testing.T) {
 	}
 }
 
-func TestSourceHasRaceSuppressedSLARecognizesMaintainedMarkers(t *testing.T) {
+// TestSourceHasRaceSuppressedSLARequiresStructuralMarker proves discovery
+// keys off the fixed raceSkippedSLAMarker token, not the human-readable
+// skip/log wording next to it — so rewording a skip message (which used to
+// be one of several recognized sentences) can no longer silently drop a
+// package from "every race-skipped SLA published to preflight.sh" coverage.
+// See docs/policies/harness-hygiene.ai.md#L31-L32.
+func TestSourceHasRaceSuppressedSLARequiresStructuralMarker(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		source string
 		want   bool
 	}{
 		{
-			name:   "skip enforced without race",
-			source: `if race` + `Enabled { t.Skip("wall-clock parser latency is enforced without race instrumentation") }`,
+			name:   "marker with arbitrary skip wording",
+			source: `if race` + `Enabled { /* SLA-RACE-SKIP */ t.Skip("some new phrasing nobody has seen before") }`,
 			want:   true,
 		},
 		{
-			name:   "skip under race",
-			source: `if race` + `Enabled { t.Skip("perf P95 test skipped under race instrumentation") }`,
-			want:   true,
-		},
-		{
-			name:   "observe under race",
-			source: `if race` + `Enabled { t.Log("SLA enforcement remains in the ordinary test pass") }`,
+			name:   "marker with arbitrary log wording",
+			source: `if race` + `Enabled { /* SLA-RACE-SKIP */ t.Log("latency is only observed, not enforced, right now") }`,
 			want:   true,
 		},
 		{
 			name:   "marker without race guard",
-			source: `t.Skip("wall-clock parser latency is enforced without race instrumentation")`,
+			source: `/* SLA-RACE-SKIP */ t.Skip("wall-clock parser latency is enforced without race instrumentation")`,
 		},
 		{
 			name:   "race guard without SLA marker",
 			source: `if race` + `Enabled { t.Skip("unrelated test") }`,
+		},
+		{
+			name:   "race guard with old recognized prose but no marker",
+			source: `if race` + `Enabled { t.Skip("wall-clock parser latency is enforced without race instrumentation") }`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
