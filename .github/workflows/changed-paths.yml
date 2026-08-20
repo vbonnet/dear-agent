@@ -1,0 +1,100 @@
+name: Changed Paths
+
+# Single source of truth for "what kind of change is this PR?".
+#
+# The taxonomy itself lives in Go (cmd/changed-paths) so it can be unit
+# tested — the bug class this guards against is a classifier that silently
+# under-selects, which is invisible in a workflow log and obvious in a test.
+#
+# Callers get boolean outputs and use them in job-level `if:` conditions.
+# They must NOT use workflow-level `on.<event>.paths` for anything that is a
+# required status check: a workflow skipped by a path filter never reports a
+# check run at all, so branch protection sits at "Expected — Waiting for status
+# to be reported" forever. A job skipped by an `if:` condition DOES report, with
+# conclusion `skipped`, which GitHub treats as satisfying a required check.
+# See ADR-039.
+#
+# Callers must also treat a FAILED detector as "everything is relevant". A
+# consumer whose `if:` has no status function inherits an implicit `success()`,
+# so a detector failure would skip it — and a skipped required check satisfies
+# branch protection exactly as well as a passing one. Every consumer condition
+# therefore carries `needs.changes.result != 'success' ||` or `!cancelled()`;
+# cmd/changed-paths/workflow_contract_test.go enforces that.
+#
+# Why a hand-rolled git diff instead of dorny/paths-filter or
+# tj-actions/changed-files: security-audit.yml's workflow-hygiene job requires
+# third-party actions to be SHA-pinned, and tj-actions/changed-files is on this
+# repo's known-compromised list. `git diff` against the merge base has no
+# supply chain.
+#
+# FAIL-SAFE CONTRACT: every output defaults to "true". Anything that makes the
+# change set unknowable (no base ref, git failure, non-pull_request event)
+# forces every consumer to run. Under-running is a silent hole in the gate;
+# over-running only costs runner minutes.
+
+on:
+  workflow_call:
+    outputs:
+      go:
+        description: "Go source, build metadata, or a non-document build input changed — build/test/analyze must run"
+        value: ${{ jobs.detect.outputs.go }}
+      agm:
+        description: "agm/** or a global input changed"
+        value: ${{ jobs.detect.outputs.agm }}
+      engram:
+        description: "engram/** or a global input changed"
+        value: ${{ jobs.detect.outputs.engram }}
+      deps:
+        description: "A dependency manifest or lockfile changed"
+        value: ${{ jobs.detect.outputs.deps }}
+      docs:
+        description: "Markdown changed"
+        value: ${{ jobs.detect.outputs.docs }}
+      adr:
+        description: "docs/adr/** changed"
+        value: ${{ jobs.detect.outputs.adr }}
+      global:
+        description: "A global input changed — every consumer is forced on"
+        value: ${{ jobs.detect.outputs.global }}
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.detect.outputs.go }}
+      agm: ${{ steps.detect.outputs.agm }}
+      engram: ${{ steps.detect.outputs.engram }}
+      deps: ${{ steps.detect.outputs.deps }}
+      docs: ${{ steps.detect.outputs.docs }}
+      adr: ${{ steps.detect.outputs.adr }}
+      global: ${{ steps.detect.outputs.global }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Shallow clones make `git diff base...HEAD` lie about which files
+          # changed — the merge base is simply not in the object store, and the
+          # diff silently degrades to "everything" or errors out. Full history
+          # is the only correct setting for merge-base computation.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          # cmd/changed-paths is stdlib-only on purpose, so `go run` needs no
+          # module download and this job stays well under a minute.
+          cache: false
+
+      - name: Detect
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: go run ./cmd/changed-paths -repo .

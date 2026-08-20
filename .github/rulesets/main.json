@@ -37,6 +37,7 @@
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
+          { "context": "CI Gateway", "integration_id": 15368 },
           { "context": "Build & Test (ubuntu-latest)", "integration_id": 15368 },
           { "context": "Build & Test (macos-latest)", "integration_id": 15368 },
           { "context": "Analyze Go Code (go)", "integration_id": 15368 },
@@ -44,7 +45,8 @@
           { "context": "Bash Script Size Check (20-line limit)", "integration_id": 15368 },
           { "context": "Vulnerability Scan", "integration_id": 15368 },
           { "context": "Identity, index, and lifecycle parity", "integration_id": 15368 },
-          { "context": "Header block format", "integration_id": 15368 }
+          { "context": "Header block format", "integration_id": 15368 },
+          { "context": "Structural Health (baselined)", "integration_id": 15368 }
         ]
       }
     }
