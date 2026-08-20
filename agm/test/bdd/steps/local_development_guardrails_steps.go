@@ -35,11 +35,6 @@ type localDevGuardrailState struct {
 	localTestTimeout       string
 	affectedTestTimeout    string
 	ciTestTimeout          string
-	affectedPackageMins    int
-	affectedListMins       int
-	affectedStartupMins    int
-	affectedCommandMins    int
-	affectedJobMins        int
 	localVulnAllowlist     []string
 	ciVulnAllowlist        []string
 	worktreeBase           string
