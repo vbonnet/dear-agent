@@ -246,8 +246,8 @@ func threadBlocker(st PRState, repo string, threads []ReviewThread) *Blocker {
 			"thread ID in brackets above: resolve-review-threads reply-resolve <threadId> "+
 			"\"Fixed - <what changed>\" (list them again any time with: "+
 			"resolve-review-threads list %s %s %d; sweep the answered ones with: "+
-			"resolve-review-threads resolve-all %s %s %d [author], which refuses threads "+
-			"nobody replied to)",
+			"resolve-review-threads resolve-all %s %s %d, which refuses threads nobody "+
+			"replied to; add a login argument after the PR number to sweep one author only)",
 			owner, name, st.Number, owner, name, st.Number),
 	}
 }

@@ -216,6 +216,7 @@ func threadRemediationGuidance(repo string, pr int) string {
 			"  resolve-review-threads list %s %s %d\n"+
 			"  resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\"\n"+
 			"then sweep the answered ones and re-run safe-merge:\n"+
-			"  resolve-review-threads resolve-all %s %s %d [author]\n",
+			"  resolve-review-threads resolve-all %s %s %d\n"+
+			"(add a login argument after the PR number to sweep one author only)\n",
 		owner, name, pr, owner, name, pr)
 }

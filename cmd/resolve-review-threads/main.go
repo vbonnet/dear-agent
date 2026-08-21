@@ -271,7 +271,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// the current state we cannot tell whether a previous run already posted
 	// this reply, and posting blind is the duplicate this guard exists to
 	// prevent, so any failure here leaves the thread untouched.
-	cur, code := readOrExit(ctx, threadID, "cannot read thread state, nothing posted")
+	_, code := readOrExit(ctx, threadID, "cannot read thread state, nothing posted")
 	if code >= 0 {
 		return code
 	}
@@ -279,14 +279,22 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// Decide against the FULL history, not the tail: a prior reply buried by
 	// later discussion must still be found, or it gets reposted and anchored
 	// to the newest follow-up, which resolves everything in between unread.
-	history, err := fetchAllComments(ctx, threadID)
-	if err != nil {
-		return fail("cannot read thread history, nothing posted: %v", err)
+	// historyLastID/historyPrevID are the two comments classifyPriorReply
+	// actually reasoned about (the tail of history, oldest-first). Anchoring
+	// to these below, rather than to a later read's LastID/PrevID, keeps the
+	// anchor and the classification talking about the same comment.
+	history, historyLastID, historyPrevID, code := fetchHistoryTail(ctx, threadID)
+	if code >= 0 {
+		return code
 	}
+
 	// Paging a long thread takes time, so re-read state before acting on it:
 	// another actor may have resolved it meanwhile, and replying then would
-	// comment on a settled conversation.
-	cur, code = readOrExit(ctx, threadID, "cannot re-read thread state, nothing posted")
+	// comment on a settled conversation. If the tail has moved since history
+	// was read, a comment landed in that gap that classifyPriorReply never
+	// saw; refuse rather than silently adopt it as the anchor, which would
+	// treat that unread comment as accounted for.
+	_, code = readMatchingTail(ctx, threadID, historyLastID)
 	if code >= 0 {
 		return code
 	}
@@ -306,12 +314,13 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
 	case priorReplyIsLast:
 		// A previous run posted this and nothing has been said since, so the
-		// comment we matched is the anchor.
+		// comment we matched (confirmed above to still be the true tail) is
+		// the anchor.
 		fmt.Fprintln(os.Stderr, "reply already present; resolving only")
-		anchorID, anchorPrevID = cur.LastID, cur.PrevID
+		anchorID, anchorPrevID = historyLastID, historyPrevID
 	case noPriorReply:
 		// Our reply must land directly after the comment we just read.
-		anchorPrevID = cur.LastID
+		anchorPrevID = historyLastID
 		id, err := postReply(ctx, threadID, body)
 		if err != nil {
 			return fail("reply failed, thread left unresolved: %v", err)
@@ -342,9 +351,12 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 				"check `gh auth status` and that the token can resolve threads on this repo, "+
 				"then finish with: resolve-review-threads resolve %s", rErr, threadID)
 		}
-		return fail("the reply is posted but the thread is NOT resolved: %v\n"+
-			"do NOT re-run reply-resolve (it would repost); finish with:\n"+
-			"  resolve-review-threads resolve %s", rErr, threadID)
+		return fail("the reply is posted but the thread is NOT resolved (likely "+
+			"transient): %v\n"+
+			"this is safe to retry: reply-resolve will see your reply is already "+
+			"last and resolve without reposting it. Bare resolve would work too, "+
+			"but it drops the anchor check this thread is relying on, so prefer:\n"+
+			"  resolve-review-threads reply-resolve %s \"...\"", rErr, threadID)
 	}
 	fmt.Println(msg)
 	return 0
@@ -764,6 +776,27 @@ func readOrExit(ctx context.Context, threadID, errMsg string) (t thread, code in
 	return cur, -1
 }
 
+// readMatchingTail re-reads a thread after its full history has been paged
+// and refuses to proceed if the tail has moved since. fetchAllComments can
+// finish before a new comment lands; classifyPriorReply never saw that
+// comment, so treating it as accounted for (by silently adopting whatever is
+// now last as the anchor) would resolve a thread with unread commentary on
+// it. wantLastID is the last comment classifyPriorReply actually reasoned
+// about. code is -1 when the tail still matches and t is safe to act on.
+func readMatchingTail(ctx context.Context, threadID, wantLastID string) (t thread, code int) {
+	cur, exitCode := readOrExit(ctx, threadID, "cannot re-read thread state, nothing posted")
+	if exitCode >= 0 {
+		return cur, exitCode
+	}
+	if cur.LastID != wantLastID {
+		return cur, fail("someone commented on thread %s while its history was "+
+			"being read; nothing was posted.\n"+
+			"read the new comment(s) and answer those:\n"+
+			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+	}
+	return cur, -1
+}
+
 // unansweredError marks a thread that was refused on evidence, as opposed to
 // a GraphQL or permission failure. The sweep continues past the former and
 // stops on the latter, so a globally denied operation is not retried once per
@@ -883,6 +916,27 @@ func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, erro
 		}
 		cursor = c.PageInfo.EndCursor
 	}
+}
+
+// fetchHistoryTail fetches a thread's full comment history and returns the
+// last two comment IDs alongside it: the two comments classifyPriorReply
+// actually reasoned about, for callers that anchor a resolution to them.
+// code is -1 when history was read and is non-empty; a thread with no
+// comments at all cannot be reasoned about, so callers should stop rather
+// than post blind.
+func fetchHistoryTail(ctx context.Context, threadID string) (history []tailComment, lastID, prevID string, code int) {
+	history, err := fetchAllComments(ctx, threadID)
+	if err != nil {
+		return nil, "", "", fail("cannot read thread history, nothing posted: %v", err)
+	}
+	if len(history) == 0 {
+		return nil, "", "", fail("thread %s has no comments to read; nothing was posted", threadID)
+	}
+	lastID = history[len(history)-1].ID
+	if len(history) > 1 {
+		prevID = history[len(history)-2].ID
+	}
+	return history, lastID, prevID, -1
 }
 
 // mutateThread resolves ("resolve") or re-opens ("unresolve") one thread and

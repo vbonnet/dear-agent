@@ -34,7 +34,7 @@ threads or an out-of-date branch. See the DEAR retro
    | `CONFLICTS` | `safe-rebase` onto base, resolve, `safe-push` |
    | `FAILING_REQUIRED_CHECK` | fix the named check; known flakes get one rerun |
    | `PENDING_REQUIRED_CHECK` | `gh pr checks <n> --watch` |
-   | `UNRESOLVED_THREADS` | address in code, then per thread: `resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"`; sweep with `resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
+   | `UNRESOLVED_THREADS` | address in code, then per thread: `resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
    | `CHANGES_REQUESTED` | address the review, push, re-request |
    | `REVIEW_REQUIRED` | obtain an approving review |
    | `BEHIND` | `gh pr update-branch <n>` |
