@@ -91,16 +91,16 @@ func TestPrintTrailTailRendersLastLinesAndHandlesMissing(t *testing.T) {
 	if err := os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := captureStdout(func() { printTrailTail(path, 2) }); got != "two\nthree\n" {
+	if got := captureStdout(t, func() { printTrailTail(path, 2) }); got != "two\nthree\n" {
 		t.Fatalf("tail output = %q", got)
 	}
-	if got := captureStdout(func() { printTrailTail(filepath.Join(home, "empty"), 2) }); got != "" {
+	if got := captureStdout(t, func() { printTrailTail(filepath.Join(home, "empty"), 2) }); got != "" {
 		t.Fatalf("missing tail output = %q", got)
 	}
 	if err := os.WriteFile(filepath.Join(home, "empty"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := captureStdout(func() { printTrailTail(filepath.Join(home, "empty"), 2) }); got != "" {
+	if got := captureStdout(t, func() { printTrailTail(filepath.Join(home, "empty"), 2) }); got != "" {
 		t.Fatalf("empty tail output = %q", got)
 	}
 }
@@ -119,7 +119,7 @@ func TestPrintStatusNamesConfiguredSupervisors(t *testing.T) {
 	bin := t.TempDir()
 	writeFakeAGM(t, bin, `case "$2" in list) printf '%s\n' 'vroom-orchestrator';; esac`)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	got := captureStdout(func() {
+	got := captureStdout(t, func() {
 		printStatus(&sessionState{Sessions: map[string]sessionInfo{"vroom-orchestrator": {LoopSent: true}}})
 	})
 	if !strings.Contains(got, "vroom-orchestrator") {
@@ -131,7 +131,7 @@ func TestShowStatusRendersFallback(t *testing.T) {
 	bin := t.TempDir()
 	writeFakeAGM(t, bin, `case "$1" in supervisor) exit 1;; session) printf '%s\n' 'vroom-orchestrator';; esac`)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if got := captureStdout(showStatus); !strings.Contains(got, "Session status:") {
+	if got := captureStdout(t, showStatus); !strings.Contains(got, "Session status:") {
 		t.Fatalf("status did not render: %q", got)
 	}
 }
@@ -389,6 +389,12 @@ func readTrailRecords(t *testing.T, home string) []trailRecord {
 		}
 		out = append(out, r)
 	}
+	// A scanner stops silently on a read error or an over-long line. Without
+	// this check a truncated trail would read as a shorter-but-valid one and
+	// the assertions would pass on incomplete evidence.
+	if err := s.Err(); err != nil {
+		t.Fatalf("reading trail: %v", err)
+	}
 	return out
 }
 func assertKinds(t *testing.T, got []trailRecord, want []string) {
@@ -414,15 +420,35 @@ func mustRead(t *testing.T, path string) []byte {
 	}
 	return b
 }
-func captureStdout(fn func()) string {
+
+// captureStdout runs fn with os.Stdout redirected and returns what it printed.
+//
+// The read happens on its own goroutine: a synchronous read deadlocks as soon
+// as fn writes more than the pipe buffer holds. os.Stdout is restored through
+// a defer so a panicking fn cannot leave every later test writing into a dead
+// pipe.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
 	old := os.Stdout
-	r, w, _ := os.Pipe()
 	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		_ = r.Close()
+	}()
+
+	out := make(chan string, 1)
+	go func() {
+		var b bytes.Buffer
+		_, _ = io.Copy(&b, r)
+		out <- b.String()
+	}()
+
 	fn()
-	w.Close()
-	os.Stdout = old
-	var b bytes.Buffer
-	io.Copy(&b, r)
-	r.Close()
-	return b.String()
+	_ = w.Close()
+	return <-out
 }
