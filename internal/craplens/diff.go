@@ -90,7 +90,11 @@ func changedGoFiles(ctx context.Context, repoDir, base, head string) (touchedSet
 		return nil, fmt.Errorf("git diff %s...%s failed: %w: %s", base, head, err, strings.TrimSpace(stderr.String()))
 	}
 
-	return parseUnifiedDiff(string(out)), nil
+	files, err := parseUnifiedDiff(string(out))
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // parseUnifiedDiff extracts changed files and their head-side line ranges from
@@ -100,7 +104,7 @@ func changedGoFiles(ctx context.Context, repoDir, base, head string) (touchedSet
 // including `new file mode`, then `+++ b/<path>`, then the hunks. The
 // added-file marker therefore arrives before the path it describes, so it is
 // held in newFile until the path line names its file.
-func parseUnifiedDiff(out string) touchedSet {
+func parseUnifiedDiff(out string) (touchedSet, error) {
 	files := touchedSet{}
 	var current *touchedFile
 	newFile := false
@@ -142,6 +146,14 @@ func parseUnifiedDiff(out string) touchedSet {
 		}
 	}
 
+	// A scanner that hit an over-long line stops early, and returning what it
+	// managed to read would present a truncated diff as a complete one:
+	// every file after the offending hunk would silently drop out of the
+	// signal. Fail instead, so the step reports rather than under-reports.
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading diff: %w", err)
+	}
+
 	// A file whose every hunk was a pure deletion has no head-side lines left
 	// to score.
 	for p, f := range files {
@@ -149,7 +161,7 @@ func parseUnifiedDiff(out string) touchedSet {
 			delete(files, p)
 		}
 	}
-	return files
+	return files, nil
 }
 
 // headerPath extracts the head-side pathname from a `+++` diff header.
@@ -307,7 +319,14 @@ func treeHasGoFiles(ctx context.Context, repoDir, rev, dir string) bool {
 	if repoDir != "" {
 		argv = append(argv, "-C", repoDir)
 	}
-	argv = append(argv, "ls-tree", "--name-only", rev+":"+dir)
+	// `rev:.` is not a valid object name, so the module root has to be
+	// addressed as the bare tree. Without this the lookup always errors and
+	// an existing zero-coverage root package would be labeled new.
+	spec := rev + ":" + dir
+	if dir == "." || dir == "" {
+		spec = rev + ":"
+	}
+	argv = append(argv, "ls-tree", "--name-only", spec)
 	out, err := exec.CommandContext(ctx, "git", argv...).Output()
 	if err != nil {
 		// The directory did not exist at that revision, which is exactly the

@@ -204,7 +204,10 @@ func TestParseUnifiedDiffTracksAddedFiles(t *testing.T) {
 		"@@ -1,2 +1,9 @@",
 	}, "\n")
 
-	files := parseUnifiedDiff(out)
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatalf("parseUnifiedDiff: %v", err)
+	}
 
 	if len(files) != 2 {
 		t.Fatalf("parsed %d files, want 2 (the test file must be excluded): %v", len(files), sortedKeys(files))
@@ -230,7 +233,11 @@ func TestParseUnifiedDiffDropsPureDeletions(t *testing.T) {
 		"@@ -5,9 +4,0 @@",
 	}, "\n")
 
-	if files := parseUnifiedDiff(out); len(files) != 0 {
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatalf("parseUnifiedDiff: %v", err)
+	}
+	if len(files) != 0 {
 		t.Errorf("parsed %v, want nothing for a pure deletion", sortedKeys(files))
 	}
 }
@@ -893,5 +900,91 @@ func TestBoundedBufferStopsAtItsLimit(t *testing.T) {
 	}
 	if got := b.String(); got != "1234567890" {
 		t.Errorf("buffer grew past its limit: %q", got)
+	}
+}
+
+// TestCutTrailingCounts covers profile records whose filename contains a
+// space. Splitting at the first space discarded the record and degraded the
+// whole package to unknown.
+func TestCutTrailingCounts(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		wantLoc string
+		wantCnt string
+		wantOK  bool
+	}{
+		{
+			name:    "ordinary",
+			line:    "example.test/p/a.go:2.10,2.26 1 0",
+			wantLoc: "example.test/p/a.go:2.10,2.26",
+			wantCnt: "1 0",
+			wantOK:  true,
+		},
+		{
+			name:    "filename with a space",
+			line:    "example.test/p/a b.go:2.10,2.26 1 0",
+			wantLoc: "example.test/p/a b.go:2.10,2.26",
+			wantCnt: "1 0",
+			wantOK:  true,
+		},
+		{name: "too few fields", line: "nospaces", wantOK: false},
+		{name: "one field only", line: "loc 1", wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			loc, counts, ok := cutTrailingCounts(tc.line)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && (loc != tc.wantLoc || counts != tc.wantCnt) {
+				t.Errorf("got (%q, %q), want (%q, %q)", loc, counts, tc.wantLoc, tc.wantCnt)
+			}
+		})
+	}
+}
+
+// TestFailedPackagesIgnoresPerTestEvents covers the distinction between a
+// per-test pass and a package-level verdict. Accepting the former marked a
+// package measured from its first passing test, so a package that later failed
+// would be scored on the partial profile its failure left behind.
+func TestFailedPackagesIgnoresPerTestEvents(t *testing.T) {
+	events := strings.Join([]string{
+		`{"Action":"pass","Package":"example.test/p","Test":"TestOne"}`,
+		`{"Action":"fail","Package":"example.test/p"}`,
+	}, "\n")
+
+	got := failedPackages(events, "example.test", []string{"p"})
+	if len(got) != 1 || got[0] != "p" {
+		t.Errorf("unmeasured = %v, want [p]: a per-test pass must not mark the package measured", got)
+	}
+
+	// And a package-level pass alone still counts as measured.
+	onlyPass := `{"Action":"pass","Package":"example.test/p"}`
+	if got := failedPackages(onlyPass, "example.test", []string{"p"}); len(got) != 0 {
+		t.Errorf("unmeasured = %v, want none for a package-level pass", got)
+	}
+}
+
+// TestParseUnifiedDiffRejectsTruncatedInput covers the scanner-error path. A
+// truncated diff returned as a complete one would silently drop every file
+// after the offending hunk out of the signal.
+func TestParseUnifiedDiffRejectsTruncatedInput(t *testing.T) {
+	huge := strings.Repeat("x", 9<<20)
+	out := strings.Join([]string{
+		"diff --git a/pkg/a.go b/pkg/a.go",
+		"--- a/pkg/a.go",
+		"+++ b/pkg/a.go",
+		"@@ -1 +1 @@",
+		"+" + huge,
+		"diff --git a/pkg/b.go b/pkg/b.go",
+		"--- a/pkg/b.go",
+		"+++ b/pkg/b.go",
+		"@@ -1 +1 @@",
+	}, "\n")
+
+	if _, err := parseUnifiedDiff(out); err == nil {
+		t.Fatal("expected a truncated diff to be rejected rather than returned as complete")
 	}
 }

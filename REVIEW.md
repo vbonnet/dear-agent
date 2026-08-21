@@ -97,9 +97,13 @@ already enabled in `.golangci.yml` with `new-from-merge-base` and therefore
 already diff-scoped and already hard-gating; packages that ship no test files
 are owned by the `zero-test` scan in `cmd/structural-health`. Reviewers should
 not ask `crap-lint` to cover those, and should not treat its silence as
-evidence about them. A package it reports as *unknown* rather than untested is
-one whose tests need infrastructure the job cannot provide (a live tmux socket,
-a Dolt server, a container runtime); that is a measurement gap, not a finding.
+evidence about them. A package it reports as *unknown* rather than untested is one whose coverage
+could not be collected at all. Missing infrastructure is the common cause here
+(a live tmux socket, a Dolt server, a container runtime), but it is not the
+only one: a package whose tests fail to compile, time out, or fail outright is
+also reported unknown, because a failed run can leave a partial profile that
+would understate coverage. Unknown means "not measured", never "measured and
+fine", so treat it as a gap to explain rather than a package to wave through.
 `.claude/skills/code-health-budget/SKILL.md` is the author-side companion.
 
 **Stacked PRs and this protocol:** the five-dimension review workflow only
