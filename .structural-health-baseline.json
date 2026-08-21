@@ -114,15 +114,15 @@
       "agm/test/bdd/steps/spec_governance_tooling_steps.go (1608 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
       "agm/test/performance/eventbus_load_test.go (1065 lines)",
-      "cmd/ai-review/spec_contract.go (3119 lines)",
-      "cmd/ai-review/spec_contract_test.go (2398 lines)",
+      "cmd/ai-review/spec_contract.go (3044 lines)",
+      "cmd/ai-review/spec_contract_test.go (2362 lines)",
       "cmd/merge-audit/main.go (1031 lines)",
       "cmd/vroom-dispatch-direct/main.go (1173 lines)",
       "cmd/vroom-dispatch/main.go (1618 lines)",
       "cmd/vroom-dispatch/main_test.go (1240 lines)",
       "engram/hooks-bin/internal/validator/validator_bdd_test.go (1009 lines)",
       "engram/internal/health/checks.go (1461 lines)",
-      "internal/safegit/merge.go (1145 lines)",
+      "internal/safegit/merge.go (1141 lines)",
       "pkg/headerlint/headerlint_test.go (1334 lines)",
       "pkg/instructionlint/instructionlint_test.go (1817 lines)",
       "pkg/instructionlint/segments.go (1988 lines)",
@@ -135,10 +135,10 @@
       "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
     ],
     "goroutine-recover": [
-      "agm/cmd/agm-bus/main.go:190",
-      "agm/cmd/agm-bus/main.go:226",
-      "agm/cmd/agm-bus/main.go:329",
-      "agm/cmd/agm-bus/main.go:362",
+      "agm/cmd/agm-bus/main.go:269",
+      "agm/cmd/agm-bus/main.go:380",
+      "agm/cmd/agm-bus/main.go:413",
+      "agm/cmd/agm-bus/main.go:460",
       "agm/cmd/agm-daemon/main.go:143",
       "agm/cmd/agm/watch.go:110",
       "agm/cmd/agm/watch.go:111",
@@ -955,6 +955,47 @@
       },
       "reason": "cmd/merge-audit/main.go grew from the MAC-09 defaultBranch-failure fix (still run ruleset-drift audit independently)",
       "reference": "https://github.com/vbonnet/dear-agent/pull/1349"
+    },
+    {
+      "previous_baseline_sha256": "15df32823c8da106550fc7ddc8f1d83f599aaa8956a91df53296e5f6db198d05",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "cmd/ai-review/spec_contract.go (3044 lines)",
+          "cmd/ai-review/spec_contract_test.go (2362 lines)",
+          "internal/safegit/merge.go (1141 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm-bus/main.go:269",
+          "agm/cmd/agm-bus/main.go:380",
+          "agm/cmd/agm-bus/main.go:413",
+          "agm/cmd/agm-bus/main.go:460"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "cmd/ai-review/spec_contract.go (3119 lines)",
+          "cmd/ai-review/spec_contract_test.go (2398 lines)",
+          "internal/safegit/merge.go (1145 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm-bus/main.go:190",
+          "agm/cmd/agm-bus/main.go:226",
+          "agm/cmd/agm-bus/main.go:329",
+          "agm/cmd/agm-bus/main.go:362"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "The four unguarded goroutines in agm/cmd/agm-bus/main.go moved line numbers when cmdServe was split into per-adapter start functions. Same four goroutines, same absence of recover(), new path:line keys: five go func sites exist before and after, four were baselined before and four are baselined now, and the goroutine-recover total is unchanged at 29. This is a relocation, not a new finding. Adding recover() to them is tracked as a follow-up.",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1352"
     }
   ]
 }
