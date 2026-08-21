@@ -582,8 +582,11 @@ func TestTreeIdentityInventoryBoundIsDerivedFromEntryLimit(t *testing.T) {
 	}
 	// A 256-component path at one byte per component must still fit one
 	// record, or the two declared limits would contradict each other.
+	// recordMetadataBytes uses the worst object-id width validObjectID
+	// accepts (64-hex SHA-256), not this repository's actual 40-hex SHA-1,
+	// so the record bound stays correct if the repository is ever converted.
 	const worstCasePathBytes = maxTreeIdentityPathComponents*2 - 1
-	const recordMetadataBytes = len("100644 blob ") + 40 + len("\t") + len("\x00")
+	const recordMetadataBytes = len("100644 blob ") + 64 + len("\t") + len("\x00")
 	if worstCasePathBytes+recordMetadataBytes > maxTreeIdentityRecordBytes {
 		t.Errorf("record bound %d cannot hold a %d-component path", maxTreeIdentityRecordBytes, maxTreeIdentityPathComponents)
 	}

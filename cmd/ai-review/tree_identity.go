@@ -16,10 +16,14 @@ const (
 	maxTreeIdentityPeers          = 32
 	// maxTreeIdentityRecordMetadataBytes bounds the non-path portion of one
 	// `ls-tree -z` record: a mode (up to 6 digits), a space, a type (up to
-	// "commit", 6 bytes), a space, a 40-hex object id, a tab, and the
-	// trailing NUL the +1 in parseTreeIdentityEntry accounts for. 64 is a
-	// generous round margin over the ~49 bytes that format actually takes.
-	maxTreeIdentityRecordMetadataBytes = 64
+	// "commit", 6 bytes), a space, an object id, a tab, and the trailing NUL
+	// the +1 in parseTreeIdentityEntry accounts for. Sized for the worst case
+	// validObjectID accepts -- a 64-hex SHA-256 id, not the shorter 40-hex
+	// SHA-1 id this repository actually uses -- because validObjectID already
+	// accepts both and this bound must not silently assume the narrower one.
+	// 96 is a generous round margin over the ~80 bytes a SHA-256 record
+	// actually takes.
+	maxTreeIdentityRecordMetadataBytes = 96
 	// maxTreeIdentityRecordBytes bounds one `ls-tree -z` record: mode, type,
 	// object id, tab, path, NUL. Sized from maxGitPathBytes — the same
 	// path-length ceiling safeGitPath enforces everywhere else — plus
