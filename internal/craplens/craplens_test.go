@@ -1,13 +1,14 @@
 package craplens
 
 import (
-	"context"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // TestCRAPFormula pins the Crap4j formula at the points that matter: full
@@ -423,7 +424,7 @@ func TestAnalyzeEndToEnd(t *testing.T) {
 // nothing is flagged, rather than numbers derived from the wrong source.
 func TestAnalyzeSkipsCoverageOnCheckoutMismatch(t *testing.T) {
 	repo := newTestRepo(t)
-	run(t, repo, "git", "checkout", "-q", "base")
+	gittest.Run(t, repo, "checkout", "-q", "base")
 
 	report, err := Analyze(t.Context(), repo, "base", "main", DefaultThreshold)
 	if err != nil {
@@ -446,15 +447,15 @@ func newTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	run(t, dir, "git", "init", "-q", "-b", "main")
-	run(t, dir, "git", "config", "user.email", "test@example.invalid")
-	run(t, dir, "git", "config", "user.name", "Test")
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+	gittest.Run(t, dir, "config", "user.name", "Test")
 
 	write(t, dir, "go.mod", "module example.test\n\ngo 1.24\n")
 	write(t, dir, "README.md", "seed\n")
-	run(t, dir, "git", "add", "-A")
-	run(t, dir, "git", "commit", "-q", "-m", "base")
-	run(t, dir, "git", "branch", "base")
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "base")
+	gittest.Run(t, dir, "branch", "base")
 
 	write(t, dir, "safe/safe.go", `package safe
 
@@ -505,8 +506,8 @@ func Classify(n int, a, b, c, d bool) string {
 	return "low"
 }
 `)
-	run(t, dir, "git", "add", "-A")
-	run(t, dir, "git", "commit", "-q", "-m", "head")
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "head")
 	return dir
 }
 
@@ -520,14 +521,3 @@ func write(t *testing.T, dir, rel, body string) {
 		t.Fatal(err)
 	}
 }
-
-func run(t *testing.T, dir, name string, args ...string) {
-	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
-	}
-}
-
-var _ = context.Background
