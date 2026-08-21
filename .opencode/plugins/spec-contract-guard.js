@@ -3,6 +3,8 @@ import {closeSync, constants as fsConstants, mkdtempSync, openSync, rmdirSync, u
 import {tmpdir} from "node:os";
 import {isAbsolute, join} from "node:path";
 import {setTimeout as delay} from "node:timers/promises";
+import {spawn} from "node:child_process";
+import {Readable} from "node:stream";
 
 // Repository-local OpenCode transport. Native before-tool hooks preserve the
 // repository guard decisions; session termination itself cannot be blocked,
@@ -220,8 +222,8 @@ async function runAdapter(worktree, invocation = {}) {
   let payloadFD;
   try {
     payloadFD = anonymousPayloadFD(invocation.input || "");
-    proc = Bun.spawn([
-      "/bin/sh", "-c", supervisorProgram, "dear-agent-opencode-spec-supervisor",
+    proc = spawn("/bin/sh", [
+      "-c", supervisorProgram, "dear-agent-opencode-spec-supervisor",
       ...(invocation.args || ["go", "run", "./cmd/spec-contract-hook", "--root", worktree, "--provider", "opencode", "--event", "Stop"]),
     ], {
       cwd: worktree, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe", payloadFD],
@@ -231,6 +233,14 @@ async function runAdapter(worktree, invocation = {}) {
   } finally {
     if (payloadFD !== undefined) try { closeSync(payloadFD); } catch { /* The child owns its duplicated descriptor. */ }
   }
+  // The control pipe is a real Node stream once the child is gone (e.g. a
+  // timeout or overflow kill races the cleanup write), a write against it
+  // reports failure asynchronously via an "error" event rather than a
+  // synchronous throw or a rejected promise. Node crashes the whole process
+  // on an unhandled stream "error" event, so this pipe needs its own
+  // listener independent of requestSupervisorCleanup's try/catch, which
+  // only ever observes synchronous failures.
+  proc.stdin?.on("error", () => { /* Surfaced through requestSupervisorCleanup and the reap check below instead. */ });
 
   const readers = [];
   const budget = {used: 0};
@@ -238,14 +248,14 @@ async function runAdapter(worktree, invocation = {}) {
   let resolveTermination;
   let cleanupRequestPromise;
   const terminationPromise = new Promise((resolve) => { resolveTermination = resolve; });
-  const supervisorExit = Promise.resolve(proc.exited).then(
-    (exitCode) => {
-      return {exitCode, signal: proc.signalCode || proc.signal || ""};
-    },
-    (error) => {
-      return {error};
-    },
-  );
+  const supervisorExit = new Promise((resolve) => {
+    proc.once("exit", (exitCode, signal) => {
+      resolve({exitCode, signal: signal || ""});
+    });
+    proc.once("error", (error) => {
+      resolve({error});
+    });
+  });
   const requestSupervisorCleanup = () => {
     if (cleanupRequestPromise) return cleanupRequestPromise;
     // stdin is a supervisor-only control pipe. The real hook receives only
@@ -281,25 +291,25 @@ async function runAdapter(worktree, invocation = {}) {
     ]);
   };
 
-  const statusFD = proc.stdio?.[3];
+  const statusStream = proc.stdio?.[3];
   let timeout;
   try {
     let readerSetupError;
     let outputReaders;
     let statusReader;
     try {
-      if (!Number.isInteger(statusFD) || statusFD < 0 || typeof Bun.file !== "function") {
+      if (!statusStream || typeof Readable.toWeb !== "function") {
         throw new Error("supervisor status pipe is unavailable");
       }
       outputReaders = [];
-      const stdoutReader = boundedReader(proc.stdout, "stdout", budget, terminate);
+      const stdoutReader = boundedReader(Readable.toWeb(proc.stdout), "stdout", budget, terminate);
       outputReaders.push(stdoutReader);
       readers.push(stdoutReader);
-      const stderrReader = boundedReader(proc.stderr, "stderr", budget, terminate);
+      const stderrReader = boundedReader(Readable.toWeb(proc.stderr), "stderr", budget, terminate);
       outputReaders.push(stderrReader);
       readers.push(stderrReader);
       statusReader = boundedReader(
-        Bun.file(statusFD).stream(),
+        Readable.toWeb(statusStream),
         "status",
         {used: 0},
         (cause) => terminate({kind: "status", error: cause.error || new Error("supervisor status exceeded its bounded frame")}),
@@ -426,8 +436,8 @@ async function runAdapter(worktree, invocation = {}) {
       Promise.allSettled(readers.map((reader) => reader.cancel())),
       delay(adapterDrainMs),
     ]);
-    if (Number.isInteger(statusFD) && statusFD >= 0) {
-      try { closeSync(statusFD); } catch { /* The bounded status reader may already have closed it. */ }
+    if (statusStream && typeof statusStream.destroy === "function") {
+      try { statusStream.destroy(); } catch { /* The bounded status reader may already have closed it. */ }
     }
   }
 }
