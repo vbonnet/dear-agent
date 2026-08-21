@@ -455,6 +455,24 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		if msg.Role != RoleUser && msg.Role != RoleAssistant {
 			return nil, fmt.Errorf("message has unsupported role %q", msg.Role)
 		}
+		// The role check above catches a null or absent "role" (Role decodes
+		// to its zero value, which matches neither RoleUser nor
+		// RoleAssistant), but "content" is a plain string field: a null or
+		// absent value there decodes to "" exactly like a genuinely empty
+		// string does, and persistence would then rewrite it as
+		// `"Content":""` — malformed input reported as a successfully
+		// imported, silently altered message. A second decode into a
+		// pointer catches null and absent alike, since both leave a nil
+		// *string where a real value would set it.
+		var contentProbe struct {
+			Content *string
+		}
+		if err := json.Unmarshal(line, &contentProbe); err != nil {
+			return nil, fmt.Errorf("failed to parse message: %w", err)
+		}
+		if contentProbe.Content == nil {
+			return nil, fmt.Errorf("message is missing a content value")
+		}
 		// GetHistory's scanner caps a single line at maxHistoryLineBytes, and
 		// what it reads back is writeHistory's re-marshaled encoding of msg,
 		// not this raw input line. Re-marshaling adds fields the wire format

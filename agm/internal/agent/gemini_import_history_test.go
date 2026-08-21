@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -75,6 +76,11 @@ func TestParseImportedMessagesRejects(t *testing.T) {
 		{name: "json null", data: []byte("null\n"), format: FormatJSONL},
 		{name: "empty object", data: []byte("{}\n"), format: FormatJSONL},
 		{name: "unknown role", data: []byte(`{"role":"system","content":"x"}` + "\n"), format: FormatJSONL},
+		// A null or absent "content" decodes to "" exactly like a genuinely
+		// empty string does, so persistence would silently rewrite it as
+		// `"Content":""` unless null and absent are both rejected.
+		{name: "null content", data: []byte(`{"role":"user","content":null}` + "\n"), format: FormatJSONL},
+		{name: "absent content", data: []byte(`{"role":"user"}` + "\n"), format: FormatJSONL},
 	}
 
 	for _, tc := range tests {
@@ -87,6 +93,25 @@ func TestParseImportedMessagesRejects(t *testing.T) {
 				t.Errorf("expected nil messages alongside the error, got %#v", messages)
 			}
 		})
+	}
+}
+
+// TestParseImportedMessagesAcceptsEmptyStringContent proves the null/absent
+// content rejection above does not over-reject: a message whose content is
+// genuinely an empty string, not null or missing, is a real (if unusual)
+// message and must still import.
+func TestParseImportedMessagesAcceptsEmptyStringContent(t *testing.T) {
+	data := []byte(`{"role":"user","content":""}` + "\n")
+
+	messages, err := parseImportedMessages(data, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
+	}
+	if messages[0].Content != "" {
+		t.Errorf("content = %q, want empty string", messages[0].Content)
 	}
 }
 
@@ -220,10 +245,70 @@ func TestWriteHistoryReplacesPriorHistory(t *testing.T) {
 	}
 }
 
+// TestWriteHistoryLeavesPriorHistoryIntactWhenReplacementFails proves AGP-64's
+// atomicity claim with an actual failure injection, rather than only reading
+// after two writes have both already succeeded the way
+// TestWriteHistoryReplacesPriorHistory does — that test would still pass even
+// if writeHistory were changed to truncate and rewrite historyPath directly,
+// since it never observes a reader during a failed replacement.
+//
+// writeHistory never opens historyPath itself until the final os.Rename, so
+// a failure at any earlier step — here, making the directory unwritable so
+// the second write's os.CreateTemp fails — must leave the first write's file
+// completely unchanged: never partial, never missing.
+func TestWriteHistoryLeavesPriorHistoryIntactWhenReplacementFails(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	first := []Message{{Role: RoleUser, Content: "first"}}
+	if err := adapter.writeHistory(metadata, first); err != nil {
+		t.Fatalf("first writeHistory returned error: %v", err)
+	}
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	before, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read first history: %v", err)
+	}
+
+	historyDir := filepath.Dir(historyPath)
+	if err := os.Chmod(historyDir, 0o500); err != nil {
+		t.Fatalf("chmod history dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(historyDir, 0o700) })
+
+	second := []Message{{Role: RoleUser, Content: "second"}}
+	if err := adapter.writeHistory(metadata, second); err == nil {
+		t.Fatal("expected the second writeHistory to fail with the directory read-only")
+	}
+
+	if err := os.Chmod(historyDir, 0o700); err != nil {
+		t.Fatalf("restore history dir permissions: %v", err)
+	}
+
+	after, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read history after failed replacement: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("history changed after a failed replacement:\nbefore: %q\nafter:  %q", before, after)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 || got[0].Content != "first" {
+		t.Fatalf("history after failed replacement = %#v, want only the first write", got)
+	}
+}
+
 // TestWriteHistoryRoundTripsOversizedRecord covers a record larger than the
 // 64 KiB default bufio.Scanner token. Without an enlarged read buffer an
 // import would write a record its own reader then chokes on, which breaks the
-// round trip AGP-66 promises for exactly the long turns most worth keeping.
+// round trip AGP-65 promises for exactly the long turns most worth keeping.
 func TestWriteHistoryRoundTripsOversizedRecord(t *testing.T) {
 	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
 
