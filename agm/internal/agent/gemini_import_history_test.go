@@ -68,6 +68,12 @@ func TestParseImportedMessagesRejects(t *testing.T) {
 		{name: "native", data: []byte("{}"), format: FormatNative},
 		{name: "unknown", data: []byte("{}"), format: ConversationFormat("bogus")},
 		{name: "malformed jsonl", data: []byte("{not json}\n"), format: FormatJSONL},
+		// json.Unmarshal accepts both of these into a Message and leaves it
+		// zero-valued, so decoding alone cannot tell a message from any other
+		// JSON value. Each must be rejected, not imported as a speakerless turn.
+		{name: "json null", data: []byte("null\n"), format: FormatJSONL},
+		{name: "empty object", data: []byte("{}\n"), format: FormatJSONL},
+		{name: "unknown role", data: []byte(`{"role":"system","content":"x"}` + "\n"), format: FormatJSONL},
 	}
 
 	for _, tc := range tests {
@@ -210,5 +216,85 @@ func TestWriteHistoryReplacesPriorHistory(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Errorf("history directory holds %d entries, want 1", len(entries))
+	}
+}
+
+// TestWriteHistoryRoundTripsOversizedRecord covers a record larger than the
+// 64 KiB default bufio.Scanner token. Without an enlarged read buffer an
+// import would write a record its own reader then chokes on, which breaks the
+// round trip AGP-63 promises for exactly the long turns most worth keeping.
+func TestWriteHistoryRoundTripsOversizedRecord(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	huge := strings.Repeat("x", 200*1024)
+	if err := adapter.writeHistory(metadata, []Message{{Role: RoleUser, Content: huge}}); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+	if len(got[0].Content) != len(huge) {
+		t.Errorf("content length = %d, want %d", len(got[0].Content), len(huge))
+	}
+}
+
+// TestParseImportedMessagesTrimsBlankLines covers a payload with trailing and
+// interior blank lines, which a JSONL file routinely has.
+func TestParseImportedMessagesTrimsBlankLines(t *testing.T) {
+	data := []byte("\n" + `{"role":"user","content":"a"}` + "\n\n  \n" + `{"role":"assistant","content":"b"}` + "\n\n")
+
+	messages, err := parseImportedMessages(data, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("got %d messages, want 2: %#v", len(messages), messages)
+	}
+}
+
+// TestWriteHistoryLeavesNoTemporaryFileOnSuccess covers the cleanup flag: the
+// temporary sibling must be renamed away, not left behind and not removed
+// twice.
+func TestWriteHistoryLeavesNoTemporaryFileOnSuccess(t *testing.T) {
+	adapter, _, metadata := newGeminiHistoryFixture(t)
+
+	if err := adapter.writeHistory(metadata, []Message{{Role: RoleUser, Content: "x"}}); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(historyPath))
+	if err != nil {
+		t.Fatalf("failed to read history directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "history.jsonl" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("history directory holds %v, want only history.jsonl", names)
+	}
+}
+
+// TestImportedSessionNamesAreDistinct covers the collision the timestamp alone
+// allowed: two imports in the same second shared a tmux name, and because
+// history is keyed by that name the second import replaced the first one's
+// conversation.
+func TestImportedSessionNamesAreDistinct(t *testing.T) {
+	seen := map[string]bool{}
+	for range 100 {
+		name := importedSessionName()
+		if seen[name] {
+			t.Fatalf("importedSessionName produced a duplicate within one run: %q", name)
+		}
+		seen[name] = true
 	}
 }

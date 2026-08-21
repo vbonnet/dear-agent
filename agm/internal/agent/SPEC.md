@@ -156,9 +156,9 @@ compatibility.
 
 ### Gemini CLI Conversation Import
 
-**AGP-63** When the Gemini CLI adapter imports a conversation, the system shall persist the decoded messages to the session's history file so a subsequent history read or export returns the imported conversation, and shall reject an undecodable format or a malformed record rather than create a session with no history.
+**AGP-63** When the Gemini CLI adapter imports a conversation, a subsequent history read or export of the returned session shall return the imported conversation, including records larger than a default scanner token; an undecodable format, a malformed record, or a record carrying no supported role shall be rejected rather than imported; and when the conversation cannot be persisted, the system shall leave no session the caller cannot reach.
 
-**AGP-64** When the Gemini CLI adapter resolves a session's history file, the system shall derive the path from one owner so an import and a history read cannot disagree about its location, and shall install a written history by atomic replacement so a failed write leaves any prior history intact.
+**AGP-64** When the Gemini CLI adapter persists an imported conversation, a reader shall observe either the complete imported history or the prior history, never a partial or truncated one, and each import shall occupy a history namespace distinct from every concurrent import.
 
 ### Harness Doctor Health
 

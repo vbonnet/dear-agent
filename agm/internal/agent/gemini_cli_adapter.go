@@ -16,6 +16,11 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
+// maxHistoryLineBytes caps a single history record on read. One conversation
+// turn can easily exceed the Scanner default of 64 KiB, and a record this
+// large is far likelier to be a corrupt file than a real message.
+const maxHistoryLineBytes = 8 * 1024 * 1024
+
 // GeminiCLIAdapter is the concrete compatibility adapter for Gemini CLI.
 //
 // It runs Gemini CLI in tmux (like Claude) and provides concrete lifecycle
@@ -289,6 +294,11 @@ func (a *GeminiCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 
 	var messages []Message
 	scanner := bufio.NewScanner(file)
+	// A default Scanner tops out at 64 KiB per line, which is smaller than a
+	// single long conversation turn. Without this an import would write a
+	// record that the matching read then fails on, breaking the round trip
+	// AGP-63 promises.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxHistoryLineBytes)
 	for scanner.Scan() {
 		var msg Message
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
@@ -360,13 +370,21 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 	}
 
 	messages := []Message{}
-	for _, line := range splitLines(string(data)) {
-		if line == "" {
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
 			continue
 		}
 		var msg Message
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("failed to parse message: %w", err)
+		}
+		// json.Unmarshal accepts `null` and `{}` into a Message and leaves it
+		// zero-valued, so decoding alone does not establish that a record IS a
+		// message. AGP-63 requires a malformed record to be rejected rather
+		// than imported as an empty turn with no speaker.
+		if msg.Role != RoleUser && msg.Role != RoleAssistant {
+			return nil, fmt.Errorf("message has unsupported role %q", msg.Role)
 		}
 		messages = append(messages, msg)
 	}
@@ -405,7 +423,14 @@ func (a *GeminiCLIAdapter) writeHistory(metadata *SessionMetadata, messages []Me
 		return fmt.Errorf("failed to create temporary history file: %w", err)
 	}
 	tmpPath := tmp.Name()
+	installed := false
+	// Clean up only when the rename did not happen. Closing and removing on
+	// the success path would be two failing syscalls against a file that no
+	// longer exists under that name.
 	defer func() {
+		if installed {
+			return
+		}
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 	}()
@@ -422,8 +447,20 @@ func (a *GeminiCLIAdapter) writeHistory(metadata *SessionMetadata, messages []Me
 	if err := os.Rename(tmpPath, historyPath); err != nil {
 		return fmt.Errorf("failed to install history file: %w", err)
 	}
+	installed = true
 
 	return nil
+}
+
+// importedSessionName builds the tmux session name for an import.
+//
+// It carries a random suffix, not just a timestamp. CreateSession reuses an
+// existing tmux session of the same name and getHistoryPath keys storage by
+// that name, so two imports in the same second would otherwise share one
+// history file and the later one would silently replace the earlier one's
+// conversation.
+func importedSessionName() string {
+	return fmt.Sprintf("imported-%s-%s", time.Now().Format("20060102-150405"), uuid.New().String()[:8])
 }
 
 // ImportConversation imports conversation from serialized data.
@@ -436,9 +473,8 @@ func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFo
 		return "", err
 	}
 
-	// Create new session
 	sessionID, err := a.CreateSession(SessionContext{
-		Name:             fmt.Sprintf("imported-%s", time.Now().Format("20060102-150405")),
+		Name:             importedSessionName(),
 		WorkingDirectory: os.TempDir(),
 	})
 	if err != nil {
@@ -451,6 +487,12 @@ func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFo
 	}
 
 	if err := a.writeHistory(metadata, messages); err != nil {
+		// The caller never receives this session's ID, so it could not
+		// terminate the tmux process or clear the store entry itself. Roll
+		// back rather than leave an unreachable session behind.
+		if termErr := a.TerminateSession(sessionID); termErr != nil {
+			return "", fmt.Errorf("failed to import conversation history: %w (rollback also failed: %w)", err, termErr)
+		}
 		return "", fmt.Errorf("failed to import conversation history: %w", err)
 	}
 
