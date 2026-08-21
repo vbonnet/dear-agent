@@ -21,9 +21,14 @@ binary. An LLM is invoked only for the judgment steps named in step 3.
    so an unreadable or stale reading normally allows the spawn. **This skill
    inverts that.** An unreadable quota is a stop, because an auto-driver with no
    cost ceiling and an event storm is the failure this bounds.
-2. **Idempotence.** Compute `(repo, pr_number, head_sha, blocker_set)`. If this
-   key was already processed, **stop**. Two GitHub events produce two
-   independent sessions, so without this the loop duplicates and storms.
+2. **Idempotence.** Compute `(repo, pr_number, head_sha, blocker_set)`. If a
+   prior attempt at this exact key **succeeded** (reached READY or merged),
+   **stop**: two GitHub events for the same already-completed state must not
+   re-run. Track attempt state as `in-progress` / `failed` / `succeeded`
+   rather than a binary processed flag — a `failed` or `in-progress` prior
+   attempt at the same key still falls through to the attempt budget below,
+   so a transient error or timeout gets to retry instead of being wrongly
+   treated as already handled.
 3. **Attempt budget.** At most 3 attempts per `head_sha`. Exhausted means
    escalate to a human, never retry.
 4. **Sensitivity.** Classify the changed paths through
@@ -57,7 +62,7 @@ A PR blocked only by these must never reach an LLM.
 | Blocker | Action |
 |---|---|
 | `CONFLICTS` | `safe-rebase` onto base, resolve, `safe-push`. Never force-push. |
-| `FAILING_REQUIRED_CHECK` | Read the logs, fix the code, push. A known flake (`dear-agent-ci-flakes`) gets **exactly one** rerun. |
+| `FAILING_REQUIRED_CHECK` | Read the logs, fix the code, push. A known flake (configured under `flaky_checks` in `.safe-merge.yml`, enforced by `internal/safegit/flakevalve.go`) gets **exactly one** rerun. |
 | `UNRESOLVED_THREADS` | Address in code, verify the fix landed, then resolve. See the hard rule below. |
 | `CHANGES_REQUESTED` | Address the review, push, re-request review. |
 | `REVIEW_REQUIRED` | Obtain an approving review. Escalate if none is available. |
@@ -82,8 +87,12 @@ fetched the body. That is the defect this rule exists to prevent.
 Re-run step 1 after every action. **Act only on a fresh diagnosis**, never on one
 from earlier in the run: a human may be editing the same PR concurrently.
 
-**No-progress detector:** if the blocker set is unchanged after an attempt, stop.
-Same blockers plus a new commit is a loop, not progress.
+**No-progress detector:** compare the blocker set at the specific-detail level
+(failing check names, conflicting paths, thread IDs) not just the high-level
+blocker codes — a new commit that changes which check fails or which files
+conflict is progress even if the blocker code (e.g. `FAILING_REQUIRED_CHECK`)
+stays the same. Stop only when the detailed set is unchanged after an
+attempt; that is a loop, not progress.
 
 ### 5. Merge
 
@@ -136,3 +145,12 @@ Skills: `pr-merge-blockers` (diagnosis discipline), `github-thread-resolver`
 - `pr-blockers <number>` exits 0 READY and the PR merged, **or** the run stopped
   at a named stop condition above with a human notified. Any other ending is a
   defect.
+
+## References
+
+- Design spike: `engram-research/spikes/design-event-driven-drive-pr-to-ready.md`
+  (epic `ce-zijb4`).
+- Sensitivity policy: `docs/policies/autonomous-merge.ai.md`.
+- Flake allowlist: `.safe-merge.yml` (`flaky_checks`), enforced by
+  `internal/safegit/flakevalve.go`.
+- Incident this rule prevents: bead `ce-lr7j`.
