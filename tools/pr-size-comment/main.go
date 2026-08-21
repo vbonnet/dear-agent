@@ -163,6 +163,21 @@ func composeBody(in inputs, priorCrapSection string) string {
 		if !strings.HasSuffix(in.crapReport, "\n") {
 			fmt.Fprintln(&b)
 		}
+	case in.crapUnknown && in.crapSummary != "" && priorCrapSection != "":
+		// This run could not measure anything AND a prior finding exists to
+		// recover. Showing only the recovered section (the old behavior)
+		// gives no indication the current revision is unmeasured, so a
+		// reviewer can mistake a stale result for a current one. Show both,
+		// the current status first and clearly labeled as recovered.
+		fmt.Fprintln(&b, in.crapSummary)
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "<details><summary>Last known code-health result (recovered — not from this revision)</summary>")
+		fmt.Fprintln(&b)
+		fmt.Fprint(&b, priorCrapSection)
+		if !strings.HasSuffix(priorCrapSection, "\n") {
+			fmt.Fprintln(&b)
+		}
+		fmt.Fprintln(&b, "</details>")
 	case priorCrapSection != "":
 		fmt.Fprint(&b, priorCrapSection)
 		if !strings.HasSuffix(priorCrapSection, "\n") {
@@ -203,18 +218,29 @@ func extractCrapSection(body string) string {
 // body, and edits the existing marker comment in place or posts a new one.
 // Best effort throughout: a comment-update failure must never fail the job
 // for a signal that promises never to.
+// exitFailedOperation is returned when the decided action ran but at least
+// one gh operation it depended on failed. It is distinct from the flag/usage
+// exit code (2) and from success (0): the workflow step that calls this
+// command has no other way to notice that its user-facing comment was not
+// actually updated — every gh error was previously logged and then this
+// returned 0 regardless, so the run reported success even though the
+// signal reviewers rely on silently went stale or missing.
+const exitFailedOperation = 1
+
 func upsertComment(ctx context.Context, repo, pr string, in inputs, stderr io.Writer) int {
 	ids, err := markerCommentIDs(ctx, repo, pr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr-size-comment: could not list existing comments: %v\n", err)
-		return 0
+		return exitFailedOperation
 	}
 
+	failed := false
 	prior := ""
 	if needsCrapRecovery(in) && len(ids) > 0 {
 		body, err := commentBody(ctx, repo, ids[0])
 		if err != nil {
 			fmt.Fprintf(stderr, "pr-size-comment: could not read the existing comment to recover: %v\n", err)
+			failed = true
 		} else {
 			prior = extractCrapSection(body)
 		}
@@ -225,17 +251,23 @@ func upsertComment(ctx context.Context, repo, pr string, in inputs, stderr io.Wr
 	if len(ids) > 0 {
 		if err := patchComment(ctx, repo, ids[0], body); err != nil {
 			fmt.Fprintf(stderr, "pr-size-comment: could not update the comment: %v\n", err)
+			failed = true
 		}
 	} else if err := postComment(ctx, repo, pr, body); err != nil {
 		fmt.Fprintf(stderr, "pr-size-comment: could not post the comment: %v\n", err)
+		failed = true
 	}
 
 	// Collapse any duplicates left by earlier revisions of this workflow.
-	// Best effort: a leftover duplicate is cosmetic, not the audit record.
+	// Best effort: a leftover duplicate is cosmetic, not the audit record,
+	// so it does not itself flip the exit code.
 	for _, id := range ids[min(1, len(ids)):] {
 		if err := deleteComment(ctx, repo, id); err != nil {
 			fmt.Fprintf(stderr, "pr-size-comment: could not delete duplicate comment %s: %v\n", id, err)
 		}
+	}
+	if failed {
+		return exitFailedOperation
 	}
 	return 0
 }
@@ -247,12 +279,17 @@ func deleteStaleComments(ctx context.Context, repo, pr string, stderr io.Writer)
 	ids, err := markerCommentIDs(ctx, repo, pr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr-size-comment: could not list existing comments: %v\n", err)
-		return 0
+		return exitFailedOperation
 	}
+	failed := false
 	for _, id := range ids {
 		if err := deleteComment(ctx, repo, id); err != nil {
 			fmt.Fprintf(stderr, "pr-size-comment: could not delete stale comment %s: %v\n", id, err)
+			failed = true
 		}
+	}
+	if failed {
+		return exitFailedOperation
 	}
 	return 0
 }

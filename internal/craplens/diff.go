@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os/exec"
 	"path"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -244,20 +246,29 @@ func isScorableGoFile(p string) bool {
 	return !strings.HasSuffix(p, ".pb.go") && !strings.HasSuffix(p, "_generated.go")
 }
 
-// generatedMarker matches the marker line the Go toolchain convention
-// prescribes for machine-written source. Only the leading portion of a file is
-// searched, because the convention places it before the package clause.
-var generatedMarker = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`)
-
 // isGeneratedSource reports whether file content carries the standard
 // generated-code marker. CRAPLENS-02 excludes generated files, and asking an
 // author to add tests for a file a generator will overwrite is noise.
+//
+// This parses just far enough to read the comments preceding the package
+// clause and defers to ast.IsGenerated, rather than searching the file's raw
+// bytes for the marker line: a handwritten file that happens to contain the
+// same text after its package clause — inside a raw-string code-generation
+// template, or an explanatory comment about the convention itself, both of
+// which exist in this repo (engram/hooks-bin/cmd/generate-patterns/main.go's
+// tmplSource) — must not be misclassified as generated just because the
+// marker appears somewhere in its first few KiB.
 func isGeneratedSource(src []byte) bool {
-	head := src
-	if len(head) > 4096 {
-		head = head[:4096]
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments|parser.PackageClauseOnly)
+	if err != nil {
+		// A file this command cannot even parse this far is not one CRAPLENS
+		// can score anyway; report it as handwritten so it surfaces through
+		// the normal complexity/coverage path rather than being silently
+		// excluded here too.
+		return false
 	}
-	return generatedMarker.Match(head)
+	return ast.IsGenerated(f)
 }
 
 // parseHunkHeader reads the head-side span from a unified-diff hunk header of

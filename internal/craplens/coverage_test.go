@@ -405,3 +405,51 @@ func TestCutTrailingCounts(t *testing.T) {
 		})
 	}
 }
+
+// TestWithGoWorkspaceDisabledForcesModuleMode pins that GOWORK=off always
+// wins for the go subprocesses this package spawns, whether or not the
+// caller's own environment already set (or omitted) GOWORK — a developer's
+// ignored go.work file must not be able to smuggle workspace mode into a
+// local crap-lint run.
+func TestWithGoWorkspaceDisabledForcesModuleMode(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []string
+	}{
+		{name: "no GOWORK set", env: []string{"PATH=/bin", "HOME=/home/x"}},
+		{name: "GOWORK already on", env: []string{"PATH=/bin", "GOWORK=on"}},
+		{name: "GOWORK pointed at a workspace file", env: []string{"GOWORK=/home/x/go.work", "PATH=/bin"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := withGoWorkspaceDisabled(tc.env)
+
+			var goworkValues []string
+			for _, kv := range got {
+				if strings.HasPrefix(kv, "GOWORK=") {
+					goworkValues = append(goworkValues, kv)
+				}
+			}
+			if len(goworkValues) != 1 || goworkValues[0] != "GOWORK=off" {
+				t.Errorf("GOWORK entries in result = %v, want exactly one \"GOWORK=off\"", goworkValues)
+			}
+
+			for _, kv := range tc.env {
+				if strings.HasPrefix(kv, "GOWORK=") {
+					continue
+				}
+				found := false
+				for _, gotKV := range got {
+					if gotKV == kv {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("non-GOWORK entry %q from the input env was dropped", kv)
+				}
+			}
+		})
+	}
+}
