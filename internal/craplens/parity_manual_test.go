@@ -17,7 +17,9 @@ import (
 // tool is exactly the kind of unverified assertion this signal exists to catch.
 //
 // Skipped when gocyclo is not installed, since it is a developer tool rather
-// than a module dependency.
+// than a module dependency. A skip is not a pass: .github/workflows/pr-size-scope.yml
+// installs a pinned gocyclo and fails the job if this test reports SKIP, so
+// CRAPLENS-05 cannot drift unverified in CI.
 func TestComplexityParityWithGocycloBinary(t *testing.T) {
 	bin, err := exec.LookPath("gocyclo")
 	if err != nil {

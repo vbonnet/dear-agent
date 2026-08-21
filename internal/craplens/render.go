@@ -72,7 +72,7 @@ func (r Report) renderUntested(b *strings.Builder) {
 		if p.New {
 			label = "**new package**"
 		}
-		fmt.Fprintf(b, "- `%s` (%s)\n", p.ImportPath, label)
+		fmt.Fprintf(b, "- %s (%s)\n", mdCode(p.ImportPath), label)
 	}
 	b.WriteString("\n")
 }
@@ -92,10 +92,37 @@ func (r Report) renderOver(b *strings.Builder) {
 		// One decimal, not zero. A score of 30.4 is correctly selected by the
 		// strict `> threshold` test but rounds to "30" at %.0f, so the row
 		// would appear not to exceed the threshold it is listed under.
-		fmt.Fprintf(b, "| %.1f | %d | %.1f%% | `%s:%d` `%s` |\n",
-			f.CRAP(), f.Complexity, f.Coverage*100, f.File, f.Line, f.Name)
+		fmt.Fprintf(b, "| %.1f | %d | %.1f%% | %s %s |\n",
+			f.CRAP(), f.Complexity, f.Coverage*100,
+			mdCode(fmt.Sprintf("%s:%d", f.File, f.Line)), mdCode(f.Name))
 	}
 	b.WriteString("\n")
+}
+
+// mdCode renders text as an inline code span that survives a Markdown table.
+//
+// A path is attacker-adjacent input as far as rendering goes: a filename may
+// legally contain a backtick, which would terminate the span, or a pipe, which
+// would add a column and break the table. The fence is widened past the
+// longest backtick run in the text, per CommonMark, and a pipe is escaped
+// because a table cell needs that even inside code.
+func mdCode(text string) string {
+	longest, run := 0, 0
+	for _, r := range text {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+			continue
+		}
+		run = 0
+	}
+	fence := strings.Repeat("`", longest+1)
+
+	padded := text
+	if strings.HasPrefix(text, "`") || strings.HasSuffix(text, "`") {
+		padded = " " + text + " "
+	}
+	return fence + strings.ReplaceAll(padded, "|", "\\|") + fence
 }
 
 // truncate bounds a list to n entries.

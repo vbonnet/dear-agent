@@ -106,44 +106,12 @@ func changedGoFiles(ctx context.Context, repoDir, base, head string) (touchedSet
 // held in newFile until the path line names its file.
 func parseUnifiedDiff(out string) (touchedSet, error) {
 	files := touchedSet{}
-	var current *touchedFile
-	newFile := false
+	state := diffScanState{files: files, inHeader: true}
 
 	scanner := bufio.NewScanner(strings.NewReader(out))
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			current = nil
-			newFile = false
-		case strings.HasPrefix(line, "new file mode"):
-			newFile = true
-		case strings.HasPrefix(line, "+++ "):
-			p, ok := headerPath(strings.TrimPrefix(line, "+++ "))
-			if !ok {
-				current = nil
-				continue
-			}
-			if !isScorableGoFile(p) {
-				current = nil
-				continue
-			}
-			if files[p] == nil {
-				files[p] = &touchedFile{Path: p}
-			}
-			current = files[p]
-			if newFile {
-				current.Added = true
-			}
-		case strings.HasPrefix(line, "@@"):
-			if current == nil {
-				continue
-			}
-			if r, ok := parseHunkHeader(line); ok {
-				current.Ranges = append(current.Ranges, r)
-			}
-		}
+		state.consume(scanner.Text())
 	}
 
 	// A scanner that hit an over-long line stops early, and returning what it
@@ -162,6 +130,62 @@ func parseUnifiedDiff(out string) (touchedSet, error) {
 		}
 	}
 	return files, nil
+}
+
+// diffScanState carries the per-file position of the unified-diff walk.
+type diffScanState struct {
+	files   touchedSet
+	current *touchedFile
+	newFile bool
+	// inHeader is true between a `diff --git` line and the first hunk. It is
+	// what tells a `+++ ` file header apart from an ADDED SOURCE LINE whose
+	// content begins with `++ `, which git also emits as a line starting
+	// `+++ `. Without it such a line cleared the current file and every later
+	// hunk in it was dropped.
+	inHeader bool
+}
+
+// consume advances the walk by one diff line.
+func (st *diffScanState) consume(line string) {
+	switch {
+	case strings.HasPrefix(line, "diff --git "):
+		st.current = nil
+		st.newFile = false
+		st.inHeader = true
+	case st.inHeader && strings.HasPrefix(line, "new file mode"):
+		st.newFile = true
+	case st.inHeader && strings.HasPrefix(line, "+++ "):
+		st.startFile(strings.TrimPrefix(line, "+++ "))
+	case strings.HasPrefix(line, "@@"):
+		st.inHeader = false
+		st.addHunk(line)
+	}
+}
+
+// startFile begins collecting hunks for the file a `+++` header names.
+func (st *diffScanState) startFile(raw string) {
+	path, ok := headerPath(raw)
+	if !ok {
+		st.current = nil
+		return
+	}
+	if st.files[path] == nil {
+		st.files[path] = &touchedFile{Path: path}
+	}
+	st.current = st.files[path]
+	if st.newFile {
+		st.current.Added = true
+	}
+}
+
+// addHunk records a hunk header's head-side span against the current file.
+func (st *diffScanState) addHunk(line string) {
+	if st.current == nil {
+		return
+	}
+	if r, ok := parseHunkHeader(line); ok {
+		st.current.Ranges = append(st.current.Ranges, r)
+	}
 }
 
 // headerPath extracts the head-side pathname from a `+++` diff header.
