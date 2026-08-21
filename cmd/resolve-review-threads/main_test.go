@@ -487,16 +487,29 @@ func TestParseReplyCommentID(t *testing.T) {
 		t.Fatalf("got (%q, %v), want (PRRC_abc, nil)", id, err)
 	}
 
-	bad := map[string][]byte{
-		"empty id":        []byte(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":""}}}}`),
-		"missing comment": []byte(`{"data":{"addPullRequestReviewThreadReply":{}}}`),
-		"empty payload":   []byte(`{}`),
-		"not json":        []byte(`<html>502</html>`),
+	// errReplyIDMissing distinguishes "GitHub accepted the mutation but the
+	// response omitted the ID" (the reply is live; postReplyOrExit forbids
+	// reposting) from a genuine parse failure (unknown whether it posted at
+	// all): they need opposite advice, so the sentinel must fire on exactly
+	// the first kind.
+	bad := map[string]struct {
+		raw        []byte
+		wantIDMiss bool
+	}{
+		"empty id":        {[]byte(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":""}}}}`), true},
+		"missing comment": {[]byte(`{"data":{"addPullRequestReviewThreadReply":{}}}`), true},
+		"empty payload":   {[]byte(`{}`), true},
+		"not json":        {[]byte(`<html>502</html>`), false},
 	}
-	for name, raw := range bad {
+	for name, tc := range bad {
 		t.Run(name, func(t *testing.T) {
-			if id, err := parseReplyCommentID(raw); err == nil {
-				t.Errorf("want an error, got id=%q", id)
+			id, err := parseReplyCommentID(tc.raw)
+			if err == nil {
+				t.Fatalf("want an error, got id=%q", id)
+			}
+			if got := errors.Is(err, errReplyIDMissing); got != tc.wantIDMiss {
+				t.Errorf("errors.Is(err, errReplyIDMissing) = %v, want %v (err: %v)",
+					got, tc.wantIDMiss, err)
 			}
 		})
 	}
@@ -508,6 +521,17 @@ func TestParseReplyCommentID(t *testing.T) {
 func TestReplyMutationRequestsCommentID(t *testing.T) {
 	if !strings.Contains(replyMutation, "comment { id }") {
 		t.Errorf("reply mutation must select the comment ID, got: %s", replyMutation)
+	}
+}
+
+// TestResolveMutationRequestsLastComment guards the query resolveWithEvidence's
+// post-mutation reconciliation depends on: if resolveMutation stopped
+// selecting the thread's last comment, mutateThread would always report an
+// empty lastCommentID, silently disabling the check for a comment landing
+// while the resolve mutation itself was in flight.
+func TestResolveMutationRequestsLastComment(t *testing.T) {
+	if !strings.Contains(resolveMutation, "comments(last:1)") {
+		t.Errorf("resolve mutation must select the last comment, got: %s", resolveMutation)
 	}
 }
 

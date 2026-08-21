@@ -119,9 +119,19 @@ const threadCommentsQuery = `query($id:ID!, $after:String) {
   }
 }`
 
+// resolveMutation asks for the thread's last comment in the same response as
+// the mutation, not via a separate read afterward. A comment landing between
+// the pre-mutation evidence check and this mutation actually applying is a
+// real window a subsequent read cannot fully close (it has its own latency);
+// having GitHub report the post-mutation last comment lets the caller detect
+// that race directly off the mutation it just made.
 const resolveMutation = `mutation($threadId:ID!) {
   resolveReviewThread(input:{threadId:$threadId}) {
-    thread { id isResolved }
+    thread {
+      id
+      isResolved
+      comments(last:1) { nodes { id } }
+    }
   }
 }`
 
@@ -239,7 +249,7 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 		return fail("usage: %s <threadId> [--force]", cmd)
 	}
 	if cmd == "unresolve" {
-		msg, err := mutateThread(ctx, cmd, args[0])
+		msg, _, err := mutateThread(ctx, cmd, args[0])
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -321,9 +331,9 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	case noPriorReply:
 		// Our reply must land directly after the comment we just read.
 		anchorPrevID = historyLastID
-		id, err := postReply(ctx, threadID, body)
-		if err != nil {
-			return fail("reply failed, thread left unresolved: %v", err)
+		id, code := postReplyOrExit(ctx, threadID, body)
+		if code >= 0 {
+			return code
 		}
 		anchorID = id
 	}
@@ -374,6 +384,27 @@ func postReply(ctx context.Context, threadID, body string) (string, error) {
 	return parseReplyCommentID(raw)
 }
 
+// postReplyOrExit posts a reply and reports whether the caller should return
+// immediately. code is -1 when id is a fresh anchor safe to resolve against.
+// errReplyIDMissing gets distinct advice from every other failure: the reply
+// text is already live, so telling the operator to just retry — as a generic
+// failure would — risks a real duplicate if they reword it while retrying.
+func postReplyOrExit(ctx context.Context, threadID, body string) (id string, code int) {
+	id, err := postReply(ctx, threadID, body)
+	if err == nil {
+		return id, -1
+	}
+	if errors.Is(err, errReplyIDMissing) {
+		return "", fail("your reply was posted, but GitHub's response did not "+
+			"confirm its ID, so it cannot be used as the resolution anchor: %v\n"+
+			"the thread was left UNRESOLVED on purpose. Do NOT reword and repost: "+
+			"re-run this exact command and reply-resolve will find your reply by "+
+			"its text and resolve without duplicating it:\n"+
+			"  resolve-review-threads reply-resolve %s \"...\"", err, threadID)
+	}
+	return "", fail("reply failed, thread left unresolved: %v", err)
+}
+
 // parseReplyCommentID extracts the new comment's node ID from the reply
 // mutation response. An absent ID is an error rather than an empty anchor:
 // without it there is nothing to prove our reply is the last comment, and
@@ -393,10 +424,19 @@ func parseReplyCommentID(raw []byte) (string, error) {
 	}
 	id := resp.Data.AddPullRequestReviewThreadReply.Comment.ID
 	if id == "" {
-		return "", fmt.Errorf("reply posted but GitHub returned no comment ID")
+		return "", errReplyIDMissing
 	}
 	return id, nil
 }
+
+// errReplyIDMissing marks a reply mutation GitHub accepted — the comment is
+// live on the thread — whose response simply omitted the new comment's ID.
+// It is distinguished from a genuine post failure because the two need
+// opposite advice: retrying with a DIFFERENT body would create a real
+// duplicate, but retrying reply-resolve with the SAME body stays safe, since
+// classifyPriorReply finds the posted comment by its text and resolves
+// without reposting it.
+var errReplyIDMissing = errors.New("reply posted but GitHub returned no comment ID")
 
 // replyPlacement describes where our reply ended up relative to what we read.
 type replyPlacement int
@@ -834,8 +874,30 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 			"reply with the reason instead: resolve-review-threads reply-resolve %s \"Fixed - <what changed>\"",
 			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)}
 	}
-	msg, err = mutateThread(ctx, "resolve", threadID)
-	return msg, err == nil, err
+	msg, gotLastID, err := mutateThread(ctx, "resolve", threadID)
+	if err != nil {
+		return msg, false, err
+	}
+	// The pre-mutation read above still leaves a window: a comment can land
+	// while this mutation itself is in flight. resolveMutation asks GitHub
+	// for the last comment as of the mutation's own response, so this check
+	// is against the mutation applying, not a separate read after it — the
+	// closest this client can get to atomic. A mismatch means the resolution
+	// just went through on stale evidence; reopen it rather than leave a
+	// thread with unread commentary silently closed.
+	if wantLastID != "" && gotLastID != "" && gotLastID != wantLastID {
+		if _, _, uErr := mutateThread(ctx, "unresolve", threadID); uErr != nil {
+			return "", false, fmt.Errorf(
+				"%s %s: resolved on stale evidence (someone commented while the "+
+					"mutation was in flight) AND reopening it failed: %w — "+
+					"resolve-review-threads unresolve %s, then read the new comment "+
+					"and answer it", threadID, cur.Path, uErr, threadID)
+		}
+		return "", false, &unansweredError{msg: fmt.Sprintf(
+			"%s %s: reopened — someone commented while the resolve mutation was "+
+				"in flight, so it is not accounted for", threadID, cur.Path)}
+	}
+	return msg, true, nil
 }
 
 // isAccessDenied reports whether an error is GitHub refusing the caller rather
@@ -940,29 +1002,40 @@ func fetchHistoryTail(ctx context.Context, threadID string) (history []tailComme
 }
 
 // mutateThread resolves ("resolve") or re-opens ("unresolve") one thread and
-// returns a human-readable confirmation line.
-func mutateThread(ctx context.Context, action, threadID string) (string, error) {
+// returns a human-readable confirmation line. lastCommentID is the thread's
+// last comment as of the SAME response as the mutation, when the query
+// requested it (currently only resolveMutation does); it is empty for
+// "unresolve", which has no caller that needs it.
+func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommentID string, err error) {
 	query, field := resolveMutation, "resolveReviewThread"
 	if action == "unresolve" {
 		query, field = unresolveMutation, "unresolveReviewThread"
 	}
 	raw, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "query="+query)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var resp struct {
 		Data map[string]struct {
 			Thread struct {
 				ID         string `json:"id"`
 				IsResolved bool   `json:"isResolved"`
+				Comments   struct {
+					Nodes []struct {
+						ID string `json:"id"`
+					} `json:"nodes"`
+				} `json:"comments"`
 			} `json:"thread"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", fmt.Errorf("parse %s response: %w", field, err)
+		return "", "", fmt.Errorf("parse %s response: %w", field, err)
 	}
 	th := resp.Data[field].Thread
-	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, th.IsResolved), nil
+	if n := th.Comments.Nodes; len(n) > 0 {
+		lastCommentID = n[len(n)-1].ID
+	}
+	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, th.IsResolved), lastCommentID, nil
 }
 
 // ghGraphQL runs `gh api graphql <args...>` and returns stdout. Stderr is
