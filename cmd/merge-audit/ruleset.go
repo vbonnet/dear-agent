@@ -187,7 +187,14 @@ func parseBypassActors(raw json.RawMessage) ([]bypassActor, error) {
 		}
 	}
 	sort.Slice(bypassActors, func(i, j int) bool {
-		return bypassActorIdentity(bypassActors[i]) < bypassActorIdentity(bypassActors[j])
+		ai, aj := bypassActors[i], bypassActors[j]
+		if ai.ActorID != aj.ActorID {
+			return ai.ActorID < aj.ActorID
+		}
+		if ai.ActorType != aj.ActorType {
+			return ai.ActorType < aj.ActorType
+		}
+		return ai.BypassMode < aj.BypassMode
 	})
 	return bypassActors, nil
 }
@@ -335,7 +342,27 @@ func parseRequiredReviewers(rawReviewers []requiredReviewerJSON) ([]requiredRevi
 		seenReviewers[identity] = struct{}{}
 		reviewers = append(reviewers, reviewer)
 	}
-	sort.Slice(reviewers, func(i, j int) bool { return requiredReviewerKey(reviewers[i]) < requiredReviewerKey(reviewers[j]) })
+	sort.Slice(reviewers, func(i, j int) bool {
+		ri, rj := reviewers[i], reviewers[j]
+		if ri.Reviewer.ID != rj.Reviewer.ID {
+			return ri.Reviewer.ID < rj.Reviewer.ID
+		}
+		if ri.Reviewer.Type != rj.Reviewer.Type {
+			return ri.Reviewer.Type < rj.Reviewer.Type
+		}
+		if ri.MinimumApprovals != rj.MinimumApprovals {
+			return ri.MinimumApprovals < rj.MinimumApprovals
+		}
+		if len(ri.FilePatterns) != len(rj.FilePatterns) {
+			return len(ri.FilePatterns) < len(rj.FilePatterns)
+		}
+		for k := range ri.FilePatterns {
+			if ri.FilePatterns[k] != rj.FilePatterns[k] {
+				return ri.FilePatterns[k] < rj.FilePatterns[k]
+			}
+		}
+		return false
+	})
 	return reviewers, nil
 }
 
@@ -363,7 +390,19 @@ func parseRequiredStatusChecksRule(raw json.RawMessage) (requiredStatusChecksRul
 		}
 		seenChecks[identity] = struct{}{}
 	}
-	sort.Slice(checks, func(i, j int) bool { return requiredCheckIdentity(checks[i]) < requiredCheckIdentity(checks[j]) })
+	sort.Slice(checks, func(i, j int) bool {
+		ci, cj := checks[i], checks[j]
+		if ci.Context != cj.Context {
+			return ci.Context < cj.Context
+		}
+		if (ci.IntegrationID == nil) != (cj.IntegrationID == nil) {
+			return ci.IntegrationID != nil
+		}
+		if ci.IntegrationID != nil && cj.IntegrationID != nil {
+			return *ci.IntegrationID < *cj.IntegrationID
+		}
+		return false
+	})
 	return requiredStatusChecksRule{
 		StrictRequiredStatusChecksPolicy: *params.StrictRequiredStatusChecksPolicy,
 		DoNotEnforceOnCreate:             *params.DoNotEnforceOnCreate,
@@ -409,17 +448,26 @@ func normalizedStrings(values []string) []string {
 	return out
 }
 
-func bypassActorIdentity(actor bypassActor) string {
-	return fmt.Sprintf("%d/%s/%s", actor.ActorID, actor.ActorType, actor.BypassMode)
-}
-
 func requiredReviewerKey(reviewer requiredReviewer) string {
 	return fmt.Sprintf("%d/%s/%d/%q", reviewer.Reviewer.ID, reviewer.Reviewer.Type, reviewer.MinimumApprovals, reviewer.FilePatterns)
 }
 
-func validateCanonicalRuleset(v rulesetView) error {
+// validateCanonicalRuleset checks v against the zero-bypass branch-protection
+// subset (DECL-RULESET-04). repo scopes the invariants that are specific to
+// dear-agent's own checked-in declaration: the mandatory GitHub Actions
+// integration ID on every required check. Other managed fleet repositories
+// are inventory-owned and legitimately declare context-only required checks
+// with no integration ID (infra/variables.tf required_checks); an omitted
+// integration ID normalizes as an explicit context-only identity for them.
+func validateCanonicalRuleset(v rulesetView, repo string) error {
 	if v.Target != "branch" {
 		return fmt.Errorf("unsupported target %q", v.Target)
+	}
+	if !containsDefaultBranchRef(v.RefNameInclude) {
+		return fmt.Errorf("ref_name include must contain ~DEFAULT_BRANCH")
+	}
+	if len(v.RefNameExclude) != 0 {
+		return fmt.Errorf("ref_name exclude must be empty; default branch cannot be excluded from a zero-bypass policy")
 	}
 	if v.Enforcement != "active" {
 		return fmt.Errorf("enforcement must be active")
@@ -439,12 +487,26 @@ func validateCanonicalRuleset(v rulesetView) error {
 	if len(v.RequiredStatusChecks.RequiredChecks) == 0 {
 		return fmt.Errorf("at least one required status check is required")
 	}
-	for _, check := range v.RequiredStatusChecks.RequiredChecks {
-		if check.IntegrationID == nil || *check.IntegrationID != githubActionsIntegrationID {
-			return fmt.Errorf("required status check %q must use integration_id %d", check.Context, githubActionsIntegrationID)
+	if isDearAgentRepo(repo) {
+		for _, check := range v.RequiredStatusChecks.RequiredChecks {
+			if check.IntegrationID == nil || *check.IntegrationID != githubActionsIntegrationID {
+				return fmt.Errorf("required status check %q must use integration_id %d", check.Context, githubActionsIntegrationID)
+			}
 		}
 	}
 	return nil
+}
+
+// containsDefaultBranchRef reports whether include contains the literal
+// "~DEFAULT_BRANCH" ref-name pattern GitHub uses to target a repository's
+// default branch regardless of its actual name.
+func containsDefaultBranchRef(include []string) bool {
+	for _, ref := range include {
+		if ref == "~DEFAULT_BRANCH" {
+			return true
+		}
+	}
+	return false
 }
 
 func requiredCheckIdentity(check requiredStatusCheck) string {

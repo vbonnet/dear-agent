@@ -101,6 +101,34 @@ func TestAuditRepoRetainsFindingsWhenLaterRulesetEvidenceFails(t *testing.T) {
 	}
 }
 
+// TestAuditRepoRunsIndependentChecksAfterAnEarlierFailure is the MAC-09
+// regression: an error from the *first* evidence source (merged-PR
+// review/checks) must not skip the direct-push and ruleset-drift checks,
+// since those are independently obtainable and may hold real violations.
+func TestAuditRepoRunsIndependentChecksAfterAnEarlierFailure(t *testing.T) {
+	wantPush := Violation{Repo: "owner/repo", Type: typeDirectPush, Ref: "abc123", Detail: "direct push"}
+	wantDrift := Violation{Repo: "owner/repo", Type: typeRulesetDrift, Detail: "ruleset drift"}
+
+	got, err := auditRepoWithDependencies(context.Background(), "owner/repo", time.Now(), "ruleset.json", repoAuditDependencies{
+		defaultBranch: func(context.Context, string) (string, error) { return "main", nil },
+		auditMergedPRs: func(context.Context, string, string, time.Time) ([]Violation, error) {
+			return nil, fmt.Errorf("PR #1 threads: review-thread query errored")
+		},
+		auditDirectPushes: func(context.Context, string, string, time.Time) ([]Violation, error) {
+			return []Violation{wantPush}, nil
+		},
+		auditRulesetDrift: func(context.Context, string, string) ([]Violation, error) {
+			return []Violation{wantDrift}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "review-thread query errored") {
+		t.Fatalf("auditRepoWithDependencies error = %v, want merged-PR failure surfaced", err)
+	}
+	if len(got) != 2 || got[0] != wantPush || got[1] != wantDrift {
+		t.Fatalf("retained findings = %#v, want independent direct-push and ruleset-drift findings despite the earlier failure", got)
+	}
+}
+
 func TestAuditMergedPRsRetainsFindingsBeforeQueryErrors(t *testing.T) {
 	prOne := mergedPR{Number: 1, Title: "first", MergedAt: merged, HeadSHA: "head-one"}
 	prTwo := mergedPR{Number: 2, Title: "second", MergedAt: merged, HeadSHA: "head-two"}
@@ -436,7 +464,7 @@ func TestValidateCanonicalRulesetAcceptsRequiredReviewers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse ruleset with provider-supported required reviewer: %v", err)
 	}
-	if err := validateCanonicalRuleset(ruleset); err != nil {
+	if err := validateCanonicalRuleset(ruleset, "vbonnet/dear-agent"); err != nil {
 		t.Fatalf("validate ruleset with provider-supported required reviewer: %v", err)
 	}
 }
@@ -457,8 +485,54 @@ func TestValidateCanonicalRulesetRejectsWeakenedInvariants(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse weakened ruleset: %v", err)
 			}
-			if err := validateCanonicalRuleset(ruleset); err == nil {
+			if err := validateCanonicalRuleset(ruleset, "vbonnet/dear-agent"); err == nil {
 				t.Fatal("validateCanonicalRuleset unexpectedly accepted weakened policy")
+			}
+		})
+	}
+}
+
+// TestValidateCanonicalRulesetGenericRepoAllowsContextOnlyChecks confirms
+// DECL-RULESET-04's normalization: a non-dear-agent managed repository may
+// declare a required check with no integration_id (a legitimate legacy
+// context-only identity per infra/variables.tf required_checks), and the
+// mandatory GitHub Actions integration ID (15368) applies only to
+// dear-agent's own checked-in declaration.
+func TestValidateCanonicalRulesetGenericRepoAllowsContextOnlyChecks(t *testing.T) {
+	raw := completeRulesetJSON(`"~DEFAULT_BRANCH"`, `false`, `false`, `true`, `true`, `true`, `false`, `[{"context":"Build & Test"}]`)
+	ruleset, err := parseRuleset(raw)
+	if err != nil {
+		t.Fatalf("parse context-only-check ruleset: %v", err)
+	}
+	if err := validateCanonicalRuleset(ruleset, "vbonnet/some-other-repo"); err != nil {
+		t.Fatalf("validate generic-repo context-only check: %v", err)
+	}
+	// The same declaration must still be rejected for dear-agent itself,
+	// which requires the GitHub Actions integration ID on every check.
+	if err := validateCanonicalRuleset(ruleset, "vbonnet/dear-agent"); err == nil {
+		t.Fatal("validateCanonicalRuleset unexpectedly accepted a context-only check for dear-agent")
+	}
+}
+
+// TestValidateCanonicalRulesetRequiresDefaultBranchCoverage guards against a
+// declaration that targets a non-default branch or excludes the default
+// branch from an otherwise branch-targeted ruleset: accepting either would
+// let merge-audit report a clean comparison while the default branch is
+// genuinely unprotected.
+func TestValidateCanonicalRulesetRequiresDefaultBranchCoverage(t *testing.T) {
+	base := string(completeRulesetJSON(`"~DEFAULT_BRANCH"`, `false`, `false`, `true`, `true`, `true`, `false`, `[{"context":"build","integration_id":15368}]`))
+	tests := map[string]string{
+		"include targets a different branch": strings.Replace(base, `"include":["~DEFAULT_BRANCH"]`, `"include":["release"]`, 1),
+		"exclude removes the default branch": strings.Replace(base, `"exclude":[]`, `"exclude":["~DEFAULT_BRANCH"]`, 1),
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			ruleset, err := parseRuleset([]byte(raw))
+			if err != nil {
+				t.Fatalf("parse ruleset: %v", err)
+			}
+			if err := validateCanonicalRuleset(ruleset, "vbonnet/dear-agent"); err == nil {
+				t.Fatal("validateCanonicalRuleset unexpectedly accepted a declaration that does not cover the default branch")
 			}
 		})
 	}

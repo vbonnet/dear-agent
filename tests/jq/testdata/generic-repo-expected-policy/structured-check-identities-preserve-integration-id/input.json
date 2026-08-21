@@ -1,0 +1,8 @@
+{
+  "visibility": "public",
+  "required_checks": ["ignored-when-identities-present"],
+  "required_check_identities": [
+    {"context": "Build & Test (ubuntu-latest)", "integration_id": 15368},
+    {"context": "Legacy Context-Only Check"}
+  ]
+}
