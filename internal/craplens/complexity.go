@@ -29,6 +29,12 @@ func changedFunctions(ctx context.Context, repoDir, head string, files touchedSe
 		if err != nil {
 			continue
 		}
+		// A path check cannot find every generated file; the toolchain marker
+		// can. CRAPLENS-02 excludes generated source, and asking for tests on
+		// a file a generator will overwrite is noise.
+		if isGeneratedSource(src) {
+			continue
+		}
 		fset := token.NewFileSet()
 		parsed, err := parser.ParseFile(fset, rel, src, parser.SkipObjectResolution)
 		if err != nil {

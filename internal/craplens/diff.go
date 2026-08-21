@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -36,13 +37,14 @@ type touchedFile struct {
 // touched is the set of changed Go files, keyed by path.
 type touchedSet map[string]*touchedFile
 
-// packageIsNew reports whether every changed file in the package was added by
-// this diff. That is the "new package shipping untested" case, as opposed to
-// an existing untested package that merely got edited.
-func (t touchedSet) packageIsNew(importPathSuffix string) bool {
+// allFilesAdded reports whether every changed file in the package was added by
+// this diff. It is a necessary condition for a new package but not a
+// sufficient one: adding a single file to an existing package also satisfies
+// it, which is why the caller confirms against the base tree.
+func (t touchedSet) allFilesAdded(pkgDir string) bool {
 	sawOne := false
 	for _, f := range t {
-		if path.Dir(f.Path) != importPathSuffix {
+		if path.Dir(f.Path) != pkgDir {
 			continue
 		}
 		sawOne = true
@@ -74,7 +76,12 @@ func changedGoFiles(ctx context.Context, repoDir, base, head string) (touchedSet
 	// -U0 so each hunk header names exactly the lines that changed rather than
 	// three lines of untouched context on either side, which would attribute a
 	// neighbouring function to this diff.
-	argv = append(argv, "diff", "-M", "-U0", "--diff-filter=ACMR", base+"..."+head, "--", "*.go")
+	// -c core.quotePath=false: by default git C-quotes any pathname with
+	// non-ASCII bytes, so `docs/café.go` arrives as "docs/caf\303\251.go"
+	// and the +++ header parse below silently drops the file. Turning quoting
+	// off keeps the pathname verbatim.
+	argv = append(argv, "-c", "core.quotePath=false",
+		"diff", "-M", "-U0", "--diff-filter=ACMR", base+"..."+head, "--", "*.go")
 	cmd := exec.CommandContext(ctx, "git", argv...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -142,7 +149,12 @@ func parseUnifiedDiff(out string) touchedSet {
 }
 
 // isScorableGoFile reports whether a path is Go source this signal scores.
-// Tests, generated output, vendored code, and testdata fixtures are excluded.
+// Tests, vendored code, and testdata fixtures are excluded by path.
+//
+// Generated files are excluded too, but a path check alone cannot find them:
+// this repository contains generated source such as
+// engram/hooks-bin/internal/validator/patterns.go that matches neither
+// suffix. Content is checked separately by isGeneratedSource.
 func isScorableGoFile(p string) bool {
 	if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 		return false
@@ -154,6 +166,22 @@ func isScorableGoFile(p string) bool {
 		}
 	}
 	return !strings.HasSuffix(p, ".pb.go") && !strings.HasSuffix(p, "_generated.go")
+}
+
+// generatedMarker matches the marker line the Go toolchain convention
+// prescribes for machine-written source. Only the leading portion of a file is
+// searched, because the convention places it before the package clause.
+var generatedMarker = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`)
+
+// isGeneratedSource reports whether file content carries the standard
+// generated-code marker. CRAPLENS-02 excludes generated files, and asking an
+// author to add tests for a file a generator will overwrite is noise.
+func isGeneratedSource(src []byte) bool {
+	head := src
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	return generatedMarker.Match(head)
 }
 
 // parseHunkHeader reads the head-side span from a unified-diff hunk header of
@@ -219,15 +247,71 @@ func fileAt(ctx context.Context, repoDir, rev, rel string) ([]byte, error) {
 	if repoDir != "" {
 		argv = append(argv, "-C", repoDir)
 	}
-	// The pathspec is passed after `--` so a path that begins with a dash
-	// cannot be read as an option.
+	// `rev:path` is a single object argument, not a pathspec, so there is no
+	// `--` to place it after. A revision cannot begin with a dash here
+	// because it comes from the caller's -base/-head, and git rejects a
+	// malformed spec rather than treating it as an option.
 	argv = append(argv, "show", rev+":"+rel)
 	cmd := exec.CommandContext(ctx, "git", argv...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git show %s:%s failed: %w", rev, rel, err)
+		return nil, fmt.Errorf("git show %s:%s failed: %w: %s", rev, rel, err, strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
+}
+
+// treeHasGoFiles reports whether a directory held any Go source at a revision.
+//
+// This is what decides whether a zero-coverage package is NEW. Inferring it
+// from the diff alone is wrong: a PR that adds one file to an existing package
+// touches only added files, so every file in the touched set is an addition
+// and the package would be mislabeled as new.
+func treeHasGoFiles(ctx context.Context, repoDir, rev, dir string) bool {
+	ctx, cancel := context.WithTimeout(ctx, diffTimeout)
+	defer cancel()
+
+	argv := []string{}
+	if repoDir != "" {
+		argv = append(argv, "-C", repoDir)
+	}
+	argv = append(argv, "ls-tree", "--name-only", rev+":"+dir)
+	out, err := exec.CommandContext(ctx, "git", argv...).Output()
+	if err != nil {
+		// The directory did not exist at that revision, which is exactly the
+		// new-package case.
+		return false
+	}
+	for name := range strings.SplitSeq(string(out), "\n") {
+		if strings.HasSuffix(strings.TrimSpace(name), ".go") {
+			return true
+		}
+	}
+	return false
+}
+
+// workingTreeIsClean reports whether the checkout has no staged, unstaged, or
+// untracked changes.
+//
+// Coverage is measured by running tests against the checkout while function
+// spans and complexity come from the committed head tree. With a dirty tree
+// those two disagree: an untracked test can make an uncovered function look
+// covered, and an uncommitted edit can shift the lines a profile block maps to.
+func workingTreeIsClean(ctx context.Context, repoDir string) bool {
+	ctx, cancel := context.WithTimeout(ctx, diffTimeout)
+	defer cancel()
+
+	argv := []string{}
+	if repoDir != "" {
+		argv = append(argv, "-C", repoDir)
+	}
+	argv = append(argv, "status", "--porcelain", "--untracked-files=normal")
+	out, err := exec.CommandContext(ctx, "git", argv...).Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == ""
 }
 
 // headIsCheckedOut reports whether the working tree is at the head revision.

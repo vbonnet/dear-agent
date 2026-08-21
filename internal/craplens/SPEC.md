@@ -42,19 +42,34 @@ server, or a container runtime.
 
 **CRAPLENS-07** When a touched package's coverage cannot be collected, the system shall report that package as unknown and shall exclude its functions from scoring rather than score them as untested.
 
-**CRAPLENS-08** When the working tree is not at the head revision, the system shall skip coverage collection entirely, report the mismatch, and flag nothing.
+**CRAPLENS-08** When the working tree is not at the head revision, or holds staged, unstaged, or untracked changes, the system shall skip coverage collection entirely, report the mismatch, and flag nothing.
 
-**CRAPLENS-09** When a touched package is measured at zero coverage, the system shall report it, and shall distinguish a package whose every changed file is newly added from an existing package that was edited.
+**CRAPLENS-09** When a touched package is measured at zero coverage, the system shall report it, and shall classify it as new only when the diff adds every changed file in it and the package directory held no Go source at the base revision.
+
+**CRAPLENS-13** When a touched package's tests do not complete successfully, the system shall report that package as unknown rather than score the partial profile a failed run can leave behind; a package with no test files shall be measured rather than treated as a failure.
+
+**CRAPLENS-14** When a profile entry is resolved to a touched package, the system shall select the package unambiguously, so that one touched package being a path suffix of another cannot change the result.
+
+**CRAPLENS-15** When a changed file carries the standard generated-code marker, the system shall exclude it regardless of its filename.
+
+**CRAPLENS-16** When a changed function's coverage cannot be determined although its package total is known, the system shall count it as unmeasured and report that count rather than silently omit it.
 
 **CRAPLENS-10** When changed functions are scored, the system shall report individually those above the configured threshold, ordered worst first, and shall report the proportion of scored functions at or under the agent-written target.
 
-**CRAPLENS-11** When a report contains no functions above the threshold and no zero-coverage package, the system shall render nothing.
+**CRAPLENS-11** When a report contains no functions above the threshold and no zero-coverage package, the system shall render nothing, and a summary of that outcome shall distinguish a measured diff with no findings from one where nothing could be measured.
 
 **CRAPLENS-12** When a report is rendered, the system shall bound each list, disclose any truncation, state that the signal cannot fail a check, and name the gates that own discarded error returns and raw complexity.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
+- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`,
+  whose repository-implementation coverage scenario lists `internal/craplens` and
+  enforces that it declares a co-located SPEC. That scenario governs SPEC
+  presence, not the CRAPLENS/CRAPLINT behaviors themselves.
+- Test consequence: the behaviors in this contract are proven by the
+  deterministic package tests below rather than by Gherkin. They are a private
+  analysis seam with no cross-harness surface, so BDD would restate the unit
+  tests without adding evidence.
 
 ## Test Traceability
 

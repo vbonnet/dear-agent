@@ -73,12 +73,37 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 	if !report.Flagged() {
-		fmt.Fprintf(stdout, "clean: %d scored changed function(s), %d at or under %.0f, none over %.0f\n",
-			report.Scored, report.WithinAgentTarget, craplens.AgentTarget, report.Threshold)
+		fmt.Fprint(stdout, unflaggedSummary(report))
 		return exitOK
 	}
 	fmt.Fprint(stdout, report.Render())
 	return exitOK
+}
+
+// unflaggedSummary describes a run that produced no findings.
+//
+// "Clean" is only honest when something was actually measured. A checkout
+// mismatch, or a run where coverage failed for every touched package, produces
+// no findings for the same reason an empty diff does, and reporting those the
+// same way would make an unusable measurement indistinguishable from a healthy
+// diff.
+func unflaggedSummary(r craplens.Report) string {
+	if r.CheckoutMismatch {
+		return fmt.Sprintf("not measured: the working tree is not at the head revision or has uncommitted changes; %d changed function(s) were left unscored\n", r.Changed)
+	}
+	if r.Scored == 0 && len(r.Unknown) > 0 {
+		return fmt.Sprintf("not measured: coverage could not be collected for any of the %d touched package(s) (%s); %d changed function(s) were left unscored\n",
+			len(r.Unknown), strings.Join(r.Unknown, ", "), r.Changed)
+	}
+	summary := fmt.Sprintf("clean: %d scored changed function(s), %d at or under %.0f, none over %.0f",
+		r.Scored, r.WithinAgentTarget, craplens.AgentTarget, r.Threshold)
+	if len(r.Unknown) > 0 {
+		summary += fmt.Sprintf("; %d package(s) unmeasured (%s)", len(r.Unknown), strings.Join(r.Unknown, ", "))
+	}
+	if r.Unmeasured > 0 {
+		summary += fmt.Sprintf("; %d function(s) unmeasured on this platform", r.Unmeasured)
+	}
+	return summary + "\n"
 }
 
 // writeGitHubOutput emits the two values the workflow consumes. The report uses
@@ -93,8 +118,10 @@ func writeGitHubOutput(w io.Writer, r craplens.Report) {
 		return
 	}
 	const delim = "CRAP_LINT_REPORT_EOF"
+	// The report ends with a newline; splitting it as-is yields a trailing
+	// empty element and so an extra blank line before the closing delimiter.
 	var kept []string
-	for line := range strings.SplitSeq(body, "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(body, "\n"), "\n") {
 		if strings.TrimSpace(line) == delim {
 			continue
 		}

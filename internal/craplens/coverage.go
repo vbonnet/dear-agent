@@ -2,7 +2,11 @@ package craplens
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -13,7 +17,11 @@ import (
 
 // coverageTimeout bounds the whole coverage run. Exceeding it leaves every
 // package unknown, which downgrades the signal rather than failing the job.
-const coverageTimeout = 12 * time.Minute
+// coverageTimeout must stay well inside the enclosing CI job's own budget
+// (20 minutes for the size-scope job). If the job is cancelled instead of the
+// step timing out, the comment steps never run and the advisory signal is lost
+// entirely rather than degraded.
+const coverageTimeout = 10 * time.Minute
 
 // profileBlock is one entry from a Go coverage profile: a statement span in a
 // file, how many statements it holds, and how many times it ran.
@@ -91,24 +99,142 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	_ = profile.Close()
 	defer func() { _ = os.Remove(profilePath) }()
 
-	argv := []string{"test", "-covermode=set", "-coverprofile=" + profilePath, "-count=1"}
+	// -json because the per-package verdict has to be read reliably. The
+	// human output cannot distinguish "no test files" from "failed" without
+	// pattern-matching prose that changes between toolchain releases, and
+	// getting that wrong reports a well-tested package as untested.
+	argv := []string{"test", "-json", "-covermode=set", "-coverprofile=" + profilePath, "-count=1"}
 	for _, dir := range pkgDirs {
 		argv = append(argv, "./"+dir)
 	}
 	cmd := exec.CommandContext(ctx, "go", argv...)
 	cmd.Dir = repoDir
-	// A failing test still writes a profile for the packages that passed, so
-	// the exit status is deliberately ignored: this signal reports on what
-	// could be measured and stays silent about the rest. The test suite's own
-	// pass or fail is a different gate's job.
-	_ = cmd.Run()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// A failing test still writes a profile for the packages that passed, so a
+	// non-zero exit is expected and not fatal: this signal reports on what
+	// could be measured. The suite's own pass or fail is a different gate's
+	// job. A failure to START the toolchain is different, and is surfaced
+	// rather than swallowed, because it means every package is unmeasured for
+	// a reason the reader should know about.
+	var exitErr *exec.ExitError
+	if err := cmd.Run(); err != nil && !errors.As(err, &exitErr) {
+		fmt.Fprintf(os.Stderr, "craplens: coverage run could not start: %v\n%s\n", err, stderr.String())
+		return data
+	}
+
+	modPath := modulePath(ctx, repoDir)
 
 	raw, err := os.ReadFile(profilePath)
 	if err != nil {
 		return data
 	}
-	parseProfile(string(raw), data)
+	parseProfile(string(raw), modPath, data)
+
+	// A package whose tests failed can still leave the blocks reached before
+	// the failure, which would understate its coverage and could report a
+	// well-tested package as untested. Drop those back to unknown.
+	for _, dir := range failedPackages(stdout.String(), modPath, pkgDirs) {
+		data.packages[dir] = packageCoverage{coverage: CoverageUnknown}
+	}
+
 	return data
+}
+
+// testEvent is the subset of `go test -json` output this package reads.
+type testEvent struct {
+	Action  string `json:"Action"`
+	Package string `json:"Package"`
+}
+
+// failedPackages returns the touched package directories whose tests did not
+// complete successfully.
+//
+// A package that reports "fail" is unmeasured: a failing run can still leave
+// the profile blocks it reached before failing, and scoring those would
+// understate coverage and could report a well-tested package as untested.
+//
+// A package with no test files reports "skip", not "fail", and IS measured:
+// zero coverage is the true answer for it, and surfacing that is the whole
+// point of this signal. A package that reported no terminal action at all
+// (a build failure, a panic that produced no event) is also unmeasured.
+func failedPackages(jsonOut, modPath string, pkgDirs []string) []string {
+	measured := map[string]bool{}
+	seen := map[string]bool{}
+
+	for line := range strings.SplitSeq(jsonOut, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var ev testEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		dir, ok := packageDirOf(ev.Package, modPath, pkgDirs)
+		if !ok {
+			continue
+		}
+		switch ev.Action {
+		case "pass", "skip":
+			seen[dir] = true
+			if !seen[dir+"\x00failed"] {
+				measured[dir] = true
+			}
+		case "fail":
+			seen[dir] = true
+			seen[dir+"\x00failed"] = true
+			delete(measured, dir)
+		}
+	}
+
+	var failed []string
+	for _, dir := range pkgDirs {
+		if !measured[dir] {
+			failed = append(failed, dir)
+		}
+	}
+	return failed
+}
+
+// packageDirOf maps an import path from a test event back to one of the
+// repository-relative package directories under measurement.
+func packageDirOf(importPath, modPath string, pkgDirs []string) (string, bool) {
+	if importPath == "" {
+		return "", false
+	}
+	if modPath != "" && strings.HasPrefix(importPath, modPath+"/") {
+		rel := strings.TrimPrefix(importPath, modPath+"/")
+		for _, dir := range pkgDirs {
+			if dir == rel {
+				return dir, true
+			}
+		}
+		return "", false
+	}
+	if modPath != "" && importPath == modPath {
+		for _, dir := range pkgDirs {
+			if dir == "." {
+				return dir, true
+			}
+		}
+		return "", false
+	}
+
+	best := ""
+	for _, dir := range pkgDirs {
+		if dir == "." {
+			continue
+		}
+		if importPath == dir || strings.HasSuffix(importPath, "/"+dir) {
+			if len(dir) > len(best) {
+				best = dir
+			}
+		}
+	}
+	return best, best != ""
 }
 
 // parseProfile reads a Go coverage profile into per-file blocks and per-package
@@ -118,7 +244,7 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 // The import path is mapped back to a repository-relative directory by matching
 // the package directories the diff touched, so this works without resolving the
 // module path.
-func parseProfile(raw string, data coverageData) {
+func parseProfile(raw, modulePath string, data coverageData) {
 	type totals struct{ total, covered int }
 	perPackage := map[string]*totals{}
 
@@ -142,7 +268,7 @@ func parseProfile(raw string, data coverageData) {
 			continue
 		}
 
-		pkgDir, rel, ok := matchPackage(data.packages, fullPath)
+		pkgDir, rel, ok := matchPackage(data.packages, modulePath, fullPath)
 		if !ok {
 			continue
 		}
@@ -161,6 +287,11 @@ func parseProfile(raw string, data coverageData) {
 
 	for pkgDir, t := range perPackage {
 		if t.total == 0 {
+			// The package was profiled and simply holds no counted
+			// statements. That is measured, not unmeasured: leaving it
+			// unknown would also make functionCoverage's empty-function
+			// handling unreachable for it.
+			data.packages[pkgDir] = packageCoverage{coverage: 1}
 			continue
 		}
 		data.packages[pkgDir] = packageCoverage{coverage: float64(t.covered) / float64(t.total)}
@@ -170,15 +301,55 @@ func parseProfile(raw string, data coverageData) {
 // matchPackage maps a profile's import-path-qualified file onto one of the
 // repository-relative package directories the diff touched, returning that
 // directory and the repository-relative file path.
-func matchPackage(pkgs map[string]packageCoverage, fullPath string) (string, string, bool) {
+//
+// modulePath, when known, makes this exact: a profile path is always
+// <modulePath>/<pkgDir>/<file>, so stripping the prefix yields the
+// repository-relative path directly and the module root resolves to ".".
+//
+// Without it the fallback is a longest-suffix match. Longest matters and a
+// first match would be wrong: this repository has both internal/tokens and
+// engram/internal/tokens, so a profile path for the longer one is a suffix
+// match for both, and iterating a map would pick between them at random.
+func matchPackage(pkgs map[string]packageCoverage, modulePath, fullPath string) (string, string, bool) {
+	if modulePath != "" && strings.HasPrefix(fullPath, modulePath+"/") {
+		rel := strings.TrimPrefix(fullPath, modulePath+"/")
+		dir := path.Dir(rel)
+		if _, ok := pkgs[dir]; ok {
+			return dir, rel, true
+		}
+		return "", "", false
+	}
+
 	dir := path.Dir(fullPath)
 	base := path.Base(fullPath)
+	best := ""
 	for pkgDir := range pkgs {
+		if pkgDir == "." {
+			continue
+		}
 		if dir == pkgDir || strings.HasSuffix(dir, "/"+pkgDir) {
-			return pkgDir, path.Join(pkgDir, base), true
+			if len(pkgDir) > len(best) {
+				best = pkgDir
+			}
 		}
 	}
-	return "", "", false
+	if best == "" {
+		return "", "", false
+	}
+	return best, path.Join(best, base), true
+}
+
+// modulePath returns the module's import path, or the empty string when it
+// cannot be determined. It is used to resolve profile paths exactly rather
+// than by suffix.
+func modulePath(ctx context.Context, repoDir string) string {
+	cmd := exec.CommandContext(ctx, "go", "list", "-m")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // parseSpan reads a profile entry's line span, statement count, and hit count.

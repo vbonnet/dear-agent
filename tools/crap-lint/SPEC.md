@@ -31,11 +31,20 @@ merge. Only usage and operational failures exit non-zero.
 
 **CRAPLINT-06** When GitHub output form is requested for an unflagged diff, the command shall emit an empty report value and no heredoc block.
 
-**CRAPLINT-07** When prose output is requested for an unflagged diff, the command shall report the scored function count and how many met the agent-written target.
+**CRAPLINT-07** When prose output is requested for an unflagged diff, the command shall report the scored function count and how many met the agent-written target, and shall report a diff where nothing could be measured as unmeasured rather than as clean.
+
+**CRAPLINT-08** When a rendered report is emitted in a heredoc block, the block shall contain no trailing blank line before its delimiter.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
+- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`,
+  whose repository-implementation coverage scenario lists `tools/crap-lint` and
+  enforces that it declares a co-located SPEC. That scenario governs SPEC
+  presence, not the CRAPLENS/CRAPLINT behaviors themselves.
+- Test consequence: the behaviors in this contract are proven by the
+  deterministic package tests below rather than by Gherkin. They are a private
+  analysis seam with no cross-harness surface, so BDD would restate the unit
+  tests without adding evidence.
 
 ## Test Traceability
 
