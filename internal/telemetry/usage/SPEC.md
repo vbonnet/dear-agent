@@ -9,6 +9,11 @@ a lightweight telemetry boundary: tracking failures must not break the command
 being observed, while synchronous tracking remains available for tests and
 callers that need durability before exit.
 
+This package is the single owner of the usage-tracker contract for every CLI in
+the module, AGM included. An `agm/internal/telemetry/usage` copy carried a
+byte-identical tracker under a parallel `AUT-01..09` requirement set; it was
+retired in favor of this owner so the two cannot drift.
+
 ## EARS Requirements
 
 **UTR-01** When a tracker is created with an explicit file path, the system shall use that path without creating the default Engram directory.
