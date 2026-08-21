@@ -318,6 +318,17 @@ func (a *GeminiCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 			// Skip malformed lines
 			continue
 		}
+		// Decode stops after one JSON value and ignores whatever follows, so
+		// a line holding a valid value plus trailing garbage would yield the
+		// prefix as if it were the whole record. The json.Unmarshal this
+		// replaced rejected such a line, so without this check the switch to
+		// a decoder would start silently returning altered data from an
+		// already-corrupted history file. Requiring a second Decode to hit
+		// io.EOF is the actual "nothing left" test.
+		if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+			// Skip lines with trailing data, as before.
+			continue
+		}
 		messages = append(messages, msg)
 	}
 

@@ -555,3 +555,39 @@ func TestGetHistoryPreservesLargeIntegerMetadata(t *testing.T) {
 		t.Errorf("GetHistory lost integer precision, want %s in:\n%s", exact, encoded)
 	}
 }
+
+// TestGetHistorySkipsRecordsWithTrailingData covers the read side of the
+// trailing-data check. json.Decoder stops after one value and ignores the
+// rest, so a corrupted line holding a valid prefix would be returned as if it
+// were the whole record. The json.Unmarshal this replaced rejected such a
+// line, and that behavior has to be preserved.
+func TestGetHistorySkipsRecordsWithTrailingData(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"role":"user","content":"good"}` + "\n" +
+		`{"role":"user","content":"corrupt"}]` + "\n" +
+		`{"role":"assistant","content":"also good"}` + "\n"
+	if err := os.WriteFile(historyPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want 2 (the corrupt line must be skipped): %#v", len(got), got)
+	}
+	for _, m := range got {
+		if m.Content == "corrupt" {
+			t.Error("a record with trailing data was returned as if it were whole")
+		}
+	}
+}
