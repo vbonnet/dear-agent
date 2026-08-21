@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -487,11 +488,19 @@ func validateCanonicalRuleset(v rulesetView, repo string) error {
 	if len(v.RequiredStatusChecks.RequiredChecks) == 0 {
 		return fmt.Errorf("at least one required status check is required")
 	}
-	if isDearAgentRepo(repo) {
-		for _, check := range v.RequiredStatusChecks.RequiredChecks {
-			if check.IntegrationID == nil || *check.IntegrationID != githubActionsIntegrationID {
-				return fmt.Errorf("required status check %q must use integration_id %d", check.Context, githubActionsIntegrationID)
-			}
+	return validateRequiredCheckIdentities(v.RequiredStatusChecks.RequiredChecks, repo)
+}
+
+// validateRequiredCheckIdentities enforces the integration-ID invariant for
+// dear-agent's own required checks. Split out of validateCanonicalRuleset to
+// keep that function's cyclomatic complexity under the repo's gocyclo limit.
+func validateRequiredCheckIdentities(checks []requiredStatusCheck, repo string) error {
+	if !isDearAgentRepo(repo) {
+		return nil
+	}
+	for _, check := range checks {
+		if check.IntegrationID == nil || *check.IntegrationID != githubActionsIntegrationID {
+			return fmt.Errorf("required status check %q must use integration_id %d", check.Context, githubActionsIntegrationID)
 		}
 	}
 	return nil
@@ -501,12 +510,7 @@ func validateCanonicalRuleset(v rulesetView, repo string) error {
 // "~DEFAULT_BRANCH" ref-name pattern GitHub uses to target a repository's
 // default branch regardless of its actual name.
 func containsDefaultBranchRef(include []string) bool {
-	for _, ref := range include {
-		if ref == "~DEFAULT_BRANCH" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(include, "~DEFAULT_BRANCH")
 }
 
 func requiredCheckIdentity(check requiredStatusCheck) string {
