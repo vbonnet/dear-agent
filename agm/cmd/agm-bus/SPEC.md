@@ -42,6 +42,8 @@ missing, and reports broker status without treating "not running" as an error.
 
 **AGMBUS-13** When `agm-bus discord-reset` is invoked without confirmation, the system shall perform a dry run instead of deleting messages.
 
+**AGMBUS-14** When `agm-bus discord-reset` is asked to act as an agent absent from the portal config, the system shall fail rather than fall back to another configured bot.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
@@ -49,3 +51,6 @@ missing, and reports broker status without treating "not running" as an error.
 ## Test Traceability
 
 - Unit package: `agm/cmd/agm-bus`
+- In-process serve seams: `agm/cmd/agm-bus/serve_test.go`
+- In-process subcommands: `agm/cmd/agm-bus/subcommands_test.go`
+- End-to-end binary behavior: `agm/cmd/agm-bus/main_test.go`
