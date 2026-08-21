@@ -715,3 +715,103 @@ func TestIsGeneratedSource(t *testing.T) {
 		})
 	}
 }
+
+// TestMatchPackageSuffixFallback covers the path taken when the module path
+// could not be determined (a `go list -m` failure), where resolution falls
+// back to a longest-suffix match.
+//
+// Added because the signal in this PR flagged matchPackage at CRAP 39.6: the
+// module-path branch was covered and the fallback was not.
+func TestMatchPackageSuffixFallback(t *testing.T) {
+	pkgs := map[string]packageCoverage{
+		"internal/tokens":        {},
+		"engram/internal/tokens": {},
+		".":                      {},
+	}
+
+	tests := []struct {
+		name     string
+		fullPath string
+		wantDir  string
+		wantRel  string
+		wantOK   bool
+	}{
+		{
+			name:     "longest suffix wins over the shorter one",
+			fullPath: "github.com/x/y/engram/internal/tokens/a.go",
+			wantDir:  "engram/internal/tokens",
+			wantRel:  "engram/internal/tokens/a.go",
+			wantOK:   true,
+		},
+		{
+			name:     "shorter package still matches its own path",
+			fullPath: "github.com/x/y/internal/tokens/b.go",
+			wantDir:  "internal/tokens",
+			wantRel:  "internal/tokens/b.go",
+			wantOK:   true,
+		},
+		{
+			name:     "exact directory match",
+			fullPath: "internal/tokens/c.go",
+			wantDir:  "internal/tokens",
+			wantRel:  "internal/tokens/c.go",
+			wantOK:   true,
+		},
+		{
+			name:     "untouched package does not match",
+			fullPath: "github.com/x/y/other/d.go",
+			wantOK:   false,
+		},
+		{
+			name:     "root package is never matched by suffix",
+			fullPath: "github.com/x/y/e.go",
+			wantOK:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, rel, ok := matchPackage(pkgs, "", tc.fullPath)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (dir=%q)", ok, tc.wantOK, dir)
+			}
+			if !ok {
+				return
+			}
+			if dir != tc.wantDir || rel != tc.wantRel {
+				t.Errorf("got (%q, %q), want (%q, %q)", dir, rel, tc.wantDir, tc.wantRel)
+			}
+		})
+	}
+}
+
+// TestMatchPackageModulePathRejectsForeignPaths covers the branch where a
+// module path is known but the profile entry belongs to a dependency rather
+// than this module.
+func TestMatchPackageModulePathRejectsForeignPaths(t *testing.T) {
+	pkgs := map[string]packageCoverage{"internal/tokens": {}}
+
+	if _, _, ok := matchPackage(pkgs, "example.test", "other.module/internal/tokens/a.go"); ok {
+		t.Error("a path outside the module must not match when the module path is known")
+	}
+	if _, _, ok := matchPackage(pkgs, "example.test", "example.test/untouched/a.go"); ok {
+		t.Error("a package the diff did not touch must not match")
+	}
+}
+
+// TestPackageDirOfHandlesTheModuleRoot covers root-package resolution and the
+// rejection of an empty import path.
+func TestPackageDirOfHandlesTheModuleRoot(t *testing.T) {
+	if dir, ok := packageDirOf("example.test", "example.test", []string{"."}); !ok || dir != "." {
+		t.Errorf("root = (%q, %v), want (\".\", true)", dir, ok)
+	}
+	if _, ok := packageDirOf("example.test", "example.test", []string{"internal/x"}); ok {
+		t.Error("the module root must not match when it is not a touched package")
+	}
+	if _, ok := packageDirOf("", "example.test", []string{"."}); ok {
+		t.Error("an empty import path must not match")
+	}
+	if _, ok := packageDirOf("example.test/other", "example.test", []string{"internal/x"}); ok {
+		t.Error("an untouched package must not match")
+	}
+}
