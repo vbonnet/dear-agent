@@ -311,8 +311,15 @@ func parseProfile(raw, modulePath string, data coverageData) {
 // engram/internal/tokens, so a profile path for the longer one is a suffix
 // match for both, and iterating a map would pick between them at random.
 func matchPackage(pkgs map[string]packageCoverage, modulePath, fullPath string) (string, string, bool) {
-	if modulePath != "" && strings.HasPrefix(fullPath, modulePath+"/") {
-		rel := strings.TrimPrefix(fullPath, modulePath+"/")
+	// A known module path is authoritative, not a first attempt. Every entry
+	// in a profile for this module is prefixed with it, so an entry that is
+	// not must not be attributed to one of our packages by suffix; doing that
+	// would fold a dependency's blocks into our numbers.
+	if modulePath != "" {
+		rel, ok := strings.CutPrefix(fullPath, modulePath+"/")
+		if !ok {
+			return "", "", false
+		}
 		dir := path.Dir(rel)
 		if _, ok := pkgs[dir]; ok {
 			return dir, rel, true
