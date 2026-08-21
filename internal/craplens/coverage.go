@@ -201,8 +201,28 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	// A package whose tests failed can still leave the blocks reached before
 	// the failure, which would understate its coverage and could report a
 	// well-tested package as untested. Drop those back to unknown.
-	for _, dir := range failedPackages(stdout.String(), modPath, pkgDirs) {
+	failed := failedPackages(stdout.String(), modPath, pkgDirs)
+	failedSet := make(map[string]bool, len(failed))
+	for _, dir := range failed {
+		failedSet[dir] = true
 		data.packages[dir] = packageCoverage{coverage: CoverageUnknown}
+	}
+
+	// A package that passed (or was skipped for having no test files) but
+	// left no lines in the profile at all — only "mode: set" — has no
+	// countable statements: go test -coverprofile writes nothing else for
+	// it. That is measured, not unmeasured, the same call parseProfile
+	// already makes for a package whose profiled blocks sum to zero
+	// statements; without this, such a package never enters parseProfile's
+	// perPackage map and is silently left at the pre-call CoverageUnknown
+	// default forever.
+	for _, dir := range pkgDirs {
+		if failedSet[dir] {
+			continue
+		}
+		if data.packages[dir].coverage == CoverageUnknown {
+			data.packages[dir] = packageCoverage{coverage: 1}
+		}
 	}
 
 	return data

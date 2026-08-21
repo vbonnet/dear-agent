@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
@@ -175,6 +176,58 @@ func TestAnalyzeIgnoresUnrelatedBuildArtifacts(t *testing.T) {
 	}
 	if report.CheckoutMismatch {
 		t.Fatal("an ignored build artifact outside every touched package must not be treated as a dirty checkout")
+	}
+}
+
+// TestAnalyzeTreatsNoStatementPackageAsMeasuredNotUnknown is the
+// collectCoverage-level counterpart to
+// TestParseProfileTreatsZeroStatementPackageAsMeasured: a package whose only
+// source declares a type (no function body has a single executable
+// statement) still runs its test and passes, but `go test -coverprofile`
+// writes nothing for it beyond the leading `mode: set` line. Because
+// parseProfile only ever populates a package's coverage while walking
+// profile lines, such a package never appears in its perPackage map at all
+// and must not be silently left at collectCoverage's pre-run
+// CoverageUnknown default.
+func TestAnalyzeTreatsNoStatementPackageAsMeasuredNotUnknown(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain unavailable")
+	}
+	dir := t.TempDir()
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+	gittest.Run(t, dir, "config", "user.name", "Test")
+	write(t, dir, "go.mod", "module example.test\n\ngo 1.24\n")
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "base")
+	gittest.Run(t, dir, "branch", "base")
+
+	write(t, dir, "onlytype/onlytype.go", `package onlytype
+
+// Marker has no methods; nothing in this package's production source has a
+// single executable statement to instrument.
+type Marker struct{}
+`)
+	write(t, dir, "onlytype/onlytype_test.go", `package onlytype
+
+import "testing"
+
+func TestMarkerExists(t *testing.T) {
+	_ = Marker{}
+}
+`)
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "add onlytype")
+
+	report, err := Analyze(t.Context(), dir, "base", "HEAD", DefaultThreshold)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if report.CheckoutMismatch {
+		t.Fatal("the fixture checkout is at head; coverage should have been measured")
+	}
+	if slices.Contains(report.Unknown, "onlytype") {
+		t.Fatal("a package with no countable statements was left unmeasured instead of treated as fully covered")
 	}
 }
 

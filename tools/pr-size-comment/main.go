@@ -132,10 +132,42 @@ func decide(in inputs) action {
 	return actionNone
 }
 
+// recoveredSectionOpen and recoveredSectionClose bracket a recovered
+// code-health finding in the rendered comment body. unwrapRecoveredSection
+// looks for this exact pair to peel a previously recovered section back to
+// its innermost content before composeBody re-wraps it.
+const (
+	recoveredSectionOpen  = "<details><summary>Last known code-health result (recovered — not from this revision)</summary>\n\n"
+	recoveredSectionClose = "</details>\n"
+)
+
+// unwrapRecoveredSection returns the innermost content of a previously
+// recovered code-health section, discarding both the wrapper and whatever
+// "current run" text composeBody printed ahead of it. Without this, two or
+// more consecutive runs that each need to recover the prior section (for
+// example, back-to-back crapUnknown syncs) would nest the already-recovered
+// section inside another recovery wrapper on every sync, growing the sticky
+// comment and duplicating the same stale diagnostic each time instead of
+// holding steady at one recovered finding. A section that was never
+// recovered (no wrapper present) is returned unchanged.
+func unwrapRecoveredSection(s string) string {
+	_, inner, ok := strings.Cut(s, recoveredSectionOpen)
+	if !ok {
+		return s
+	}
+	end := strings.LastIndex(inner, recoveredSectionClose)
+	if end < 0 {
+		return s
+	}
+	return inner[:end]
+}
+
 // composeBody renders the comment. priorCrapSection is whatever the comment
 // being overwritten already said about code health; it is used only when
 // this run has nothing fresher to report.
 func composeBody(in inputs, priorCrapSection string) string {
+	priorCrapSection = unwrapRecoveredSection(priorCrapSection)
+
 	var b strings.Builder
 	fmt.Fprintln(&b, marker)
 	fmt.Fprintln(&b, "## PR size, scope, and code health signals")
@@ -163,14 +195,16 @@ func composeBody(in inputs, priorCrapSection string) string {
 		if !strings.HasSuffix(in.crapReport, "\n") {
 			fmt.Fprintln(&b)
 		}
-	case in.crapUnknown && in.crapSummary != "" && priorCrapSection != "":
-		// This run could not measure anything AND a prior finding exists to
-		// recover. Showing only the recovered section (the old behavior)
-		// gives no indication the current revision is unmeasured, so a
-		// reviewer can mistake a stale result for a current one. Show both,
-		// the current status first and clearly labeled as recovered.
-		fmt.Fprintln(&b, in.crapSummary)
-		fmt.Fprintln(&b)
+	case priorCrapSection != "":
+		// Recovering a prior section -- whether this run measured nothing
+		// (crapUnknown) or the code-health step simply failed operationally
+		// -- must always say so. Labeling only the crapUnknown case (the
+		// original behavior) let an operational failure republish a stale
+		// finding with no indication it was not from this revision.
+		if in.crapUnknown && in.crapSummary != "" {
+			fmt.Fprintln(&b, in.crapSummary)
+			fmt.Fprintln(&b)
+		}
 		fmt.Fprintln(&b, "<details><summary>Last known code-health result (recovered — not from this revision)</summary>")
 		fmt.Fprintln(&b)
 		fmt.Fprint(&b, priorCrapSection)
@@ -178,11 +212,6 @@ func composeBody(in inputs, priorCrapSection string) string {
 			fmt.Fprintln(&b)
 		}
 		fmt.Fprintln(&b, "</details>")
-	case priorCrapSection != "":
-		fmt.Fprint(&b, priorCrapSection)
-		if !strings.HasSuffix(priorCrapSection, "\n") {
-			fmt.Fprintln(&b)
-		}
 	case in.crapUnknown && in.crapSummary != "":
 		fmt.Fprintln(&b, in.crapSummary)
 	}

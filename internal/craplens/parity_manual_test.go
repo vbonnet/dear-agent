@@ -57,7 +57,16 @@ func compareGocycloOutput(t *testing.T, root, out string) {
 		if err != nil {
 			continue
 		}
-		loc := fields[len(fields)-1]
+		// The location is everything after the first three
+		// whitespace-delimited fields, taken verbatim rather than
+		// fields[len(fields)-1]: a source filename containing a space (a
+		// valid Go file name) splits gocyclo's location across more than
+		// one field, and picking only the last field silently truncates the
+		// path down to its final segment.
+		loc := skipFields(line, 3)
+		if loc == "" {
+			continue
+		}
 		path, rest, ok := strings.Cut(loc, ":")
 		if !ok || strings.HasSuffix(path, "_test.go") {
 			continue
@@ -81,6 +90,22 @@ func compareGocycloOutput(t *testing.T, root, out string) {
 			t.Errorf("%s:%d %s: this package counted %d, gocyclo counted %d", rel, declLine, fields[2], got, want)
 		}
 	}
+}
+
+// skipFields returns line with its first n whitespace-delimited fields
+// removed, leaving the remainder (including any internal spaces) intact and
+// leading whitespace trimmed. Returns "" if line has fewer than n fields.
+func skipFields(line string, n int) string {
+	rest := line
+	for range n {
+		rest = strings.TrimLeft(rest, " \t")
+		idx := strings.IndexAny(rest, " \t")
+		if idx < 0 {
+			return ""
+		}
+		rest = rest[idx:]
+	}
+	return strings.TrimLeft(rest, " \t")
 }
 
 // complexityAt parses a file and returns the complexity of the declaration
@@ -126,5 +151,41 @@ func repoRoot(t *testing.T) string {
 			t.Fatal("module root not found")
 		}
 		dir = parent
+	}
+}
+
+// TestSkipFieldsPreservesSpacesInTheRemainder guards the exact gap that made
+// gocyclo parity silently misread a location for any source filename
+// containing a space: fields[len(fields)-1] would return only the final
+// whitespace-delimited chunk, dropping the location's leading path segment.
+func TestSkipFieldsPreservesSpacesInTheRemainder(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		n    int
+		want string
+	}{
+		{
+			name: "ordinary, no spaces in the location",
+			line: "10 main funcName /path/to/file.go:12:1",
+			n:    3,
+			want: "/path/to/file.go:12:1",
+		},
+		{
+			name: "location contains a space",
+			line: "4 pkg Func /path/to/some file.go:8:2",
+			n:    3,
+			want: "/path/to/some file.go:8:2",
+		},
+		{name: "too few fields", line: "10 main", n: 3, want: ""},
+		{name: "skip zero fields trims only leading whitespace", line: "  a b  ", n: 0, want: "a b  "},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := skipFields(tc.line, tc.n); got != tc.want {
+				t.Errorf("skipFields(%q, %d) = %q, want %q", tc.line, tc.n, got, tc.want)
+			}
+		})
 	}
 }

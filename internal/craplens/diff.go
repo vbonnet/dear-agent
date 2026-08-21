@@ -410,20 +410,29 @@ func workingTreeIsClean(ctx context.Context, repoDir string, pkgs []string) bool
 	// --ignored=matching as well: an ignored _test.go file is invisible to a
 	// plain status but `go test` still compiles it, and it could make an
 	// uncovered function appear covered.
-	argv = append(argv, "status", "--porcelain", "--untracked-files=normal", "--ignored=matching")
+	//
+	// -z: text-mode --porcelain C-quotes a path containing a space or
+	// non-ASCII byte (e.g. `"p/a name_test.go"`), and the retained closing
+	// quote made the .go suffix check below false, silently accepting an
+	// ignored test file as clean. -z uses NUL-terminated, never-quoted
+	// paths instead. A rename entry's extra NUL-separated old path is safe
+	// to leave unhandled: its status is never "!!", so the loop below
+	// already returns false on that entry before the stray old-path
+	// fragment is ever reached.
+	argv = append(argv, "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignored=matching")
 	out, err := exec.CommandContext(ctx, "git", argv...).Output()
 	if err != nil {
 		return false
 	}
 
-	for line := range strings.SplitSeq(strings.TrimRight(string(out), "\n"), "\n") {
-		if line == "" {
+	for entry := range strings.SplitSeq(strings.TrimRight(string(out), "\x00"), "\x00") {
+		if entry == "" {
 			continue
 		}
-		if len(line) < 4 {
+		if len(entry) < 4 {
 			return false // malformed porcelain output; do not risk a false clean
 		}
-		status, p := line[:2], strings.TrimSpace(line[3:])
+		status, p := entry[:2], entry[3:]
 		if status != "!!" {
 			return false // a real staged, unstaged, or untracked change
 		}

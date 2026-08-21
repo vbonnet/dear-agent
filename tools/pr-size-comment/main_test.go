@@ -109,9 +109,15 @@ func TestComposeBodyRecoversPriorSectionOnlyWhenNothingFresher(t *testing.T) {
 		t.Errorf("a fresh crap_report must win over a recovered section:\n%s", got)
 	}
 
+	// An operational failure (crapOutcome != success, crapUnknown false)
+	// recovering a prior section must be labeled exactly like the
+	// crapUnknown case below: without a label, a stale finding republished
+	// after an unrelated tool failure is indistinguishable from a fresh one.
 	recovered := inputs{}
 	if got := composeBody(recovered, "stale finding\n"); !strings.Contains(got, "stale finding") {
 		t.Errorf("with no fresh report, the recovered section must appear:\n%s", got)
+	} else if !strings.Contains(got, "recovered") {
+		t.Errorf("a recovered section must be labeled as not from this revision even after a plain operational failure:\n%s", got)
 	}
 
 	diagnosticOnly := inputs{crapUnknown: true, crapSummary: "not measured: nothing could be collected"}
@@ -139,6 +145,36 @@ func TestComposeBodyRecoversPriorSectionOnlyWhenNothingFresher(t *testing.T) {
 	got := composeBody(nothingAtAll, "")
 	if !strings.Contains(got, crapSectionMarker) {
 		t.Errorf("the crap-section marker must always be present so a later run can find it:\n%s", got)
+	}
+}
+
+// TestComposeBodyDoesNotNestRecoveredSectionsAcrossConsecutiveRecoveries
+// guards against unbounded growth: two or more consecutive runs that each
+// need to recover the prior section (e.g. back-to-back crapUnknown syncs)
+// must keep showing the same single recovered finding, not wrap the
+// previous recovery inside another one each time.
+func TestComposeBodyDoesNotNestRecoveredSectionsAcrossConsecutiveRecoveries(t *testing.T) {
+	unknown := inputs{crapUnknown: true, crapSummary: "not measured: nothing could be collected"}
+
+	round1 := composeBody(unknown, "original finding\n")
+	priorFromRound1 := extractCrapSection(round1)
+
+	round2 := composeBody(unknown, priorFromRound1)
+	priorFromRound2 := extractCrapSection(round2)
+
+	round3 := composeBody(unknown, priorFromRound2)
+
+	if n := strings.Count(round3, "<details>"); n != 1 {
+		t.Errorf("round 3 has %d <details> wrappers, want exactly 1 (no nesting):\n%s", n, round3)
+	}
+	if n := strings.Count(round3, "original finding"); n != 1 {
+		t.Errorf("round 3 shows the original finding %d times, want exactly 1:\n%s", n, round3)
+	}
+	if !strings.Contains(round3, "not measured") {
+		t.Errorf("round 3 must still show this run's own unknown status:\n%s", round3)
+	}
+	if len(round3) > 2*len(round2) {
+		t.Errorf("comment grew from %d to %d bytes across one more recovery round; nesting is back", len(round2), len(round3))
 	}
 }
 
