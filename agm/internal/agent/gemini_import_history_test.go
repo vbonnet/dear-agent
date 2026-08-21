@@ -257,6 +257,10 @@ func TestWriteHistoryReplacesPriorHistory(t *testing.T) {
 // the second write's os.CreateTemp fails — must leave the first write's file
 // completely unchanged: never partial, never missing.
 func TestWriteHistoryLeavesPriorHistoryIntactWhenReplacementFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the read-only directory mode bit, so os.CreateTemp would still succeed")
+	}
+
 	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
 
 	first := []Message{{Role: RoleUser, Content: "first"}}
