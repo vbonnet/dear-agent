@@ -1,0 +1,742 @@
+package agent
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+// newGeminiHistoryFixture returns an adapter whose history writes and reads
+// land under a temporary HOME, plus a stored session to address them with.
+func newGeminiHistoryFixture(t *testing.T) (*GeminiCLIAdapter, SessionID, *SessionMetadata) {
+	t.Helper()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	store, err := NewJSONSessionStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatalf("failed to create session store: %v", err)
+	}
+
+	sessionID := SessionID("import-session")
+	metadata := &SessionMetadata{
+		TmuxName:   "gemini-import",
+		CreatedAt:  time.Now(),
+		WorkingDir: home,
+	}
+	if err := store.Set(sessionID, metadata); err != nil {
+		t.Fatalf("failed to store session metadata: %v", err)
+	}
+
+	return &GeminiCLIAdapter{sessionStore: store}, sessionID, metadata
+}
+
+// TestParseImportedMessagesJSONL covers the decode half of an import.
+func TestParseImportedMessagesJSONL(t *testing.T) {
+	data := []byte(`{"role":"user","content":"hello"}` + "\n\n" + `{"role":"assistant","content":"hi"}` + "\n")
+
+	messages, err := parseImportedMessages(data, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+
+	if len(messages) != 2 {
+		t.Fatalf("got %d messages, want 2: %#v", len(messages), messages)
+	}
+	if messages[0].Role != RoleUser || messages[0].Content != "hello" {
+		t.Errorf("first message = %#v", messages[0])
+	}
+	if messages[1].Role != RoleAssistant || messages[1].Content != "hi" {
+		t.Errorf("second message = %#v", messages[1])
+	}
+}
+
+// TestParseImportedMessagesRejects covers the formats that cannot be decoded
+// and malformed JSONL. Each must be an error, never a silent empty import.
+func TestParseImportedMessagesRejects(t *testing.T) {
+	tests := []struct {
+		name   string
+		data   []byte
+		format ConversationFormat
+	}{
+		{name: "markdown", data: []byte("# conversation"), format: FormatMarkdown},
+		{name: "html", data: []byte("<html></html>"), format: FormatHTML},
+		{name: "native", data: []byte("{}"), format: FormatNative},
+		{name: "unknown", data: []byte("{}"), format: ConversationFormat("bogus")},
+		{name: "malformed jsonl", data: []byte("{not json}\n"), format: FormatJSONL},
+		// json.Unmarshal accepts both of these into a Message and leaves it
+		// zero-valued, so decoding alone cannot tell a message from any other
+		// JSON value. Each must be rejected, not imported as a speakerless turn.
+		{name: "json null", data: []byte("null\n"), format: FormatJSONL},
+		{name: "empty object", data: []byte("{}\n"), format: FormatJSONL},
+		{name: "unknown role", data: []byte(`{"role":"system","content":"x"}` + "\n"), format: FormatJSONL},
+		// A null or absent "content" decodes to "" exactly like a genuinely
+		// empty string does, so persistence would silently rewrite it as
+		// `"Content":""` unless null and absent are both rejected.
+		{name: "null content", data: []byte(`{"role":"user","content":null}` + "\n"), format: FormatJSONL},
+		{name: "absent content", data: []byte(`{"role":"user"}` + "\n"), format: FormatJSONL},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			messages, err := parseImportedMessages(tc.data, tc.format)
+			if err == nil {
+				t.Fatalf("expected an error, got %d messages", len(messages))
+			}
+			if messages != nil {
+				t.Errorf("expected nil messages alongside the error, got %#v", messages)
+			}
+		})
+	}
+}
+
+// TestParseImportedMessagesAcceptsEmptyStringContent proves the null/absent
+// content rejection above does not over-reject: a message whose content is
+// genuinely an empty string, not null or missing, is a real (if unusual)
+// message and must still import.
+func TestParseImportedMessagesAcceptsEmptyStringContent(t *testing.T) {
+	data := []byte(`{"role":"user","content":""}` + "\n")
+
+	messages, err := parseImportedMessages(data, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
+	}
+	if messages[0].Content != "" {
+		t.Errorf("content = %q, want empty string", messages[0].Content)
+	}
+}
+
+// TestWriteHistoryRoundTripsThroughGetHistory is the regression test for the
+// discarded-append bug (staticcheck SA4010): parsed messages used to be
+// dropped on the floor, so an import produced a session with no history.
+func TestWriteHistoryRoundTripsThroughGetHistory(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	want := []Message{
+		{Role: RoleUser, Content: "first"},
+		{Role: RoleAssistant, Content: "second"},
+	}
+
+	if err := adapter.writeHistory(metadata, want); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d messages, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].Role != want[i].Role || got[i].Content != want[i].Content {
+			t.Errorf("message %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestWriteHistoryIsJSONLGetHistoryCanParse pins the on-disk encoding, since
+// GetHistory silently skips any line it cannot unmarshal.
+func TestWriteHistoryIsJSONLGetHistoryCanParse(t *testing.T) {
+	adapter, _, metadata := newGeminiHistoryFixture(t)
+
+	if err := adapter.writeHistory(metadata, []Message{{Role: RoleUser, Content: "only"}}); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("failed to read history file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1: %q", len(lines), string(raw))
+	}
+	var decoded Message
+	if err := json.Unmarshal([]byte(lines[0]), &decoded); err != nil {
+		t.Fatalf("history line is not valid JSON: %v", err)
+	}
+	if decoded.Content != "only" {
+		t.Errorf("decoded content = %q, want %q", decoded.Content, "only")
+	}
+}
+
+// TestWriteHistoryEmptyConversation covers importing a conversation with no
+// messages: the file must exist and be empty, not absent.
+func TestWriteHistoryEmptyConversation(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	if err := adapter.writeHistory(metadata, nil); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	info, err := os.Stat(historyPath)
+	if err != nil {
+		t.Fatalf("history file missing after empty import: %v", err)
+	}
+	if info.Size() != 0 {
+		t.Errorf("history file size = %d, want 0", info.Size())
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d messages, want 0: %#v", len(got), got)
+	}
+}
+
+// TestWriteHistoryReplacesPriorHistory covers the rename-based install: a
+// second write must not leave a partially-overwritten first write behind.
+func TestWriteHistoryReplacesPriorHistory(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	long := []Message{
+		{Role: RoleUser, Content: strings.Repeat("a", 512)},
+		{Role: RoleAssistant, Content: strings.Repeat("b", 512)},
+	}
+	if err := adapter.writeHistory(metadata, long); err != nil {
+		t.Fatalf("first writeHistory returned error: %v", err)
+	}
+	if err := adapter.writeHistory(metadata, []Message{{Role: RoleUser, Content: "short"}}); err != nil {
+		t.Fatalf("second writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 || got[0].Content != "short" {
+		t.Fatalf("history was not replaced: %#v", got)
+	}
+
+	// The temporary sibling must not survive as a stray file.
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(historyPath))
+	if err != nil {
+		t.Fatalf("failed to read history directory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("history directory holds %d entries, want 1", len(entries))
+	}
+}
+
+// TestWriteHistoryLeavesPriorHistoryIntactWhenReplacementFails proves AGP-64's
+// atomicity claim with an actual failure injection, rather than only reading
+// after two writes have both already succeeded the way
+// TestWriteHistoryReplacesPriorHistory does — that test would still pass even
+// if writeHistory were changed to truncate and rewrite historyPath directly,
+// since it never observes a reader during a failed replacement.
+//
+// writeHistory never opens historyPath itself until the final os.Rename, so
+// a failure at any earlier step — here, making the directory unwritable so
+// the second write's os.CreateTemp fails — must leave the first write's file
+// completely unchanged: never partial, never missing.
+func TestWriteHistoryLeavesPriorHistoryIntactWhenReplacementFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the read-only directory mode bit, so os.CreateTemp would still succeed")
+	}
+
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	first := []Message{{Role: RoleUser, Content: "first"}}
+	if err := adapter.writeHistory(metadata, first); err != nil {
+		t.Fatalf("first writeHistory returned error: %v", err)
+	}
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	before, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read first history: %v", err)
+	}
+
+	historyDir := filepath.Dir(historyPath)
+	if err := os.Chmod(historyDir, 0o500); err != nil {
+		t.Fatalf("chmod history dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(historyDir, 0o700) })
+
+	second := []Message{{Role: RoleUser, Content: "second"}}
+	if err := adapter.writeHistory(metadata, second); err == nil {
+		t.Fatal("expected the second writeHistory to fail with the directory read-only")
+	}
+
+	if err := os.Chmod(historyDir, 0o700); err != nil {
+		t.Fatalf("restore history dir permissions: %v", err)
+	}
+
+	after, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read history after failed replacement: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("history changed after a failed replacement:\nbefore: %q\nafter:  %q", before, after)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 || got[0].Content != "first" {
+		t.Fatalf("history after failed replacement = %#v, want only the first write", got)
+	}
+}
+
+// TestWriteHistoryRoundTripsOversizedRecord covers a record larger than the
+// 64 KiB default bufio.Scanner token. Without an enlarged read buffer an
+// import would write a record its own reader then chokes on, which breaks the
+// round trip AGP-65 promises for exactly the long turns most worth keeping.
+func TestWriteHistoryRoundTripsOversizedRecord(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	huge := strings.Repeat("x", 200*1024)
+	if err := adapter.writeHistory(metadata, []Message{{Role: RoleUser, Content: huge}}); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+	if len(got[0].Content) != len(huge) {
+		t.Errorf("content length = %d, want %d", len(got[0].Content), len(huge))
+	}
+}
+
+// TestParseImportedMessagesTrimsBlankLines covers a payload with trailing and
+// interior blank lines, which a JSONL file routinely has.
+func TestParseImportedMessagesTrimsBlankLines(t *testing.T) {
+	data := []byte("\n" + `{"role":"user","content":"a"}` + "\n\n  \n" + `{"role":"assistant","content":"b"}` + "\n\n")
+
+	messages, err := parseImportedMessages(data, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("got %d messages, want 2: %#v", len(messages), messages)
+	}
+}
+
+// TestWriteHistoryLeavesNoTemporaryFileOnSuccess covers the cleanup flag: the
+// temporary sibling must be renamed away, not left behind and not removed
+// twice.
+func TestWriteHistoryLeavesNoTemporaryFileOnSuccess(t *testing.T) {
+	adapter, _, metadata := newGeminiHistoryFixture(t)
+
+	if err := adapter.writeHistory(metadata, []Message{{Role: RoleUser, Content: "x"}}); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(historyPath))
+	if err != nil {
+		t.Fatalf("failed to read history directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "history.jsonl" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("history directory holds %v, want only history.jsonl", names)
+	}
+}
+
+// TestImportedSessionNamesAreDistinct covers the collision the timestamp alone
+// allowed: two imports in the same second shared a tmux name, and because
+// history is keyed by that name the second import replaced the first one's
+// conversation.
+func TestImportedSessionNamesAreDistinct(t *testing.T) {
+	seen := map[string]bool{}
+	for range 100 {
+		name := importedSessionName()
+		if seen[name] {
+			t.Fatalf("importedSessionName produced a duplicate within one run: %q", name)
+		}
+		seen[name] = true
+	}
+}
+
+// TestParseImportedMessagesRejectsOversizedRecord covers AGP-65's rejection
+// half. The reader caps a record at maxHistoryLineBytes, so accepting a larger
+// one at import would persist a record the matching GetHistory then fails on.
+func TestParseImportedMessagesRejectsOversizedRecord(t *testing.T) {
+	oversized := `{"role":"user","content":"` + strings.Repeat("x", maxHistoryLineBytes) + `"}` + "\n"
+
+	messages, err := parseImportedMessages([]byte(oversized), FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "history limit") {
+		t.Errorf("error = %v, want it to name the history limit", err)
+	}
+}
+
+// TestParseImportedMessagesAcceptsLargeRecordUnderTheLimit is the other half of
+// AGP-65: a record that is big but within the limit must still import, so the
+// rejection above cannot be satisfied by refusing everything large.
+func TestParseImportedMessagesAcceptsLargeRecordUnderTheLimit(t *testing.T) {
+	large := `{"role":"user","content":"` + strings.Repeat("x", 256*1024) + `"}` + "\n"
+
+	messages, err := parseImportedMessages([]byte(large), FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
+	}
+}
+
+// TestParseImportedMessagesRejectsRecordOversizedOnlyOnceRePersisted covers a
+// record whose raw input line is under maxHistoryLineBytes but whose
+// re-marshaled encoding is not: writeHistory persists ID, Timestamp, and
+// Metadata fields the minimal wire format omits, so a line-length check alone
+// would accept a record that GetHistory then fails to read back.
+func TestParseImportedMessagesRejectsRecordOversizedOnlyOnceRePersisted(t *testing.T) {
+	// The raw line is the minimal wire encoding, sized to land exactly at the
+	// limit; re-marshaling with the zero-valued ID/Timestamp/Metadata fields
+	// pushes the persisted record over it.
+	overhead := len(`{"role":"user","content":""}`)
+	content := strings.Repeat("x", maxHistoryLineBytes-overhead)
+	line := `{"role":"user","content":"` + content + `"}` + "\n"
+	if len(strings.TrimSuffix(line, "\n")) > maxHistoryLineBytes {
+		t.Fatalf("test setup: raw line already exceeds the limit, want it at or under")
+	}
+
+	messages, err := parseImportedMessages([]byte(line), FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection for a record oversized once persisted, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "history limit") {
+		t.Errorf("error = %v, want it to name the history limit", err)
+	}
+}
+
+// TestParseImportedMessagesRejectsInvalidUTF8 covers the silent-corruption
+// path: json.Unmarshal replaces invalid UTF-8 in a string with U+FFFD instead
+// of erroring, which would import altered content and report success rather
+// than reject the malformed record.
+func TestParseImportedMessagesRejectsInvalidUTF8(t *testing.T) {
+	// \xff is not valid UTF-8 in any position.
+	line := []byte(`{"role":"user","content":"a` + "\xff" + `b"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "UTF-8") {
+		t.Errorf("error = %v, want it to name UTF-8", err)
+	}
+}
+
+// TestParseImportedMessagesRejectsNonJSONWhitespace covers what
+// bytes.TrimSpace would silently fix: unicode.IsSpace accepts characters JSON
+// does not treat as insignificant whitespace between tokens (a non-breaking
+// space, among others), so trimming them would normalize an otherwise
+// malformed record instead of rejecting it.
+func TestParseImportedMessagesRejectsNonJSONWhitespace(t *testing.T) {
+	// U+00A0 (non-breaking space) satisfies unicode.IsSpace but is not one of
+	// the four bytes RFC 8259 permits as whitespace between JSON tokens.
+	line := []byte(" " + `{"role":"user","content":"x"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+}
+
+// TestParseImportedMessagesRejectsLoneSurrogateEscape covers the
+// escape-sequence sibling of the invalid-UTF-8 check above: utf8.Valid only
+// sees raw bytes, so an unpaired UTF-16 surrogate escape like \ud800 (itself
+// valid ASCII) passes it, but encoding/json accepts the escape during decode
+// and silently substitutes U+FFFD rather than erroring.
+func TestParseImportedMessagesRejectsLoneSurrogateEscape(t *testing.T) {
+	line := []byte(`{"role":"user","content":"` + `\ud800` + `"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "surrogate") {
+		t.Errorf("error = %v, want it to name the surrogate escape", err)
+	}
+}
+
+// TestParseImportedMessagesAcceptsPairedSurrogateEscape proves the surrogate
+// check above does not over-reject: a properly paired high/low surrogate
+// escape (how JSON must encode any character outside the Basic Multilingual
+// Plane) must still decode.
+func TestParseImportedMessagesAcceptsPairedSurrogateEscape(t *testing.T) {
+	// Builds the JSON string field as a literal \uXXXX\uXXXX escape pair
+	// (U+1F600, grinning face, encoded as its UTF-16 surrogate pair) rather
+	// than embedding the emoji as raw UTF-8 bytes, so this actually exercises
+	// the surrogate-pairing branch of hasLoneSurrogateEscape.
+	highSurrogate := "\\u" + strconv.FormatUint(0xD83D, 16)
+	lowSurrogate := "\\u" + strconv.FormatUint(0xDE00, 16)
+	line := []byte(`{"role":"user","content":"` + highSurrogate + lowSurrogate + `"}` + "\n")
+	const wantContent = "\U0001F600"
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
+	}
+	if messages[0].Content != wantContent {
+		t.Errorf("content = %q, want %q (the decoded emoji)", messages[0].Content, wantContent)
+	}
+}
+
+// stubTmuxOnPath installs a fake `tmux` binary as the only entry on PATH so
+// tests can control kill-session outcomes without a real tmux server. The
+// binary is a shell script: the kernel resolves its shebang directly, so the
+// narrowed PATH does not need to keep /bin/sh reachable.
+func stubTmuxOnPath(t *testing.T, script string) {
+	t.Helper()
+	binDir := t.TempDir()
+	fakeTmux := filepath.Join(binDir, "tmux")
+	if err := os.WriteFile(fakeTmux, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+}
+
+// TestRollbackFailedImportRemovesRecordOnConfirmedKill covers the success
+// path: once tmux confirms the session is gone, the store entry — the only
+// thing that could leak the session — is safe to remove.
+func TestRollbackFailedImportRemovesRecordOnConfirmedKill(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+	stubTmuxOnPath(t, "#!/bin/sh\nexit 0\n")
+
+	if err := adapter.rollbackFailedImport(sessionID, metadata.TmuxName); err != nil {
+		t.Fatalf("rollbackFailedImport returned error: %v", err)
+	}
+	if _, err := adapter.sessionStore.Get(sessionID); err == nil {
+		t.Fatalf("session record still present after a confirmed kill")
+	}
+}
+
+// TestRollbackFailedImportKeepsRecordWhenKillUnconfirmed covers the bug this
+// fixes: TerminateSession only logged a failed tmux exit and still deleted
+// the store entry, so a caller with no session ID lost the only handle to a
+// possibly-still-running process. rollbackFailedImport must instead keep the
+// record and surface the failure when tmux cannot confirm termination.
+func TestRollbackFailedImportKeepsRecordWhenKillUnconfirmed(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+	stubTmuxOnPath(t, "#!/bin/sh\necho 'server not found' >&2\nexit 1\n")
+
+	err := adapter.rollbackFailedImport(sessionID, metadata.TmuxName)
+	if err == nil {
+		t.Fatalf("expected rollbackFailedImport to report the unconfirmed kill")
+	}
+	if _, getErr := adapter.sessionStore.Get(sessionID); getErr != nil {
+		t.Fatalf("session record was removed despite an unconfirmed kill: %v", getErr)
+	}
+}
+
+// TestParseImportedMessagesPreservesLargeIntegerMetadata covers the decode
+// precision clause. Decoding into map[string]interface{} with the default
+// decoder turns every number into a float64, which rounds an integer outside
+// float64's exact range; writeHistory then re-marshals the rounded value, so
+// the round trip would return altered metadata.
+func TestParseImportedMessagesPreservesLargeIntegerMetadata(t *testing.T) {
+	const exact = "9007199254740993" // 2^53 + 1, not representable as a float64
+	record := []byte(`{"role":"user","content":"x","Metadata":{"tokens":` + exact + `}}` + "\n")
+
+	messages, err := parseImportedMessages(record, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
+	}
+
+	encoded, err := json.Marshal(messages[0])
+	if err != nil {
+		t.Fatalf("re-encoding: %v", err)
+	}
+	if !strings.Contains(string(encoded), exact) {
+		t.Errorf("re-encoded message lost integer precision, want %s in:\n%s", exact, encoded)
+	}
+}
+
+// TestParseImportedMessagesRejectsTrailingJSONValue covers the case Decode
+// alone does not: it reads exactly one JSON value and leaves anything after
+// it alone, so a line holding a valid message immediately followed by another
+// JSON value would decode the first and silently discard the second instead
+// of rejecting the record.
+func TestParseImportedMessagesRejectsTrailingJSONValue(t *testing.T) {
+	line := []byte(`{"role":"user","content":"ok"}{"role":"assistant","content":"ignored"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "trailing data") {
+		t.Errorf("error = %v, want it to name trailing data", err)
+	}
+}
+
+// TestParseImportedMessagesRejectsTrailingBracket covers what dec.More()
+// alone would miss: More reports whether another element remains in the
+// array or object currently being parsed, so it also reports false when the
+// very next byte is a stray `]` or `}` — trailing garbage, not proof nothing
+// is left. A second Decode that must hit io.EOF is what actually tells them
+// apart.
+func TestParseImportedMessagesRejectsTrailingBracket(t *testing.T) {
+	line := []byte(`{"role":"user","content":"ok"}]` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "trailing data") {
+		t.Errorf("error = %v, want it to name trailing data", err)
+	}
+}
+
+// TestWriteHistoryRoundTripsRecordAtExactlyTheLimit covers the off-by-one this
+// fixes: writeHistory appends a newline after every record, and ScanLines can
+// only locate that delimiter by buffering it along with the record itself, so
+// a record of exactly maxHistoryLineBytes plus its newline needs a token
+// buffer one byte larger than maxHistoryLineBytes. Without that margin, a
+// record parseImportedMessages accepts as exactly at the limit would still
+// fail on the next GetHistory with "token too long".
+func TestWriteHistoryRoundTripsRecordAtExactlyTheLimit(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	// Grow content until the marshaled message lands exactly at the limit.
+	msg := Message{Role: RoleUser, Content: ""}
+	overhead, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal empty message: %v", err)
+	}
+	msg.Content = strings.Repeat("x", maxHistoryLineBytes-len(overhead))
+	encoded, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal sized message: %v", err)
+	}
+	if len(encoded) != maxHistoryLineBytes {
+		t.Fatalf("test setup: encoded message is %d bytes, want exactly %d", len(encoded), maxHistoryLineBytes)
+	}
+
+	if err := adapter.writeHistory(metadata, []Message{msg}); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+	if len(got[0].Content) != len(msg.Content) {
+		t.Errorf("content length = %d, want %d", len(got[0].Content), len(msg.Content))
+	}
+}
+
+// TestGetHistoryPreservesLargeIntegerMetadata covers the read half of the
+// precision fix: writeHistory preserves an out-of-float64-range integer to
+// disk, but GetHistory previously re-decoded every line with the default
+// decoder, rounding the value again on the way back out even though the file
+// on disk still held the exact digits.
+func TestGetHistoryPreservesLargeIntegerMetadata(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	const exact = "9007199254740993" // 2^53 + 1, not representable as a float64
+	record := []byte(`{"role":"user","content":"x","Metadata":{"tokens":` + exact + `}}` + "\n")
+	messages, err := parseImportedMessages(record, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+
+	if err := adapter.writeHistory(metadata, messages); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+
+	encoded, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatalf("re-encoding: %v", err)
+	}
+	if !strings.Contains(string(encoded), exact) {
+		t.Errorf("GetHistory lost integer precision, want %s in:\n%s", exact, encoded)
+	}
+}
+
+// TestGetHistorySkipsRecordsWithTrailingData covers the read side of the
+// trailing-data check. json.Decoder stops after one value and ignores the
+// rest, so a corrupted line holding a valid prefix would be returned as if it
+// were the whole record. The json.Unmarshal this replaced rejected such a
+// line, and that behavior has to be preserved.
+func TestGetHistorySkipsRecordsWithTrailingData(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	historyPath, err := adapter.getHistoryPath(metadata)
+	if err != nil {
+		t.Fatalf("getHistoryPath returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"role":"user","content":"good"}` + "\n" +
+		`{"role":"user","content":"corrupt"}]` + "\n" +
+		`{"role":"assistant","content":"also good"}` + "\n"
+	if err := os.WriteFile(historyPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want 2 (the corrupt line must be skipped): %#v", len(got), got)
+	}
+	for _, m := range got {
+		if m.Content == "corrupt" {
+			t.Error("a record with trailing data was returned as if it were whole")
+		}
+	}
+}

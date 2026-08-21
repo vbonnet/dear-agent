@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -756,5 +757,196 @@ func TestGeminiCLIAdapter_GetHistoryPath(t *testing.T) {
 	expectedPath := filepath.Join(homeDir, ".gemini", "sessions", "test-session", "history.jsonl")
 	if path != expectedPath {
 		t.Errorf("Expected path '%s', got '%s'", expectedPath, path)
+	}
+}
+
+// requireRealTmux skips a test that needs a real tmux server: in short mode,
+// under CI_SKIP_TMUX (which ci.yml and cross-platform-test.yml set on macOS
+// specifically to exclude tmux-dependent tests and the platform flakes they
+// bring), and when no tmux binary is on PATH at all.
+func requireRealTmux(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("Skipping import test in short mode (requires tmux)")
+	}
+	if os.Getenv("CI_SKIP_TMUX") == "true" {
+		t.Skip("Skipping import test because CI_SKIP_TMUX=true")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not available")
+	}
+}
+
+// TestGeminiCLIAdapter_ImportConversationEndToEnd exercises ImportConversation
+// through its public entry point rather than only its internal helpers
+// (parseImportedMessages, writeHistory, rollbackFailedImport). Those helper
+// tests would all stay green even if ImportConversation stopped calling one
+// of them, or stopped propagating a rollback error; this is the test that
+// would actually catch that.
+func TestGeminiCLIAdapter_ImportConversationEndToEnd(t *testing.T) {
+	requireRealTmux(t)
+
+	// Isolate tmux to prevent phantom sessions on production socket
+	server := helpers.SetupTestServer(t)
+	t.Setenv("AGM_TMUX_SOCKET", server.SocketPath)
+	t.Setenv("HOME", t.TempDir())
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "sessions.json")
+	store, err := NewJSONSessionStore(storePath)
+	if err != nil {
+		t.Fatalf("failed to create session store: %v", err)
+	}
+	adapter := &GeminiCLIAdapter{sessionStore: store}
+
+	data := []byte(`{"role":"user","content":"hello"}` + "\n" + `{"role":"assistant","content":"hi"}` + "\n")
+
+	sessionID, err := adapter.ImportConversation(data, FormatJSONL)
+	if err != nil {
+		t.Fatalf("ImportConversation returned error: %v", err)
+	}
+	if sessionID == "" {
+		t.Fatal("ImportConversation returned an empty session ID")
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want 2: %#v", len(got), got)
+	}
+	if got[0].Role != RoleUser || got[0].Content != "hello" {
+		t.Errorf("first message = %#v", got[0])
+	}
+	if got[1].Role != RoleAssistant || got[1].Content != "hi" {
+		t.Errorf("second message = %#v", got[1])
+	}
+}
+
+// TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure exercises the
+// rollback path through the public entry point: an unwritable history
+// directory makes writeHistory fail after CreateSession has already launched
+// a real tmux session, and ImportConversation must both report the failure
+// and not return a session ID that nothing can then reach.
+func TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure(t *testing.T) {
+	requireRealTmux(t)
+
+	server := helpers.SetupTestServer(t)
+	t.Setenv("AGM_TMUX_SOCKET", server.SocketPath)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// getHistoryPath descends into ~/.gemini/sessions/<tmux>/history.jsonl.
+	// Occupying "sessions" with a plain file makes MkdirAll fail for every
+	// session name, forcing writeHistory to fail regardless of which tmux
+	// name this particular import happens to draw.
+	geminiDir := filepath.Join(home, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0o700); err != nil {
+		t.Fatalf("mkdir .gemini: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(geminiDir, "sessions"), []byte("occupied"), 0o600); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "sessions.json")
+	store, err := NewJSONSessionStore(storePath)
+	if err != nil {
+		t.Fatalf("failed to create session store: %v", err)
+	}
+	adapter := &GeminiCLIAdapter{sessionStore: store}
+
+	data := []byte(`{"role":"user","content":"hello"}` + "\n")
+
+	sessionID, err := adapter.ImportConversation(data, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected ImportConversation to fail, got session %q", sessionID)
+	}
+	if sessionID != "" {
+		t.Errorf("expected an empty session ID on failure, got %q", sessionID)
+	}
+
+	// The error and empty ID alone would also be exactly what a version with
+	// rollbackFailedImport silently dropped from ImportConversation returns,
+	// since writeHistory's own error already produces both. Inspecting the
+	// store and the real tmux server directly is what actually proves the
+	// rollback ran, rather than merely that the write failed.
+	sessions, err := store.List()
+	if err != nil {
+		t.Fatalf("store.List returned error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("session store still holds %d entr(y/ies) after rollback: %#v", len(sessions), sessions)
+	}
+
+	out, _ := exec.Command("tmux", "-S", server.SocketPath, "list-sessions").CombinedOutput()
+	if strings.Contains(string(out), "imported-") {
+		t.Errorf("tmux still has the imported session after rollback: %s", out)
+	}
+}
+
+// TestGeminiCLIAdapter_TwoImportsDoNotOverwriteEachOther exercises AGP-69
+// through the public entry point: TestImportedSessionNamesAreDistinct only
+// calls importedSessionName directly, and both single-import tests above
+// only ever run one import at a time, so neither would notice
+// ImportConversation reusing a shared name or dropping the random suffix.
+// Running two real imports back to back and reading both histories back is
+// what actually proves a second import cannot overwrite the first one's
+// history — if ImportConversation used a fixed or timestamp-only name, both
+// calls here would collide on the same tmux session and history file.
+//
+// This runs the two imports sequentially rather than as concurrent
+// goroutines: tmux.AcquireTmuxLock is a package-level, non-reentrant lock
+// that errors "already held by this process" rather than blocking when a
+// second caller in the same process tries to create a session while the
+// first creation is still in flight, so genuinely parallel ImportConversation
+// calls are not supported within one process today. The contract this test
+// protects — namespace distinctness — does not depend on true concurrency
+// for it to hold or fail.
+func TestGeminiCLIAdapter_TwoImportsDoNotOverwriteEachOther(t *testing.T) {
+	requireRealTmux(t)
+
+	server := helpers.SetupTestServer(t)
+	t.Setenv("AGM_TMUX_SOCKET", server.SocketPath)
+	t.Setenv("HOME", t.TempDir())
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "sessions.json")
+	store, err := NewJSONSessionStore(storePath)
+	if err != nil {
+		t.Fatalf("failed to create session store: %v", err)
+	}
+	adapter := &GeminiCLIAdapter{sessionStore: store}
+
+	dataA := []byte(`{"role":"user","content":"conversation A"}` + "\n")
+	dataB := []byte(`{"role":"user","content":"conversation B"}` + "\n")
+
+	sessionA, err := adapter.ImportConversation(dataA, FormatJSONL)
+	if err != nil {
+		t.Fatalf("import A returned error: %v", err)
+	}
+	sessionB, err := adapter.ImportConversation(dataB, FormatJSONL)
+	if err != nil {
+		t.Fatalf("import B returned error: %v", err)
+	}
+	if sessionA == sessionB {
+		t.Fatalf("two imports returned the same session ID: %q", sessionA)
+	}
+
+	historyA, err := adapter.GetHistory(sessionA)
+	if err != nil {
+		t.Fatalf("GetHistory(A) returned error: %v", err)
+	}
+	historyB, err := adapter.GetHistory(sessionB)
+	if err != nil {
+		t.Fatalf("GetHistory(B) returned error: %v", err)
+	}
+
+	if len(historyA) != 1 || historyA[0].Content != "conversation A" {
+		t.Errorf("history for A = %#v, want exactly the conversation A message", historyA)
+	}
+	if len(historyB) != 1 || historyB[0].Content != "conversation B" {
+		t.Errorf("history for B = %#v, want exactly the conversation B message", historyB)
 	}
 }

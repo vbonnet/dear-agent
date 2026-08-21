@@ -2,18 +2,28 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
+
+// maxHistoryLineBytes caps a single history record on read. One conversation
+// turn can easily exceed the Scanner default of 64 KiB, and a record this
+// large is far likelier to be a corrupt file than a real message.
+const maxHistoryLineBytes = 8 * 1024 * 1024
 
 // GeminiCLIAdapter is the concrete compatibility adapter for Gemini CLI.
 //
@@ -265,13 +275,13 @@ func (a *GeminiCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 
 	// Find history file for this session
 	// Note: Gemini CLI stores sessions in ~/.gemini/tmp/<project_hash>/chats/
-	// For now, we'll use a simplified approach similar to Claude
-	homeDir, err := os.UserHomeDir()
+	// For now, we'll use a simplified approach similar to Claude.
+	// getHistoryPath is the single owner of this layout so a read and an
+	// import can never disagree about where history lives.
+	historyPath, err := a.getHistoryPath(metadata)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+		return nil, err
 	}
-
-	historyPath := filepath.Join(homeDir, ".gemini", "sessions", metadata.TmuxName, "history.jsonl")
 
 	// Check if history file exists
 	if _, err := os.Stat(historyPath); os.IsNotExist(err) {
@@ -288,10 +298,36 @@ func (a *GeminiCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 
 	var messages []Message
 	scanner := bufio.NewScanner(file)
+	// A default Scanner tops out at 64 KiB per line, which is smaller than a
+	// single long conversation turn. Without this an import would write a
+	// record that the matching read then fails on, breaking the round trip
+	// AGP-63 and AGP-65 promise. The +1 is the trailing newline writeHistory
+	// appends after every record: ScanLines can only locate that delimiter by
+	// buffering it along with the content before it, so a maxHistoryLineBytes
+	// record plus its newline needs a token buffer one byte larger than
+	// maxHistoryLineBytes, not equal to it.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxHistoryLineBytes+1)
 	for scanner.Scan() {
 		var msg Message
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+		// UseNumber, matching parseImportedMessages: the default decoder
+		// would turn a Metadata integer back into a float64 on every read,
+		// rounding values outside float64's exact range even though
+		// writeHistory persisted the original digits.
+		dec := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
+		dec.UseNumber()
+		if err := dec.Decode(&msg); err != nil {
 			// Skip malformed lines
+			continue
+		}
+		// Decode stops after one JSON value and ignores whatever follows, so
+		// a line holding a valid value plus trailing garbage would yield the
+		// prefix as if it were the whole record. The json.Unmarshal this
+		// replaced rejected such a line, so without this check the switch to
+		// a decoder would start silently returning altered data from an
+		// already-corrupted history file. Requiring a second Decode to hit
+		// io.EOF is the actual "nothing left" test.
+		if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+			// Skip lines with trailing data, as before.
 			continue
 		}
 		messages = append(messages, msg)
@@ -349,44 +385,338 @@ func (a *GeminiCLIAdapter) ExportConversation(sessionID SessionID, format Conver
 	}
 }
 
-// ImportConversation imports conversation from serialized data.
-func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFormat) (SessionID, error) {
-	// Parse messages based on format
-	var messages []Message
-	switch format {
-	case FormatJSONL:
-		lines := splitLines(string(data))
-		for _, line := range lines {
-			if line == "" {
-				continue
-			}
-			var msg Message
-			if err := json.Unmarshal([]byte(line), &msg); err != nil {
-				return "", fmt.Errorf("failed to parse message: %w", err)
-			}
-			messages = append(messages, msg)
-		}
-
-	case FormatHTML, FormatMarkdown, FormatNative:
-		return "", fmt.Errorf("unsupported import format: %s", format)
-
-	default:
-		return "", fmt.Errorf("unsupported import format: %s", format)
+// parseImportedMessages decodes serialized conversation data into messages.
+//
+// Only FormatJSONL is decodable; every other format is rejected rather than
+// silently importing an empty conversation.
+func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, error) {
+	if format != FormatJSONL {
+		return nil, fmt.Errorf("unsupported import format: %s", format)
 	}
 
-	// Create new session
+	messages := []Message{}
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		// bytes.TrimSpace uses unicode.IsSpace, which accepts characters JSON
+		// does not treat as whitespace between tokens (a vertical tab, a
+		// non-breaking space, ...). Trimming those would silently normalize a
+		// malformed record instead of rejecting it, undoing AGP-67. RFC 8259
+		// permits exactly these four bytes as insignificant whitespace, which
+		// is also what a blank line or a CRLF line ending actually needs.
+		line = bytes.Trim(line, " \t\r\n")
+		if len(line) == 0 {
+			continue
+		}
+		// json.Unmarshal replaces invalid UTF-8 inside a JSON string with
+		// U+FFFD instead of erroring, which would silently alter the
+		// imported content rather than reject the malformed record it came
+		// from. AGP-67 requires rejecting it instead.
+		if !utf8.Valid(line) {
+			return nil, fmt.Errorf("message record is not valid UTF-8")
+		}
+		// utf8.Valid only sees raw bytes, not \uXXXX escapes: an unpaired
+		// UTF-16 surrogate escape like \ud800 is itself valid ASCII, so it
+		// passes that check, but encoding/json accepts it during decode and
+		// silently substitutes U+FFFD rather than erroring. That is the same
+		// silent-corruption failure mode as invalid UTF-8, just reached
+		// through an escape instead of a raw byte.
+		if hasLoneSurrogateEscape(line) {
+			return nil, fmt.Errorf("message record has an unpaired surrogate escape")
+		}
+
+		// UseNumber, not the default: decoding into map[string]interface{}
+		// turns every JSON number into a float64, which silently rounds an
+		// integer outside float64's exact range (9007199254740993 becomes
+		// ...92). writeHistory re-marshals the decoded value, so the round
+		// trip would return altered metadata.
+		var msg Message
+		dec := json.NewDecoder(bytes.NewReader(line))
+		dec.UseNumber()
+		if err := dec.Decode(&msg); err != nil {
+			return nil, fmt.Errorf("failed to parse message: %w", err)
+		}
+		// Decode reads exactly one JSON value and leaves anything after it
+		// alone, so a line holding a valid message immediately followed by
+		// trailing data would decode the first value and silently discard the
+		// rest instead of rejecting the record. dec.More() is not the right
+		// check: it reports whether another element remains in the array or
+		// object currently being parsed, so it also returns false when the
+		// very next byte is a stray `]` or `}` — trailing garbage, not proof
+		// there is nothing left. Requiring a second Decode to hit io.EOF is
+		// the actual "nothing left" check: a nil error means another value
+		// followed, and any other error means unparseable trailing bytes:
+		// both are trailing data.
+		if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("message record has trailing data after its JSON value")
+		}
+		// json.Unmarshal accepts `null` and `{}` into a Message and leaves it
+		// zero-valued, so decoding alone does not establish that a record IS a
+		// message. AGP-67 requires a record with no supported role to be
+		// rejected rather than imported as an empty turn with no speaker.
+		if msg.Role != RoleUser && msg.Role != RoleAssistant {
+			return nil, fmt.Errorf("message has unsupported role %q", msg.Role)
+		}
+		// The role check above catches a null or absent "role" (Role decodes
+		// to its zero value, which matches neither RoleUser nor
+		// RoleAssistant), but "content" is a plain string field: a null or
+		// absent value there decodes to "" exactly like a genuinely empty
+		// string does, and persistence would then rewrite it as
+		// `"Content":""` — malformed input reported as a successfully
+		// imported, silently altered message. A second decode into a
+		// pointer catches null and absent alike, since both leave a nil
+		// *string where a real value would set it.
+		var contentProbe struct {
+			Content *string
+		}
+		if err := json.Unmarshal(line, &contentProbe); err != nil {
+			return nil, fmt.Errorf("failed to parse message: %w", err)
+		}
+		if contentProbe.Content == nil {
+			return nil, fmt.Errorf("message is missing a content value")
+		}
+		// GetHistory's scanner caps a single line at maxHistoryLineBytes, and
+		// what it reads back is writeHistory's re-marshaled encoding of msg,
+		// not this raw input line. Re-marshaling adds fields the wire format
+		// omits (ID, Timestamp, Metadata) and can expand escaped characters,
+		// so a line just under the limit can still persist a record over it.
+		// Checking the encoding that is actually written, rather than the one
+		// that was read, is what makes AGP-65's limit and AGP-63's round trip
+		// agree; rejecting here keeps the promise from AGP-68 that a failed
+		// import leaves no session behind, since none exists yet.
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate message size: %w", err)
+		}
+		if len(encoded) > maxHistoryLineBytes {
+			return nil, fmt.Errorf("message record is %d bytes once persisted, over the %d-byte history limit", len(encoded), maxHistoryLineBytes)
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+// hasLoneSurrogateEscape reports whether a JSON string literal in line
+// contains a \uXXXX escape for a UTF-16 surrogate half (U+D800-U+DFFF) that
+// is not immediately paired with its matching other half. encoding/json
+// accepts such an escape during decode and silently substitutes U+FFFD
+// instead of erroring, which would let a malformed record through as altered
+// content rather than being rejected.
+func hasLoneSurrogateEscape(line []byte) bool {
+	inString := false
+	for pos := 0; pos < len(line); {
+		b := line[pos]
+		if !inString {
+			if b == '"' {
+				inString = true
+			}
+			pos++
+			continue
+		}
+		if b == '"' {
+			inString = false
+			pos++
+			continue
+		}
+		if b != '\\' {
+			pos++
+			continue
+		}
+		next, r, isSurrogate := scanEscape(line, pos)
+		if !isSurrogate {
+			pos = next
+			continue
+		}
+		if consumesMatchingLowSurrogate(line, next, r) {
+			pos = next + 6 // consumed the matching low surrogate too
+			continue
+		}
+		return true // a high surrogate with no matching low, or a lone low surrogate
+	}
+	return false
+}
+
+// scanEscape advances past one JSON string escape starting at line[pos]
+// ('\\') and reports the code point if it is a \uXXXX escape whose value
+// falls in the UTF-16 surrogate range (U+D800-U+DFFF). Any other escape, or
+// one too short to read safely at the end of the record, is left for
+// json.Decode to validate — this only needs to find escapes worth a closer
+// look, not police JSON syntax generally.
+func scanEscape(line []byte, pos int) (next int, r uint64, isSurrogate bool) {
+	if pos+1 >= len(line) || line[pos+1] != 'u' || pos+6 > len(line) {
+		return pos + 2, 0, false
+	}
+	value, err := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32)
+	if err != nil || value < 0xD800 || value > 0xDFFF {
+		return pos + 6, 0, false
+	}
+	return pos + 6, value, true
+}
+
+// consumesMatchingLowSurrogate reports whether a valid low-surrogate escape
+// (U+DC00-U+DFFF) immediately follows at pos, given that high is the
+// surrogate half scanEscape just found. Only a high surrogate
+// (U+D800-U+DBFF) can be validly paired; a low surrogate on its own can
+// never be the start of a pair.
+func consumesMatchingLowSurrogate(line []byte, pos int, high uint64) bool {
+	if high > 0xDBFF {
+		return false
+	}
+	if pos+6 > len(line) || line[pos] != '\\' || line[pos+1] != 'u' {
+		return false
+	}
+	low, err := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32)
+	if err != nil {
+		return false
+	}
+	return low >= 0xDC00 && low <= 0xDFFF
+}
+
+// writeHistory persists messages as the session's history.jsonl.
+//
+// The file is written through a temporary sibling and renamed, so a failed
+// write leaves any prior history intact rather than truncated. The encoding
+// matches what GetHistory parses, which is what makes an import readable by a
+// later GetHistory or ExportConversation call.
+func (a *GeminiCLIAdapter) writeHistory(metadata *SessionMetadata, messages []Message) error {
+	historyPath, err := a.getHistoryPath(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to get history path: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
+		return fmt.Errorf("failed to create history directory: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(historyPath), "history-*.jsonl")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary history file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	installed := false
+	// Clean up only when the rename did not happen. Closing and removing on
+	// the success path would be two failing syscalls against a file that no
+	// longer exists under that name.
+	defer func() {
+		if installed {
+			return
+		}
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	// Encoded straight into the temp file rather than into a bytes.Buffer
+	// first: parseImportedMessages already holds the whole decoded
+	// conversation in memory, and there is no bound on total import size, so
+	// buffering the whole re-encoded copy again before writing a single byte
+	// would double that footprint for no reason. bufio still batches the
+	// small per-record writes into few syscalls.
+	writer := bufio.NewWriter(tmp)
+	for _, msg := range messages {
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message: %w", err)
+		}
+		if _, err := writer.Write(encoded); err != nil {
+			return fmt.Errorf("failed to write history file: %w", err)
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return fmt.Errorf("failed to write history file: %w", err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("failed to write history file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close history file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("failed to set history file mode: %w", err)
+	}
+	if err := os.Rename(tmpPath, historyPath); err != nil {
+		return fmt.Errorf("failed to install history file: %w", err)
+	}
+	installed = true
+
+	return nil
+}
+
+// importedSessionName builds the tmux session name for an import.
+//
+// It carries a random suffix, not just a timestamp. CreateSession reuses an
+// existing tmux session of the same name and getHistoryPath keys storage by
+// that name, so two imports in the same second would otherwise share one
+// history file and the later one would silently replace the earlier one's
+// conversation.
+func importedSessionName() string {
+	return fmt.Sprintf("imported-%s-%s", time.Now().Format("20060102-150405"), uuid.New().String()[:8])
+}
+
+// ImportConversation imports conversation from serialized data.
+//
+// The decoded messages are written to the new session's history file, so a
+// subsequent GetHistory or ExportConversation returns what was imported.
+func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFormat) (SessionID, error) {
+	messages, err := parseImportedMessages(data, format)
+	if err != nil {
+		return "", err
+	}
+
+	// Held so rollback has the tmux name even when the store read below is
+	// what fails: CreateSession uses this name verbatim.
+	tmuxName := importedSessionName()
+
 	sessionID, err := a.CreateSession(SessionContext{
-		Name:             fmt.Sprintf("imported-%s", time.Now().Format("20060102-150405")),
+		Name:             tmuxName,
 		WorkingDirectory: os.TempDir(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// TODO: Write messages to history file
-	// For now, just return the session ID
+	metadata, err := a.sessionStore.Get(sessionID)
+	if err != nil {
+		// The session is launched and registered but its ID never reaches the
+		// caller, so this leaks exactly like a failed history write. A remote
+		// or transient store makes this reachable.
+		if rollbackErr := a.rollbackFailedImport(sessionID, tmuxName); rollbackErr != nil {
+			return "", fmt.Errorf("failed to read imported session metadata: %w (rollback also failed: %w)", err, rollbackErr)
+		}
+		return "", fmt.Errorf("failed to read imported session metadata: %w", err)
+	}
+
+	if err := a.writeHistory(metadata, messages); err != nil {
+		// The caller never receives this session's ID, so it could not
+		// terminate the tmux process or clear the store entry itself. Roll
+		// back rather than leave an unreachable session behind.
+		if rollbackErr := a.rollbackFailedImport(sessionID, metadata.TmuxName); rollbackErr != nil {
+			return "", fmt.Errorf("failed to import conversation history: %w (rollback also failed: %w)", err, rollbackErr)
+		}
+		return "", fmt.Errorf("failed to import conversation history: %w", err)
+	}
 
 	return sessionID, nil
+}
+
+// rollbackFailedImport cleans up a session created for an import whose
+// history could not be persisted.
+//
+// TerminateSession's graceful "exit" is best-effort by design: it logs a
+// send failure and still deletes the store entry, which is the right
+// behavior for a caller that holds the session ID and can retry. Here the
+// caller never received the ID, so a discarded store entry would make the
+// session permanently unreachable even if the tmux process were still
+// alive. KillSessionChecked instead confirms the process is gone (or was
+// already gone) before the store entry is removed, so a cleanup failure
+// stays observable and the record survives for another cleanup attempt
+// instead of being silently dropped.
+func (a *GeminiCLIAdapter) rollbackFailedImport(sessionID SessionID, tmuxName string) error {
+	if err := tmux.KillSessionChecked(tmuxName); err != nil {
+		return fmt.Errorf("tmux session %q could not be confirmed terminated: %w", tmuxName, err)
+	}
+	if err := a.sessionStore.Delete(sessionID); err != nil {
+		return fmt.Errorf("failed to remove session record: %w", err)
+	}
+	return nil
 }
 
 // Capabilities returns Gemini's feature capabilities.
@@ -652,24 +982,4 @@ func (a *GeminiCLIAdapter) extractLatestGeminiUUID(workingDir string) (string, e
 	}
 
 	return "", fmt.Errorf("no UUID found in --list-sessions output")
-}
-
-// splitLines splits a string into lines, preserving empty lines at the end.
-func splitLines(s string) []string {
-	if s == "" {
-		return nil
-	}
-	lines := []string{}
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	// Add remaining content (even if empty when string ends with newline)
-	if start <= len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
 }

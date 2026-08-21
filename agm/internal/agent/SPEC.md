@@ -154,6 +154,22 @@ compatibility.
 
 **AGP-53** When the Codex CLI adapter creates a tmux session for a fresh create or cold resume and private launch preparation or command delivery fails, the system shall clean up the session it created without terminating a pre-existing session.
 
+### Gemini CLI Conversation Import
+
+**AGP-63** When the Gemini CLI adapter imports a conversation, the system shall return that conversation from a subsequent history read or export of the returned session.
+
+**AGP-65** When an imported record is larger than the adapter's 8 MiB history record limit, the system shall reject it at import rather than persist a record a later history read cannot return; a record at or under that limit shall still satisfy the AGP-63 round trip.
+
+**AGP-66** When an import supplies a format the adapter cannot decode, the system shall reject it rather than create a session.
+
+**AGP-67** When an imported record is not valid UTF-8, is not decodable as a message, or decodes without a supported role, the system shall reject the import rather than persist altered or speakerless content.
+
+**AGP-68** When an imported conversation cannot be persisted, the system shall leave no session the caller cannot reach, and shall report a cleanup failure rather than discard the only remaining handle to a surviving process.
+
+**AGP-64** When the Gemini CLI adapter persists an imported conversation, the system shall present a reader either the complete imported history or the prior history, never a partial or truncated one.
+
+**AGP-69** When two imports each return a session, the system shall return each import's own conversation from a history read of its returned session, unaffected by the other import. Session creation may serialize or reject an import attempted while another is still in flight in the same process; this contract governs the histories of imports that each succeed, not simultaneous execution.
+
 ### Harness Doctor Health
 
 **AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
@@ -167,4 +183,46 @@ compatibility.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
-- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`
+- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`, `agm/internal/agent/gemini_import_history_test.go`, `agm/internal/agent/gemini_cli_adapter_test.go`
+
+### No-BDD rationale for AGP-63 through AGP-69
+
+These contracts are proven by deterministic package tests rather than by
+scenarios in `harness_parity.feature`, and the reason is that feature's own
+subject: it exercises the ACTIVE parity matrix, and AGP-02 states that
+`gemini-cli` is accepted only as a deprecated compatibility harness and is not
+in that set. AGP-05 already excludes its aliases from shared model choices for
+the same reason. A cross-harness scenario here would assert parity for a
+harness the matrix deliberately excludes.
+
+The evidence is `agm/internal/agent/gemini_import_history_test.go` and
+`gemini_cli_adapter_test.go`. The former covers the decode and persist seams
+directly: the round trip through `writeHistory` and `GetHistory`, both sides
+of the 8 MiB boundary on input and on the re-encoded record, invalid UTF-8,
+every rejected format, a malformed record, a record with no supported role,
+integer precision in metadata, replacement of prior history rather than a
+partial write, namespace distinctness across generated names, and rollback
+with the kill confirmed and unconfirmed. The latter proves the composition:
+`TestGeminiCLIAdapter_ImportConversationEndToEnd` calls `ImportConversation`
+itself against an isolated real tmux server and reads the result back through
+`GetHistory`, and
+`TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure` forces the
+write to fail after a real session is already launched, then inspects the
+session store and the real tmux server directly and requires both to hold no
+trace of the session — the error and empty ID alone would also be produced by
+a version that silently dropped the `rollbackFailedImport` call, since
+`writeHistory`'s own error already yields both. And
+`TestGeminiCLIAdapter_TwoImportsDoNotOverwriteEachOther` runs two real imports
+back to back and reads both returned sessions back, so a version that reused
+a shared tmux name or dropped the random suffix would fail here even though
+`TestImportedSessionNamesAreDistinct` only calls `importedSessionName`
+directly and the single-import tests above never run two at all. The two
+imports run sequentially rather than concurrently: tmux session creation
+holds a package-level, non-reentrant lock that rejects a second in-flight
+caller in the same process rather than queuing it, so true concurrent
+`ImportConversation` calls are not supported today — a constraint of session
+creation, not of the namespace-distinctness contract this test proves.
+
+If `gemini-cli` is ever promoted into the active parity set, AGP-12 already
+requires BDD scenarios at that point, which is the correct trigger for adding
+them rather than now.
