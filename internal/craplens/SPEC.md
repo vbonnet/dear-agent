@@ -71,6 +71,8 @@ server, or a container runtime.
   analysis seam with no cross-harness surface, so BDD would restate the unit
   tests without adding evidence.
 
+- No BDD change, with reason: this is a private analysis library with no cross-harness or user-visible surface, so a Gherkin scenario would restate the deterministic package tests without adding evidence. CRAPLENS-01 through CRAPLENS-16 are each proven by named cases in `internal/craplens/craplens_test.go`, including an end-to-end run against a throwaway repository that exercises the diff, complexity, coverage, and scoring stages together.
+
 ## Test Traceability
 
 - Unit package: `internal/craplens`
