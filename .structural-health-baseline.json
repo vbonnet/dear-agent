@@ -138,7 +138,7 @@
       "agm/cmd/agm-bus/main.go:269",
       "agm/cmd/agm-bus/main.go:380",
       "agm/cmd/agm-bus/main.go:413",
-      "agm/cmd/agm-bus/main.go:460",
+      "agm/cmd/agm-bus/main.go:471",
       "agm/cmd/agm-daemon/main.go:143",
       "agm/cmd/agm/watch.go:110",
       "agm/cmd/agm/watch.go:111",
@@ -995,6 +995,33 @@
         "zero-test": []
       },
       "reason": "The four unguarded goroutines in agm/cmd/agm-bus/main.go moved line numbers when cmdServe was split into per-adapter start functions. Same four goroutines, same absence of recover(), new path:line keys: five go func sites exist before and after, four were baselined before and four are baselined now, and the goroutine-recover total is unchanged at 29. This is a relocation, not a new finding. Adding recover() to them is tracked as a follow-up.",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1352"
+    },
+    {
+      "previous_baseline_sha256": "ef0a2e8ed6dee6e8736aa7f11d17699c89070429c3fcf973b98df59dfce1054c",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/cmd/agm-bus/main.go:471"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/cmd/agm-bus/main.go:460"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "The ACL-reloader goroutine moved again, from line 460 to 471, when watchACLReload was folded into serve to give cmdServe and the tests one shared orchestration. Still five go func sites in the file, still the same four without recover(), and the goroutine-recover total is unchanged at 29. Relocation, not a new finding.",
       "reference": "https://github.com/vbonnet/dear-agent/pull/1352"
     }
   ]
