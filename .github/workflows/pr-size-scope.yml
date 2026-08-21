@@ -196,6 +196,12 @@ jobs:
 
       - name: Verify complexity parity with gocyclo
         run: |
+          # The default shell here is `bash -e {0}`, which does not imply
+          # pipefail: without it, a failing `go test` is masked by `tee`'s
+          # own success, so this step would go green on the exact test
+          # failure it exists to catch. set -o pipefail makes the pipeline's
+          # exit status the test's, so -e can still stop the step on it.
+          set -o pipefail
           go test ./internal/craplens/ -run TestComplexityParityWithGocycloBinary -count=1 -v 2>&1 | tee /tmp/parity.log
           if grep -q -- "--- SKIP" /tmp/parity.log; then
             echo "::error::the gocyclo parity check skipped; CRAPLENS-05 was not verified"
@@ -242,8 +248,33 @@ jobs:
           REASONS: ${{ steps.scope.outputs.reasons }}
           CONCERN_REASON: ${{ steps.concern.outputs.reason }}
           CRAP_REPORT: ${{ steps.crap.outputs.crap_report }}
+          CRAP_OUTCOME: ${{ steps.crap.outcome }}
         run: |
           set -euo pipefail
+
+          # Edit the existing marker comment in place when there is one. The
+          # previous post-then-delete-the-rest order re-notified every PR
+          # subscriber on each synchronize; an edit notifies nobody, so the
+          # signal stops training people to mute the thread.
+          mapfile -t existing < <(
+            gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+              --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id'
+          )
+
+          # continue-on-error on the crap step means an operational failure
+          # (not a "clean" or "unknown" verdict, an actual crash) leaves
+          # CRAP_REPORT empty exactly like a genuinely clean diff. Composing
+          # the body from that alone would silently erase the last known
+          # finding the instant should_comment or mixed_concern also needs an
+          # update, making a failed detector look like the problem was fixed.
+          # Recover the prior section from the comment this step is about to
+          # overwrite instead of trusting a blank CRAP_REPORT on a failure.
+          prev_crap=""
+          if [ "$CRAP_OUTCOME" != "success" ] && [ "${#existing[@]}" -gt 0 ]; then
+            prev_crap="$(gh api "repos/$REPO/issues/comments/${existing[0]}" --jq .body |
+              sed -n '/^<!-- crap-section -->$/,$p' | tail -n +2)"
+          fi
+
           body=/tmp/pr-size-scope-comment.md
           {
             echo "<!-- pr-size-scope -->"
@@ -260,17 +291,13 @@ jobs:
               echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands."
               echo
             fi
-            [ -n "$CRAP_REPORT" ] && printf '%s\n' "$CRAP_REPORT"
+            echo "<!-- crap-section -->"
+            if [ -n "$CRAP_REPORT" ]; then
+              printf '%s\n' "$CRAP_REPORT"
+            elif [ -n "$prev_crap" ]; then
+              printf '%s\n' "$prev_crap"
+            fi
           } > "$body"
-
-          # Edit the existing marker comment in place when there is one. The
-          # previous post-then-delete-the-rest order re-notified every PR
-          # subscriber on each synchronize; an edit notifies nobody, so the
-          # signal stops training people to mute the thread.
-          mapfile -t existing < <(
-            gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
-              --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id'
-          )
 
           if [ "${#existing[@]}" -gt 0 ]; then
             gh api --method PATCH "repos/$REPO/issues/comments/${existing[0]}" \

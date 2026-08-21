@@ -136,6 +136,35 @@ func TestAllFilesAdded(t *testing.T) {
 	}
 }
 
+// TestInTouchedPackage pins the scope workingTreeIsClean narrows an ignored
+// path against: only a Go file directly inside one of the touched package
+// directories can affect that package's `go test`, so an ignored path
+// elsewhere — a build artifact left by `make preflight`, for one — must not
+// match regardless of extension or nesting.
+func TestInTouchedPackage(t *testing.T) {
+	pkgs := []string{"internal/craplens", "."}
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "inside a touched package", path: "internal/craplens/coverage_test.go", want: true},
+		{name: "inside the root package", path: "main.go", want: true},
+		{name: "untouched package", path: "internal/other/x.go", want: false},
+		{name: "nested nonexistent package below a touched one", path: "internal/craplens/sub/x.go", want: false},
+		{name: "build artifact outside every touched package", path: "build/agm", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := inTouchedPackage(tc.path, pkgs); got != tc.want {
+				t.Errorf("inTouchedPackage(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestIsGeneratedSource pins detection by the standard toolchain marker rather
 // than by filename. CRAPLENS-02 excludes generated files, and this repository
 // contains generated source whose name matches no generated-looking suffix.

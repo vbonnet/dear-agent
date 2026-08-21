@@ -81,10 +81,19 @@ type Function struct {
 	Name string
 	// Line is the line the declaration starts on.
 	Line int
+	// StartCol is the column Line starts at. Coverage intersects a profile
+	// block's position, not just its line, against the declaration's span: two
+	// function literals can share a line — gofmt preserves that shape for
+	// `var A, B = func() {...}, func() {...}` — and a line-only test would
+	// double-count a block belonging to either one under both functions.
+	StartCol int
 	// EndLine is the line the declaration ends on. Coverage is derived by
-	// intersecting profile blocks with the span from Line to EndLine, so an
-	// unset EndLine would let a neighbouring function's blocks leak in.
+	// intersecting profile blocks with the span from (Line, StartCol) to
+	// (EndLine, EndCol), so an unset EndLine would let a neighbouring
+	// function's blocks leak in.
 	EndLine int
+	// EndCol is the column EndLine ends at.
+	EndCol int
 	// Complexity is the function's cyclomatic complexity.
 	Complexity int
 	// Coverage is the fraction of the function's statements exercised by the
@@ -182,7 +191,7 @@ func Analyze(ctx context.Context, repoDir, base, head string, threshold float64)
 	// A different revision, or the same revision with uncommitted or
 	// untracked changes, makes the two disagree: an untracked test can make an
 	// uncovered function look covered.
-	if !headIsCheckedOut(ctx, repoDir, head) || !workingTreeIsClean(ctx, repoDir) {
+	if !headIsCheckedOut(ctx, repoDir, head) || !workingTreeIsClean(ctx, repoDir, pkgs) {
 		return Report{
 			Threshold:        threshold,
 			Changed:          len(funcs),

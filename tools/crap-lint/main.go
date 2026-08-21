@@ -112,11 +112,14 @@ func unflaggedSummary(r craplens.Report) string {
 // cannot terminate the block early and inject workflow outputs.
 func writeGitHubOutput(w io.Writer, r craplens.Report) {
 	fmt.Fprintf(w, "crap_flagged=%t\n", r.Flagged())
-	// Separate from the verdict: a run that measured nothing is not a clean
-	// run, and the workflow must not delete a standing comment on the strength
-	// of it. Emitted alongside rather than folded into crap_flagged, because
-	// an unmeasured run also has nothing to say.
-	fmt.Fprintf(w, "crap_unknown=%t\n", r.CheckoutMismatch || len(r.Unknown) > 0)
+	// Separate from the verdict: a run that measured nothing, or left some
+	// changed functions unmeasured within an otherwise-measured package (a
+	// build-tagged file excluded on this runner, say), is not a clean run,
+	// and the workflow must not delete a standing comment on the strength of
+	// it. Emitted alongside rather than folded into crap_flagged, because an
+	// unmeasured run also has nothing to say. Matches unflaggedSummary, which
+	// already surfaces r.Unmeasured in the prose form.
+	fmt.Fprintf(w, "crap_unknown=%t\n", r.CheckoutMismatch || len(r.Unknown) > 0 || r.Unmeasured > 0)
 	body := r.Render()
 	if body == "" {
 		fmt.Fprintln(w, "crap_report=")

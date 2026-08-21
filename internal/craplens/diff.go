@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -366,13 +367,20 @@ func treeHasGoFiles(ctx context.Context, repoDir, rev, dir string) bool {
 }
 
 // workingTreeIsClean reports whether the checkout has no staged, unstaged, or
-// untracked changes.
+// untracked changes, and no ignored Go source sitting inside a touched
+// package that `go test` would still compile into it.
 //
 // Coverage is measured by running tests against the checkout while function
 // spans and complexity come from the committed head tree. With a dirty tree
 // those two disagree: an untracked test can make an uncovered function look
 // covered, and an uncommitted edit can shift the lines a profile block maps to.
-func workingTreeIsClean(ctx context.Context, repoDir string) bool {
+//
+// An ignored path outside every touched package — `make preflight`'s
+// `build/` directory, for one — cannot affect either tree and is not treated
+// as dirty, or the local lens this repository documents would refuse to
+// measure anything for a developer who ran that target once and left the
+// directory in place.
+func workingTreeIsClean(ctx context.Context, repoDir string, pkgs []string) bool {
 	ctx, cancel := context.WithTimeout(ctx, diffTimeout)
 	defer cancel()
 
@@ -388,7 +396,30 @@ func workingTreeIsClean(ctx context.Context, repoDir string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(out)) == ""
+
+	for line := range strings.SplitSeq(strings.TrimRight(string(out), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		if len(line) < 4 {
+			return false // malformed porcelain output; do not risk a false clean
+		}
+		status, p := line[:2], strings.TrimSpace(line[3:])
+		if status != "!!" {
+			return false // a real staged, unstaged, or untracked change
+		}
+		if !strings.HasSuffix(p, ".go") || !inTouchedPackage(p, pkgs) {
+			continue // ignored, and cannot affect a touched package's tests
+		}
+		return false
+	}
+	return true
+}
+
+// inTouchedPackage reports whether a repo-relative path sits directly inside
+// one of the given package directories.
+func inTouchedPackage(p string, pkgs []string) bool {
+	return slices.Contains(pkgs, path.Dir(p))
 }
 
 // headIsCheckedOut reports whether the working tree is at the head revision.

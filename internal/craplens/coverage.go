@@ -12,6 +12,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -22,6 +23,11 @@ import (
 // step timing out, the comment steps never run and the advisory signal is lost
 // entirely rather than degraded.
 const coverageTimeout = 10 * time.Minute
+
+// processWaitDelay bounds how long Wait keeps this process alive after the
+// coverage run's own process group has been signalled, closing the captured
+// pipes forcibly once it elapses. See protectGoTestProcessTree.
+const processWaitDelay = time.Second
 
 // maxCapturedOutput bounds each captured stream from the coverage run. The
 // verdict events this package reads are small; the rest is test chatter.
@@ -53,7 +59,9 @@ func (b *boundedBuffer) String() string { return b.buf.String() }
 // file, how many statements it holds, and how many times it ran.
 type profileBlock struct {
 	startLine int
+	startCol  int
 	endLine   int
+	endCol    int
 	numStmt   int
 	count     int
 }
@@ -73,7 +81,7 @@ type coverageData struct {
 
 // functionCoverage returns the fraction of a function's statements that the
 // package's tests exercised, derived by intersecting the coverage profile's
-// blocks with the function's line span.
+// blocks with the function's declaration span.
 //
 // A function containing no counted statements is reported as fully covered:
 // there is nothing in it that a test could fail to reach, so scoring it as
@@ -88,7 +96,7 @@ func (c coverageData) functionCoverage(f Function) float64 {
 
 	total, covered := 0, 0
 	for _, b := range blocks {
-		if b.startLine < f.Line || b.startLine > end {
+		if !blockStartsWithin(b, f.Line, f.StartCol, end, f.EndCol) {
 			continue
 		}
 		total += b.numStmt
@@ -100,6 +108,30 @@ func (c coverageData) functionCoverage(f Function) float64 {
 		return 1
 	}
 	return float64(covered) / float64(total)
+}
+
+// blockStartsWithin reports whether a profile block's start position falls
+// within a declaration's span from (startLine, startCol) to (endLine, endCol).
+//
+// Comparing by line alone would double-count a block on a line two function
+// literals share — a shape gofmt preserves for
+// `var A, B = func() {...}, func() {...}` — crediting both functions with
+// whichever one's test happened to run. Column only matters on the two
+// boundary lines: any block strictly between them belongs to this function
+// regardless of its column. A zero column (a caller that never populated it)
+// disables that check rather than rejecting the block, matching the line-only
+// behavior this replaces.
+func blockStartsWithin(b profileBlock, startLine, startCol, endLine, endCol int) bool {
+	if b.startLine < startLine || b.startLine > endLine {
+		return false
+	}
+	if b.startLine == startLine && startCol > 0 && b.startCol > 0 && b.startCol < startCol {
+		return false
+	}
+	if b.startLine == endLine && endCol > 0 && b.startCol > 0 && b.startCol > endCol {
+		return false
+	}
+	return true
 }
 
 // collectCoverage runs the package tests under coverage and parses the result.
@@ -143,6 +175,7 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	stderr := &boundedBuffer{limit: maxCapturedOutput}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	protectGoTestProcessTree(cmd)
 
 	// A failing test still writes a profile for the packages that passed, so a
 	// non-zero exit is expected and not fatal: this signal reports on what
@@ -172,6 +205,35 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	}
 
 	return data
+}
+
+// protectGoTestProcessTree bounds how long a cancelled coverage run can keep
+// this process alive.
+//
+// cmd.Stdout and cmd.Stderr above are not *os.File, so Wait copies from them
+// in background goroutines that only stop once the write ends close. A test
+// that leaves a descendant process holding those inherited pipes survives the
+// context's own cancellation of the direct `go` process, so without a bound
+// here Wait would keep blocking until the enclosing CI job's own timeout
+// killed everything, losing the advisory comment instead of degrading one
+// package. Setpgid plus killing the negated PID reaches the whole process
+// group rather than only the immediate child; WaitDelay is the backstop that
+// still applies if a descendant escaped the group entirely. Matches
+// cmd/test-affected's protectGoCommandProcessTree, which runs `go test` under
+// the same constraint.
+func protectGoTestProcessTree(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil || cmd.Process.Pid <= 0 {
+			return nil
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	cmd.WaitDelay = processWaitDelay
 }
 
 // testEvent is the subset of `go test -json` output this package reads.
@@ -419,17 +481,19 @@ func modulePath(ctx context.Context, repoDir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// parseSpan reads a profile entry's line span, statement count, and hit count.
+// parseSpan reads a profile entry's position span, statement count, and hit
+// count. The column half of each `<line>.<column>` pair is kept, not just the
+// line, so functionCoverage can tell apart two functions that share a line.
 func parseSpan(span, counts string) (profileBlock, bool) {
 	startPart, endPart, ok := strings.Cut(span, ",")
 	if !ok {
 		return profileBlock{}, false
 	}
-	startLine, ok := leadingInt(startPart)
+	startLine, startCol, ok := parsePos(startPart)
 	if !ok {
 		return profileBlock{}, false
 	}
-	endLine, ok := leadingInt(endPart)
+	endLine, endCol, ok := parsePos(endPart)
 	if !ok {
 		return profileBlock{}, false
 	}
@@ -446,17 +510,26 @@ func parseSpan(span, counts string) (profileBlock, bool) {
 	if err != nil {
 		return profileBlock{}, false
 	}
-	return profileBlock{startLine: startLine, endLine: endLine, numStmt: numStmt, count: count}, true
+	return profileBlock{
+		startLine: startLine, startCol: startCol,
+		endLine: endLine, endCol: endCol,
+		numStmt: numStmt, count: count,
+	}, true
 }
 
-// leadingInt reads the line number from a `<line>.<column>` pair.
-func leadingInt(s string) (int, bool) {
-	lineStr, _, _ := strings.Cut(s, ".")
-	n, err := strconv.Atoi(lineStr)
+// parsePos reads a `<line>.<column>` pair. A missing column defaults to 0
+// rather than rejecting the entry, matching this parser's existing tolerance
+// for profile lines slightly outside the documented format.
+func parsePos(s string) (line, col int, ok bool) {
+	lineStr, colStr, hasCol := strings.Cut(s, ".")
+	line, err := strconv.Atoi(lineStr)
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
-	return n, true
+	if hasCol {
+		col, _ = strconv.Atoi(colStr)
+	}
+	return line, col, true
 }
 
 // unmeasured returns a coverageData in which every package is unknown. It is
