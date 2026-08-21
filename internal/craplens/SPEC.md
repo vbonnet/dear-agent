@@ -62,15 +62,7 @@ server, or a container runtime.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`,
-  whose repository-implementation coverage scenario lists `internal/craplens` and
-  enforces that it declares a co-located SPEC. That scenario governs SPEC
-  presence, not the CRAPLENS/CRAPLINT behaviors themselves.
-- Test consequence: the behaviors in this contract are proven by the
-  deterministic package tests below rather than by Gherkin. They are a private
-  analysis seam with no cross-harness surface, so BDD would restate the unit
-  tests without adding evidence.
-
+- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
 - No BDD change, with reason: this is a private analysis library with no cross-harness or user-visible surface, so a Gherkin scenario would restate the deterministic package tests without adding evidence. CRAPLENS-01 through CRAPLENS-16 are each proven by named cases in `internal/craplens/craplens_test.go`, including an end-to-end run against a throwaway repository that exercises the diff, complexity, coverage, and scoring stages together.
 
 ## Test Traceability
