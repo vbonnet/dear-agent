@@ -64,6 +64,18 @@ jobs:
             exit 1
           fi
           check_evidence_cutoff_epoch=$(( $(date -u +%s) - CHECK_EVIDENCE_MAX_AGE_DAYS * 86400 ))
+          check_evidence_cutoff_iso=$(date -u -d "@${check_evidence_cutoff_epoch}" +%Y-%m-%dT%H:%M:%SZ)
+          # Bounds the default-branch commit walk-back below: each candidate
+          # costs its own timeout(30s)-bounded check-runs API call, and this
+          # job's own timeout-minutes is 15 and loops over every managed
+          # repository, not just one. A cap of 20 could alone consume 10
+          # minutes per repo on top of the pre-existing 20-PR-head walk's
+          # own worst case — kept small enough that even a repo needing the
+          # full walk leaves the rest of the job (and any other repos in
+          # this run) real headroom, at the cost of only catching evidence
+          # that lags the tip by a handful of commits rather than the full
+          # declared window on a pathological repo.
+          branch_walk_max_commits=5
 
           record_finding() {
             finding_count=$((finding_count + 1))
@@ -98,46 +110,11 @@ jobs:
                 exit 1
               fi
             else
-              if ! expected_policy=$(jq -cn --argjson cfg "$repo_config" '
-                  (if ($cfg | has("required_check_identities")) and $cfg.required_check_identities != null then
-                     $cfg.required_check_identities
-                   else
-                     (if ($cfg | has("required_checks")) and $cfg.required_checks != null then
-                        $cfg.required_checks
-                      else []
-                      end) as $legacy_checks
-                     | [$legacy_checks[] | {context: ., integration_id: null}]
-                   end)
-                  | map({context, integration_id: (if has("integration_id") then .integration_id else null end)}) as $checks
-                  | {
-                      name: "branch-protection",
-                      target: "branch",
-                      enforcement: "active",
-                      bypass_actors: [],
-                      conditions: {ref_name: {include: ["~DEFAULT_BRANCH"], exclude: []}},
-                      rules: ([
-                        {type: "deletion"},
-                        {type: "non_fast_forward"},
-                        {type: "required_linear_history"},
-                        {type: "pull_request", parameters: {
-                          required_approving_review_count: 0,
-                          dismiss_stale_reviews_on_push: true,
-                          require_code_owner_review: false,
-                          require_last_push_approval: false,
-                          required_review_thread_resolution: true,
-                          required_reviewers: [],
-                          allowed_merge_methods: ["squash"]
-                        }}
-                      ] + if ($checks | length) > 0 then [{
-                        type: "required_status_checks",
-                        parameters: {
-                          strict_required_status_checks_policy: false,
-                          do_not_enforce_on_create: false,
-                          required_status_checks: $checks
-                        }
-                      }] else [] end)
-                    }
-                '); then
+              # Policy construction lives in .github/rulesets/generic-repo-
+              # expected-policy.jq (tested by tests/jq/runner_test.go) rather
+              # than inline here, per the 20-line bash policy in
+              # .github/workflows/AGENTS.md.
+              if ! expected_policy=$(jq -c -f .github/rulesets/generic-repo-expected-policy.jq <<<"$repo_config"); then
                 record_finding "private inventory policy is malformed"
                 continue
               fi
@@ -278,6 +255,61 @@ jobs:
                   '{expected: $expected, produced: $produced}' \
                   | jq -ce -f .github/rulesets/missing-required-checks.jq); then
                 evidence_error="required-check production evidence is malformed"
+              fi
+            fi
+
+            # A required check that last produced evidence on an earlier
+            # default-branch commit — not the current tip — still counts as
+            # recent: walk back through default-branch commits within the
+            # cutoff window before concluding evidence is missing.
+            if [[ -z "$evidence_error" && "$(jq -r 'length' <<<"$missing_checks")" -gt 0 ]]; then
+              if ! branch_commit_pages=$(timeout 30 gh api --paginate --slurp \
+                  "repos/${slug}/commits?sha=${default_branch_path}&since=${check_evidence_cutoff_iso}&per_page=100" 2>/dev/null); then
+                evidence_error="required-check production evidence is unavailable"
+              elif ! branch_refs=$(jq -ce --argjson cap "$branch_walk_max_commits" '
+                  if type == "array"
+                      and all(.[];
+                        type == "array"
+                        and all(.[]; type == "object" and (.sha | type) == "string" and (.sha | length) > 0))
+                  # The commits API returns each page newest-first and
+                  # --paginate --slurp preserves page order, so slicing
+                  # before deduping keeps the cap on the $cap MOST RECENT
+                  # commits. unique() sorts, so doing it first (as an
+                  # earlier revision did) would cap an arbitrary
+                  # lexicographic subset instead (gemini review on #1349).
+                  then flatten(1) | map(.sha) | .[0:$cap] | unique
+                  else error("unexpected paginated commits response")
+                  end
+                ' <<<"$branch_commit_pages"); then
+                evidence_error="required-check production evidence is malformed"
+              else
+                # Each iteration issues its own timeout-bounded API call
+                # (collect_check_runs), so an unbounded commit count here
+                # could exhaust the job's timeout on a busy repository before
+                # a genuinely-missing check is ever concluded. branch_refs is
+                # already capped to branch_walk_max_commits above.
+                while IFS= read -r candidate_ref; do
+                  if collect_check_runs "$candidate_ref"; then
+                    :
+                  else
+                    case $? in
+                      1) evidence_error="required-check production evidence is unavailable" ;;
+                      *) evidence_error="required-check production evidence is malformed" ;;
+                    esac
+                    break
+                  fi
+                  if ! missing_checks=$(jq -cn \
+                      --argjson expected "$required_checks" \
+                      --argjson produced "$produced_checks" \
+                      '{expected: $expected, produced: $produced}' \
+                      | jq -ce -f .github/rulesets/missing-required-checks.jq); then
+                    evidence_error="required-check production evidence is malformed"
+                    break
+                  fi
+                  if [[ "$(jq -r 'length' <<<"$missing_checks")" -eq 0 ]]; then
+                    break
+                  fi
+                done < <(jq -r '.[]' <<<"$branch_refs")
               fi
             fi
 

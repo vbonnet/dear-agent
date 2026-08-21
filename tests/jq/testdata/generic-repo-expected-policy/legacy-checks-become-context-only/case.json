@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/generic-repo-expected-policy.jq",
+  "description": "Legacy required_checks (plain context strings, no required_check_identities) normalize to context-only identities with a null integration_id, the DECL-RULESET-04 fallback for repositories mid-migration to the structured field."
+}

@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/generic-repo-expected-policy.jq",
+  "description": "A repository with no configured checks (required_checks: []) omits the required_status_checks rule entirely rather than emitting an empty, no-op contexts list."
+}

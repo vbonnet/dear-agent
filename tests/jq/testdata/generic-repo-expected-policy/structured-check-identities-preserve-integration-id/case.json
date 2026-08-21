@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/generic-repo-expected-policy.jq",
+  "description": "required_check_identities is authoritative when present: each check's context and integration_id (including a legitimate context-only null) pass through unchanged, and strict_required_status_checks_policy is true to match infra/managed_repos.tf regardless of repo."
+}

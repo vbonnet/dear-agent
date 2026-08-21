@@ -42,6 +42,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -137,7 +138,8 @@ func runWithDependencies(args []string, deps runDependencies) int {
 
 	repos, err := resolveRepositories(ctx, opts)
 	if err != nil {
-		return fail("%v", err)
+		fmt.Fprintf(deps.stderr, "merge-audit: %v\n", err)
+		return 1
 	}
 
 	violations, auditErrors := auditRepositories(ctx, repos, opts, deps.auditRepo)
@@ -178,7 +180,8 @@ func parseOptions(args []string, stderr io.Writer) (options, int) {
 		opts.repos = splitCSV(*reposCSV)
 	}
 	if opts.days <= 0 {
-		return options{}, fail("--days must be a positive integer, got %d", opts.days)
+		fmt.Fprintf(stderr, "merge-audit: --days must be a positive integer, got %d\n", opts.days)
+		return options{}, 1
 	}
 	return opts, 0
 }
@@ -243,7 +246,8 @@ func finishAudit(violations []Violation, auditErrors []string, opts options, dep
 		return 1
 	}
 	if err := report(violations, opts, deps.stdout, deps.stderr, deps.persistViolations); err != nil {
-		return fail("%v", err)
+		fmt.Fprintf(deps.stderr, "merge-audit: %v\n", err)
+		return 1
 	}
 	return 0
 }
@@ -267,31 +271,43 @@ func auditRepo(ctx context.Context, repo string, since time.Time, rulesetPath st
 	})
 }
 
+// auditRepoWithDependencies runs the three per-repo evidence sources
+// (merged-PR review/checks, direct pushes, ruleset drift) independently.
+// Per MAC-09, a failure in one evidence source must not suppress findings
+// from another: every source still runs and every finding it returns is
+// retained, even when an earlier source in this same function already
+// failed. The combined error (nil if every source succeeded) marks the
+// overall audit incomplete without discarding what was gathered.
 func auditRepoWithDependencies(ctx context.Context, repo string, since time.Time, rulesetPath string, deps repoAuditDependencies) ([]Violation, error) {
+	var out []Violation
+	var errs []error
+
 	branch, err := deps.defaultBranch(ctx, repo)
 	if err != nil {
-		return nil, fmt.Errorf("default branch: %w", err)
-	}
+		// Ruleset drift does not depend on the default branch name, so it
+		// still runs even when this resolution fails.
+		errs = append(errs, fmt.Errorf("default branch: %w", err))
+	} else {
+		prVs, err := deps.auditMergedPRs(ctx, repo, branch, since)
+		out = append(out, prVs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
 
-	var out []Violation
-	prVs, err := deps.auditMergedPRs(ctx, repo, branch, since)
-	out = append(out, prVs...)
-	if err != nil {
-		return out, err
-	}
-
-	pushVs, err := deps.auditDirectPushes(ctx, repo, branch, since)
-	out = append(out, pushVs...)
-	if err != nil {
-		return out, err
+		pushVs, err := deps.auditDirectPushes(ctx, repo, branch, since)
+		out = append(out, pushVs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	rulesetVs, err := deps.auditRulesetDrift(ctx, repo, rulesetPath)
 	out = append(out, rulesetVs...)
 	if err != nil {
-		return out, err
+		errs = append(errs, err)
 	}
-	return out, nil
+
+	return out, errors.Join(errs...)
 }
 
 // auditMergedPRs runs checks 1 (unresolved threads) and 2 (incomplete checks)
@@ -390,7 +406,7 @@ func auditRulesetDrift(ctx context.Context, repo, rulesetPath string) ([]Violati
 	if err != nil {
 		return nil, fmt.Errorf("parse canonical ruleset %s: %w", localPath, err)
 	}
-	if err := validateCanonicalRuleset(expected); err != nil {
+	if err := validateCanonicalRuleset(expected, repo); err != nil {
 		return nil, fmt.Errorf("validate canonical ruleset %s: %w", localPath, err)
 	}
 	live, err := liveRuleset(ctx, repo, expected.Name)
@@ -863,8 +879,18 @@ func parseRulesetSummaryPages(raw []byte) ([]rulesetSummary, error) {
 	return rulesets, nil
 }
 
+// isDearAgentRepo reports whether repo is dear-agent itself, the only
+// repository whose canonical ruleset declaration is checked in and therefore
+// held to dear-agent-specific invariants (fixed ruleset ID, mandatory
+// GitHub Actions integration ID on required checks). Other managed fleet
+// repositories are inventory-owned and legitimately use context-only checks
+// (see infra/variables.tf required_checks vs required_check_identities).
+func isDearAgentRepo(repo string) bool {
+	return strings.EqualFold(strings.TrimSpace(repo), "vbonnet/dear-agent")
+}
+
 func selectExpectedRuleset(repo, expectedName string, rulesets []rulesetSummary) (rulesetSummary, error) {
-	isDearAgent := strings.EqualFold(strings.TrimSpace(repo), "vbonnet/dear-agent")
+	isDearAgent := isDearAgentRepo(repo)
 	var matches []rulesetSummary
 	for _, ruleset := range rulesets {
 		if isDearAgent {
@@ -1002,9 +1028,4 @@ func homeDir() string {
 		return h
 	}
 	return "."
-}
-
-func fail(format string, a ...any) int {
-	fmt.Fprintf(os.Stderr, "merge-audit: "+format+"\n", a...)
-	return 1
 }
