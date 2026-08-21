@@ -63,7 +63,7 @@ func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreaker
 		circuitbreaker.WithProcCounter(pc),
 		circuitbreaker.WithBrakeReader(br),
 		circuitbreaker.WithProviderQuota(circuitbreaker.DefaultProviderQuotaGate(
-			func(m string) string { return agent.ModelFamilyForHarnessModel(harness, m) }), model),
+			providerQuotaFamilyResolver(harness)), model),
 	}
 	normalizedBrakeOverrideReason := ""
 	if brakeOverrideReason != "" {
@@ -133,7 +133,7 @@ func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreaker
 		// through). An empty model leaves the quota gate off entirely, so
 		// there is nothing to record.
 		if model != "" {
-			family := agent.ModelFamilyForHarnessModel(harness, model)
+			family := providerQuotaFamilyResolver(harness)(model)
 			if family != "" {
 				if err := circuitbreaker.RecordProviderQuotaAdmission(family, time.Now()); err != nil {
 					debug.Log("Warning: failed to record provider-quota admission: %v", err)
@@ -142,6 +142,30 @@ func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreaker
 		}
 	}
 	return admission, nil
+}
+
+// providerQuotaFamilyResolver returns the family resolver the provider-quota
+// gate uses for one harness, honoring harnesses whose provider credentials
+// are not the CLI-subscription accounts CodexBar meters.
+//
+// pi-cli is documented as exactly that case: "Pi does not expose a provider
+// quota/rate-limit API, so those fields are reported as unavailable rather
+// than populated with Claude-specific values" (agm/docs/PI-HARNESS.md). Pi
+// resolves its own model aliases against its own independently configured
+// provider account, so ModelFamilyForHarnessModel's answer — say,
+// "anthropic" for Pi's default "sonnet" — names the vendor Pi's alias
+// evokes, not the CLI subscription CodexBar actually reads. Attributing a
+// Pi spawn to that unrelated reading would let it gate on (or dodge)
+// headroom that has nothing to do with what Pi is actually about to spend
+// (codex review on #1218). Returning "" here is the same signal the gate
+// already treats as "cannot evaluate": SpawnGate.AllowSpawn fails open and
+// marks the decision Evaluated=false, which is precisely "unavailable"
+// rather than a Claude-specific value.
+func providerQuotaFamilyResolver(harness string) func(model string) string {
+	if agent.NormalizeHarnessName(harness) == "pi-cli" {
+		return func(string) string { return "" }
+	}
+	return func(m string) string { return agent.ModelFamilyForHarnessModel(harness, m) }
 }
 
 func finalizeAdmissionBrakeOverride(

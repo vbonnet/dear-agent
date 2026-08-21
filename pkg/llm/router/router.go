@@ -190,6 +190,12 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 // GenerateForModel bypasses role lookup and routes a literal model id
 // through the resolver + circuit breaker. Used by AIExecutor when a
 // workflow node specifies AINode.Model directly.
+//
+// It records the same quota verdict Generate does (LLM-ROUTER-16):
+// GenerateForModel is the only path an explicit-model workflow node takes,
+// so skipping quota metadata here would leave every cost record for such a
+// node silently missing the guardrail decision that applied — invisible
+// rather than merely absent (codex review on #1218).
 func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *provider.GenerateRequest) (*provider.GenerateResponse, error) {
 	if req == nil {
 		return nil, errors.New("router: request cannot be nil")
@@ -205,6 +211,12 @@ func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *prov
 	if err != nil {
 		return nil, err
 	}
+	decision := r.quota.DecisionForModel(modelID)
+
+	// No quota fields on the request, for the same reason Generate omits
+	// them: this *callReq is what CircuitBreaker.GenerateWithSource
+	// forwards verbatim to its own internal fallback, and a provider such
+	// as OpenAI echoes request metadata back into its response.
 	callReq := *req
 	callReq.Model = model
 	callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
@@ -217,12 +229,20 @@ func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *prov
 	if resp == nil {
 		return nil, fmt.Errorf("router: provider %s/%s returned a nil response", family, model)
 	}
-	resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+	// The verdict was computed for modelID, the candidate actually
+	// requested; a circuit-breaker fallback serves a different provider,
+	// so — as in Generate — omit it there rather than mislabel the
+	// fallback's response with it.
+	quotaMD := quotaMetadata(decision)
+	if source.Fallback {
+		quotaMD = nil
+	}
+	resp.Metadata = mergeMetadata(resp.Metadata, mergeMetadata(map[string]any{
 		"router_provider":        source.Provider,
 		"router_model":           source.Model,
 		"router_candidate_model": modelID,
 		"router_fallback":        source.Fallback,
-	})
+	}, quotaMD))
 	return resp, nil
 }
 

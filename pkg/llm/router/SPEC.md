@@ -40,9 +40,9 @@ attempt history.
 
 **LLM-ROUTER-14** When a quota meter is configured, the system shall order a role's candidates by remaining provider quota before attempting them, and shall retain every configured candidate.
 
-**LLM-ROUTER-15** When a quota meter is absent or reports no usable reading for a candidate, the system shall attempt candidates in their configured order and shall omit quota fields from request and response metadata.
+**LLM-ROUTER-15** When a quota meter is absent or reports no usable reading for a candidate, the system shall attempt candidates in their configured order and shall omit quota fields from response metadata.
 
-**LLM-ROUTER-16** When a quota-classified candidate is attempted, the system shall record its quota class, family, remaining percentage, and constraining window in request and response metadata.
+**LLM-ROUTER-16** When a quota-classified candidate is attempted — through a role's candidate chain or through a literal model id — the system shall record its quota class, family, remaining percentage, and constraining window in response metadata, and shall never place quota fields in request metadata: a circuit-breaker fallback forwards the same request object, and a provider that echoes request metadata into its response would otherwise leak the original candidate's verdict onto the fallback's response.
 
 ## BDD Traceability
 

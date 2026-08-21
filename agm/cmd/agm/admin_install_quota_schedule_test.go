@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/xml"
 	"strings"
 	"testing"
 )
@@ -59,5 +61,53 @@ func TestQuotaRefreshPlistTemplateSubstitutesStateFilePath(t *testing.T) {
 	}
 	if !strings.Contains(content, "<string>"+statePath+"</string>") {
 		t.Errorf("rendered plist does not carry the resolved state path %q", statePath)
+	}
+}
+
+// A home directory, binary path, or resolved state path can legitimately
+// contain an XML metacharacter (an "R&D" directory, say). Substituting it
+// raw would produce a malformed plist that launchctl load silently fails
+// to parse; xmlEscapeText must keep every substituted <string> element
+// well-formed (codex review on #1218).
+//
+// This checks the substituted elements directly rather than parsing the
+// whole document: the template's own descriptive header comment is free
+// text, not installer-controlled data, and Go's strict XML parser rejects
+// even a literal "--" inside a comment — a rule real plist tooling
+// (CFPropertyList/launchctl) does not enforce and this fix has no bearing
+// on.
+func TestQuotaRefreshPlistTemplateEscapesXMLMetacharactersInSubstitutions(t *testing.T) {
+	raw, err := schedulesFS.ReadFile(quotaPlistFile)
+	if err != nil {
+		t.Fatalf("read embedded plist template: %v", err)
+	}
+
+	const home = `/Users/A&D <ops>/test`
+	const bin = `/Users/A&D <ops>/go/bin/agm`
+	const statePath = `/Users/A&D <ops>/.local/state/dear-agent/quota/latest.json`
+
+	content := strings.ReplaceAll(string(raw), "__USER_HOME__", xmlEscapeText(home))
+	content = strings.ReplaceAll(content, "__AGM_BINARY__", xmlEscapeText(bin))
+	content = strings.ReplaceAll(content, "__STATE_FILE__", xmlEscapeText(statePath))
+
+	if strings.Contains(content, home) {
+		t.Error("the unescaped home path leaked into the rendered plist")
+	}
+	wantEscaped := xml.CharData(bin)
+	var escaped bytes.Buffer
+	if err := xml.EscapeText(&escaped, wantEscaped); err != nil {
+		t.Fatalf("xml.EscapeText: %v", err)
+	}
+	if !strings.Contains(content, "<string>"+escaped.String()+"</string>") {
+		t.Errorf("rendered plist does not carry the escaped binary path as a well-formed <string> element:\n%s", content)
+	}
+}
+
+func TestXMLEscapeTextEscapesMetacharacters(t *testing.T) {
+	got := xmlEscapeText(`A&D <ops> "quoted"`)
+	for _, bad := range []string{"&D", "<ops>", `"quoted"`} {
+		if strings.Contains(got, bad) {
+			t.Errorf("xmlEscapeText result still contains unescaped %q: %s", bad, got)
+		}
 	}
 }

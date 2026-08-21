@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,6 +62,16 @@ func quotaPlistPath(homeDir string) string {
 	return filepath.Join(homeDir, "Library", "LaunchAgents", quotaPlistLabel+".plist")
 }
 
+// xmlEscapeText escapes s for placement inside an XML text node (a plist
+// <string> element's content), so a value containing &, <, >, or a quote
+// cannot break the surrounding markup. xml.EscapeText never returns an
+// error for a bytes.Buffer target, so the error is intentionally ignored.
+func xmlEscapeText(s string) string {
+	var buf bytes.Buffer
+	_ = xml.EscapeText(&buf, []byte(s))
+	return buf.String()
+}
+
 func runInstallQuotaSchedule(_ *cobra.Command, _ []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -88,10 +100,16 @@ func runInstallQuotaSchedule(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("read embedded plist template: %w", err)
 	}
 
+	// XML-escape every substituted value: each is a filesystem path that
+	// can legitimately contain an XML metacharacter (a home directory
+	// under "R&D", say). Substituting it raw produces a malformed plist —
+	// launchctl load then fails, and this installer would otherwise still
+	// report success while pointing an operator at the same invalid file
+	// (codex review on #1218).
 	content := string(tmpl)
-	content = strings.ReplaceAll(content, "__USER_HOME__", homeDir)
-	content = strings.ReplaceAll(content, "__AGM_BINARY__", agmBin)
-	content = strings.ReplaceAll(content, "__STATE_FILE__", statePath)
+	content = strings.ReplaceAll(content, "__USER_HOME__", xmlEscapeText(homeDir))
+	content = strings.ReplaceAll(content, "__AGM_BINARY__", xmlEscapeText(agmBin))
+	content = strings.ReplaceAll(content, "__STATE_FILE__", xmlEscapeText(statePath))
 
 	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
 	if err := os.MkdirAll(launchAgentsDir, 0o755); err != nil {

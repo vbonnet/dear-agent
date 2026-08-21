@@ -79,10 +79,22 @@ func TestRequireAuditedCodexBarVersionAllowsTheFloorAndAbove(t *testing.T) {
 	}
 }
 
-func TestRequireAuditedCodexBarVersionAllowsAnEmptyOrNilVersion(t *testing.T) {
-	if err := requireAuditedCodexBarVersion(&quota.Snapshot{}); err != nil {
-		t.Errorf("empty version: want no error (no evidence must not gate), got %v", err)
+// An empty SourceVersion must refuse to publish, not pass through. This is
+// the one place in the package where "no evidence" must NOT default to
+// "don't gate": the whole point of the check is to keep an unauditable
+// build's readings from ever reaching the published state at all, so
+// missing evidence of meeting the floor must be treated the same as
+// evidence of missing it (codex review on #1218, second pass).
+func TestRequireAuditedCodexBarVersionRefusesAnEmptyVersion(t *testing.T) {
+	if err := requireAuditedCodexBarVersion(&quota.Snapshot{}); err == nil {
+		t.Fatal("want an error for an empty codexbar version, not a silent pass")
 	}
+}
+
+func TestRequireAuditedCodexBarVersionAllowsANilSnapshot(t *testing.T) {
+	// Defensive only: meter.Refresh never returns a nil snapshot on
+	// success, so this path exists to make the nil check's intent
+	// explicit rather than to document a real caller.
 	if err := requireAuditedCodexBarVersion(nil); err != nil {
 		t.Errorf("nil snapshot: want no error, got %v", err)
 	}

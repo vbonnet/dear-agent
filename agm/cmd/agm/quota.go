@@ -65,7 +65,7 @@ func init() {
 	quotaMeterCmd.Flags().BoolVar(&quotaMeterJSON, "json", false, "emit JSON instead of a table")
 	quotaMeterCmd.Flags().BoolVar(&quotaMeterRefresh, "refresh", false, "read the meter now and republish the state file")
 	quotaMeterCmd.Flags().StringVar(&quotaMeterFamily, "family", "", "report only this provider family (anthropic, openai, gemini)")
-	quotaMeterCmd.Flags().BoolVar(&quotaMeterCheck, "check", false, "exit 3 if any reported provider's guardrail is open")
+	quotaMeterCmd.Flags().BoolVar(&quotaMeterCheck, "check", false, "exit 4 if any reported provider's guardrail is open")
 	quotaMeterCmd.Flags().StringVar(&quotaMeterPath, "state-file", "", "published state file (default: $XDG_STATE_HOME or ~/.local/state/dear-agent/quota/latest.json)")
 	quotaMeterCmd.Flags().DurationVar(&quotaMeterMaxAge, "max-age", quota.DefaultSpawnGateMaxAge, "warn when the published reading is older than this")
 	quotaMeterCmd.Flags().StringVar(&quotaMeterCommand, "command", quota.DefaultCodexBarCommand, "meter executable used by --refresh")
@@ -188,26 +188,38 @@ func refreshQuotaMeterState(ctx context.Context, path string) (*quota.State, err
 
 // requireAuditedCodexBarVersion refuses a snapshot from a CodexBar build
 // below ADR-038's audited floor (engram-research #313: earlier builds
-// carry a recorded SQLite cost-store defect). cmd/workflow-run already
-// refuses to route on an unaudited build via the same shared floor
+// carry a recorded SQLite cost-store defect). cmd/workflow-run refuses to
+// route on an unaudited build via the same shared floor
 // (quota.MeetsMinCodexBarVersion); this scheduled refresh must refuse to
 // publish one too, or the launchd job launders an unaudited reading into
-// guardrail verdicts every consumer trusts (codex review on #1218). An
-// empty version is a build too old to report one at all and is treated
-// the same as any other below-floor version by MeetsMinCodexBarVersion —
-// but a snapshot that has no version string because the field was never
-// populated (e.g. a hand-built test snapshot) is allowed through, since
-// "no evidence" must not gate any more than it does anywhere else in
-// this package.
+// guardrail verdicts every consumer trusts (codex review on #1218).
+//
+// An empty SourceVersion is deliberately NOT treated as "no evidence,
+// don't gate" the way an absent reading is everywhere else in this
+// package: MeetsMinCodexBarVersion already reports "" as below the
+// floor, and that is the correct direction here specifically, because
+// this check's job is the opposite of the package's usual one. Elsewhere,
+// missing evidence must not let quota data block a spawn or demote a
+// route — but here, missing evidence (a build too old, or too broken, to
+// report its own version) must not be trusted to let quota data start
+// gating anything at all. Silently accepting an unversioned snapshot
+// would let exactly the unaudited build ADR-038 excludes start producing
+// guardrail verdicts (codex review on #1218, second pass). A nil snapshot
+// (defensive only; Refresh never returns one on success) has no version
+// to check and is let through.
 func requireAuditedCodexBarVersion(snapshot *quota.Snapshot) error {
-	if snapshot == nil || snapshot.SourceVersion == "" {
+	if snapshot == nil {
 		return nil
 	}
 	if quota.MeetsMinCodexBarVersion(snapshot.SourceVersion) {
 		return nil
 	}
+	version := snapshot.SourceVersion
+	if version == "" {
+		version = "(none reported)"
+	}
 	return fmt.Errorf("refuse to publish: codexbar %s is below the audited floor %s (ADR-038)",
-		snapshot.SourceVersion, quota.MinAuditedCodexBarVersion)
+		version, quota.MinAuditedCodexBarVersion)
 }
 
 func emitQuotaMeterJSON(state *quota.State, providers []quota.ProviderState, path string) error {

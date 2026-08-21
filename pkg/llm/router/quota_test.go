@@ -322,6 +322,84 @@ func TestRouterDoesNotSendQuotaMetadataToTheProvider(t *testing.T) {
 	}
 }
 
+// GenerateForModel is the only path an explicit-model workflow node takes
+// (AIExecutor.Generate calls it instead of the role-chain Generate), so it
+// must record the same quota verdict Generate does or cost records for
+// such a node silently lose the guardrail decision that applied
+// (LLM-ROUTER-16, codex review on #1218).
+func TestGenerateForModelRecordsTheQuotaVerdictInMetadata(t *testing.T) {
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+	r, err := New(Options{
+		Config: &Config{Version: 1, Roles: map[string]RoleSpec{}},
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return &fakeProvider{name: "anthropic", resp: &provider.GenerateResponse{Text: "ok"}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := r.GenerateForModel(context.Background(), "claude-opus-4-8", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("GenerateForModel: %v", err)
+	}
+	if got := resp.Metadata["router_quota_class"]; got != string(quota.ClassHealthy) {
+		t.Errorf("router_quota_class = %v, want healthy", got)
+	}
+	if got := resp.Metadata["router_quota_family"]; got != "anthropic" {
+		t.Errorf("router_quota_family = %v, want anthropic", got)
+	}
+}
+
+// Same leak class TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback and
+// TestRouterDoesNotSendQuotaMetadataToTheProvider guard on the role-chain
+// path, exercised here through the literal-model path instead.
+func TestGenerateForModelOmitsQuotaMetadataOnFallbackAndNeverSendsItToTheProvider(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+
+	r, err := New(Options{
+		Config: &Config{Version: 1, Roles: map[string]RoleSpec{}},
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := r.GenerateForModel(context.Background(), "claude-opus-4-8", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("GenerateForModel: %v", err)
+	}
+	if resp.Metadata["router_fallback"] != true {
+		t.Fatalf("expected a fallback response, got metadata = %#v", resp.Metadata)
+	}
+	for key := range resp.Metadata {
+		if len(key) > 12 && key[:12] == "router_quota" {
+			t.Errorf("fallback response carried the primary candidate's quota metadata: %q = %v", key, resp.Metadata[key])
+		}
+	}
+	for _, p := range []*fakeProvider{primary, fallback} {
+		if p.lastReq == nil {
+			t.Fatalf("%s: provider was never called", p.name)
+		}
+		for key := range p.lastReq.Metadata {
+			if len(key) > 12 && key[:12] == "router_quota" {
+				t.Errorf("%s: request metadata carried a quota field: %q = %v", p.name, key, p.lastReq.Metadata[key])
+			}
+		}
+	}
+}
+
 func TestRouterOmitsQuotaMetadataWhenUnmetered(t *testing.T) {
 	r := newQuotaRouter(t, nil, quotaProviders())
 	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})

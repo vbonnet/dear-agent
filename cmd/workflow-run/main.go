@@ -189,7 +189,14 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 		return nil, fmt.Errorf("bad -quota %q; expect auto, on, or off", mode)
 	}
 
-	meter := quota.New(quota.Options{Reader: credentialFilteredReader{inner: quota.CodexBarReader{}}})
+	// SkipPace: true — Router.OrderModels and the router metadata this
+	// meter feeds consume only quota windows, never Pace. The second
+	// CodexBar invocation SkipPace would otherwise trigger costs another
+	// network refresh and, unlike the identity-redacted dashboard call,
+	// has no redacted mode of its own (pkg/llm/quota/codexbar.go's
+	// readPace), so routing startup would pay latency and read more
+	// account-bearing data than it needs (codex review on #1218).
+	meter := quota.New(quota.Options{Reader: credentialFilteredReader{inner: quota.CodexBarReader{SkipPace: true}}})
 
 	// Warm the cache once so the first AI node routes on real data. The
 	// read is slow enough to be worth doing here and never on the
@@ -201,7 +208,7 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 		logger.Warn("quota routing: no reading, routing as configured", "error", err)
 		return meter, nil
 	}
-	if snapshot.SourceVersion != "" && !quota.MeetsMinCodexBarVersion(snapshot.SourceVersion) {
+	if !quota.MeetsMinCodexBarVersion(snapshot.SourceVersion) {
 		// ADR-038 limits the audited dependency to 0.49.0+ (earlier builds
 		// carry a recorded SQLite cost-store defect). The installed binary
 		// answered the dashboard call, so it exists and is on PATH — this
@@ -210,8 +217,18 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 		// quota routing rather than route on an unaudited build; the -quota
 		// tri-state's own fail-safe (an unreadable/disabled meter yields no
 		// verdicts) applies unchanged.
+		//
+		// An empty SourceVersion goes through this same check rather than
+		// bypassing it: MeetsMinCodexBarVersion already reports "" as
+		// below the floor, and a build too old (or broken) to report its
+		// own version is exactly the case this floor exists to catch, not
+		// an exemption from it (codex review on #1218, second pass).
+		installed := snapshot.SourceVersion
+		if installed == "" {
+			installed = "(none reported)"
+		}
 		logger.Warn("quota routing: disabled, codexbar version is below the audited floor",
-			"installed", snapshot.SourceVersion, "floor", quota.MinAuditedCodexBarVersion)
+			"installed", installed, "floor", quota.MinAuditedCodexBarVersion)
 		return nil, nil
 	}
 	logger.Info("quota routing: enabled", "source", snapshot.Source, "providers", len(snapshot.Providers))
