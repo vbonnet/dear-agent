@@ -379,12 +379,20 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		// json.Unmarshal replaces invalid UTF-8 inside a JSON string with
 		// U+FFFD instead of erroring, which would silently alter the
 		// imported content rather than reject the malformed record it came
-		// from.
+		// from. AGP-67 requires rejecting it instead.
 		if !utf8.Valid(line) {
-			return nil, fmt.Errorf("message contains invalid UTF-8")
+			return nil, fmt.Errorf("message record is not valid UTF-8")
 		}
+
+		// UseNumber, not the default: decoding into map[string]interface{}
+		// turns every JSON number into a float64, which silently rounds an
+		// integer outside float64's exact range (9007199254740993 becomes
+		// ...92). writeHistory re-marshals the decoded value, so the round
+		// trip would return altered metadata.
 		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(line))
+		dec.UseNumber()
+		if err := dec.Decode(&msg); err != nil {
 			return nil, fmt.Errorf("failed to parse message: %w", err)
 		}
 		// json.Unmarshal accepts `null` and `{}` into a Message and leaves it
@@ -497,8 +505,12 @@ func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFo
 		return "", err
 	}
 
+	// Held so rollback has the tmux name even when the store read below is
+	// what fails: CreateSession uses this name verbatim.
+	tmuxName := importedSessionName()
+
 	sessionID, err := a.CreateSession(SessionContext{
-		Name:             importedSessionName(),
+		Name:             tmuxName,
 		WorkingDirectory: os.TempDir(),
 	})
 	if err != nil {
@@ -507,6 +519,12 @@ func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFo
 
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
+		// The session is launched and registered but its ID never reaches the
+		// caller, so this leaks exactly like a failed history write. A remote
+		// or transient store makes this reachable.
+		if rollbackErr := a.rollbackFailedImport(sessionID, tmuxName); rollbackErr != nil {
+			return "", fmt.Errorf("failed to read imported session metadata: %w (rollback also failed: %w)", err, rollbackErr)
+		}
 		return "", fmt.Errorf("failed to read imported session metadata: %w", err)
 	}
 

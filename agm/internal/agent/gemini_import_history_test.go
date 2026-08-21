@@ -417,3 +417,29 @@ func TestRollbackFailedImportKeepsRecordWhenKillUnconfirmed(t *testing.T) {
 		t.Fatalf("session record was removed despite an unconfirmed kill: %v", getErr)
 	}
 }
+
+// TestParseImportedMessagesPreservesLargeIntegerMetadata covers the decode
+// precision clause. Decoding into map[string]interface{} with the default
+// decoder turns every number into a float64, which rounds an integer outside
+// float64's exact range; writeHistory then re-marshals the rounded value, so
+// the round trip would return altered metadata.
+func TestParseImportedMessagesPreservesLargeIntegerMetadata(t *testing.T) {
+	const exact = "9007199254740993" // 2^53 + 1, not representable as a float64
+	record := []byte(`{"role":"user","content":"x","Metadata":{"tokens":` + exact + `}}` + "\n")
+
+	messages, err := parseImportedMessages(record, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
+	}
+
+	encoded, err := json.Marshal(messages[0])
+	if err != nil {
+		t.Fatalf("re-encoding: %v", err)
+	}
+	if !strings.Contains(string(encoded), exact) {
+		t.Errorf("re-encoded message lost integer precision, want %s in:\n%s", exact, encoded)
+	}
+}

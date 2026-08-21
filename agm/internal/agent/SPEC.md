@@ -162,13 +162,13 @@ compatibility.
 
 **AGP-66** When an import supplies a format the adapter cannot decode, the system shall reject it rather than create a session.
 
-**AGP-67** When an imported record is not decodable as a message, or decodes without a supported role, the system shall reject the import rather than persist a turn with no speaker.
+**AGP-67** When an imported record is not valid UTF-8, is not decodable as a message, or decodes without a supported role, the system shall reject the import rather than persist altered or speakerless content.
 
 **AGP-68** When an imported conversation cannot be persisted, the system shall leave no session the caller cannot reach, and shall report a cleanup failure rather than discard the only remaining handle to a surviving process.
 
 **AGP-64** When the Gemini CLI adapter persists an imported conversation, the system shall present a reader either the complete imported history or the prior history, never a partial or truncated one.
 
-**AGP-69** When two imports occur concurrently, the system shall ensure each returned session's history reflects only the conversation imported for it, with neither import's history overwritten or merged by the other.
+**AGP-69** When imports occur concurrently, the system shall return each import's own conversation from a history read of its returned session, unaffected by any other import.
 
 ### Harness Doctor Health
 
@@ -195,12 +195,20 @@ in that set. AGP-05 already excludes its aliases from shared model choices for
 the same reason. A cross-harness scenario here would assert parity for a
 harness the matrix deliberately excludes.
 
-The evidence is `agm/internal/agent/gemini_import_history_test.go`, which
-covers each requirement as a separate observable outcome: the round trip, both
-sides of the 8 MiB record boundary, every rejected format, a malformed record,
-a record with no supported role, rollback both when the kill is confirmed and
-when it is not, replacement of prior history rather than a partial write, and
-namespace distinctness across imports.
+The evidence is `agm/internal/agent/gemini_import_history_test.go`. It covers
+the decode and persist seams directly: the round trip through `writeHistory`
+and `GetHistory`, both sides of the 8 MiB boundary on input and on the
+re-encoded record, invalid UTF-8, every rejected format, a malformed record, a
+record with no supported role, integer precision in metadata, replacement of
+prior history rather than a partial write, namespace distinctness across
+generated names, and rollback with the kill confirmed and unconfirmed.
+
+What it does NOT do is call `ImportConversation` itself, because that calls
+`CreateSession`, which needs a live tmux socket. The composition of those seams
+inside `ImportConversation` is therefore unproven by any automated test, here
+or in BDD, and that gap is stated rather than papered over: it is the reason
+`ImportConversation` reads as 0% covered in the coverage output for this
+package.
 
 If `gemini-cli` is ever promoted into the active parity set, AGP-12 already
 requires BDD scenarios at that point, which is the correct trigger for adding
