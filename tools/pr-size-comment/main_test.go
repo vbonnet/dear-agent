@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -115,6 +119,22 @@ func TestComposeBodyRecoversPriorSectionOnlyWhenNothingFresher(t *testing.T) {
 		t.Errorf("with nothing fresh and nothing to recover, the unknown summary must appear:\n%s", got)
 	}
 
+	// A run that measured nothing (crapUnknown) but has a prior finding to
+	// recover must show BOTH: the recovered section alone (the old
+	// behavior) gives a reviewer no indication the current revision is
+	// unmeasured, letting a stale result pass as current.
+	unknownWithRecovery := inputs{crapUnknown: true, crapSummary: "not measured: nothing could be collected"}
+	gotBoth := composeBody(unknownWithRecovery, "stale finding\n")
+	if !strings.Contains(gotBoth, "not measured") {
+		t.Errorf("crapUnknown with a recovered section must still show the current unknown status:\n%s", gotBoth)
+	}
+	if !strings.Contains(gotBoth, "stale finding") {
+		t.Errorf("crapUnknown with a recovered section must still show the recovered finding:\n%s", gotBoth)
+	}
+	if !strings.Contains(gotBoth, "recovered") {
+		t.Errorf("the recovered finding must be clearly labeled as not from this revision:\n%s", gotBoth)
+	}
+
 	nothingAtAll := inputs{}
 	got := composeBody(nothingAtAll, "")
 	if !strings.Contains(got, crapSectionMarker) {
@@ -138,5 +158,47 @@ func TestRunTreatsUnsetBooleanFlagsAsFalse(t *testing.T) {
 	}, &stdout, &stderr)
 	if got != 0 {
 		t.Errorf("exit = %d, want 0 (unset flags must not crash the command); stderr=%q", got, stderr.String())
+	}
+}
+
+// installFakeGh puts a `gh` script on PATH that always fails, so a test can
+// exercise this command's real gh-calling paths without touching a live
+// repo. Returns the exit status the fake script reports.
+func installFakeGh(t *testing.T, exitCode int) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-gh PATH shim is a POSIX shell script; this test only runs on non-Windows CI")
+	}
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\nexit %d\n", exitCode)
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestUpsertCommentReturnsDistinctFailureWhenGhFails guards the exact gap
+// codex flagged: every gh error here used to be logged and then this
+// returned 0 regardless, so the workflow step reported success even though
+// the comment was never actually updated. A fake gh that always fails must
+// now surface as a non-zero, non-2 (flag/usage) exit code.
+func TestUpsertCommentReturnsDistinctFailureWhenGhFails(t *testing.T) {
+	installFakeGh(t, 1)
+	var stderr bytes.Buffer
+	got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{shouldComment: true, crapOutcome: "success"}, &stderr)
+	if got != exitFailedOperation {
+		t.Errorf("upsertComment() = %d, want %d (exitFailedOperation); stderr=%q", got, exitFailedOperation, stderr.String())
+	}
+}
+
+// TestDeleteStaleCommentsReturnsDistinctFailureWhenGhFails is
+// TestUpsertCommentReturnsDistinctFailureWhenGhFails's counterpart for the
+// delete path.
+func TestDeleteStaleCommentsReturnsDistinctFailureWhenGhFails(t *testing.T) {
+	installFakeGh(t, 1)
+	var stderr bytes.Buffer
+	got := deleteStaleComments(t.Context(), "vbonnet/dear-agent", "1", &stderr)
+	if got != exitFailedOperation {
+		t.Errorf("deleteStaleComments() = %d, want %d (exitFailedOperation); stderr=%q", got, exitFailedOperation, stderr.String())
 	}
 }

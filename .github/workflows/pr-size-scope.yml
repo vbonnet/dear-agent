@@ -207,6 +207,14 @@ jobs:
             echo "::error::the gocyclo parity check skipped; CRAPLENS-05 was not verified"
             exit 1
           fi
+          # A renamed or deleted test leaves -run matching nothing: go test
+          # still exits 0 and prints no SKIP marker, so the check above alone
+          # would go green without ever running CRAPLENS-05's verification.
+          # Require the exact PASS record instead of trusting the exit code.
+          if ! grep -qF -- "--- PASS: TestComplexityParityWithGocycloBinary" /tmp/parity.log; then
+            echo "::error::TestComplexityParityWithGocycloBinary did not run (renamed, deleted, or -run matched nothing); CRAPLENS-05 was not verified"
+            exit 1
+          fi
 
       - name: Score changed functions for complexity against coverage
         id: crap
@@ -227,6 +235,14 @@ jobs:
             -github-output >> "$GITHUB_OUTPUT"
 
       - name: Update PR size, scope, and code-health comment
+        # tools/pr-size-comment now returns a distinct non-zero status when a
+        # gh operation it depends on fails, instead of always returning 0 —
+        # so this step can genuinely fail for the first time. continue-on-error
+        # keeps that advisory (a lost comment update never blocks the merge,
+        # this step isn't in the required-checks list), but the step itself
+        # still shows red in the run: that visible failure is exactly the
+        # signal this fix exists to expose, where before there was none.
+        continue-on-error: true
         # A pull_request run from a fork, or one opened by Dependabot (whose
         # workflow runs also get a read-only GITHUB_TOKEN even though the head
         # branch lives in this repo), can't post/delete comments; skip rather

@@ -167,6 +167,7 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	}
 	cmd := exec.CommandContext(ctx, "go", argv...)
 	cmd.Dir = repoDir
+	cmd.Env = withGoWorkspaceDisabled(os.Environ())
 	// Bounded, not unbounded: a noisy package streams every output event
 	// through -json, and holding all of it for up to the coverage timeout
 	// could exhaust the runner and cancel the whole job, which loses the
@@ -468,12 +469,38 @@ func matchPackage(pkgs map[string]packageCoverage, modulePath, fullPath string) 
 	return best, path.Join(best, base), true
 }
 
+// withGoWorkspaceDisabled returns env with GOWORK=off appended, so the `go`
+// subprocess it is given to ignores any workspace file regardless of the
+// caller's own environment.
+//
+// CI already sets GOWORK=off at the workflow-step level, but this package's
+// documented local invocation (`go run ./tools/crap-lint` on an uncommitted
+// diff) does not — a developer's own ignored go.work file (workingTreeIsClean
+// above already treats an ignored path outside every touched package as
+// clean, go.work included) would otherwise put these `go test`/`go list -m`
+// calls into workspace mode. go help work documents that a workspace's
+// replace directives take precedence over go.mod, so a clean-looking local
+// run could measure coverage against different dependency code than the
+// authoritative single-module CI run and disagree with it silently. Setting
+// it here, not just in the workflow, makes the local invocation correct on
+// its own rather than relying on the caller to remember an env var.
+func withGoWorkspaceDisabled(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "GOWORK=") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, "GOWORK=off")
+}
+
 // modulePath returns the module's import path, or the empty string when it
 // cannot be determined. It is used to resolve profile paths exactly rather
 // than by suffix.
 func modulePath(ctx context.Context, repoDir string) string {
 	cmd := exec.CommandContext(ctx, "go", "list", "-m")
 	cmd.Dir = repoDir
+	cmd.Env = withGoWorkspaceDisabled(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
