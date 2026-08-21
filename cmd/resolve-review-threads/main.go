@@ -267,19 +267,13 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		return fail("reply body must not be empty: resolution needs a stated reason")
 	}
 	// Read first: to skip an already-resolved thread, and to notice a reply a
-	// previous run already posted so a retry does not duplicate it.
-	cur, err := fetchThread(ctx, threadID)
-	if err != nil {
-		// Without the current state we cannot tell whether a previous run
-		// already posted this reply, and posting blind is the duplicate this
-		// guard exists to prevent. Leave the thread untouched.
-		return fail("cannot read thread state, nothing posted: %v", err)
-	}
-	if cur.IsResolved {
-		// Someone closed it first. Replying now would add a public comment to
-		// a settled conversation.
-		fmt.Printf("skipped %s (already resolved)\n", threadID)
-		return 0
+	// previous run already posted so a retry does not duplicate it. Without
+	// the current state we cannot tell whether a previous run already posted
+	// this reply, and posting blind is the duplicate this guard exists to
+	// prevent, so any failure here leaves the thread untouched.
+	cur, code := readOrExit(ctx, threadID, "cannot read thread state, nothing posted")
+	if code >= 0 {
+		return code
 	}
 
 	// Decide against the FULL history, not the tail: a prior reply buried by
@@ -292,13 +286,9 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// Paging a long thread takes time, so re-read state before acting on it:
 	// another actor may have resolved it meanwhile, and replying then would
 	// comment on a settled conversation.
-	cur, err = fetchThread(ctx, threadID)
-	if err != nil {
-		return fail("cannot re-read thread state, nothing posted: %v", err)
-	}
-	if cur.IsResolved {
-		fmt.Printf("skipped %s (already resolved)\n", threadID)
-		return 0
+	cur, code = readOrExit(ctx, threadID, "cannot re-read thread state, nothing posted")
+	if code >= 0 {
+		return code
 	}
 
 	// anchorID must be the thread's last comment, and anchorPrevID must be the
@@ -754,6 +744,24 @@ func fetchThread(ctx context.Context, threadID string) (thread, error) {
 		return thread{}, fmt.Errorf("no review thread with ID %s", threadID)
 	}
 	return toThread(resp.Data.Node), nil
+}
+
+// readOrExit re-reads a thread and reports whether the caller should return
+// immediately. code is -1 when t is fresh and safe to act on; otherwise the
+// caller should `return code` as-is. A read failure fails with errMsg framing
+// context the generic error lacks; an already-resolved thread means someone
+// else closed it since the caller last looked, so the skip is reported here
+// once rather than at every call site.
+func readOrExit(ctx context.Context, threadID, errMsg string) (t thread, code int) {
+	cur, err := fetchThread(ctx, threadID)
+	if err != nil {
+		return thread{}, fail("%s: %v", errMsg, err)
+	}
+	if cur.IsResolved {
+		fmt.Printf("skipped %s (already resolved)\n", threadID)
+		return cur, 0
+	}
+	return cur, -1
 }
 
 // unansweredError marks a thread that was refused on evidence, as opposed to
