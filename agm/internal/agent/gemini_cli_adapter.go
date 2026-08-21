@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -265,13 +266,13 @@ func (a *GeminiCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 
 	// Find history file for this session
 	// Note: Gemini CLI stores sessions in ~/.gemini/tmp/<project_hash>/chats/
-	// For now, we'll use a simplified approach similar to Claude
-	homeDir, err := os.UserHomeDir()
+	// For now, we'll use a simplified approach similar to Claude.
+	// getHistoryPath is the single owner of this layout so a read and an
+	// import can never disagree about where history lives.
+	historyPath, err := a.getHistoryPath(metadata)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+		return nil, err
 	}
-
-	historyPath := filepath.Join(homeDir, ".gemini", "sessions", metadata.TmuxName, "history.jsonl")
 
 	// Check if history file exists
 	if _, err := os.Stat(historyPath); os.IsNotExist(err) {
@@ -349,29 +350,90 @@ func (a *GeminiCLIAdapter) ExportConversation(sessionID SessionID, format Conver
 	}
 }
 
-// ImportConversation imports conversation from serialized data.
-func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFormat) (SessionID, error) {
-	// Parse messages based on format
-	var messages []Message
-	switch format {
-	case FormatJSONL:
-		lines := splitLines(string(data))
-		for _, line := range lines {
-			if line == "" {
-				continue
-			}
-			var msg Message
-			if err := json.Unmarshal([]byte(line), &msg); err != nil {
-				return "", fmt.Errorf("failed to parse message: %w", err)
-			}
-			messages = append(messages, msg)
+// parseImportedMessages decodes serialized conversation data into messages.
+//
+// Only FormatJSONL is decodable; every other format is rejected rather than
+// silently importing an empty conversation.
+func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, error) {
+	if format != FormatJSONL {
+		return nil, fmt.Errorf("unsupported import format: %s", format)
+	}
+
+	messages := []Message{}
+	for _, line := range splitLines(string(data)) {
+		if line == "" {
+			continue
 		}
+		var msg Message
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			return nil, fmt.Errorf("failed to parse message: %w", err)
+		}
+		messages = append(messages, msg)
+	}
 
-	case FormatHTML, FormatMarkdown, FormatNative:
-		return "", fmt.Errorf("unsupported import format: %s", format)
+	return messages, nil
+}
 
-	default:
-		return "", fmt.Errorf("unsupported import format: %s", format)
+// writeHistory persists messages as the session's history.jsonl.
+//
+// The file is written through a temporary sibling and renamed, so a failed
+// write leaves any prior history intact rather than truncated. The encoding
+// matches what GetHistory parses, which is what makes an import readable by a
+// later GetHistory or ExportConversation call.
+func (a *GeminiCLIAdapter) writeHistory(metadata *SessionMetadata, messages []Message) error {
+	historyPath, err := a.getHistoryPath(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to get history path: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
+		return fmt.Errorf("failed to create history directory: %w", err)
+	}
+
+	var buf bytes.Buffer
+	for _, msg := range messages {
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message: %w", err)
+		}
+		buf.Write(encoded)
+		buf.WriteByte('\n')
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(historyPath), "history-*.jsonl")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary history file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	if _, err := tmp.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to write history file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close history file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("failed to set history file mode: %w", err)
+	}
+	if err := os.Rename(tmpPath, historyPath); err != nil {
+		return fmt.Errorf("failed to install history file: %w", err)
+	}
+
+	return nil
+}
+
+// ImportConversation imports conversation from serialized data.
+//
+// The decoded messages are written to the new session's history file, so a
+// subsequent GetHistory or ExportConversation returns what was imported.
+func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFormat) (SessionID, error) {
+	messages, err := parseImportedMessages(data, format)
+	if err != nil {
+		return "", err
 	}
 
 	// Create new session
@@ -383,8 +445,14 @@ func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFo
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// TODO: Write messages to history file
-	// For now, just return the session ID
+	metadata, err := a.sessionStore.Get(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to read imported session metadata: %w", err)
+	}
+
+	if err := a.writeHistory(metadata, messages); err != nil {
+		return "", fmt.Errorf("failed to import conversation history: %w", err)
+	}
 
 	return sessionID, nil
 }
