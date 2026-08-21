@@ -71,6 +71,18 @@ func runInstallQuotaSchedule(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve agm binary path: %w", err)
 	}
 
+	// Resolve the state path here, in the installer's own environment,
+	// and bake it into the job rather than letting quota-meter re-resolve
+	// it at run time: launchd's EnvironmentVariables below carries only
+	// PATH and HOME, not XDG_STATE_HOME, so a job left to its own default
+	// would silently publish to ~/.local/state even for an operator whose
+	// interactive shell (and every interactive reader) uses
+	// $XDG_STATE_HOME instead (codex review on #1218).
+	statePath, err := quota.DefaultStateFilePath()
+	if err != nil {
+		return fmt.Errorf("resolve quota state path: %w", err)
+	}
+
 	tmpl, err := schedulesFS.ReadFile(quotaPlistFile)
 	if err != nil {
 		return fmt.Errorf("read embedded plist template: %w", err)
@@ -79,6 +91,7 @@ func runInstallQuotaSchedule(_ *cobra.Command, _ []string) error {
 	content := string(tmpl)
 	content = strings.ReplaceAll(content, "__USER_HOME__", homeDir)
 	content = strings.ReplaceAll(content, "__AGM_BINARY__", agmBin)
+	content = strings.ReplaceAll(content, "__STATE_FILE__", statePath)
 
 	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
 	if err := os.MkdirAll(launchAgentsDir, 0o755); err != nil {
@@ -109,10 +122,7 @@ func runInstallQuotaSchedule(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("✓ Loaded:    %s\n", quotaPlistLabel)
 
-	statePath, pathErr := quota.DefaultStateFilePath()
-	if pathErr == nil {
-		fmt.Printf("\nReadings are published to:\n  %s\n", statePath)
-	}
+	fmt.Printf("\nReadings are published to:\n  %s\n", statePath)
 	fmt.Println("\nThe refresh runs every 30 minutes and once immediately at load.")
 	fmt.Println("Read the current reading with 'agm quota-meter' or 'agm quota-meter --json'.")
 	return nil

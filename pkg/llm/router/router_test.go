@@ -20,6 +20,7 @@ type fakeProvider struct {
 	resp        *provider.GenerateResponse
 	err         error
 	nilResponse bool
+	lastReq     *provider.GenerateRequest
 
 	// errOnce, if true, fails the first call and succeeds afterwards.
 	// Useful for checking that the router falls through to the next
@@ -34,6 +35,7 @@ func (f *fakeProvider) Generate(_ context.Context, req *provider.GenerateRequest
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	f.lastReq = req
 	if f.err != nil {
 		err := f.err
 		if f.errOnce {

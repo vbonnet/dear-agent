@@ -213,3 +213,31 @@ func (p ProviderQuota) MostConstrained() (Window, bool) {
 	}
 	return worst, true
 }
+
+// MostConstrainedActive is MostConstrained restricted to windows whose
+// reset time has not yet passed.
+//
+// A window past its own ResetAt no longer reflects the active quota
+// period: CodexBar can still report an exhausted window's stale 0%
+// alongside a healthy window that has already rolled over, and picking
+// the expired one as "most constrained" would open the breaker (and
+// refuse admission) on a period that has actually reset. Routing and
+// breaker verdicts must derive from this rather than from
+// MostConstrained. The second result is false when every window is
+// either absent or expired — not "no windows", but "no window that is
+// currently binding" — which callers treat the same way: no usable
+// reading.
+func (p ProviderQuota) MostConstrainedActive(now time.Time) (Window, bool) {
+	var worst Window
+	found := false
+	for _, w := range p.Windows {
+		if !w.ResetAt.IsZero() && !now.Before(w.ResetAt) {
+			continue
+		}
+		if !found || w.RemainingPercent < worst.RemainingPercent {
+			worst = w
+			found = true
+		}
+	}
+	return worst, found
+}

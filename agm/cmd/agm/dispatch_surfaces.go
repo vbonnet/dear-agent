@@ -30,9 +30,17 @@ func skipRootInit(cmd *cobra.Command) *cobra.Command {
 	return cmd
 }
 
+// quotaCmd predates ADR-038's guardrail (docs/adr/ADR-038-codexbar-quota-routing.md)
+// and reads the same published state file `agm quota-meter` does, but
+// with its own staleness threshold, default provider, and JSON schema —
+// a second, diverging way to ask the same question (codex review on
+// #1218). It stays because agm_get_quota_status (agm/cmd/agm-mcp-server)
+// is a stable MCP surface built on it and its callers were not audited as
+// part of this change. Prefer `agm quota-meter` for anything new; this
+// command is not the canonical interface.
 var quotaCmd = skipRootInit(&cobra.Command{
 	Use:   "quota",
-	Short: "Read provider quota status captured by CodexBar",
+	Short: "Read provider quota status captured by CodexBar (legacy — prefer 'agm quota-meter')",
 	Args:  cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		home, err := os.UserHomeDir()

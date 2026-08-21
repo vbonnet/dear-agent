@@ -12,7 +12,15 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 )
 
-var quotaMeterCmd = &cobra.Command{
+// quotaMeterCmd reads or writes only its own published state file under
+// the user's home directory, and its --refresh path exists precisely so
+// the scheduled launchd job (com.dear-agent.quota-refresh.plist) keeps
+// working when repository/session initialization is unavailable — the
+// same reason quotaCmd in dispatch_surfaces.go opts out via skipRootInit.
+// Without this, an unrelated AGM configuration failure would stop every
+// refresh until readings go stale and the guardrail fails open on data
+// nobody can trust (codex review on #1218).
+var quotaMeterCmd = skipRootInit(&cobra.Command{
 	Use:   "quota-meter",
 	Short: "Per-provider subscription quota, spend pace, and cost-guardrail state",
 	Long: `Report how much subscription quota each provider has left, how fast it is
@@ -40,7 +48,7 @@ missing shows as unreadable with the reason, and the guardrail stays closed
 for it — the meter can only stop work on evidence, never on its absence.`,
 	Args: cobra.NoArgs,
 	RunE: runQuotaMeter,
-}
+})
 
 var (
 	quotaMeterJSON    bool
@@ -96,17 +104,35 @@ func runQuotaMeter(cmd *cobra.Command, _ []string) error {
 	}
 
 	if quotaMeterCheck {
-		for _, p := range providers {
-			if quota.BreakerState(p.BreakerState) == quota.BreakerOpen {
-				// A halted provider is a state conflict, not a command
-				// failure: the request was well-formed and the tool
-				// worked, the provider is simply out of room. Reusing
-				// the taxonomy lets a caller branch on $? == 4 the same
-				// way it already does everywhere else in agm.
-				return &exitError{
-					code: ExitStateConflict,
-					msg:  fmt.Sprintf("quota guardrail is open for %s: %s", p.Family, p.Reason),
-				}
+		return checkQuotaMeterState(state, providers, quotaMeterMaxAge, time.Now())
+	}
+	return nil
+}
+
+// checkQuotaMeterState is --check's verdict, factored out so it is
+// testable without cobra or a real state file.
+//
+// A reading older than maxAge is unevaluated, not evidence that a
+// provider is still halted. SpawnGate already treats a stale published
+// state as "no usable reading" and fails open past this same age
+// (DefaultSpawnGateMaxAge); --check must agree, or an orchestrator
+// polling this command can keep admissions halted indefinitely off a
+// BreakerState the refresh job stopped updating long ago, even though
+// the live spawn gate has already recovered (codex review on #1218).
+func checkQuotaMeterState(state *quota.State, providers []quota.ProviderState, maxAge time.Duration, now time.Time) error {
+	if maxAge > 0 && state.Age(now) > maxAge {
+		return nil
+	}
+	for _, p := range providers {
+		if quota.BreakerState(p.BreakerState) == quota.BreakerOpen {
+			// A halted provider is a state conflict, not a command
+			// failure: the request was well-formed and the tool
+			// worked, the provider is simply out of room. Reusing
+			// the taxonomy lets a caller branch on $? == 4 the same
+			// way it already does everywhere else in agm.
+			return &exitError{
+				code: ExitStateConflict,
+				msg:  fmt.Sprintf("quota guardrail is open for %s: %s", p.Family, p.Reason),
 			}
 		}
 	}
@@ -146,12 +172,42 @@ func refreshQuotaMeterState(ctx context.Context, path string) (*quota.State, err
 	if err != nil {
 		return nil, fmt.Errorf("refresh quota meter: %w", err)
 	}
+	if err := requireAuditedCodexBarVersion(snapshot); err != nil {
+		// The previous published state — which did pass this floor when
+		// it was written — is left in place rather than overwritten, so
+		// the guardrail degrades to "stale" instead of to "wrong".
+		return nil, err
+	}
 	breaker := quota.NewBreaker(meter, quota.BreakerPolicy{})
 	state := quota.BuildState(snapshot, meter, breaker, time.Now())
 	if err := quota.WriteStateFile(path, state); err != nil {
 		return nil, err
 	}
 	return state, nil
+}
+
+// requireAuditedCodexBarVersion refuses a snapshot from a CodexBar build
+// below ADR-038's audited floor (engram-research #313: earlier builds
+// carry a recorded SQLite cost-store defect). cmd/workflow-run already
+// refuses to route on an unaudited build via the same shared floor
+// (quota.MeetsMinCodexBarVersion); this scheduled refresh must refuse to
+// publish one too, or the launchd job launders an unaudited reading into
+// guardrail verdicts every consumer trusts (codex review on #1218). An
+// empty version is a build too old to report one at all and is treated
+// the same as any other below-floor version by MeetsMinCodexBarVersion —
+// but a snapshot that has no version string because the field was never
+// populated (e.g. a hand-built test snapshot) is allowed through, since
+// "no evidence" must not gate any more than it does anywhere else in
+// this package.
+func requireAuditedCodexBarVersion(snapshot *quota.Snapshot) error {
+	if snapshot == nil || snapshot.SourceVersion == "" {
+		return nil
+	}
+	if quota.MeetsMinCodexBarVersion(snapshot.SourceVersion) {
+		return nil
+	}
+	return fmt.Errorf("refuse to publish: codexbar %s is below the audited floor %s (ADR-038)",
+		snapshot.SourceVersion, quota.MinAuditedCodexBarVersion)
 }
 
 func emitQuotaMeterJSON(state *quota.State, providers []quota.ProviderState, path string) error {

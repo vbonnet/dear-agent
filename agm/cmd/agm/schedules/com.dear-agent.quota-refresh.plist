@@ -6,8 +6,18 @@
   Source template:
       agm/cmd/agm/schedules/com.dear-agent.quota-refresh.plist
   Installed by `agm admin install-quota-schedule`, which substitutes
-  __USER_HOME__ and __AGM_BINARY__ before writing this file (launchd
-  does not expand ~ or shell variables).
+  __USER_HOME__, __AGM_BINARY__, and __STATE_FILE__ before writing this
+  file (launchd does not expand ~ or shell variables).
+
+  --state-file is baked in explicitly rather than left to quota-meter's
+  own default resolution: that default honours XDG_STATE_HOME, but this
+  job's EnvironmentVariables below carries only PATH and HOME — launchd
+  does not inherit the installing shell's environment — so an operator
+  with XDG_STATE_HOME set would otherwise have this job silently publish
+  to ~/.local/state while every interactive reader looks under
+  $XDG_STATE_HOME instead. Baking in the path the installer resolved (at
+  install time, in the installer's own environment) keeps both sides
+  reading and writing the same file.
 
   Schedule: every 30 minutes (StartInterval = 1800 seconds).
   Logs:     <home>/Library/Logs/dear-agent/quota-refresh.log
@@ -38,6 +48,8 @@
         <string>__AGM_BINARY__</string>
         <string>quota-meter</string>
         <string>--refresh</string>
+        <string>--state-file</string>
+        <string>__STATE_FILE__</string>
     </array>
 
     <key>EnvironmentVariables</key>

@@ -25,8 +25,6 @@ import (
 	"strings"
 	"syscall"
 
-	"golang.org/x/mod/semver"
-
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 	llmprovider "github.com/vbonnet/dear-agent/pkg/llm/provider"
 	"github.com/vbonnet/dear-agent/pkg/llm/quota"
@@ -203,7 +201,7 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 		logger.Warn("quota routing: no reading, routing as configured", "error", err)
 		return meter, nil
 	}
-	if snapshot.SourceVersion != "" && !meetsMinCodexBarVersion(snapshot.SourceVersion) {
+	if snapshot.SourceVersion != "" && !quota.MeetsMinCodexBarVersion(snapshot.SourceVersion) {
 		// ADR-038 limits the audited dependency to 0.49.0+ (earlier builds
 		// carry a recorded SQLite cost-store defect). The installed binary
 		// answered the dashboard call, so it exists and is on PATH — this
@@ -213,32 +211,11 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 		// tri-state's own fail-safe (an unreadable/disabled meter yields no
 		// verdicts) applies unchanged.
 		logger.Warn("quota routing: disabled, codexbar version is below the audited floor",
-			"installed", snapshot.SourceVersion, "floor", minAuditedCodexBarVersion)
+			"installed", snapshot.SourceVersion, "floor", quota.MinAuditedCodexBarVersion)
 		return nil, nil
 	}
 	logger.Info("quota routing: enabled", "source", snapshot.Source, "providers", len(snapshot.Providers))
 	return meter, nil
-}
-
-// minAuditedCodexBarVersion is the floor ADR-038 sets: earlier builds carry
-// a recorded SQLite cost-store defect and were never part of the security
-// review.
-const minAuditedCodexBarVersion = "0.49.0"
-
-// meetsMinCodexBarVersion reports whether installed is at or above
-// minAuditedCodexBarVersion. An unparseable installed version is treated as
-// not meeting the floor — silently trusting an unrecognized version string
-// would defeat the point of a floor check.
-func meetsMinCodexBarVersion(installed string) bool {
-	v := installed
-	if !strings.HasPrefix(v, "v") {
-		v = "v" + v
-	}
-	if !semver.IsValid(v) {
-		return false
-	}
-	floor := "v" + minAuditedCodexBarVersion
-	return semver.Compare(v, floor) >= 0
 }
 
 // credentialFilteredReader wraps a quota.Reader and drops any provider

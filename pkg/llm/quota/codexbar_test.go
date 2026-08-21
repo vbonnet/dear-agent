@@ -524,3 +524,31 @@ func TestCodexBarReaderReportsCommandFailure(t *testing.T) {
 		t.Error("want a nil snapshot on failure")
 	}
 }
+
+// ADR-038's audited floor (engram-research #313): every consumer that
+// gates on a CodexBar reading — cmd/workflow-run's routing meter and
+// agm's scheduled refresh alike — must reject a build below this
+// version rather than trust unaudited evidence. One shared
+// implementation is what makes "every consumer" actually true.
+func TestMeetsMinCodexBarVersion(t *testing.T) {
+	tests := []struct {
+		name      string
+		installed string
+		want      bool
+	}{
+		{name: "audited version", installed: "0.49.0", want: true},
+		{name: "well above the floor", installed: "0.49.2", want: true},
+		{name: "future major version", installed: "1.0.0", want: true},
+		{name: "below the floor", installed: "0.48.9", want: false},
+		{name: "well below the floor", installed: "0.30.0", want: false},
+		{name: "unparseable version does not meet the floor", installed: "not-a-version", want: false},
+		{name: "empty version does not meet the floor", installed: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := quota.MeetsMinCodexBarVersion(tt.installed); got != tt.want {
+				t.Errorf("MeetsMinCodexBarVersion(%q) = %t, want %t", tt.installed, got, tt.want)
+			}
+		})
+	}
+}

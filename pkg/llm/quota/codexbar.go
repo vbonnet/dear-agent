@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // Reader produces one Snapshot per call. Implementations must not surface
@@ -26,6 +28,29 @@ const DefaultCodexBarCommand = "codexbar"
 // refreshes providers over the network on a cold cache, so this is sized
 // for the slow path; the Meter keeps it off the routing path entirely.
 const DefaultReadTimeout = 45 * time.Second
+
+// MinAuditedCodexBarVersion is the floor ADR-038 sets: earlier CodexBar
+// builds carry a recorded SQLite cost-store defect and were never part
+// of the security review (engram-research #313). A reading from a build
+// below this floor must not gate spawns or routing — the guardrail
+// would be trusting evidence nobody has audited.
+const MinAuditedCodexBarVersion = "0.49.0"
+
+// MeetsMinCodexBarVersion reports whether installed is at or above
+// MinAuditedCodexBarVersion. An unparseable installed version is treated
+// as not meeting the floor — silently trusting an unrecognized version
+// string would defeat the point of a floor check.
+func MeetsMinCodexBarVersion(installed string) bool {
+	v := installed
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	if !semver.IsValid(v) {
+		return false
+	}
+	floor := "v" + MinAuditedCodexBarVersion
+	return semver.Compare(v, floor) >= 0
+}
 
 // DefaultFamilyAliases maps CodexBar's provider ids onto dear-agent
 // provider families. Several source ids can feed one family: Gemini

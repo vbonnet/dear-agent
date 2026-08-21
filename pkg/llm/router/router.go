@@ -127,12 +127,24 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 
 		// Override the request's Model with the resolved name and tag
 		// the cost record's Component with the role for budget tracking.
+		//
+		// Deliberately no quota fields here. This same *callReq is what
+		// CircuitBreaker.GenerateWithSource forwards verbatim to its own
+		// internal fallback when the primary call fails and the breaker
+		// trips — the router has no say in that hop. A provider such as
+		// OpenAI echoes req.Metadata back under response
+		// Metadata["request_metadata"], so quota data merged in here
+		// would ride along into the fallback's response and mislabel it
+		// with the primary's verdict even though the fallback-aware
+		// response metadata below correctly omits its own top-level
+		// quota fields on that path. The verdict is attached once,
+		// below, after source.Fallback is known.
 		callReq := *req
 		callReq.Model = model
-		callReq.Metadata = mergeMetadata(callReq.Metadata, mergeMetadata(map[string]any{
+		callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
 			"router_role":            resolvedRole,
 			"router_candidate_model": modelID,
-		}, quotaMetadata(decisions[i])))
+		})
 
 		resp, source, callErr := prov.GenerateWithSource(ctx, &callReq)
 		if callErr == nil && resp == nil {

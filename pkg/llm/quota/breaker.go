@@ -246,7 +246,7 @@ func (b *Breaker) burnContext(family string) (*Pace, time.Time) {
 	if !ok {
 		return nil, time.Time{}
 	}
-	worst, ok := provider.MostConstrained()
+	worst, ok := provider.MostConstrainedActive(b.now())
 	if !ok {
 		return provider.Pace, time.Time{}
 	}

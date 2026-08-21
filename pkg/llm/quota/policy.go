@@ -163,7 +163,7 @@ func Evaluate(snapshot *Snapshot, family string, now time.Time, policy Policy) D
 		return decision
 	}
 
-	worst, ok := quota.MostConstrained()
+	worst, ok := quota.MostConstrainedActive(now)
 	if !ok {
 		decision.Reason = fmt.Sprintf("family %q reported no usage windows", family)
 		return decision

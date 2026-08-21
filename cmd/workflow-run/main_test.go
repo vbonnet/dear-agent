@@ -244,25 +244,7 @@ type fakeQuotaReader struct{ snapshot *quota.Snapshot }
 
 func (f fakeQuotaReader) Read(context.Context) (*quota.Snapshot, error) { return f.snapshot, nil }
 
-func TestMeetsMinCodexBarVersion(t *testing.T) {
-	tests := []struct {
-		name      string
-		installed string
-		want      bool
-	}{
-		{name: "audited version", installed: "0.49.0", want: true},
-		{name: "well above the floor", installed: "0.49.2", want: true},
-		{name: "future major version", installed: "1.0.0", want: true},
-		{name: "below the floor", installed: "0.48.9", want: false},
-		{name: "well below the floor", installed: "0.30.0", want: false},
-		{name: "unparseable version does not meet the floor", installed: "not-a-version", want: false},
-		{name: "empty version does not meet the floor", installed: "", want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := meetsMinCodexBarVersion(tt.installed); got != tt.want {
-				t.Errorf("meetsMinCodexBarVersion(%q) = %t, want %t", tt.installed, got, tt.want)
-			}
-		})
-	}
-}
+// The version-floor check itself moved to pkg/llm/quota
+// (TestMeetsMinCodexBarVersion) so agm's own scheduled refresh can
+// enforce the same floor before publishing, rather than living only
+// here where nothing else could reach it.

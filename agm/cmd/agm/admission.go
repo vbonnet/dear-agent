@@ -125,6 +125,21 @@ func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreaker
 		if err := st.RecordSpawn(time.Now()); err != nil {
 			debug.Log("Warning: failed to record spawn time: %v", err)
 		}
+		// Recorded exactly once, here, after every live gate has passed
+		// and the spawn is truly proceeding — not inside the quota gate
+		// itself, which runs at both preflight and live confirmation and
+		// would double-count a single spawn (ce-93lw.18 class bug: this
+		// is the one admission point every sanctioned spawn path goes
+		// through). An empty model leaves the quota gate off entirely, so
+		// there is nothing to record.
+		if model != "" {
+			family := agent.ModelFamilyForHarnessModel(harness, model)
+			if family != "" {
+				if err := circuitbreaker.RecordProviderQuotaAdmission(family, time.Now()); err != nil {
+					debug.Log("Warning: failed to record provider-quota admission: %v", err)
+				}
+			}
+		}
 	}
 	return admission, nil
 }

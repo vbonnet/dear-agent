@@ -270,6 +270,58 @@ func TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback(t *testing.T) {
 	}
 }
 
+// TestRouterDoesNotSendQuotaMetadataToTheProvider guards the request side
+// of the same leak TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback
+// guards on the response side. CircuitBreaker.GenerateWithSource forwards
+// the router's *GenerateRequest verbatim to its own internal fallback when
+// the primary fails, and a real provider (OpenAI) echoes req.Metadata back
+// under response Metadata["request_metadata"] — so quota fields merged
+// into the outgoing request would ride along into the fallback's response
+// and mislabel it with the primary's verdict, even though the top-level
+// response metadata correctly omits them on that path (codex review on
+// #1218). The fix is to never put quota fields on the request at all;
+// this asserts that directly against what each provider actually
+// received, independent of what any specific provider does with it.
+func TestRouterDoesNotSendQuotaMetadataToTheProvider(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "claude-opus-4-7"},
+	}}
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+
+	r, err := New(Options{
+		Config: cfg,
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	for _, p := range []*fakeProvider{primary, fallback} {
+		if p.lastReq == nil {
+			t.Fatalf("%s: provider was never called", p.name)
+		}
+		for key := range p.lastReq.Metadata {
+			if len(key) > 12 && key[:12] == "router_quota" {
+				t.Errorf("%s: request metadata carried a quota field: %q = %v", p.name, key, p.lastReq.Metadata[key])
+			}
+		}
+	}
+}
+
 func TestRouterOmitsQuotaMetadataWhenUnmetered(t *testing.T) {
 	r := newQuotaRouter(t, nil, quotaProviders())
 	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})

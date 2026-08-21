@@ -72,6 +72,40 @@ func TestBreakerHaltsOnExhaustedHeadroom(t *testing.T) {
 	}
 }
 
+// An expired window must not gate the breaker. CodexBar can carry a
+// stale exhausted window forward alongside a healthy one that has
+// already reset; picking the expired 0% reading would open the breaker
+// and refuse admission even though the actual period has room again
+// (codex review on #1218).
+func TestBreakerIgnoresAnExpiredWindow(t *testing.T) {
+	now := time.Now()
+	expired := quota.ProviderQuota{
+		Family:       "openai",
+		SourceID:     "openai",
+		Availability: quota.AvailabilityOK,
+		Windows: []quota.Window{
+			{ID: "daily", Label: "Daily", RemainingPercent: 0, UsedPercent: 100, ResetAt: now.Add(-time.Hour)},
+			{ID: "weekly", Label: "Weekly", RemainingPercent: 60, UsedPercent: 40, ResetAt: now.Add(6 * 24 * time.Hour)},
+		},
+	}
+	meter := quota.New(quota.Options{
+		Reader:          &stubReader{snapshot: &quota.Snapshot{Source: "test", GeneratedAt: now, Providers: []quota.ProviderQuota{expired}}},
+		RefreshInterval: -1,
+		Now:             func() time.Time { return now },
+	})
+	if _, err := meter.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	b := quota.NewBreaker(meter, quota.BreakerPolicy{})
+	got := b.Evaluate("openai")
+	if got.State != quota.BreakerClosed {
+		t.Errorf("State = %q, want closed (expired window must not gate): %s", got.State, got.Reason)
+	}
+	if !got.Allowed {
+		t.Error("an active 60%% window must admit new work")
+	}
+}
+
 // The spend-spike case: plenty of raw headroom left, but the burn rate
 // will not reach the reset. Headroom alone would have allowed this.
 func TestBreakerHaltsOnASpendSpikeWithHeadroomRemaining(t *testing.T) {

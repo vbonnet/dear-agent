@@ -72,6 +72,46 @@ func TestEvaluateUsesMostConstrainedWindow(t *testing.T) {
 	}
 }
 
+// A window whose reset time has already passed no longer reflects the
+// active quota period. CodexBar can report a stale exhausted window
+// alongside a healthy one that has already rolled over; Evaluate must
+// pick the active window, not the expired one, or a provider that has
+// actually reset gets classified as avoided (codex review on #1218).
+func TestEvaluateSkipsExpiredWindow(t *testing.T) {
+	now := time.Now()
+	snap := snapshotAt(now, readable("openai",
+		quota.Window{ID: "daily", Label: "Daily", RemainingPercent: 0, UsedPercent: 100, ResetAt: now.Add(-time.Hour)},
+		quota.Window{ID: "weekly", Label: "Weekly", RemainingPercent: 60, UsedPercent: 40, ResetAt: now.Add(6 * 24 * time.Hour)},
+	))
+	got := quota.Evaluate(snap, "openai", now, quota.Policy{})
+	if got.RemainingPercent != 60 {
+		t.Errorf("RemainingPercent = %.1f, want 60 (expired window excluded)", got.RemainingPercent)
+	}
+	if got.ConstrainedWindow != "Weekly" {
+		t.Errorf("ConstrainedWindow = %q, want Weekly", got.ConstrainedWindow)
+	}
+	if got.Class != quota.ClassHealthy {
+		t.Errorf("Class = %q, want healthy", got.Class)
+	}
+}
+
+// When every window is expired, the family has no currently-binding
+// reading at all — not the same as reporting zero windows, but callers
+// treat it identically: unknown, never avoid.
+func TestEvaluateTreatsAllWindowsExpiredAsNoUsableWindow(t *testing.T) {
+	now := time.Now()
+	snap := snapshotAt(now, readable("openai",
+		quota.Window{ID: "daily", Label: "Daily", RemainingPercent: 0, UsedPercent: 100, ResetAt: now.Add(-time.Hour)},
+	))
+	got := quota.Evaluate(snap, "openai", now, quota.Policy{})
+	if got.Class != quota.ClassUnknown {
+		t.Errorf("Class = %q, want unknown when every window is expired", got.Class)
+	}
+	if !strings.Contains(got.Reason, "no usage windows") {
+		t.Errorf("Reason = %q, want it to say no usage windows", got.Reason)
+	}
+}
+
 // The fail-safe contract: every way of not knowing produces ClassUnknown,
 // never ClassAvoid. A provider nobody can read must keep routing.
 func TestEvaluateNeverAvoidsOnAMissingReading(t *testing.T) {

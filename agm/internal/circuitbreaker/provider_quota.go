@@ -33,6 +33,13 @@ const providerQuotaGateName = "provider_quota"
 func checkProviderQuota(gate ProviderQuotaGate, model string) GateResult {
 	decision := gate.AllowSpawn(model)
 	if decision.Allowed {
+		if refusal := throttleAllowanceRefusal(decision); refusal != "" {
+			return GateResult{
+				Gate:    providerQuotaGateName,
+				Passed:  false,
+				Message: refusal,
+			}
+		}
 		msg := decision.Reason
 		if !decision.Evaluated {
 			// Distinguish "checked, has room" from "could not check". Both
@@ -51,7 +58,7 @@ func checkProviderQuota(gate ProviderQuotaGate, model string) GateResult {
 	if !decision.ResetsAt.IsZero() {
 		msg += fmt.Sprintf(" The window resets at %s.", decision.ResetsAt.Format(time.RFC3339))
 	}
-	msg += fmt.Sprintf(" Start this session on a provider with headroom (`agm quota` shows all of them),"+
+	msg += fmt.Sprintf(" Start this session on a provider with headroom (`agm quota-meter` shows all of them),"+
 		" or override with %s=off.", quota.SpawnGateOverrideEnvVar)
 
 	return GateResult{
@@ -59,6 +66,35 @@ func checkProviderQuota(gate ProviderQuotaGate, model string) GateResult {
 		Passed:  false,
 		Message: msg,
 	}
+}
+
+// throttleAllowanceRefusal enforces the hourly per-family allowance
+// documented on quota.DefaultThrottledSpawnsPerHour against the
+// persistent throttle ledger, returning a non-empty refusal message once
+// the allowance is spent. It is a no-op — "" — for any family that is
+// not currently throttled, so the common healthy-provider path never
+// touches the ledger file at all.
+//
+// A ledger this process cannot read is not evidence the allowance is
+// spent, so a read error refuses nothing: the gate degrades to "wired
+// but unable to enforce the burst cap", the same fail-open direction
+// checkProviderQuota already takes everywhere else in this file.
+func throttleAllowanceRefusal(decision quota.SpawnDecision) string {
+	if !decision.Evaluated || decision.State != quota.BreakerThrottled {
+		return ""
+	}
+	limit := quota.DefaultThrottledSpawnsPerHour
+	if limit < 0 {
+		return ""
+	}
+	count, err := recentThrottledAdmissions(decision.Family, time.Now())
+	if err != nil || count < limit {
+		return ""
+	}
+	return fmt.Sprintf("%s quota is throttled and the hourly allowance (%d starts) is already spent: %s"+
+		" Start this session on a provider with headroom (`agm quota-meter` shows all of them),"+
+		" or override with %s=off.",
+		decision.Family, limit, decision.Reason, quota.SpawnGateOverrideEnvVar)
 }
 
 // WithProviderQuota enables the provider-quota gate for a spawn of model.
