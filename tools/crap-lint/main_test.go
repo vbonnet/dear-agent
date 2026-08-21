@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/craplens"
 )
 
 // TestRunRequiresRevisions pins the usage contract: a missing revision is the
@@ -91,5 +93,70 @@ func TestWriteGitHubOutputHeredocIsTerminated(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, delim+"\n") {
 		t.Errorf("heredoc was not closed on the final line: %q", got)
+	}
+}
+
+// TestUnflaggedSummaryDistinguishesUnmeasuredFromClean pins the honesty
+// property the command and the skill both promise: a run that measured nothing
+// must not read like a healthy diff. Reporting "clean" for an unusable
+// measurement is the failure that would make this signal worth ignoring.
+func TestUnflaggedSummaryDistinguishesUnmeasuredFromClean(t *testing.T) {
+	tests := []struct {
+		name      string
+		report    craplens.Report
+		wantHas   string
+		wantNotIn string
+	}{
+		{
+			name:      "checkout mismatch",
+			report:    craplens.Report{CheckoutMismatch: true, Changed: 7},
+			wantHas:   "not measured",
+			wantNotIn: "clean",
+		},
+		{
+			name:      "every package unmeasured",
+			report:    craplens.Report{Changed: 4, Unknown: []string{"agm/internal/dolt"}},
+			wantHas:   "not measured",
+			wantNotIn: "clean",
+		},
+		{
+			name:      "genuinely clean",
+			report:    craplens.Report{Scored: 5, WithinAgentTarget: 5, Threshold: craplens.DefaultThreshold},
+			wantHas:   "clean",
+			wantNotIn: "not measured",
+		},
+		{
+			name: "clean but partially unmeasured still says so",
+			report: craplens.Report{
+				Scored: 5, WithinAgentTarget: 5, Threshold: craplens.DefaultThreshold,
+				Unknown: []string{"agm/internal/tmux"},
+			},
+			wantHas:   "unmeasured",
+			wantNotIn: "not measured",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := unflaggedSummary(tc.report)
+			if !strings.Contains(got, tc.wantHas) {
+				t.Errorf("summary = %q, want it to contain %q", got, tc.wantHas)
+			}
+			if strings.Contains(got, tc.wantNotIn) {
+				t.Errorf("summary = %q, must not contain %q", got, tc.wantNotIn)
+			}
+		})
+	}
+}
+
+// TestWriteGitHubOutputHasNoTrailingBlankLine pins that the heredoc body ends
+// at the last content line, so the block closes cleanly.
+func TestWriteGitHubOutputHasNoTrailingBlankLine(t *testing.T) {
+	var out bytes.Buffer
+	writeGitHubOutput(&out, flaggedReport())
+
+	got := out.String()
+	if strings.Contains(got, "\n\nCRAP_LINT_REPORT_EOF") {
+		t.Errorf("heredoc has a blank line before its delimiter:\n%q", got)
 	}
 }

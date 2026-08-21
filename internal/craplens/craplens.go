@@ -122,6 +122,10 @@ type Report struct {
 	Threshold float64
 	// Scored is the count of changed functions whose coverage was known.
 	Scored int
+	// Unmeasured is the count of changed functions whose coverage could not be
+	// determined even though their package total was known, which happens for
+	// build-tagged files excluded from the profile on this platform.
+	Unmeasured int
 	// WithinAgentTarget is how many Scored functions are at or under
 	// AgentTarget.
 	WithinAgentTarget int
@@ -173,7 +177,12 @@ func Analyze(ctx context.Context, repoDir, base, head string, threshold float64)
 	funcs := changedFunctions(ctx, repoDir, head, touched)
 	pkgs := packagesOf(touched)
 
-	if !headIsCheckedOut(ctx, repoDir, head) {
+	// Coverage is measured against the checkout while spans and complexity
+	// come from the committed head tree, so both must describe the same code.
+	// A different revision, or the same revision with uncommitted or
+	// untracked changes, makes the two disagree: an untracked test can make an
+	// uncovered function look covered.
+	if !headIsCheckedOut(ctx, repoDir, head) || !workingTreeIsClean(ctx, repoDir) {
 		return Report{
 			Threshold:        threshold,
 			Changed:          len(funcs),
@@ -187,7 +196,7 @@ func Analyze(ctx context.Context, repoDir, base, head string, threshold float64)
 
 	report := Report{Threshold: threshold, Changed: len(funcs)}
 	scoreFunctions(&report, funcs, threshold)
-	classifyPackages(&report, cov, touched)
+	classifyPackages(ctx, &report, cov, touched, repoDir, base)
 	return report, nil
 }
 
@@ -209,6 +218,11 @@ func applyCoverage(funcs []Function, cov coverageData) {
 func scoreFunctions(report *Report, funcs []Function, threshold float64) {
 	for _, f := range funcs {
 		if f.Coverage == CoverageUnknown {
+			// A file excluded from the profile (a build-tagged file on the
+			// wrong runner, for example) leaves its functions unmeasured even
+			// when the package total is known. Counting them keeps that
+			// visible instead of silently narrowing what was scored.
+			report.Unmeasured++
 			continue
 		}
 		report.Scored++
@@ -234,16 +248,21 @@ func scoreFunctions(report *Report, funcs []Function, threshold float64) {
 
 // classifyPackages separates the touched packages that could not be measured
 // from those measured at zero coverage.
-func classifyPackages(report *Report, cov coverageData, touched touchedSet) {
+func classifyPackages(ctx context.Context, report *Report, cov coverageData, touched touchedSet, repoDir, base string) {
 	for _, p := range sortedKeys(cov.packages) {
 		switch cov.packages[p].coverage {
 		case CoverageUnknown:
 			report.Unknown = append(report.Unknown, p)
 		case 0:
+			// New only when the diff adds every changed file in the package
+			// AND the directory held no Go source at the base. Without the
+			// second check, adding one file to an existing package would
+			// report the whole package as new.
+			isNew := touched.allFilesAdded(p) && !treeHasGoFiles(ctx, repoDir, base, p)
 			report.Untested = append(report.Untested, Package{
 				ImportPath: p,
 				Coverage:   0,
-				New:        touched.packageIsNew(p),
+				New:        isNew,
 			})
 		}
 	}

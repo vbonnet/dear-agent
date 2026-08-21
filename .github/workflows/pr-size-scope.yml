@@ -29,7 +29,12 @@ jobs:
   size-scope:
     name: Size and scope signal
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 20, not 5. The crap-lint step runs the changed packages' tests to measure
+    # coverage, which can take minutes. At 5 the runner would cancel the whole
+    # job mid-measurement, and a cancelled job skips the comment steps entirely,
+    # so the step's continue-on-error would not preserve the advisory behavior.
+    # crap-lint bounds its own coverage run well inside this budget.
+    timeout-minutes: 20
     outputs:
       should_comment: ${{ steps.scope.outputs.should_comment }}
       mixed_concern: ${{ steps.concern.outputs.mixed_concern }}
@@ -259,7 +264,13 @@ jobs:
       - name: Remove stale split-suggestion comment
         # A later synchronize run can drop below every threshold; clear any
         # marker comment left by an earlier, larger revision of this PR.
-        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && steps.crap.outputs.crap_flagged != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        #
+        # Gated on steps.crap.outcome == 'success' as well as its verdict. A
+        # crap step that died before writing outputs leaves crap_flagged empty,
+        # which is indistinguishable from "clean" by value alone; deleting the
+        # comment on that would turn a failed detector into a green-looking
+        # run. An unknown verdict keeps whatever the last known one said.
+        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && steps.crap.outcome == 'success' && steps.crap.outputs.crap_flagged != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

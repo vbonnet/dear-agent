@@ -11,9 +11,11 @@ Measure the branch before opening the PR:
 go run ./tools/crap-lint -base origin/main -head HEAD
 ```
 
-It scores every function your diff changed and prints nothing when the diff is
-clean. Run it from a checkout that is at your head commit; it refuses to score
-otherwise rather than report numbers from the wrong source.
+It scores every function your diff changed and prints a one-line summary:
+`clean: ...` when nothing is flagged, or `not measured: ...` when it could not
+measure anything. Run it from a checkout that is at your head commit with no
+uncommitted or untracked changes; it refuses to score otherwise rather than
+report coverage from one tree against line numbers from another.
 
 ## The budget
 
@@ -40,7 +42,7 @@ Do not hand-roll a check that already has an owner. One rule, one home.
 |---|---|---|
 | Discarded error returns | `errcheck` in `.golangci.yml`, `check-blank: true` | Hard fail on new occurrences |
 | Raw cyclomatic complexity over 15 | `gocyclo` in `.golangci.yml` | Hard fail on new occurrences |
-| Result of `append` never used | `staticcheck` SA4010 | Hard fail |
+| Result of `append` never used | `staticcheck` SA4010 | Hard fail once #1350 lands; the suppression is still in `.golangci.yml` until then |
 | Packages shipping no `_test.go` at all | `zero-test` scan in `cmd/structural-health` | Baselined ratchet |
 | Complexity that no test exercises | `tools/crap-lint` | Advisory comment only |
 
@@ -109,7 +111,8 @@ complexity dropping from 46 to 4 and no behavior change.
 
 2. If it prints `clean:`, you are done. Check the second number it reports:
    how many of your changed functions are at or under 6. Raising it is the
-   goal even when nothing is over 30.
+   goal even when nothing is over 30. If it prints `not measured:`, nothing
+   was checked at all, which is not a pass; fix what it names and re-run.
 
 3. If it names a function, pick one of the three answers above and act on it.
    Re-run until it is clean, or until the remaining entries are ones you can

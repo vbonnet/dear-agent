@@ -38,8 +38,16 @@ func (r Report) Render() string {
 	b.WriteString("If the code is exercised by an integration suite this signal cannot run, say so and move on.\n")
 
 	if len(r.Unknown) > 0 {
-		fmt.Fprintf(&b, "\nCoverage could not be collected for %d touched package(s), which are excluded rather than scored as untested: `%s`.\n",
+		fmt.Fprintf(&b, "\nCoverage could not be collected for %d touched package(s), which are excluded rather than scored as untested: `%s`",
 			len(r.Unknown), strings.Join(truncate(r.Unknown, maxListed), "`, `"))
+		if len(r.Unknown) > maxListed {
+			fmt.Fprintf(&b, ", and %d more", len(r.Unknown)-maxListed)
+		}
+		b.WriteString(".\n")
+	}
+
+	if r.Unmeasured > 0 {
+		fmt.Fprintf(&b, "\n%d changed function(s) could not be measured on this platform, typically build-tagged files excluded from the profile, and were not scored.\n", r.Unmeasured)
 	}
 
 	b.WriteString("\nThis is advisory. It posts a comment and never fails a check. ")
@@ -81,7 +89,10 @@ func (r Report) renderOver(b *strings.Builder) {
 			fmt.Fprintf(b, "\n...and %d more.\n", len(r.Over)-maxListed)
 			break
 		}
-		fmt.Fprintf(b, "| %.0f | %d | %.0f%% | `%s:%d` `%s` |\n",
+		// One decimal, not zero. A score of 30.4 is correctly selected by the
+		// strict `> threshold` test but rounds to "30" at %.0f, so the row
+		// would appear not to exceed the threshold it is listed under.
+		fmt.Fprintf(b, "| %.1f | %d | %.1f%% | `%s:%d` `%s` |\n",
 			f.CRAP(), f.Complexity, f.Coverage*100, f.File, f.Line, f.Name)
 	}
 	b.WriteString("\n")

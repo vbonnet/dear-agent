@@ -1,6 +1,8 @@
 package craplens
 
 import (
+	"go/parser"
+	"go/token"
 	"math"
 	"os"
 	"os/exec"
@@ -233,10 +235,11 @@ func TestParseUnifiedDiffDropsPureDeletions(t *testing.T) {
 	}
 }
 
-// TestPackageIsNew pins that a package counts as new only when every changed
-// file in it was added, so adding one file to an existing package does not
-// report the whole package as new.
-func TestPackageIsNew(t *testing.T) {
+// TestAllFilesAdded pins the diff-side half of the new-package decision. It is
+// necessary but not sufficient on its own: the caller also confirms the
+// directory held no Go source at the base, because adding one file to an
+// existing package also makes every changed file an addition.
+func TestAllFilesAdded(t *testing.T) {
 	files := touchedSet{
 		"pkg/fresh/a.go": {Path: "pkg/fresh/a.go", Added: true},
 		"pkg/fresh/b.go": {Path: "pkg/fresh/b.go", Added: true},
@@ -244,13 +247,13 @@ func TestPackageIsNew(t *testing.T) {
 		"pkg/mixed/b.go": {Path: "pkg/mixed/b.go", Added: false},
 	}
 
-	if !files.packageIsNew("pkg/fresh") {
+	if !files.allFilesAdded("pkg/fresh") {
 		t.Error("pkg/fresh should be new")
 	}
-	if files.packageIsNew("pkg/mixed") {
+	if files.allFilesAdded("pkg/mixed") {
 		t.Error("pkg/mixed has an edited file, so it is not new")
 	}
-	if files.packageIsNew("pkg/absent") {
+	if files.allFilesAdded("pkg/absent") {
 		t.Error("a package the diff did not touch is not new")
 	}
 }
@@ -272,6 +275,15 @@ func TestComplexityMatchesGocyclo(t *testing.T) {
 		{name: "logical and", body: "func f(a, b bool) { if a && b { println(1) } }", want: 3},
 		{name: "logical or", body: "func f(a, b bool) { if a || b { println(1) } }", want: 3},
 		{name: "switch cases", body: "func f(n int) { switch n { case 1: case 2: case 3: } }", want: 4},
+		// Verified against the gocyclo binary: it walks the whole declaration
+		// and counts branches inside a nested closure toward the enclosing
+		// function. Scoring the closure separately instead would report 2 here
+		// and break the parity CRAPLENS-05 promises.
+		{
+			name: "nested closure counts toward the enclosing function",
+			body: "func f(a bool) func(int) int { if a { return nil }; return func(n int) int { if n > 1 { return 1 }; if n > 2 { return 2 }; if n > 3 { return 3 }; return 0 } }",
+			want: 5,
+		},
 		{name: "default adds no branch", body: "func f(n int) { switch n { case 1: default: } }", want: 2},
 		{name: "select default adds no branch", body: "func f(c chan int) { select { case <-c: default: } }", want: 2},
 	}
@@ -350,7 +362,7 @@ func TestParseProfile(t *testing.T) {
 	}, "\n")
 	data := unmeasured([]string{"pkg/x"})
 
-	parseProfile(raw, data)
+	parseProfile(raw, "github.com/example/mod", data)
 
 	if got := data.packages["pkg/x"].coverage; math.Abs(got-0.75) > 0.001 {
 		t.Errorf("pkg/x coverage = %.3f, want 0.75", got)
@@ -519,5 +531,187 @@ func write(t *testing.T, dir, rel, body string) {
 	}
 	if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestDeclaredFuncsMatchesGocycloScope pins WHICH declarations are scored,
+// which is a separate question from how each one is counted.
+//
+// Both answers below were taken from the gocyclo binary rather than assumed:
+// it reports a directly-assigned package-level function literal, and it does
+// not report one nested inside a composite literal (the cobra RunE shape).
+// Scoring the composite-literal case here would diverge from the linter this
+// package promises parity with, so the blind spot is shared deliberately.
+func TestDeclaredFuncsMatchesGocycloScope(t *testing.T) {
+	src := `package p
+
+type cmd struct{ RunE func(int) error }
+
+func Plain() {}
+
+var Bare = func(n int) int {
+	if n > 1 {
+		return 1
+	}
+	return 0
+}
+
+var Composite = &cmd{RunE: func(n int) error { return nil }}
+`
+	file, err := parser.ParseFile(token.NewFileSet(), "p.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+
+	var names []string
+	for _, decl := range file.Decls {
+		for _, cand := range declaredFuncs(decl) {
+			names = append(names, cand.name)
+		}
+	}
+
+	want := []string{"Plain", "Bare"}
+	if len(names) != len(want) {
+		t.Fatalf("scored %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Errorf("scored[%d] = %q, want %q", i, names[i], want[i])
+		}
+	}
+}
+
+// TestFailedPackagesDistinguishesFailFromNoTests is the regression test for
+// the trust property this signal rests on. A package whose tests FAILED may
+// still have left the profile blocks it reached before failing, so scoring it
+// would understate its coverage and could report well-tested code as untested.
+// A package with NO test files is the opposite: zero coverage is the true
+// answer and reporting it is the entire point.
+//
+// Parsing go test's human output could not tell these apart reliably, which
+// is why the collector reads -json events instead.
+func TestFailedPackagesDistinguishesFailFromNoTests(t *testing.T) {
+	const mod = "example.test"
+	events := strings.Join([]string{
+		`{"Action":"pass","Package":"example.test/passing"}`,
+		`{"Action":"fail","Package":"example.test/failing"}`,
+		`{"Action":"skip","Package":"example.test/notests"}`,
+		`not json at all`,
+		``,
+	}, "\n")
+
+	got := failedPackages(events, mod, []string{"passing", "failing", "notests", "silent"})
+
+	want := map[string]bool{"failing": true, "silent": true}
+	if len(got) != len(want) {
+		t.Fatalf("unmeasured = %v, want exactly %v", got, []string{"failing", "silent"})
+	}
+	for _, dir := range got {
+		if !want[dir] {
+			t.Errorf("%q was reported unmeasured; a passing or test-free package must be measured", dir)
+		}
+	}
+}
+
+// TestFailedPackagesTreatsLateFailureAsUnmeasured covers a package that emits
+// a passing test event and then fails overall, which is what a panic after
+// some tests pass looks like.
+func TestFailedPackagesTreatsLateFailureAsUnmeasured(t *testing.T) {
+	events := strings.Join([]string{
+		`{"Action":"pass","Package":"example.test/flaky"}`,
+		`{"Action":"fail","Package":"example.test/flaky"}`,
+	}, "\n")
+
+	got := failedPackages(events, "example.test", []string{"flaky"})
+	if len(got) != 1 || got[0] != "flaky" {
+		t.Errorf("unmeasured = %v, want [flaky]: a package that ends in failure must not be scored", got)
+	}
+}
+
+// TestPackageDirOfPrefersTheLongestMatch pins the ambiguity this repository
+// actually contains: internal/tokens and engram/internal/tokens both exist, so
+// an import path for the longer one is a suffix match for both.
+func TestPackageDirOfPrefersTheLongestMatch(t *testing.T) {
+	dirs := []string{"internal/tokens", "engram/internal/tokens"}
+
+	got, ok := packageDirOf("github.com/x/y/engram/internal/tokens", "", dirs)
+	if !ok || got != "engram/internal/tokens" {
+		t.Errorf("packageDirOf = %q (%v), want engram/internal/tokens", got, ok)
+	}
+
+	got, ok = packageDirOf("github.com/x/y/internal/tokens", "", dirs)
+	if !ok || got != "internal/tokens" {
+		t.Errorf("packageDirOf = %q (%v), want internal/tokens", got, ok)
+	}
+}
+
+// TestMatchPackageUsesTheModulePathExactly pins that a known module path
+// resolves profile entries by prefix rather than by suffix guessing, including
+// for the module root.
+func TestMatchPackageUsesTheModulePathExactly(t *testing.T) {
+	pkgs := map[string]packageCoverage{
+		"internal/tokens":        {},
+		"engram/internal/tokens": {},
+		".":                      {},
+	}
+
+	dir, rel, ok := matchPackage(pkgs, "example.test", "example.test/engram/internal/tokens/a.go")
+	if !ok || dir != "engram/internal/tokens" || rel != "engram/internal/tokens/a.go" {
+		t.Errorf("nested = (%q, %q, %v)", dir, rel, ok)
+	}
+
+	dir, rel, ok = matchPackage(pkgs, "example.test", "example.test/root.go")
+	if !ok || dir != "." || rel != "root.go" {
+		t.Errorf("root = (%q, %q, %v), want (\".\", \"root.go\", true)", dir, rel, ok)
+	}
+
+	if _, _, ok = matchPackage(pkgs, "example.test", "example.test/untouched/a.go"); ok {
+		t.Error("a package the diff did not touch must not match")
+	}
+}
+
+// TestParseProfileTreatsZeroStatementPackageAsMeasured covers a profiled
+// package holding no counted statements: that is measured at full coverage,
+// not unmeasured, so its functions are scored rather than silently skipped.
+func TestParseProfileTreatsZeroStatementPackageAsMeasured(t *testing.T) {
+	raw := "mode: set\nexample.test/empty/e.go:1.1,2.2 0 0\n"
+	data := unmeasured([]string{"empty"})
+
+	parseProfile(raw, "example.test", data)
+
+	if got := data.packages["empty"].coverage; got != 1 {
+		t.Errorf("coverage = %v, want 1 for a package with no counted statements", got)
+	}
+}
+
+// TestIsGeneratedSource pins detection by the standard toolchain marker rather
+// than by filename. CRAPLENS-02 excludes generated files, and this repository
+// contains generated source whose name matches no generated-looking suffix.
+func TestIsGeneratedSource(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{
+			name: "standard marker",
+			src:  "// Code generated by tool. DO NOT EDIT.\n\npackage p\n",
+			want: true,
+		},
+		{
+			name: "marker with a different generator",
+			src:  "// Code generated from patterns.yaml; DO NOT EDIT.\n\npackage p\n",
+			want: true,
+		},
+		{name: "handwritten", src: "// Package p does a thing.\npackage p\n", want: false},
+		{name: "prose mentioning generation", src: "// This code generated a report once.\npackage p\n", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isGeneratedSource([]byte(tc.src)); got != tc.want {
+				t.Errorf("isGeneratedSource = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
