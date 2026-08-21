@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -375,13 +376,12 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		if len(line) == 0 {
 			continue
 		}
-		// GetHistory's scanner caps a single line at maxHistoryLineBytes. A
-		// record accepted here but larger than that would write successfully
-		// and then make every later GetHistory or ExportConversation call fail
-		// with "token too long" for the whole file, not just this record.
-		// AGP-65 requires rejecting it up front, before a session exists.
-		if len(line) > maxHistoryLineBytes {
-			return nil, fmt.Errorf("message record is %d bytes, over the %d-byte history limit", len(line), maxHistoryLineBytes)
+		// json.Unmarshal replaces invalid UTF-8 inside a JSON string with
+		// U+FFFD instead of erroring, which would silently alter the
+		// imported content rather than reject the malformed record it came
+		// from.
+		if !utf8.Valid(line) {
+			return nil, fmt.Errorf("message contains invalid UTF-8")
 		}
 		var msg Message
 		if err := json.Unmarshal(line, &msg); err != nil {
@@ -393,6 +393,22 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		// rejected rather than imported as an empty turn with no speaker.
 		if msg.Role != RoleUser && msg.Role != RoleAssistant {
 			return nil, fmt.Errorf("message has unsupported role %q", msg.Role)
+		}
+		// GetHistory's scanner caps a single line at maxHistoryLineBytes, and
+		// what it reads back is writeHistory's re-marshaled encoding of msg,
+		// not this raw input line. Re-marshaling adds fields the wire format
+		// omits (ID, Timestamp, Metadata) and can expand escaped characters,
+		// so a line just under the limit can still persist a record over it.
+		// Checking the encoding that is actually written, rather than the one
+		// that was read, is what makes AGP-65's limit and AGP-63's round trip
+		// agree; rejecting here keeps the promise from AGP-68 that a failed
+		// import leaves no session behind, since none exists yet.
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate message size: %w", err)
+		}
+		if len(encoded) > maxHistoryLineBytes {
+			return nil, fmt.Errorf("message record is %d bytes once persisted, over the %d-byte history limit", len(encoded), maxHistoryLineBytes)
 		}
 		messages = append(messages, msg)
 	}

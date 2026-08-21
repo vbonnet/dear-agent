@@ -329,6 +329,48 @@ func TestParseImportedMessagesAcceptsLargeRecordUnderTheLimit(t *testing.T) {
 	}
 }
 
+// TestParseImportedMessagesRejectsRecordOversizedOnlyOnceRePersisted covers a
+// record whose raw input line is under maxHistoryLineBytes but whose
+// re-marshaled encoding is not: writeHistory persists ID, Timestamp, and
+// Metadata fields the minimal wire format omits, so a line-length check alone
+// would accept a record that GetHistory then fails to read back.
+func TestParseImportedMessagesRejectsRecordOversizedOnlyOnceRePersisted(t *testing.T) {
+	// The raw line is the minimal wire encoding, sized to land exactly at the
+	// limit; re-marshaling with the zero-valued ID/Timestamp/Metadata fields
+	// pushes the persisted record over it.
+	overhead := len(`{"role":"user","content":""}`)
+	content := strings.Repeat("x", maxHistoryLineBytes-overhead)
+	line := `{"role":"user","content":"` + content + `"}` + "\n"
+	if len(strings.TrimSuffix(line, "\n")) > maxHistoryLineBytes {
+		t.Fatalf("test setup: raw line already exceeds the limit, want it at or under")
+	}
+
+	messages, err := parseImportedMessages([]byte(line), FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection for a record oversized once persisted, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "history limit") {
+		t.Errorf("error = %v, want it to name the history limit", err)
+	}
+}
+
+// TestParseImportedMessagesRejectsInvalidUTF8 covers the silent-corruption
+// path: json.Unmarshal replaces invalid UTF-8 in a string with U+FFFD instead
+// of erroring, which would import altered content and report success rather
+// than reject the malformed record.
+func TestParseImportedMessagesRejectsInvalidUTF8(t *testing.T) {
+	// \xff is not valid UTF-8 in any position.
+	line := []byte(`{"role":"user","content":"a` + "\xff" + `b"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "UTF-8") {
+		t.Errorf("error = %v, want it to name UTF-8", err)
+	}
+}
+
 // stubTmuxOnPath installs a fake `tmux` binary as the only entry on PATH so
 // tests can control kill-session outcomes without a real tmux server. The
 // binary is a shell script: the kernel resolves its shebang directly, so the

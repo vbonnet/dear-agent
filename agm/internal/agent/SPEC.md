@@ -168,7 +168,7 @@ compatibility.
 
 **AGP-64** When the Gemini CLI adapter persists an imported conversation, the system shall present a reader either the complete imported history or the prior history, never a partial or truncated one.
 
-**AGP-69** When imports occur concurrently, the system shall give each one a history namespace distinct from every other.
+**AGP-69** When two imports occur concurrently, the system shall ensure each returned session's history reflects only the conversation imported for it, with neither import's history overwritten or merged by the other.
 
 ### Harness Doctor Health
 
