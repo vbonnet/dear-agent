@@ -760,6 +760,23 @@ func TestGeminiCLIAdapter_GetHistoryPath(t *testing.T) {
 	}
 }
 
+// requireRealTmux skips a test that needs a real tmux server: in short mode,
+// under CI_SKIP_TMUX (which ci.yml and cross-platform-test.yml set on macOS
+// specifically to exclude tmux-dependent tests and the platform flakes they
+// bring), and when no tmux binary is on PATH at all.
+func requireRealTmux(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("Skipping import test in short mode (requires tmux)")
+	}
+	if os.Getenv("CI_SKIP_TMUX") == "true" {
+		t.Skip("Skipping import test because CI_SKIP_TMUX=true")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not available")
+	}
+}
+
 // TestGeminiCLIAdapter_ImportConversationEndToEnd exercises ImportConversation
 // through its public entry point rather than only its internal helpers
 // (parseImportedMessages, writeHistory, rollbackFailedImport). Those helper
@@ -767,9 +784,7 @@ func TestGeminiCLIAdapter_GetHistoryPath(t *testing.T) {
 // of them, or stopped propagating a rollback error; this is the test that
 // would actually catch that.
 func TestGeminiCLIAdapter_ImportConversationEndToEnd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping import test in short mode (requires tmux)")
-	}
+	requireRealTmux(t)
 
 	// Isolate tmux to prevent phantom sessions on production socket
 	server := helpers.SetupTestServer(t)
@@ -815,9 +830,7 @@ func TestGeminiCLIAdapter_ImportConversationEndToEnd(t *testing.T) {
 // a real tmux session, and ImportConversation must both report the failure
 // and not return a session ID that nothing can then reach.
 func TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping import test in short mode (requires tmux)")
-	}
+	requireRealTmux(t)
 
 	server := helpers.SetupTestServer(t)
 	t.Setenv("AGM_TMUX_SOCKET", server.SocketPath)

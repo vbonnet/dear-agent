@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -395,7 +396,13 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 
 	messages := []Message{}
 	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
-		line = bytes.TrimSpace(line)
+		// bytes.TrimSpace uses unicode.IsSpace, which accepts characters JSON
+		// does not treat as whitespace between tokens (a vertical tab, a
+		// non-breaking space, ...). Trimming those would silently normalize a
+		// malformed record instead of rejecting it, undoing AGP-67. RFC 8259
+		// permits exactly these four bytes as insignificant whitespace, which
+		// is also what a blank line or a CRLF line ending actually needs.
+		line = bytes.Trim(line, " \t\r\n")
 		if len(line) == 0 {
 			continue
 		}
@@ -405,6 +412,15 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		// from. AGP-67 requires rejecting it instead.
 		if !utf8.Valid(line) {
 			return nil, fmt.Errorf("message record is not valid UTF-8")
+		}
+		// utf8.Valid only sees raw bytes, not \uXXXX escapes: an unpaired
+		// UTF-16 surrogate escape like \ud800 is itself valid ASCII, so it
+		// passes that check, but encoding/json accepts it during decode and
+		// silently substitutes U+FFFD rather than erroring. That is the same
+		// silent-corruption failure mode as invalid UTF-8, just reached
+		// through an escape instead of a raw byte.
+		if hasLoneSurrogateEscape(line) {
+			return nil, fmt.Errorf("message record has an unpaired surrogate escape")
 		}
 
 		// UseNumber, not the default: decoding into map[string]interface{}
@@ -459,6 +475,58 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 	}
 
 	return messages, nil
+}
+
+// hasLoneSurrogateEscape reports whether a JSON string literal in line
+// contains a \uXXXX escape for a UTF-16 surrogate half (U+D800-U+DFFF) that
+// is not immediately paired with its matching other half. encoding/json
+// accepts such an escape during decode and silently substitutes U+FFFD
+// instead of erroring, which would let a malformed record through as altered
+// content rather than being rejected.
+func hasLoneSurrogateEscape(line []byte) bool {
+	inString := false
+	for pos := 0; pos < len(line); {
+		b := line[pos]
+		if !inString {
+			if b == '"' {
+				inString = true
+			}
+			pos++
+			continue
+		}
+		switch {
+		case b == '"':
+			inString = false
+			pos++
+		case b != '\\':
+			pos++
+		case pos+1 >= len(line):
+			// A truncated escape at the end of the record; json.Decode will
+			// report the real syntax error.
+			return false
+		case line[pos+1] != 'u':
+			pos += 2 // an ordinary two-byte escape such as \n or \"
+		case pos+6 > len(line):
+			return false
+		default:
+			r, err := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32)
+			if err != nil {
+				return false
+			}
+			pos += 6
+			if r < 0xD800 || r > 0xDFFF {
+				continue // an ordinary \uXXXX escape, not a surrogate half
+			}
+			if r <= 0xDBFF && pos+6 <= len(line) && line[pos] == '\\' && line[pos+1] == 'u' {
+				if r2, err2 := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32); err2 == nil && r2 >= 0xDC00 && r2 <= 0xDFFF {
+					pos += 6 // consumed the matching low surrogate too
+					continue
+				}
+			}
+			return true // a high surrogate with no matching low, or a lone low surrogate
+		}
+	}
+	return false
 }
 
 // writeHistory persists messages as the session's history.jsonl.
@@ -863,24 +931,4 @@ func (a *GeminiCLIAdapter) extractLatestGeminiUUID(workingDir string) (string, e
 	}
 
 	return "", fmt.Errorf("no UUID found in --list-sessions output")
-}
-
-// splitLines splits a string into lines, preserving empty lines at the end.
-func splitLines(s string) []string {
-	if s == "" {
-		return nil
-	}
-	lines := []string{}
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	// Add remaining content (even if empty when string ends with newline)
-	if start <= len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
 }

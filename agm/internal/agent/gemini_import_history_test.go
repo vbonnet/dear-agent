@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -368,6 +369,65 @@ func TestParseImportedMessagesRejectsInvalidUTF8(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "UTF-8") {
 		t.Errorf("error = %v, want it to name UTF-8", err)
+	}
+}
+
+// TestParseImportedMessagesRejectsNonJSONWhitespace covers what
+// bytes.TrimSpace would silently fix: unicode.IsSpace accepts characters JSON
+// does not treat as insignificant whitespace between tokens (a non-breaking
+// space, among others), so trimming them would normalize an otherwise
+// malformed record instead of rejecting it.
+func TestParseImportedMessagesRejectsNonJSONWhitespace(t *testing.T) {
+	// U+00A0 (non-breaking space) satisfies unicode.IsSpace but is not one of
+	// the four bytes RFC 8259 permits as whitespace between JSON tokens.
+	line := []byte(" " + `{"role":"user","content":"x"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+}
+
+// TestParseImportedMessagesRejectsLoneSurrogateEscape covers the
+// escape-sequence sibling of the invalid-UTF-8 check above: utf8.Valid only
+// sees raw bytes, so an unpaired UTF-16 surrogate escape like \ud800 (itself
+// valid ASCII) passes it, but encoding/json accepts the escape during decode
+// and silently substitutes U+FFFD rather than erroring.
+func TestParseImportedMessagesRejectsLoneSurrogateEscape(t *testing.T) {
+	line := []byte(`{"role":"user","content":"` + `\ud800` + `"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "surrogate") {
+		t.Errorf("error = %v, want it to name the surrogate escape", err)
+	}
+}
+
+// TestParseImportedMessagesAcceptsPairedSurrogateEscape proves the surrogate
+// check above does not over-reject: a properly paired high/low surrogate
+// escape (how JSON must encode any character outside the Basic Multilingual
+// Plane) must still decode.
+func TestParseImportedMessagesAcceptsPairedSurrogateEscape(t *testing.T) {
+	// Builds the JSON string field as a literal \uXXXX\uXXXX escape pair
+	// (U+1F600, grinning face, encoded as its UTF-16 surrogate pair) rather
+	// than embedding the emoji as raw UTF-8 bytes, so this actually exercises
+	// the surrogate-pairing branch of hasLoneSurrogateEscape.
+	highSurrogate := "\\u" + strconv.FormatUint(0xD83D, 16)
+	lowSurrogate := "\\u" + strconv.FormatUint(0xDE00, 16)
+	line := []byte(`{"role":"user","content":"` + highSurrogate + lowSurrogate + `"}` + "\n")
+	const wantContent = "\U0001F600"
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
+	}
+	if messages[0].Content != wantContent {
+		t.Errorf("content = %q, want %q (the decoded emoji)", messages[0].Content, wantContent)
 	}
 }
 
