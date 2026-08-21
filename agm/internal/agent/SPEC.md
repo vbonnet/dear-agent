@@ -183,7 +183,7 @@ compatibility.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
-- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`, `agm/internal/agent/gemini_import_history_test.go`
+- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`, `agm/internal/agent/gemini_import_history_test.go`, `agm/internal/agent/gemini_cli_adapter_test.go`
 
 ### No-BDD rationale for AGP-63 through AGP-69
 
@@ -195,20 +195,21 @@ in that set. AGP-05 already excludes its aliases from shared model choices for
 the same reason. A cross-harness scenario here would assert parity for a
 harness the matrix deliberately excludes.
 
-The evidence is `agm/internal/agent/gemini_import_history_test.go`. It covers
-the decode and persist seams directly: the round trip through `writeHistory`
-and `GetHistory`, both sides of the 8 MiB boundary on input and on the
-re-encoded record, invalid UTF-8, every rejected format, a malformed record, a
-record with no supported role, integer precision in metadata, replacement of
-prior history rather than a partial write, namespace distinctness across
-generated names, and rollback with the kill confirmed and unconfirmed.
-
-What it does NOT do is call `ImportConversation` itself, because that calls
-`CreateSession`, which needs a live tmux socket. The composition of those seams
-inside `ImportConversation` is therefore unproven by any automated test, here
-or in BDD, and that gap is stated rather than papered over: it is the reason
-`ImportConversation` reads as 0% covered in the coverage output for this
-package.
+The evidence is `agm/internal/agent/gemini_import_history_test.go` and
+`gemini_cli_adapter_test.go`. The former covers the decode and persist seams
+directly: the round trip through `writeHistory` and `GetHistory`, both sides
+of the 8 MiB boundary on input and on the re-encoded record, invalid UTF-8,
+every rejected format, a malformed record, a record with no supported role,
+integer precision in metadata, replacement of prior history rather than a
+partial write, namespace distinctness across generated names, and rollback
+with the kill confirmed and unconfirmed. The latter proves the composition:
+`TestGeminiCLIAdapter_ImportConversationEndToEnd` calls `ImportConversation`
+itself against an isolated real tmux server and reads the result back through
+`GetHistory`, and
+`TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure` forces the
+write to fail after a real session is already launched and asserts both an
+error and an empty session ID — the case a helper-only suite could not tell
+apart from a silently-dropped rollback call.
 
 If `gemini-cli` is ever promoted into the active parity set, AGP-12 already
 requires BDD scenarios at that point, which is the correct trigger for adding
