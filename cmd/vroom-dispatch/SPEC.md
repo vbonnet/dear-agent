@@ -53,4 +53,4 @@ harness when a supervisor is stale.
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Feature: `agm/test/bdd/features/stall_detection.feature`
-- Package tests: `cmd/vroom-dispatch/main_test.go`
+- Package tests: `cmd/vroom-dispatch/main_test.go`, `cmd/vroom-dispatch/coverage_test.go`
