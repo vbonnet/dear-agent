@@ -816,11 +816,13 @@ uninstall-mergeloop-launchagent:
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
 	@echo "Removed plist (if present)."
 
-# Build resolve-review-threads: atomic wrapper for the resolveReviewThread
-# GraphQL mutation. Agents must use this instead of raw `gh api graphql`
-# because the classifier blocks bare GraphQL mutations. The binary shells out
-# to `gh api graphql` internally, so authentication uses the gh CLI token.
-# Usage: resolve-review-threads resolve-all <owner> <repo> <pr> [author]
+# Build resolve-review-threads: the sanctioned wrapper for GitHub review-thread
+# reply and resolution mutations. Agents must use this instead of raw
+# `gh api graphql` because the classifier blocks bare GraphQL mutations. The
+# binary shells out to `gh api graphql` internally, so authentication uses the
+# gh CLI token. Resolution requires evidence that the thread was answered; see
+# `resolve-review-threads --help` for the subcommands rather than duplicating
+# the usage catalogue here, where it goes stale.
 build-resolve-review-threads:
 	@echo "Building resolve-review-threads..."
 	go build $(BUILD_STAMP_FLAGS) -o bin/resolve-review-threads ./cmd/resolve-review-threads/

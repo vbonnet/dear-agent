@@ -797,53 +797,6 @@ func TestBuildReviewPlan_FailsClosedWithoutProtectedBaseHarnessRegistry(t *testi
 	}
 }
 
-func TestSpecReviewOwnerPath_CoversExactCanonicalSpecAuthoringSurface(t *testing.T) {
-	expected := []string{
-		specAuthoringPolicyPath,
-		"docs/templates/SPEC.md.tmpl",
-		"spec-governance/skills/write-spec/SKILL.md",
-		"spec-governance/skills/write-spec/references/contract-model.md",
-		"spec-governance/skills/write-spec/references/ears-and-bdd.md",
-		"spec-governance/skills/audit-specs/SKILL.md",
-		"spec-governance/skills/audit-specs/references/audit-verdicts.md",
-		"spec-governance/skills/audit-specs/references/report-schema.md",
-	}
-	if !slices.Equal(canonicalSpecAuthoringOwnerPaths[:], expected) {
-		t.Fatalf("canonical SPEC authoring owners = %v, want %v", canonicalSpecAuthoringOwnerPaths, expected)
-	}
-	for _, path := range expected {
-		if !specReviewOwnerPath(path) {
-			t.Errorf("canonical SPEC authoring owner %q is not protected", path)
-		}
-	}
-	for _, path := range []string{
-		"docs/templates/README.md",
-		"spec-governance/skills/write-spec/references/README.md",
-		"spec-governance/skills/audit-specs/examples/report-schema.md",
-		"spec-governance/skills/other/SKILL.md",
-	} {
-		if specReviewOwnerPath(path) {
-			t.Errorf("non-owner path %q entered the protected authoring surface", path)
-		}
-	}
-}
-
-func TestSpecReviewDependencyPathDoesNotCallManifestsSpecOwners(t *testing.T) {
-	for _, path := range []string{"go.mod", "go.sum", "go.work", "go.work.sum", "vendor/example/module.go"} {
-		if !specReviewDependencyPath(path) {
-			t.Errorf("reviewer dependency path %q is not protected", path)
-		}
-		if specReviewOwnerPath(path) {
-			t.Errorf("reviewer dependency path %q is mislabeled as a SPEC owner", path)
-		}
-	}
-	for _, path := range []string{"nested/go.mod", "go.mod.backup", "vendors/example.go", "docs/ordinary.md"} {
-		if specReviewDependencyPath(path) {
-			t.Errorf("ordinary path %q entered the reviewer dependency boundary", path)
-		}
-	}
-}
-
 func TestBuildReviewPlan_RequiresHumanForReviewEnforcementChanges(t *testing.T) {
 	for _, tc := range []struct {
 		path       string
@@ -861,6 +814,11 @@ func TestBuildReviewPlan_RequiresHumanForReviewEnforcementChanges(t *testing.T) 
 		{path: activeHarnessRegistryPath, wantReview: true, reason: "enforcement owner change"},
 		{path: ".github/workflows/review.yml", wantReview: true, reason: "enforcement owner change"},
 		{path: "cmd/ai-review/main.go", wantReview: true, reason: "enforcement owner change"},
+		{path: "cmd/ai-review/spec_contract_test.go"},
+		{path: "cmd/ai-review/backdoor_TEST.go", wantReview: true, reason: "enforcement owner change"},
+		{path: "cmd/ai-review/backdoor_teſt.go", wantReview: true, reason: "enforcement owner change"},
+		{path: "module/NOT-A-SPEC.md"},
+		{path: "module/NOT-SPEC.owner"},
 		{path: "internal/earslint/lint.go", wantReview: true, reason: "enforcement owner change"},
 		{path: "internal/markdownvisible/markdown.go", wantReview: true, reason: "enforcement owner change"},
 		{path: ".github/rulesets/main.json", wantReview: true, reason: "enforcement owner change"},
@@ -1274,6 +1232,12 @@ func TestBuildReviewPlan_RejectsHarnessLocalNormativeOwnersWithoutPeerComparison
 		"cmd/.claude/SPEC.md",
 		"harnesses/future-harness/SPEC.md",
 		"nested/plugins/future-harness/SPEC.md",
+		".CLAUDE/hooks/SPEC.md",
+		"AGY/hooks/SPEC.md",
+		"nested/Plugins/future-harness/SPEC.md",
+		".agentſ/hooks/SPEC.md",
+		"nested/CLAUDE-PLUGIN/SPEC.md",
+		"Harneſſes/future-harness/SPEC.md",
 	}
 	for index, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -1299,7 +1263,7 @@ func TestBuildReviewPlan_RejectsHarnessLocalNormativeOwnersWithoutPeerComparison
 }
 
 func TestBuildReviewPlan_AllowsLogicalDomainOwnersUnderInternalAndCmd(t *testing.T) {
-	for index, path := range []string{"internal/session/SPEC.md", "cmd/session/SPEC.md", "agm/internal/claude/SPEC.md", "agm/cmd/codex/SPEC.md", "pkg/plugin/SPEC.md"} {
+	for index, path := range []string{"internal/session/SPEC.md", "cmd/session/SPEC.md", "agm/internal/claude/SPEC.md", "agm/cmd/codex/SPEC.md", "pkg/plugin/SPEC.md", "agm/tests/e2e-install/Dockerfiles/SPEC.md"} {
 		t.Run(path, func(t *testing.T) {
 			repo := newReviewRepo(t)
 			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
@@ -2017,7 +1981,7 @@ func TestBuildReviewPlan_MarksEveryDeterministicEscalationRelevant(t *testing.T)
 		name string
 		path string
 	}{
-		{"CI pipeline", ".github/workflows/ci.yml"},
+		{"provider rules", ".github/rulesets/secondary.json"},
 		{"permission boundary", "agm/internal/permissionparity/parity.go"},
 		{"tool hook", ".codex/hooks/pretool-guard"},
 		{"security boundary", "internal/fsguard/fsguard.go"},

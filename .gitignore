@@ -130,3 +130,10 @@ infra/*.tfvars
 
 # Stray binary from `go build ./tools/language-policy` run at the repo root.
 /language-policy
+
+# Stray root-level builds from `go build ./cmd/<name>/` without -o. The
+# Makefile targets all write into bin/, so anything here is an accident.
+/resolve-review-threads
+/pr-blockers
+/safe-merge
+/safe-push

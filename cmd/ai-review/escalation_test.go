@@ -8,9 +8,35 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		paths []string
 		want  bool
 	}{
-		{"workflow edit", []string{".github/workflows/review.yml"}, true},
+		{"ordinary workflow", []string{".github/workflows/structural-health.yml"}, false},
+		// A repository-local action executes inside its caller's privileged
+		// job, and no workflow path changes when only the action does.
+		{"local composite action", []string{".github/actions/setup-go/action.yml"}, true},
+		{"local composite action script", []string{".github/actions/setup-go/setup.sh"}, true},
+		{"local action outside .github", []string{"tools/deploy/action.yaml"}, true},
+		{"local action case-fold alias", []string{"tools/deploy/Action.YML"}, true},
+		{"authoritative review policy", []string{"REVIEW.md"}, true},
+		{"lowercase alias of review policy", []string{"review.md"}, true},
+		{"case-fold alias of review policy", []string{"Review.md"}, true},
+		{"trusted review workflow", []string{".github/workflows/review.yml"}, true},
+		{"lowercase alias of review workflow", []string{".github/workflows/review.yaml"}, false},
+		{"mixed-case alias of review workflow", []string{".github/workflows/Review.Yml"}, true},
+		{"case-fold alias of review workflow", []string{".GitHub/Workflows/Review.yml"}, true},
 		{"review gate implementation", []string{"cmd/ai-review/escalation.go"}, true},
+		{"review gate governance", []string{"cmd/ai-review/SPEC.md"}, true},
+		{"review test-only hardening", []string{"cmd/ai-review/spec_contract_test.go"}, false},
+		{"review test-only deletion path", []string{"cmd/ai-review/spec_contract_git_test.go"}, false},
+		{"review test-only owner case-fold alias", []string{"CMD/AI-REVIEW/Spec_Contract_test.go"}, false},
+		{"review uppercase test suffix is production", []string{"cmd/ai-review/backdoor_TEST.go"}, true},
+		{"review Unicode test suffix is production", []string{"cmd/ai-review/backdoor_teſt.go"}, true},
+		{"review test-only rename", []string{"cmd/ai-review/old_test.go", "cmd/ai-review/new_test.go"}, false},
+		{"review production renamed to test", []string{"cmd/ai-review/review.go", "cmd/ai-review/review_test.go"}, true},
+		{"review test renamed to production", []string{"cmd/ai-review/review_test.go", "cmd/ai-review/review.go"}, true},
+		{"review non-Go test-shaped file", []string{"cmd/ai-review/review_test.yaml"}, true},
 		{"ruleset edit", []string{".github/rulesets/main.json"}, true},
+		{"case-fold alias of ruleset", []string{".GitHub/Rulesets/Main.json"}, true},
+		{"Unicode-fold alias of ruleset", []string{".github/ruleſetſ/main.json"}, true},
+		{"case-only rename retains canonical deletion", []string{"REVIEW.md", "Review.md"}, true},
 		{"settings.json", []string{".claude/settings.json"}, true},
 		// Permission/authorization surfaces are matched by concept, so a new
 		// owning package does not silently escape escalation.
@@ -19,11 +45,57 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"pi authorization ext", []string{"agm/internal/permissionparity/piadapter/pi_authorization_extension.js"}, true},
 		{"hook installer", []string{"agm/cmd/agm/install_hooks.go"}, true},
 		{"hook script", []string{".config/claude-code/hooks/pretool-bash-write-guard"}, true},
+		{"OpenCode hook root", []string{".opencode/hooks"}, true},
+		{"OpenCode hook case alias", []string{".OPENCODE/HOOKS/stop-guardrail-feedback"}, true},
+		{"Pi guardrail Unicode alias", []string{".pi/guardrailſ/stop-guardrail-feedback"}, true},
+		{"AGM command hook root", []string{"agm/cmd/agm/hooks"}, true},
+		{"AGM command hook descendant", []string{"agm/cmd/agm/hooks/session-start-agm-state-ready"}, true},
+		{"AGM internal hook root", []string{"agm/internal/hooks"}, true},
+		{"AGM internal hook case alias", []string{"AGM/INTERNAL/HOOKS/exit_gate.go"}, true},
+		{"AGM internal hook Unicode alias", []string{"agm/internal/hookſ/living_docs_check.go"}, true},
+		{"AGM internal hook descendant", []string{"agm/internal/hooks/living_docs_check.go"}, true},
+		{"AGM internal hook Go test", []string{"agm/internal/hooks/exit_gate_test.go"}, false},
+		// The Go-test carveout is owned by the rule that granted it, so an
+		// independent trigger under the same owner still fires.
+		{"hook migration Go test keeps independent trigger", []string{"agm/internal/hooks/migrations/schema_test.go"}, true},
+		{"hook permission Go test keeps independent trigger", []string{"agm/internal/hooks/permissions/policy_test.go"}, true},
+		{"hook launchd Go test keeps independent trigger", []string{"agm/internal/hooks/launchd/plan_test.go"}, true},
+		{"review permission Go test keeps independent trigger", []string{"cmd/ai-review/permission_test.go"}, true},
+		{"review migration Go test keeps independent trigger", []string{"cmd/ai-review/migrations/apply_test.go"}, true},
+		{"OpenCode hook contract", []string{".opencode/hooks/SPEC.md"}, false},
+		{"Pi guardrail contract", []string{".pi/guardrails/SPEC.md"}, false},
+		{"AGM Git hook contract", []string{"agm/.githooks/SPEC.md"}, false},
+		{"AGM internal hook contract", []string{"agm/internal/hooks/SPEC.md"}, false},
+		{"hook permission contract keeps independent trigger", []string{"agm/internal/hooks/permissions/SPEC.md"}, true},
+		{"hook migration contract keeps independent trigger", []string{"agm/internal/hooks/migrations/SPEC.md"}, true},
+		{"hook security contract keeps independent trigger", []string{"agm/internal/hooks/write-guard/SPEC.md"}, true},
+		{"hook launchd contract keeps independent trigger", []string{"agm/internal/hooks/launchd/SPEC.md"}, true},
+		{"AGM Codex hook contract", []string{"agm/internal/codexhooks/SPEC.md"}, false},
+		{"AGM Codex hook Go test", []string{"agm/internal/codexhooks/verify_test.go"}, false},
+		{"script hook pseudo-Go test", []string{".opencode/hooks/backdoor_test.go"}, true},
+		{"AGM internal hook uppercase test suffix", []string{"agm/internal/hooks/backdoor_TEST.go"}, true},
+		{"AGM internal hook Unicode test suffix", []string{"agm/internal/hooks/backdoor_teſt.go"}, true},
+		{"AGM internal hook lowercase contract alias", []string{"agm/internal/hooks/spec.md"}, true},
+		{"AGM internal hook Unicode contract alias", []string{"agm/internal/hooks/ſPEC.md"}, true},
+		{"AGM internal hook test owner case alias", []string{"AGM/internal/hooks/exit_gate_test.go"}, true},
+		{"AGM hook contract trailing space", []string{"agm/internal/hooks/SPEC.md "}, true},
+		{"AGM hook contract leading basename space", []string{"agm/internal/hooks/ SPEC.md"}, true},
+		{"AGM hook test trailing space", []string{"agm/internal/hooks/exit_gate_test.go "}, true},
+		{"review test trailing space", []string{"cmd/ai-review/review_test.go "}, true},
+		{"hook production leading basename space", []string{"agm/internal/hooks/ exit_gate.go"}, true},
+		{"AGM Git hook root alias", []string{"AGM/.GITHOOKS"}, true},
+		{"AGM Git hook descendant", []string{"agm/.githooks/pre-commit"}, true},
+		{"Codex hook Unicode root alias", []string{"agm/internal/codexhookſ"}, true},
+		{"Codex hook descendant", []string{"agm/internal/codexhooks/verify.go"}, true},
 		{"pretool prefix", []string{"cmd/pretool-fs-write-guard/main.go"}, true},
 		// Hook *registration* files have no "/hooks/" segment, and hook
 		// implementations are often named main.go under a -hooks/ owner dir.
 		{"agents hooks.json", []string{".agents/hooks.json"}, true},
 		{"codex hooks.json", []string{".codex/hooks.json"}, true},
+		{"Codex hook feature config", []string{".codex/config.toml"}, true},
+		{"Codex hook feature config case alias", []string{".CODEX/CONFIG.TOML"}, true},
+		{"Codex hook feature config Unicode alias", []string{".codex/conﬁg.toml"}, true},
+		{"Codex hook feature config descendant", []string{".codex/config.toml/payload"}, true},
 		{"agm-hooks impl", []string{"agm/cmd/agm-hooks/pretool-bash-blocker/main.go"}, true},
 		{"write guard", []string{"internal/writeguard/write-guard.go"}, true},
 		// The package that owns the boundary must escalate even though its
@@ -67,6 +139,19 @@ func TestEscalationTriggers_ExplicitMarker(t *testing.T) {
 	}
 }
 
+func TestChangedWorkflowIdentities_PreservesGitPathWhitespace(t *testing.T) {
+	const canonical = ".github/workflows/ordinary.yml"
+	got := changedWorkflowIdentities([]string{
+		canonical,
+		canonical + " ",
+		" " + canonical,
+	})
+	paths, ok := got[normalizedPathIdentity(canonical)]
+	if !ok || len(got) != 1 || len(paths) != 1 || paths[0] != canonical {
+		t.Fatalf("workflow identities mutated authenticated paths: %#v", got)
+	}
+}
+
 // TestBinaryEscalationTriggers guards the binary bypass: git renders a binary
 // change as a bare "Binary files differ" marker, so the reviewers never see the
 // payload and it must escalate instead of riding an "approved".
@@ -77,8 +162,11 @@ func TestBinaryEscalationTriggers(t *testing.T) {
 	if got := BinaryEscalationTriggers(nil); len(got) != 0 {
 		t.Fatalf("expected no triggers, got %v", got)
 	}
-	if got := BinaryEscalationTriggers([]string{"", "  "}); len(got) != 0 {
-		t.Fatalf("blank paths must not trigger, got %v", got)
+	if got := BinaryEscalationTriggers([]string{""}); len(got) != 0 {
+		t.Fatalf("empty paths must not trigger, got %v", got)
+	}
+	if got := BinaryEscalationTriggers([]string{"  "}); len(got) != 1 || got[0] != "binary file not reviewable from a text diff (  )" {
+		t.Fatalf("authenticated path whitespace was not preserved, got %v", got)
 	}
 	// A binary addition must block even when the model said approved.
 	if ApplyEscalation(Approved, BinaryEscalationTriggers([]string{"build/tool"})) != NeedsHumanReview {
@@ -92,8 +180,11 @@ func TestGitlinkEscalationTriggers(t *testing.T) {
 	if got := GitlinkEscalationTriggers([]string{"vendor/dep"}); len(got) != 1 {
 		t.Fatalf("expected a gitlink trigger, got %v", got)
 	}
-	if got := GitlinkEscalationTriggers([]string{"", " "}); len(got) != 0 {
-		t.Fatalf("blank paths must not trigger, got %v", got)
+	if got := GitlinkEscalationTriggers([]string{""}); len(got) != 0 {
+		t.Fatalf("empty paths must not trigger, got %v", got)
+	}
+	if got := GitlinkEscalationTriggers([]string{" "}); len(got) != 1 || got[0] != "submodule (gitlink) change whose target tree is not in the diff ( )" {
+		t.Fatalf("authenticated path whitespace was not preserved, got %v", got)
 	}
 	if ApplyEscalation(Approved, GitlinkEscalationTriggers([]string{"vendor/dep"})) != NeedsHumanReview {
 		t.Fatal("submodule change must escalate an approved outcome")
@@ -108,6 +199,17 @@ func TestHookEscalationIsScoped(t *testing.T) {
 		"engram/hooks/registry_test.go",
 		"engram/hooks/registry.go",
 		"pkg/hooks/doc.go",
+		"agm/.git-hooks-doc/pre-commit",
+		"agm/internal/hooksdocs/helper.go",
+		"agm/internal/codexhookdocs/verify.go",
+		".codex/config.toml.example",
+		"agm/internal/hooks/exit_gate_test.go",
+		"agm/internal/hooks/SPEC.md",
+		"agm/internal/codexhooks/verify_test.go",
+		"agm/internal/codexhooks/SPEC.md",
+		".opencode/hooks/SPEC.md",
+		".pi/guardrails/SPEC.md",
+		"agm/.githooks/SPEC.md",
 	}
 	for _, p := range shouldNot {
 		if got := EscalationTriggers([]string{p}, "", ""); len(got) != 0 {
@@ -119,6 +221,7 @@ func TestHookEscalationIsScoped(t *testing.T) {
 		".config/claude-code/hooks/pretool-bash-write-guard",
 		"agm/cmd/agm-hooks/pretool-bash-blocker/main.go",
 		"agm/hooks/cmd/posttool-cost-guard/main.go",
+		"agm/internal/hooks/living_docs_check.go",
 		".agents/hooks.json",
 	}
 	for _, p := range shouldEscalate {
@@ -131,7 +234,7 @@ func TestHookEscalationIsScoped(t *testing.T) {
 func TestApplyEscalation(t *testing.T) {
 	// Escalation forces needs-human-review from any outcome...
 	for _, o := range []Outcome{Approved, NeedsWork, Rejected, NeedsHumanReview} {
-		if got := ApplyEscalation(o, []string{"CI/CD pipeline edit"}); got != NeedsHumanReview {
+		if got := ApplyEscalation(o, []string{"critical trust-root change"}); got != NeedsHumanReview {
 			t.Errorf("ApplyEscalation(%v, triggered) = %v, want NeedsHumanReview", o, got)
 		}
 	}
@@ -143,15 +246,23 @@ func TestApplyEscalation(t *testing.T) {
 	}
 }
 
-// TestEscalationBlocksApprovedCIChange is the regression guard for the Codex
-// P1 finding: a CI/CD edit must never merge on a model-produced "approved".
-func TestEscalationBlocksApprovedCIChange(t *testing.T) {
-	triggers := EscalationTriggers([]string{".github/workflows/review.yml"}, "", "")
-	outcome := ApplyEscalation(Approved, triggers)
+// TestEscalationProtectsReviewTrustRootAndAllowsRoutineCI keeps the human-only
+// boundary on review authority rather than on every workflow consumer.
+func TestEscalationProtectsReviewTrustRootAndAllowsRoutineCI(t *testing.T) {
+	routine := EscalationTriggers([]string{".github/workflows/structural-health.yml"}, "", "")
+	if len(routine) != 0 {
+		t.Fatalf("routine workflow must stay in automated review, got %v", routine)
+	}
+	if outcome := ApplyEscalation(Approved, routine); outcome != Approved || ExitFor(outcome, false) != 0 {
+		t.Fatalf("routine workflow approved outcome = %v, want mergeable", outcome)
+	}
+
+	protected := EscalationTriggers([]string{".github/workflows/review.yml"}, "", "")
+	outcome := ApplyEscalation(Approved, protected)
 	if outcome != NeedsHumanReview {
-		t.Fatalf("CI/CD edit synthesized as approved must escalate, got %v", outcome)
+		t.Fatalf("trusted review workflow must escalate, got %v", outcome)
 	}
 	if ExitFor(outcome, false) != 1 {
-		t.Fatal("escalated outcome must block the merge")
+		t.Fatal("protected review workflow escalation must block the merge")
 	}
 }

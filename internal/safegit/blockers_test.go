@@ -69,7 +69,7 @@ func TestClassifyBlockers_OutdatedUnresolvedThreadBlocks(t *testing.T) {
 	st.MergeStateStatus = "BLOCKED"
 	threads := []ReviewThread{
 		{IsResolved: true},
-		{IsResolved: false, IsOutdated: true, Author: "gemini-code-assist", Path: "cmd/x/main.go"},
+		{ID: "PRRT_abc123", IsResolved: false, IsOutdated: true, Author: "gemini-code-assist", Path: "cmd/x/main.go"},
 	}
 	bs := ClassifyBlockers(st, "owner/repo", threads, nil)
 	if len(bs) != 1 || bs[0].Code != BlockThreads {
@@ -78,8 +78,19 @@ func TestClassifyBlockers_OutdatedUnresolvedThreadBlocks(t *testing.T) {
 	if !strings.Contains(bs[0].Detail, "outdated") {
 		t.Errorf("outdated threads must be called out, got: %s", bs[0].Detail)
 	}
+	if !strings.Contains(bs[0].Fix, "resolve-review-threads reply-resolve") {
+		t.Errorf("thread fix must lead with reply-resolve, got: %s", bs[0].Fix)
+	}
 	if !strings.Contains(bs[0].Fix, "resolve-review-threads resolve-all owner repo 42") {
 		t.Errorf("thread fix must name resolve-review-threads, got: %s", bs[0].Fix)
+	}
+	// The prescribed reply-resolve command takes a thread ID, so the diagnosis
+	// has to carry one; otherwise its output cannot be acted on directly.
+	if !strings.Contains(bs[0].Detail, "PRRT_abc123") {
+		t.Errorf("detail must carry the thread ID for reply-resolve, got: %s", bs[0].Detail)
+	}
+	if !strings.Contains(bs[0].Fix, "resolve-review-threads list owner repo 42") {
+		t.Errorf("fix must offer a list command that yields thread IDs, got: %s", bs[0].Fix)
 	}
 }
 
