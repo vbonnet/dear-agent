@@ -39,8 +39,12 @@ func changedFunctions(ctx context.Context, repoDir, head string, files touchedSe
 
 		for _, decl := range parsed.Decls {
 			for _, cand := range declaredFuncs(decl) {
-				start := fset.Position(cand.node.Pos()).Line
-				end := fset.Position(cand.node.End()).Line
+				// PositionFor with adjusted=false: a //line directive would
+				// otherwise move a declaration to a logical line while the
+				// git hunk ranges stay physical, so the overlap check would
+				// miss the changed function entirely.
+				start := fset.PositionFor(cand.node.Pos(), false).Line
+				end := fset.PositionFor(cand.node.End(), false).Line
 				if !overlaps(tf.Ranges, start, end) {
 					continue
 				}

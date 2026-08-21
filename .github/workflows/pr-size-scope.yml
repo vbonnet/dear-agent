@@ -39,6 +39,7 @@ jobs:
       should_comment: ${{ steps.scope.outputs.should_comment }}
       mixed_concern: ${{ steps.concern.outputs.mixed_concern }}
       crap_flagged: ${{ steps.crap.outputs.crap_flagged }}
+      crap_unknown: ${{ steps.crap.outputs.crap_unknown }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -184,6 +185,23 @@ jobs:
       # never become the reason a PR cannot merge. It runs the changed
       # packages' tests to measure coverage, so it is bounded and allowed to
       # fail without failing the job.
+      # CRAPLENS-05 claims the lens counts complexity the same way the gocyclo
+      # that golangci-lint runs does. That claim is checked against the real
+      # binary by TestComplexityParityWithGocycloBinary, which SKIPS when
+      # gocyclo is absent — so without this step the claim could drift with no
+      # test failing anywhere. Pinned rather than @latest so a gocyclo release
+      # cannot silently change what parity means.
+      - name: Install gocyclo for the parity check
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
+
+      - name: Verify complexity parity with gocyclo
+        run: |
+          go test ./internal/craplens/ -run TestComplexityParityWithGocycloBinary -count=1 -v 2>&1 | tee /tmp/parity.log
+          if grep -q -- "--- SKIP" /tmp/parity.log; then
+            echo "::error::the gocyclo parity check skipped; CRAPLENS-05 was not verified"
+            exit 1
+          fi
+
       - name: Score changed functions for complexity against coverage
         id: crap
         continue-on-error: true
@@ -271,12 +289,16 @@ jobs:
         # A later synchronize run can drop below every threshold; clear any
         # marker comment left by an earlier, larger revision of this PR.
         #
-        # Gated on steps.crap.outcome == 'success' as well as its verdict. A
+        # Gated on steps.crap.outcome == 'success' and on crap_unknown as well
+        # as the verdict. A run that could not measure some touched package
+        # reports no findings for the same reason an empty diff does, so
+        # deleting the comment on it would turn a measurement gap into a
+        # green-looking clean run. A
         # crap step that died before writing outputs leaves crap_flagged empty,
         # which is indistinguishable from "clean" by value alone; deleting the
         # comment on that would turn a failed detector into a green-looking
         # run. An unknown verdict keeps whatever the last known one said.
-        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && steps.crap.outcome == 'success' && steps.crap.outputs.crap_flagged != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && steps.crap.outcome == 'success' && steps.crap.outputs.crap_flagged != 'true' && steps.crap.outputs.crap_unknown != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

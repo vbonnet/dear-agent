@@ -988,3 +988,79 @@ func TestParseUnifiedDiffRejectsTruncatedInput(t *testing.T) {
 		t.Fatal("expected a truncated diff to be rejected rather than returned as complete")
 	}
 }
+
+// TestParseUnifiedDiffIgnoresAddedLinesThatLookLikeHeaders covers added source
+// text beginning with "++ ": git prefixes it with the addition marker, so the
+// emitted line starts with "+++ " and was mistaken for a file header, clearing
+// the current file and dropping every later hunk in it.
+func TestParseUnifiedDiffIgnoresAddedLinesThatLookLikeHeaders(t *testing.T) {
+	out := strings.Join([]string{
+		"diff --git a/pkg/a.go b/pkg/a.go",
+		"--- a/pkg/a.go",
+		"+++ b/pkg/a.go",
+		"@@ -1,0 +5,2 @@",
+		`+	doc := ` + "`" + `++ not a header` + "`",
+		"+++ still source, not a header",
+		"@@ -20,0 +30,3 @@",
+		"+more source",
+	}, "\n")
+
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatalf("parseUnifiedDiff: %v", err)
+	}
+	f := files["pkg/a.go"]
+	if f == nil {
+		t.Fatal("pkg/a.go was dropped entirely")
+	}
+	if len(f.Ranges) != 2 {
+		t.Fatalf("got %d hunks, want 2: a later hunk was lost to a fake header: %+v", len(f.Ranges), f.Ranges)
+	}
+	if f.Ranges[1] != (lineRange{30, 32}) {
+		t.Errorf("second hunk = %+v, want {30 32}", f.Ranges[1])
+	}
+}
+
+// TestMdCodeSurvivesMarkdownMetacharacters covers rendering a path that
+// contains characters legal in a filename but structural in a Markdown table.
+func TestMdCodeSurvivesMarkdownMetacharacters(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "pipe", in: "pkg/a|b.go"},
+		{name: "backtick", in: "pkg/a`b.go"},
+		{name: "double backtick", in: "pkg/a``b.go"},
+		{name: "leading backtick", in: "`pkg/a.go"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mdCode(tc.in)
+			if strings.Contains(got, "|") && !strings.Contains(got, `\|`) {
+				t.Errorf("unescaped pipe would add a table column: %q", got)
+			}
+			// The fence must be longer than any backtick run in the content,
+			// or the span terminates early.
+			fence := 0
+			for fence < len(got) && got[fence] == '`' {
+				fence++
+			}
+			inner := strings.Trim(got, "`")
+			longest, run := 0, 0
+			for _, r := range inner {
+				if r == '`' {
+					run++
+					if run > longest {
+						longest = run
+					}
+					continue
+				}
+				run = 0
+			}
+			if fence <= longest {
+				t.Errorf("fence of %d backticks does not clear a run of %d in %q", fence, longest, got)
+			}
+		})
+	}
+}
