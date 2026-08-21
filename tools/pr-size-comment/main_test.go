@@ -29,9 +29,9 @@ func TestDecide(t *testing.T) {
 			want: actionUpsert,
 		},
 		{
-			name: "crap step failed outright: neither delete (not a clean success) nor update",
+			name: "crap step failed outright: not a confirmed-clean delete, but refresh a stale comment if one exists",
 			in:   inputs{crapOutcome: "failure"},
-			want: actionNone,
+			want: actionRefreshIfExists,
 		},
 	}
 
@@ -221,7 +221,7 @@ func installFakeGh(t *testing.T, exitCode int) {
 func TestUpsertCommentReturnsDistinctFailureWhenGhFails(t *testing.T) {
 	installFakeGh(t, 1)
 	var stderr bytes.Buffer
-	got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{shouldComment: true, crapOutcome: "success"}, &stderr)
+	got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{shouldComment: true, crapOutcome: "success"}, false, &stderr)
 	if got != exitFailedOperation {
 		t.Errorf("upsertComment() = %d, want %d (exitFailedOperation); stderr=%q", got, exitFailedOperation, stderr.String())
 	}
@@ -236,5 +236,94 @@ func TestDeleteStaleCommentsReturnsDistinctFailureWhenGhFails(t *testing.T) {
 	got := deleteStaleComments(t.Context(), "vbonnet/dear-agent", "1", &stderr)
 	if got != exitFailedOperation {
 		t.Errorf("deleteStaleComments() = %d, want %d (exitFailedOperation); stderr=%q", got, exitFailedOperation, stderr.String())
+	}
+}
+
+// installFakeGhScript is installFakeGh's more flexible sibling: it puts a
+// caller-supplied POSIX shell script on PATH as `gh`, for a test that needs
+// different behavior for different gh subcommands rather than one fixed
+// exit code for every call.
+func installFakeGhScript(t *testing.T, script string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-gh PATH shim is a POSIX shell script; this test only runs on non-Windows CI")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestUpsertCommentOnlyIfExistsSkipsPostingWhenNoMarkerCommentExists guards
+// actionRefreshIfExists's whole point: a CRAP operational failure on an
+// otherwise unremarkable PR (no marker comment yet) must not post a new,
+// essentially empty comment. The fake gh fails any "pr comment" (post) call,
+// so if the code wrongly posted anyway, this returns exitFailedOperation
+// instead of the expected 0.
+func TestUpsertCommentOnlyIfExistsSkipsPostingWhenNoMarkerCommentExists(t *testing.T) {
+	installFakeGhScript(t, "#!/bin/sh\nif [ \"$1\" = \"pr\" ]; then exit 1; fi\nexit 0\n")
+	var stderr bytes.Buffer
+	got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{crapOutcome: "failure"}, true, &stderr)
+	if got != 0 {
+		t.Errorf("upsertComment(onlyIfExists=true, no marker comment) = %d, want 0 (must not post a new comment); stderr=%q", got, stderr.String())
+	}
+}
+
+// TestUpsertCommentOnlyIfExistsRefreshesWhenMarkerCommentExists is that
+// test's counterpart: a marker comment already exists, so a CRAP operational
+// failure must still refresh it — otherwise a stale "oversized" comment from
+// an earlier, larger revision is left standing forever once the current
+// revision drops below every threshold.
+func TestUpsertCommentOnlyIfExistsRefreshesWhenMarkerCommentExists(t *testing.T) {
+	installFakeGhScript(t, `#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    --paginate) echo 999; exit 0 ;;
+    --method) exit 0 ;;
+  esac
+done
+printf '%s\n' "<!-- pr-size-scope -->" "old" "<!-- crap-section -->" "old finding"
+exit 0
+`)
+	var stderr bytes.Buffer
+	got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{crapOutcome: "failure"}, true, &stderr)
+	if got != 0 {
+		t.Errorf("upsertComment(onlyIfExists=true, marker comment exists) = %d, want 0; stderr=%q", got, stderr.String())
+	}
+}
+
+// TestUpsertCommentStopsBeforePatchingWhenRecoveryReadFails guards against
+// the exact data loss codex flagged: a marker comment exists, recovery is
+// needed (crapOutcome != success), and the read of the existing comment
+// itself fails. Falling through to patch anyway would overwrite the only
+// stored code-health finding with a blank section. The fake gh succeeds on
+// the id-listing and PATCH calls (so a fall-through would succeed silently
+// and print nothing incriminating) but fails the single-comment read, and
+// the PATCH branch writes a sentinel file — the one channel a silently
+// successful patch can't hide from — so the test can tell a real
+// short-circuit apart from a patch that merely happened not to fail.
+func TestUpsertCommentStopsBeforePatchingWhenRecoveryReadFails(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, "patch-ran")
+	installFakeGhScript(t, fmt.Sprintf(`#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    --paginate) echo 999; exit 0 ;;
+    --method) touch %q; exit 0 ;;
+  esac
+done
+exit 1
+`, sentinel))
+	var stderr bytes.Buffer
+	got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{crapOutcome: "failure"}, false, &stderr)
+	if got != exitFailedOperation {
+		t.Errorf("upsertComment() = %d, want %d (exitFailedOperation); stderr=%q", got, exitFailedOperation, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "could not read the existing comment to recover") {
+		t.Errorf("stderr must report the read failure:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Error("a failed recovery read must not fall through to patching the comment")
 	}
 }
