@@ -37,15 +37,7 @@ merge. Only usage and operational failures exit non-zero.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`,
-  whose repository-implementation coverage scenario lists `tools/crap-lint` and
-  enforces that it declares a co-located SPEC. That scenario governs SPEC
-  presence, not the CRAPLENS/CRAPLINT behaviors themselves.
-- Test consequence: the behaviors in this contract are proven by the
-  deterministic package tests below rather than by Gherkin. They are a private
-  analysis seam with no cross-harness surface, so BDD would restate the unit
-  tests without adding evidence.
-
+- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
 - No BDD change, with reason: this command is a thin argument-and-output wrapper over `internal/craplens`, mirroring how `tools/pr-concern-lint` wraps `internal/prconcern`, and its behavior is proven by `tools/crap-lint/main_test.go`. The analysis it wraps carries its own contract and tests, so a scenario here would assert the wrapper twice and the analysis not at all.
 
 ## Test Traceability
