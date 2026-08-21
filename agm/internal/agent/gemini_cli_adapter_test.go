@@ -885,3 +885,68 @@ func TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure(t *testing.T
 		t.Errorf("tmux still has the imported session after rollback: %s", out)
 	}
 }
+
+// TestGeminiCLIAdapter_TwoImportsDoNotOverwriteEachOther exercises AGP-69
+// through the public entry point: TestImportedSessionNamesAreDistinct only
+// calls importedSessionName directly, and both single-import tests above
+// only ever run one import at a time, so neither would notice
+// ImportConversation reusing a shared name or dropping the random suffix.
+// Running two real imports back to back and reading both histories back is
+// what actually proves a second import cannot overwrite the first one's
+// history — if ImportConversation used a fixed or timestamp-only name, both
+// calls here would collide on the same tmux session and history file.
+//
+// This runs the two imports sequentially rather than as concurrent
+// goroutines: tmux.AcquireTmuxLock is a package-level, non-reentrant lock
+// that errors "already held by this process" rather than blocking when a
+// second caller in the same process tries to create a session while the
+// first creation is still in flight, so genuinely parallel ImportConversation
+// calls are not supported within one process today. The contract this test
+// protects — namespace distinctness — does not depend on true concurrency
+// for it to hold or fail.
+func TestGeminiCLIAdapter_TwoImportsDoNotOverwriteEachOther(t *testing.T) {
+	requireRealTmux(t)
+
+	server := helpers.SetupTestServer(t)
+	t.Setenv("AGM_TMUX_SOCKET", server.SocketPath)
+	t.Setenv("HOME", t.TempDir())
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "sessions.json")
+	store, err := NewJSONSessionStore(storePath)
+	if err != nil {
+		t.Fatalf("failed to create session store: %v", err)
+	}
+	adapter := &GeminiCLIAdapter{sessionStore: store}
+
+	dataA := []byte(`{"role":"user","content":"conversation A"}` + "\n")
+	dataB := []byte(`{"role":"user","content":"conversation B"}` + "\n")
+
+	sessionA, err := adapter.ImportConversation(dataA, FormatJSONL)
+	if err != nil {
+		t.Fatalf("import A returned error: %v", err)
+	}
+	sessionB, err := adapter.ImportConversation(dataB, FormatJSONL)
+	if err != nil {
+		t.Fatalf("import B returned error: %v", err)
+	}
+	if sessionA == sessionB {
+		t.Fatalf("two imports returned the same session ID: %q", sessionA)
+	}
+
+	historyA, err := adapter.GetHistory(sessionA)
+	if err != nil {
+		t.Fatalf("GetHistory(A) returned error: %v", err)
+	}
+	historyB, err := adapter.GetHistory(sessionB)
+	if err != nil {
+		t.Fatalf("GetHistory(B) returned error: %v", err)
+	}
+
+	if len(historyA) != 1 || historyA[0].Content != "conversation A" {
+		t.Errorf("history for A = %#v, want exactly the conversation A message", historyA)
+	}
+	if len(historyB) != 1 || historyB[0].Content != "conversation B" {
+		t.Errorf("history for B = %#v, want exactly the conversation B message", historyB)
+	}
+}

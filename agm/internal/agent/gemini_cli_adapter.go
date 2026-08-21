@@ -569,16 +569,6 @@ func (a *GeminiCLIAdapter) writeHistory(metadata *SessionMetadata, messages []Me
 		return fmt.Errorf("failed to create history directory: %w", err)
 	}
 
-	var buf bytes.Buffer
-	for _, msg := range messages {
-		encoded, err := json.Marshal(msg)
-		if err != nil {
-			return fmt.Errorf("failed to marshal message: %w", err)
-		}
-		buf.Write(encoded)
-		buf.WriteByte('\n')
-	}
-
 	tmp, err := os.CreateTemp(filepath.Dir(historyPath), "history-*.jsonl")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary history file: %w", err)
@@ -596,7 +586,26 @@ func (a *GeminiCLIAdapter) writeHistory(metadata *SessionMetadata, messages []Me
 		_ = os.Remove(tmpPath)
 	}()
 
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
+	// Encoded straight into the temp file rather than into a bytes.Buffer
+	// first: parseImportedMessages already holds the whole decoded
+	// conversation in memory, and there is no bound on total import size, so
+	// buffering the whole re-encoded copy again before writing a single byte
+	// would double that footprint for no reason. bufio still batches the
+	// small per-record writes into few syscalls.
+	writer := bufio.NewWriter(tmp)
+	for _, msg := range messages {
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message: %w", err)
+		}
+		if _, err := writer.Write(encoded); err != nil {
+			return fmt.Errorf("failed to write history file: %w", err)
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return fmt.Errorf("failed to write history file: %w", err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
 		return fmt.Errorf("failed to write history file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

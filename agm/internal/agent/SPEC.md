@@ -211,7 +211,17 @@ write to fail after a real session is already launched, then inspects the
 session store and the real tmux server directly and requires both to hold no
 trace of the session — the error and empty ID alone would also be produced by
 a version that silently dropped the `rollbackFailedImport` call, since
-`writeHistory`'s own error already yields both.
+`writeHistory`'s own error already yields both. And
+`TestGeminiCLIAdapter_TwoImportsDoNotOverwriteEachOther` runs two real imports
+back to back and reads both returned sessions back, so a version that reused
+a shared tmux name or dropped the random suffix would fail here even though
+`TestImportedSessionNamesAreDistinct` only calls `importedSessionName`
+directly and the single-import tests above never run two at all. The two
+imports run sequentially rather than concurrently: tmux session creation
+holds a package-level, non-reentrant lock that rejects a second in-flight
+caller in the same process rather than queuing it, so true concurrent
+`ImportConversation` calls are not supported today — a constraint of session
+creation, not of the namespace-distinctness contract this test proves.
 
 If `gemini-cli` is ever promoted into the active parity set, AGP-12 already
 requires BDD scenarios at that point, which is the correct trigger for adding
