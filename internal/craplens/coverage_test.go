@@ -2,6 +2,7 @@ package craplens
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -439,14 +440,7 @@ func TestWithGoWorkspaceDisabledForcesModuleMode(t *testing.T) {
 				if strings.HasPrefix(kv, "GOWORK=") {
 					continue
 				}
-				found := false
-				for _, gotKV := range got {
-					if gotKV == kv {
-						found = true
-						break
-					}
-				}
-				if !found {
+				if !slices.Contains(got, kv) {
 					t.Errorf("non-GOWORK entry %q from the input env was dropped", kv)
 				}
 			}

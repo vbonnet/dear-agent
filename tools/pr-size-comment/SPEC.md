@@ -16,8 +16,12 @@ finding across a run that could not re-measure it, rendering the body, and
 choosing between updating, deleting, or leaving the comment alone.
 
 The command is advisory by construction, matching every signal it reports: a
-comment-update failure is logged and swallowed, never the reason a pull
-request cannot merge.
+comment-update failure is never the reason a pull request cannot merge. It is
+not, however, silent about that failure to a direct caller: `upsertComment`
+and `deleteStaleComments` return a distinct non-zero status when a required
+`gh` operation fails, so the advisory posture toward the merge decision is a
+property of the calling workflow step (`continue-on-error: true`), not of
+this command swallowing the error itself.
 
 ## EARS Requirements
 
@@ -30,6 +34,8 @@ request cannot merge.
 **PRSIZECOMMENT-04** When there is no fresh code-health report to show and nothing to recover, and the code-health step reports an unknown result with a summary, the command shall render that summary so an unknown-only run is not silently invisible.
 
 **PRSIZECOMMENT-05** When more than one marker comment exists, the command shall update or delete only the oldest and remove the rest.
+
+**PRSIZECOMMENT-06** When a required `gh` operation fails while upserting or deleting the marker comment, the command shall exit with a distinct non-zero status rather than reporting success.
 
 ## BDD Traceability
 

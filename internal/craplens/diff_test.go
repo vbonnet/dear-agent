@@ -1,9 +1,52 @@
 package craplens
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+// TestWorkingTreeIsCleanCatchesIgnoredQuotedPathInTouchedPackage guards
+// against a real regression: text-mode `git status --porcelain` C-quotes a
+// path containing a space (confirmed: it renders as `!! "pkg/a
+// name_test.go"`), and the retained closing quote made the .go suffix check
+// false, so an ignored test file with a space in its name was silently
+// accepted as a clean checkout instead of correctly forcing the package to
+// unmeasured.
+func TestWorkingTreeIsCleanCatchesIgnoredQuotedPathInTouchedPackage(t *testing.T) {
+	dir := t.TempDir()
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+	gittest.Run(t, dir, "config", "user.name", "Test")
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "keep.go"), []byte("package pkg\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "base")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("pkg/a name_test.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, dir, "add", ".gitignore")
+	gittest.Run(t, dir, "commit", "-q", "-m", "ignore")
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "a name_test.go"), []byte("package pkg\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if workingTreeIsClean(t.Context(), dir, []string{"pkg"}) {
+		t.Fatal("an ignored .go file with a space in its name, inside a touched package, must not be treated as a clean checkout")
+	}
+
+	// The same ignored file outside any touched package is still harmless.
+	if !workingTreeIsClean(t.Context(), dir, []string{"other"}) {
+		t.Fatal("an ignored file outside every touched package must not force a dirty checkout")
+	}
+}
 
 // TestParseHunkHeader pins the diff arithmetic the whole signal rests on. A
 // wrong head-side span attributes changes to the wrong function.
