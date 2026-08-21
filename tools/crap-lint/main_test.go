@@ -149,6 +149,27 @@ func TestUnflaggedSummaryDistinguishesUnmeasuredFromClean(t *testing.T) {
 	}
 }
 
+// TestWriteGitHubOutputMarksUnmeasuredFunctionsUnknown pins that a diff with
+// no over-threshold function and no unknown package, but a per-function
+// coverage gap (a build-tagged file excluded on this runner, say), still
+// reports crap_unknown=true. Without it the workflow's own "clean" and
+// "delete the marker comment" gates would treat a partially unmeasured diff
+// as a healthy one, the same failure unflaggedSummary already guards against
+// in the prose form.
+func TestWriteGitHubOutputMarksUnmeasuredFunctionsUnknown(t *testing.T) {
+	var out bytes.Buffer
+	report := craplens.Report{Threshold: craplens.DefaultThreshold, Scored: 3, WithinAgentTarget: 3, Unmeasured: 1}
+	writeGitHubOutput(&out, report)
+
+	got := out.String()
+	if report.Flagged() {
+		t.Fatal("test setup: report must not be flagged, or this isn't the silent-gap case")
+	}
+	if !strings.Contains(got, "crap_unknown=true") {
+		t.Errorf("a report with unmeasured functions must report crap_unknown=true, got %q", got)
+	}
+}
+
 // TestWriteGitHubOutputHasNoTrailingBlankLine pins that the heredoc body ends
 // at the last content line, so the block closes cleanly.
 func TestWriteGitHubOutputHasNoTrailingBlankLine(t *testing.T) {

@@ -43,17 +43,19 @@ func changedFunctions(ctx context.Context, repoDir, head string, files touchedSe
 				// otherwise move a declaration to a logical line while the
 				// git hunk ranges stay physical, so the overlap check would
 				// miss the changed function entirely.
-				start := fset.PositionFor(cand.node.Pos(), false).Line
-				end := fset.PositionFor(cand.node.End(), false).Line
-				if !overlaps(tf.Ranges, start, end) {
+				startPos := fset.PositionFor(cand.node.Pos(), false)
+				endPos := fset.PositionFor(cand.node.End(), false)
+				if !overlaps(tf.Ranges, startPos.Line, endPos.Line) {
 					continue
 				}
 				out = append(out, Function{
 					Package:    dirOf(rel),
 					File:       rel,
 					Name:       cand.name,
-					Line:       start,
-					EndLine:    end,
+					Line:       startPos.Line,
+					StartCol:   startPos.Column,
+					EndLine:    endPos.Line,
+					EndCol:     endPos.Column,
 					Complexity: complexity(cand.node),
 				})
 			}

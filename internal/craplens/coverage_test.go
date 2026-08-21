@@ -42,6 +42,34 @@ func TestFunctionCoverageUnknownForUnprofiledFile(t *testing.T) {
 	}
 }
 
+// TestFunctionCoverageSeparatesFunctionsSharingALine covers two package-level
+// function literals gofmt can leave on one line, such as
+// `var A, B = func() int { return 1 }, func() int { return 2 }`. A line-only
+// intersection would credit every block on that line to both functions; only
+// A's block is hit here, so a line-only test would report both at 50% instead
+// of A fully covered and B not covered at all — either inventing or hiding an
+// over-threshold score depending on which function CRAP is scoring.
+func TestFunctionCoverageSeparatesFunctionsSharingALine(t *testing.T) {
+	data := coverageData{
+		blocks: map[string][]profileBlock{
+			"pkg/x/y.go": {
+				{startLine: 5, startCol: 12, endLine: 5, endCol: 18, numStmt: 1, count: 1},
+				{startLine: 5, startCol: 27, endLine: 5, endCol: 33, numStmt: 1, count: 0},
+			},
+		},
+	}
+
+	a := Function{File: "pkg/x/y.go", Line: 5, StartCol: 10, EndLine: 5, EndCol: 20}
+	if got := data.functionCoverage(a); got != 1 {
+		t.Errorf("coverage of the hit function = %v, want 1", got)
+	}
+
+	b := Function{File: "pkg/x/y.go", Line: 5, StartCol: 25, EndLine: 5, EndCol: 35}
+	if got := data.functionCoverage(b); got != 0 {
+		t.Errorf("coverage of the unhit function = %v, want 0", got)
+	}
+}
+
 // TestParseProfile pins reading a real coverage-profile body, including that
 // per-package totals are statement-weighted rather than a mean of blocks.
 func TestParseProfile(t *testing.T) {

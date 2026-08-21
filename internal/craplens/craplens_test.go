@@ -153,6 +153,31 @@ func TestAnalyzeSkipsCoverageOnCheckoutMismatch(t *testing.T) {
 	}
 }
 
+// TestAnalyzeIgnoresUnrelatedBuildArtifacts covers the checkout this
+// repository's own `make preflight` leaves behind: an ignored `build/`
+// directory of compiled binaries. Treating any ignored path as dirty made the
+// local lens this repository documents refuse to measure coverage until that
+// directory was deleted, even though it cannot affect `go test` for any
+// touched package.
+func TestAnalyzeIgnoresUnrelatedBuildArtifacts(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain unavailable")
+	}
+	repo := newTestRepo(t)
+	write(t, repo, ".gitignore", "/build/\n")
+	gittest.Run(t, repo, "add", ".gitignore")
+	gittest.Run(t, repo, "commit", "-q", "-m", "ignore build/")
+	write(t, repo, "build/agm", "not a go file\n")
+
+	report, err := Analyze(t.Context(), repo, "base", "HEAD", DefaultThreshold)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if report.CheckoutMismatch {
+		t.Fatal("an ignored build artifact outside every touched package must not be treated as a dirty checkout")
+	}
+}
+
 // newTestRepo builds a throwaway git repository with a base commit and a head
 // commit that adds one tested package and one untested, branchy package.
 func newTestRepo(t *testing.T) string {
