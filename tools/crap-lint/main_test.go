@@ -68,8 +68,8 @@ func TestWriteGitHubOutputCleanDiff(t *testing.T) {
 	if !strings.Contains(got, "crap_report=\n") {
 		t.Errorf("missing empty crap_report in %q", got)
 	}
-	if strings.Contains(got, "<<") {
-		t.Errorf("a clean report should not open a heredoc block: %q", got)
+	if strings.Contains(got, "crap_report<<") {
+		t.Errorf("an empty crap_report should not open a heredoc block: %q", got)
 	}
 }
 
@@ -179,5 +179,50 @@ func TestWriteGitHubOutputHasNoTrailingBlankLine(t *testing.T) {
 	got := out.String()
 	if strings.Contains(got, "\n\nCRAP_LINT_REPORT_EOF") {
 		t.Errorf("heredoc has a blank line before its delimiter:\n%q", got)
+	}
+}
+
+// TestWriteGitHubOutputCrapSummaryCannotInjectOutputs guards against the
+// exact injection codex flagged: a legal Git path can itself contain a
+// newline, and unflaggedSummary folds r.Unknown's package directories
+// straight into crap_summary's prose. A plain "crap_summary=<value>\n"
+// scalar line would let a crafted directory name like
+// "p\ncrap_unknown=false\nx" terminate that line early and inject a forged
+// crap_unknown assignment; the heredoc form must keep the whole value,
+// injected newlines included, inside one delimited block.
+func TestWriteGitHubOutputCrapSummaryCannotInjectOutputs(t *testing.T) {
+	var out bytes.Buffer
+	report := craplens.Report{
+		Changed: 1,
+		Unknown: []string{"p\ncrap_unknown=false\nx"},
+	}
+	writeGitHubOutput(&out, report)
+
+	got := out.String()
+	if !strings.Contains(got, "crap_summary<<") {
+		t.Fatalf("crap_summary must use the heredoc form once its value can contain a newline:\n%q", got)
+	}
+	// GITHUB_OUTPUT parsing treats every line up to (but not including) the
+	// bare closing delimiter as inert heredoc body, regardless of what it
+	// looks like; only what follows the closing delimiter is parsed as
+	// further output lines. Find that bare delimiter line specifically
+	// (distinct from the "crap_summary<<DELIM" opening line) and confirm
+	// nothing resembling the injected "crap_unknown=false" survived past it
+	// as its own top-level assignment.
+	const delim = "CRAP_LINT_SUMMARY_EOF"
+	lines := strings.Split(got, "\n")
+	closeIdx := -1
+	for i, line := range lines {
+		if line == delim {
+			closeIdx = i
+			break
+		}
+	}
+	if closeIdx < 0 {
+		t.Fatalf("no bare closing delimiter line found:\n%q", got)
+	}
+	after := strings.Join(lines[closeIdx+1:], "\n")
+	if strings.Contains(after, "crap_unknown=false") {
+		t.Errorf("the injected package path's crap_unknown=false escaped the heredoc as a real output line: %q", after)
 	}
 }
