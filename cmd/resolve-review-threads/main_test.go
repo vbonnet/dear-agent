@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -366,6 +367,43 @@ func TestSameReplyBody(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestShellQuote pins the retry-guidance safety property %q broke: a
+// multiline body or one with shell metacharacters must survive a literal
+// copy-paste into bash unchanged, or the retried command posts a body that
+// no longer matches the original and classifyPriorReply treats it as new.
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		name, in string
+	}{
+		{"plain", "Fixed - moved the check"},
+		{"multiline", "Fixed in abc1234\n\nCovered by TestThing."},
+		{"embedded single quote", "it's fixed now"},
+		{"dollar and backtick", "cost is $5 via `cmd`"},
+		{"empty", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			quoted := shellQuote(tt.in)
+			got := unquoteSingleQuoted(t, quoted)
+			if got != tt.in {
+				t.Errorf("shellQuote(%q) = %q, round-tripped through a POSIX "+
+					"shell as %q, want %q", tt.in, quoted, got, tt.in)
+			}
+		})
+	}
+}
+
+// unquoteSingleQuoted runs the shell's own single-quote parsing rather than
+// reimplementing it, so the test proves what bash would actually see.
+func unquoteSingleQuoted(t *testing.T, quoted string) string {
+	t.Helper()
+	out, err := exec.Command("sh", "-c", "printf '%s' "+quoted).Output()
+	if err != nil {
+		t.Fatalf("sh -c failed on %q: %v", quoted, err)
+	}
+	return string(out)
 }
 
 // TestIsAccessDenied separates a refusal by GitHub from a transient failure.

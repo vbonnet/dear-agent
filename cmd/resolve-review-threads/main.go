@@ -272,7 +272,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 				"will be denied too.\n"+
 				"check `gh auth status` and that the token can resolve threads on this "+
 				"repo, then finish with the EXACT SAME body:\n"+
-				"  resolve-review-threads reply-resolve %s %q", rErr, threadID, body)
+				"  resolve-review-threads reply-resolve %s %s", rErr, threadID, shellQuote(body))
 		}
 		return fail("the reply is posted but the thread is NOT resolved (likely "+
 			"transient): %v\n"+
@@ -281,7 +281,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			"reply-resolve will see your reply is already last and resolve "+
 			"without reposting it. Bare resolve would work too, but it drops "+
 			"the anchor check this thread is relying on, so prefer:\n"+
-			"  resolve-review-threads reply-resolve %s %q", rErr, threadID, body)
+			"  resolve-review-threads reply-resolve %s %s", rErr, threadID, shellQuote(body))
 	}
 	fmt.Println(msg)
 	return 0
@@ -315,7 +315,7 @@ func postReplyOrExit(ctx context.Context, threadID, body string) (id string, cod
 			"the thread was left UNRESOLVED on purpose. Do NOT reword and repost: "+
 			"re-run with the EXACT SAME body below and reply-resolve will find "+
 			"your reply by its text and resolve without duplicating it:\n"+
-			"  resolve-review-threads reply-resolve %s %q", err, threadID, body)
+			"  resolve-review-threads reply-resolve %s %s", err, threadID, shellQuote(body))
 	}
 	return "", fail("reply failed, thread left unresolved: %v", err)
 }
@@ -397,7 +397,7 @@ func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID,
 			"reply-resolve will see your reply is already last and resolve "+
 			"without reposting it. Bare resolve would work too, but it drops "+
 			"the anchor check this thread is relying on, so prefer:\n"+
-			"  resolve-review-threads reply-resolve %s %q", err, threadID, body)
+			"  resolve-review-threads reply-resolve %s %s", err, threadID, shellQuote(body))
 	}
 	switch checkReplyPlacement(after.PrevID, after.LastID, wantPrevID, wantLastID) {
 	case replyBuried:
@@ -563,6 +563,18 @@ func cleanBody(s string) string {
 // using it here would fail to match any multi-line or long reply and repost it.
 func sameReplyBody(lastBody, want string) bool {
 	return strings.TrimSpace(lastBody) == strings.TrimSpace(want)
+}
+
+// shellQuote wraps s in single quotes for a POSIX shell, escaping any
+// embedded single quote as '\”. Retry-guidance messages use this instead of
+// %q: %q produces Go string-literal escaping, so a multiline body's
+// newlines print as a literal backslash-n (which stays literal, not a
+// newline, inside bash double quotes) and embedded $ or backticks would be
+// expanded if pasted verbatim — either way the retried body would no longer
+// equal the original, defeating the exact-text-match retry safety this
+// guidance depends on. Single-quoted, only "'" itself needs escaping.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func fail(format string, a ...any) int {

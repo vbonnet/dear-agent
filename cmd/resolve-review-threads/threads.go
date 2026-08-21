@@ -399,7 +399,21 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 	}
 	msg, gotLastID, err := mutateThread(ctx, "resolve", threadID)
 	if err != nil {
-		return msg, false, err
+		// gh api can fail on the client side (network drop, timeout) after
+		// GitHub already applied the mutation server-side: this error alone
+		// does not prove the resolve never happened. Re-read before trusting
+		// it as a clean no-op, so a resolution that actually went through
+		// still gets the same reconciliation below rather than silently
+		// skipping it because the client-side signal was ambiguous.
+		after, checkErr := fetchThread(ctx, threadID)
+		if checkErr != nil || !after.IsResolved {
+			// Genuinely failed, or genuinely unclear and we can't do better:
+			// report the original error, same as before this check existed.
+			return msg, false, err
+		}
+		msg = fmt.Sprintf("resolved %s (isResolved=true) [recovered: the "+
+			"resolve mutation reported an error, but it had already applied]", threadID)
+		gotLastID = after.LastID
 	}
 	// The pre-mutation read above still leaves a window: a comment can land
 	// while this mutation itself is in flight. resolveMutation asks GitHub

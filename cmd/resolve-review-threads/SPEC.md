@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 2.4
+**Version:** 2.5
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -101,7 +101,9 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-43** When a stale-evidence resolution is detected and the automatic reopen also fails, the system shall report the thread as still resolved and direct the user to run `unresolve` before any other action, distinctly from the advice given when the reviewer has simply commented again.
 
-**RESOLVE-REVIEW-THREADS-44** When advising a retry that depends on posting the identical reply body, the system shall include that exact body in the suggested command rather than a generic placeholder, since a reworded retry is a new reply that resolves on top of unread commentary instead of a safe no-op.
+**RESOLVE-REVIEW-THREADS-44** When advising a retry that depends on posting the identical reply body, the system shall include that exact body, POSIX-shell-quoted so a literal copy-paste reproduces it unchanged, rather than a generic placeholder or a representation (such as a Go string literal) that a shell would not round-trip.
+
+**RESOLVE-REVIEW-THREADS-45** When a resolution mutation reports an error, the system shall re-read the thread before treating that as a clean no-op, since the client can fail after GitHub already applied the mutation server-side; if the re-read confirms it resolved, the system shall apply the same anchor verification and reopen-on-mismatch as a normally-reported success.
 
 ## BDD Traceability
 
