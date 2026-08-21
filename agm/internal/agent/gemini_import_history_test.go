@@ -443,3 +443,97 @@ func TestParseImportedMessagesPreservesLargeIntegerMetadata(t *testing.T) {
 		t.Errorf("re-encoded message lost integer precision, want %s in:\n%s", exact, encoded)
 	}
 }
+
+// TestParseImportedMessagesRejectsTrailingJSONValue covers the case Decode
+// alone does not: it reads exactly one JSON value and leaves anything after
+// it alone, so a line holding a valid message immediately followed by another
+// JSON value would decode the first and silently discard the second instead
+// of rejecting the record.
+func TestParseImportedMessagesRejectsTrailingJSONValue(t *testing.T) {
+	line := []byte(`{"role":"user","content":"ok"}{"role":"assistant","content":"ignored"}` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "trailing data") {
+		t.Errorf("error = %v, want it to name trailing data", err)
+	}
+}
+
+// TestWriteHistoryRoundTripsRecordAtExactlyTheLimit covers the off-by-one this
+// fixes: writeHistory appends a newline after every record, and ScanLines can
+// only locate that delimiter by buffering it along with the record itself, so
+// a record of exactly maxHistoryLineBytes plus its newline needs a token
+// buffer one byte larger than maxHistoryLineBytes. Without that margin, a
+// record parseImportedMessages accepts as exactly at the limit would still
+// fail on the next GetHistory with "token too long".
+func TestWriteHistoryRoundTripsRecordAtExactlyTheLimit(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	// Grow content until the marshaled message lands exactly at the limit.
+	msg := Message{Role: RoleUser, Content: ""}
+	overhead, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal empty message: %v", err)
+	}
+	msg.Content = strings.Repeat("x", maxHistoryLineBytes-len(overhead))
+	encoded, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal sized message: %v", err)
+	}
+	if len(encoded) != maxHistoryLineBytes {
+		t.Fatalf("test setup: encoded message is %d bytes, want exactly %d", len(encoded), maxHistoryLineBytes)
+	}
+
+	if err := adapter.writeHistory(metadata, []Message{msg}); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+	if len(got[0].Content) != len(msg.Content) {
+		t.Errorf("content length = %d, want %d", len(got[0].Content), len(msg.Content))
+	}
+}
+
+// TestGetHistoryPreservesLargeIntegerMetadata covers the read half of the
+// precision fix: writeHistory preserves an out-of-float64-range integer to
+// disk, but GetHistory previously re-decoded every line with the default
+// decoder, rounding the value again on the way back out even though the file
+// on disk still held the exact digits.
+func TestGetHistoryPreservesLargeIntegerMetadata(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+
+	const exact = "9007199254740993" // 2^53 + 1, not representable as a float64
+	record := []byte(`{"role":"user","content":"x","Metadata":{"tokens":` + exact + `}}` + "\n")
+	messages, err := parseImportedMessages(record, FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+
+	if err := adapter.writeHistory(metadata, messages); err != nil {
+		t.Fatalf("writeHistory returned error: %v", err)
+	}
+
+	got, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("GetHistory returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+
+	encoded, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatalf("re-encoding: %v", err)
+	}
+	if !strings.Contains(string(encoded), exact) {
+		t.Errorf("GetHistory lost integer precision, want %s in:\n%s", exact, encoded)
+	}
+}

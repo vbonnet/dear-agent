@@ -298,11 +298,21 @@ func (a *GeminiCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 	// A default Scanner tops out at 64 KiB per line, which is smaller than a
 	// single long conversation turn. Without this an import would write a
 	// record that the matching read then fails on, breaking the round trip
-	// AGP-63 and AGP-65 promise.
-	scanner.Buffer(make([]byte, 0, 64*1024), maxHistoryLineBytes)
+	// AGP-63 and AGP-65 promise. The +1 is the trailing newline writeHistory
+	// appends after every record: ScanLines can only locate that delimiter by
+	// buffering it along with the content before it, so a maxHistoryLineBytes
+	// record plus its newline needs a token buffer one byte larger than
+	// maxHistoryLineBytes, not equal to it.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxHistoryLineBytes+1)
 	for scanner.Scan() {
 		var msg Message
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+		// UseNumber, matching parseImportedMessages: the default decoder
+		// would turn a Metadata integer back into a float64 on every read,
+		// rounding values outside float64's exact range even though
+		// writeHistory persisted the original digits.
+		dec := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
+		dec.UseNumber()
+		if err := dec.Decode(&msg); err != nil {
 			// Skip malformed lines
 			continue
 		}
@@ -394,6 +404,13 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		dec.UseNumber()
 		if err := dec.Decode(&msg); err != nil {
 			return nil, fmt.Errorf("failed to parse message: %w", err)
+		}
+		// Decode reads exactly one JSON value and leaves anything after it
+		// alone, so a line holding a valid message immediately followed by
+		// another JSON value would decode the first and silently discard the
+		// second instead of rejecting the record.
+		if dec.More() {
+			return nil, fmt.Errorf("message record has trailing data after its JSON value")
 		}
 		// json.Unmarshal accepts `null` and `{}` into a Message and leaves it
 		// zero-valued, so decoding alone does not establish that a record IS a
