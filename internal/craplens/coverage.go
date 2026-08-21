@@ -23,6 +23,32 @@ import (
 // entirely rather than degraded.
 const coverageTimeout = 10 * time.Minute
 
+// maxCapturedOutput bounds each captured stream from the coverage run. The
+// verdict events this package reads are small; the rest is test chatter.
+const maxCapturedOutput = 8 << 20
+
+// boundedBuffer accumulates up to limit bytes and discards the rest, so a
+// runaway test cannot exhaust the runner through this capture.
+type boundedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if remaining := b.limit - b.buf.Len(); remaining > 0 {
+		if len(p) <= remaining {
+			b.buf.Write(p)
+		} else {
+			b.buf.Write(p[:remaining])
+		}
+	}
+	// Report the full length: a short write would make exec treat the
+	// truncation as a pipe error and fail the run.
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string { return b.buf.String() }
+
 // profileBlock is one entry from a Go coverage profile: a statement span in a
 // file, how many statements it holds, and how many times it ran.
 type profileBlock struct {
@@ -109,9 +135,14 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	}
 	cmd := exec.CommandContext(ctx, "go", argv...)
 	cmd.Dir = repoDir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Bounded, not unbounded: a noisy package streams every output event
+	// through -json, and holding all of it for up to the coverage timeout
+	// could exhaust the runner and cancel the whole job, which loses the
+	// advisory comment entirely instead of degrading one package.
+	stdout := &boundedBuffer{limit: maxCapturedOutput}
+	stderr := &boundedBuffer{limit: maxCapturedOutput}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	// A failing test still writes a profile for the packages that passed, so a
 	// non-zero exit is expected and not fatal: this signal reports on what
@@ -259,10 +290,15 @@ func parseProfile(raw, modulePath string, data coverageData) {
 		if !ok {
 			continue
 		}
-		fullPath, span, ok := strings.Cut(loc, ":")
-		if !ok {
+		// Cut at the LAST colon, not the first: a filename may legally
+		// contain one, and cutting at the first would truncate the path and
+		// make parseSpan reject the remainder, silently leaving the function
+		// unmeasured.
+		idx := strings.LastIndex(loc, ":")
+		if idx < 0 {
 			continue
 		}
+		fullPath, span := loc[:idx], loc[idx+1:]
 		block, ok := parseSpan(span, counts)
 		if !ok {
 			continue

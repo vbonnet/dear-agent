@@ -115,8 +115,12 @@ func parseUnifiedDiff(out string) touchedSet {
 			newFile = false
 		case strings.HasPrefix(line, "new file mode"):
 			newFile = true
-		case strings.HasPrefix(line, "+++ b/"):
-			p := strings.TrimPrefix(line, "+++ b/")
+		case strings.HasPrefix(line, "+++ "):
+			p, ok := headerPath(strings.TrimPrefix(line, "+++ "))
+			if !ok {
+				current = nil
+				continue
+			}
 			if !isScorableGoFile(p) {
 				current = nil
 				continue
@@ -146,6 +150,33 @@ func parseUnifiedDiff(out string) touchedSet {
 		}
 	}
 	return files
+}
+
+// headerPath extracts the head-side pathname from a `+++` diff header.
+//
+// core.quotePath=false stops git quoting non-ASCII bytes, but it still
+// C-quotes a pathname containing a tab, newline, backslash, or double quote:
+// `+++ "b/p/tab\tname.go"`. Requiring a bare `b/` prefix would drop those
+// files silently, which is the same class of miss the quotePath flag fixed for
+// non-ASCII. Go string-literal syntax covers git's C-quoting, including its
+// octal escapes, so strconv.Unquote decodes it.
+func headerPath(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "/dev/null" {
+		return "", false
+	}
+	if strings.HasPrefix(raw, `"`) {
+		unquoted, err := strconv.Unquote(raw)
+		if err != nil {
+			return "", false
+		}
+		raw = unquoted
+	}
+	path, ok := strings.CutPrefix(raw, "b/")
+	if !ok {
+		return "", false
+	}
+	return path, isScorableGoFile(path)
 }
 
 // isScorableGoFile reports whether a path is Go source this signal scores.
@@ -306,7 +337,10 @@ func workingTreeIsClean(ctx context.Context, repoDir string) bool {
 	if repoDir != "" {
 		argv = append(argv, "-C", repoDir)
 	}
-	argv = append(argv, "status", "--porcelain", "--untracked-files=normal")
+	// --ignored=matching as well: an ignored _test.go file is invisible to a
+	// plain status but `go test` still compiles it, and it could make an
+	// uncovered function appear covered.
+	argv = append(argv, "status", "--porcelain", "--untracked-files=normal", "--ignored=matching")
 	out, err := exec.CommandContext(ctx, "git", argv...).Output()
 	if err != nil {
 		return false

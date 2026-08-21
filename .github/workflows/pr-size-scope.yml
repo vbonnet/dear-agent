@@ -190,6 +190,12 @@ jobs:
         env:
           CI: "true"
           CI_SKIP_TMUX: "true"
+          # The repository's CI contract is the single root module. Without
+          # this, a PR that adds a go.work file would have that
+          # candidate-controlled workspace auto-enabled for both the go run
+          # and the coverage tests, so the lens would measure a different
+          # package and dependency set than every other gate.
+          GOWORK: "off"
         run: |
           go run ./tools/crap-lint \
             -base "${{ github.event.pull_request.base.sha }}" \
