@@ -178,6 +178,8 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 type testEvent struct {
 	Action  string `json:"Action"`
 	Package string `json:"Package"`
+	// Test is empty on a package-level event and set on a per-test one.
+	Test string `json:"Test"`
 }
 
 // failedPackages returns the touched package directories whose tests did not
@@ -193,7 +195,7 @@ type testEvent struct {
 // (a build failure, a panic that produced no event) is also unmeasured.
 func failedPackages(jsonOut, modPath string, pkgDirs []string) []string {
 	measured := map[string]bool{}
-	seen := map[string]bool{}
+	failedSeen := map[string]bool{}
 
 	for line := range strings.SplitSeq(jsonOut, "\n") {
 		line = strings.TrimSpace(line)
@@ -208,22 +210,26 @@ func failedPackages(jsonOut, modPath string, pkgDirs []string) []string {
 		if !ok {
 			continue
 		}
+		// Only a PACKAGE-level event decides this. go test -json emits a
+		// pass event per test as well as per package, and they are told apart
+		// by Test being empty. Accepting a per-test pass would mark a package
+		// measured from its first passing test, so a package that later failed
+		// after more output than the capture holds would be scored on the
+		// partial profile its failure left behind.
+		if ev.Test != "" {
+			continue
+		}
 		switch ev.Action {
 		case "pass", "skip":
-			seen[dir] = true
-			if !seen[dir+"\x00failed"] {
-				measured[dir] = true
-			}
+			measured[dir] = true
 		case "fail":
-			seen[dir] = true
-			seen[dir+"\x00failed"] = true
-			delete(measured, dir)
+			failedSeen[dir] = true
 		}
 	}
 
 	var failed []string
 	for _, dir := range pkgDirs {
-		if !measured[dir] {
+		if !measured[dir] || failedSeen[dir] {
 			failed = append(failed, dir)
 		}
 	}
@@ -286,7 +292,11 @@ func parseProfile(raw, modulePath string, data coverageData) {
 		if line == "" || strings.HasPrefix(line, "mode:") {
 			continue
 		}
-		loc, counts, ok := strings.Cut(line, " ")
+		// Split from the END: the last two fields are the statement count and
+		// the hit count, and everything before them is the location. Cutting
+		// at the FIRST space discards any record whose filename contains one,
+		// degrading the whole package to unknown.
+		loc, counts, ok := cutTrailingCounts(line)
 		if !ok {
 			continue
 		}
@@ -332,6 +342,20 @@ func parseProfile(raw, modulePath string, data coverageData) {
 		}
 		data.packages[pkgDir] = packageCoverage{coverage: float64(t.covered) / float64(t.total)}
 	}
+}
+
+// cutTrailingCounts splits a coverage-profile line into its location prefix
+// and its trailing "<numStmt> <count>" fields.
+func cutTrailingCounts(line string) (string, string, bool) {
+	second := strings.LastIndex(line, " ")
+	if second <= 0 {
+		return "", "", false
+	}
+	first := strings.LastIndex(line[:second], " ")
+	if first <= 0 {
+		return "", "", false
+	}
+	return line[:first], line[first+1:], true
 }
 
 // matchPackage maps a profile's import-path-qualified file onto one of the
