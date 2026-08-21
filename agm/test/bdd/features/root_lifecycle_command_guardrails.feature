@@ -14,6 +14,7 @@
 # RELATED-SPEC: internal/prconcern/SPEC.md
 # RELATED-SPEC: tools/crap-lint/SPEC.md
 # RELATED-SPEC: tools/pr-concern-lint/SPEC.md
+# RELATED-SPEC: tools/pr-size-comment/SPEC.md
 Feature: Root lifecycle command guardrails
   Repository lifecycle commands should keep executable SPEC traceability, and
   repair-agent routing should remain neutral across active harnesses and model
@@ -42,6 +43,7 @@ Feature: Root lifecycle command guardrails
       | internal/prreviewer      |
       | tools/crap-lint          |
       | tools/pr-concern-lint    |
+      | tools/pr-size-comment    |
 
   Scenario Outline: Merge repair agents preserve active harness routes
     Given merge repair harness "<harness>" uses model "<model>"

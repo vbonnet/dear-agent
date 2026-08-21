@@ -48,7 +48,11 @@ Do not hand-roll a check that already has an owner. One rule, one home.
 | Complexity that no test exercises | `tools/crap-lint` | Advisory comment only |
 
 Both golangci-lint checks run with `new-from-merge-base: origin/main`, so they
-are already scoped to your diff.
+are already scoped to your diff — for a PR against `main`. This workflow also
+runs against `develop` (`.github/workflows/pr-size-scope.yml`), and the lint
+base does not follow the PR's actual target, so a `develop`-targeted PR sees
+every finding `develop` already differs from `main` by, not just this PR's own
+changes.
 
 ## Why this is not cosmetic
 

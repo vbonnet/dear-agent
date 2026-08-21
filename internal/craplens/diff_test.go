@@ -94,6 +94,33 @@ func TestParseUnifiedDiffTracksAddedFiles(t *testing.T) {
 	}
 }
 
+// TestParseUnifiedDiffTracksRenamedDestinationsAsAdded covers a renamed-and-
+// edited file: git emits `rename from`/`rename to` instead of `new file
+// mode`, so a naive check for the latter alone left the destination's
+// Added false even when it is the only file in a package the diff touched,
+// preventing a genuinely new package (one whose destination directory held
+// no Go source at the base revision) from being classified as new.
+func TestParseUnifiedDiffTracksRenamedDestinationsAsAdded(t *testing.T) {
+	out := strings.Join([]string{
+		"diff --git a/pkg/old/thing.go b/pkg/newdir/thing.go",
+		"similarity index 92%",
+		"rename from pkg/old/thing.go",
+		"rename to pkg/newdir/thing.go",
+		"index 111..222 100644",
+		"--- a/pkg/old/thing.go",
+		"+++ b/pkg/newdir/thing.go",
+		"@@ -5,2 +5,3 @@",
+	}, "\n")
+
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatalf("parseUnifiedDiff: %v", err)
+	}
+	if !files["pkg/newdir/thing.go"].Added {
+		t.Error("a renamed-and-edited destination should be marked added, same as a wholly new file")
+	}
+}
+
 // TestParseUnifiedDiffDropsPureDeletions pins that a file whose every hunk
 // removed lines is not reported: it has no head-side line left to score.
 func TestParseUnifiedDiffDropsPureDeletions(t *testing.T) {

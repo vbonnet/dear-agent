@@ -155,6 +155,14 @@ func (st *diffScanState) consume(line string) {
 		st.inHeader = true
 	case st.inHeader && strings.HasPrefix(line, "new file mode"):
 		st.newFile = true
+	case st.inHeader && strings.HasPrefix(line, "rename to "):
+		// Git emits `rename from`/`rename to` instead of `new file mode` for a
+		// renamed-and-edited file, so this destination path is new to
+		// wherever it landed even though it is not new to the repository.
+		// allFilesAdded only asks whether every touched file in a package
+		// arrived fresh into it; treeHasGoFiles at the caller is what still
+		// catches the case where the destination package already existed.
+		st.newFile = true
 	case st.inHeader && strings.HasPrefix(line, "+++ "):
 		st.startFile(strings.TrimPrefix(line, "+++ "))
 	case strings.HasPrefix(line, "@@"):
