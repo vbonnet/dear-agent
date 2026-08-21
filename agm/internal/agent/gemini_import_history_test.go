@@ -222,7 +222,7 @@ func TestWriteHistoryReplacesPriorHistory(t *testing.T) {
 // TestWriteHistoryRoundTripsOversizedRecord covers a record larger than the
 // 64 KiB default bufio.Scanner token. Without an enlarged read buffer an
 // import would write a record its own reader then chokes on, which breaks the
-// round trip AGP-63 promises for exactly the long turns most worth keeping.
+// round trip AGP-66 promises for exactly the long turns most worth keeping.
 func TestWriteHistoryRoundTripsOversizedRecord(t *testing.T) {
 	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
 
@@ -296,5 +296,35 @@ func TestImportedSessionNamesAreDistinct(t *testing.T) {
 			t.Fatalf("importedSessionName produced a duplicate within one run: %q", name)
 		}
 		seen[name] = true
+	}
+}
+
+// TestParseImportedMessagesRejectsOversizedRecord covers AGP-65's rejection
+// half. The reader caps a record at maxHistoryLineBytes, so accepting a larger
+// one at import would persist a record the matching GetHistory then fails on.
+func TestParseImportedMessagesRejectsOversizedRecord(t *testing.T) {
+	oversized := `{"role":"user","content":"` + strings.Repeat("x", maxHistoryLineBytes) + `"}` + "\n"
+
+	messages, err := parseImportedMessages([]byte(oversized), FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "history limit") {
+		t.Errorf("error = %v, want it to name the history limit", err)
+	}
+}
+
+// TestParseImportedMessagesAcceptsLargeRecordUnderTheLimit is the other half of
+// AGP-65: a record that is big but within the limit must still import, so the
+// rejection above cannot be satisfied by refusing everything large.
+func TestParseImportedMessagesAcceptsLargeRecordUnderTheLimit(t *testing.T) {
+	large := `{"role":"user","content":"` + strings.Repeat("x", 256*1024) + `"}` + "\n"
+
+	messages, err := parseImportedMessages([]byte(large), FormatJSONL)
+	if err != nil {
+		t.Fatalf("parseImportedMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(messages))
 	}
 }

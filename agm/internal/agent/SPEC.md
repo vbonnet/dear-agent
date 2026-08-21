@@ -156,9 +156,19 @@ compatibility.
 
 ### Gemini CLI Conversation Import
 
-**AGP-63** When the Gemini CLI adapter imports a conversation, a subsequent history read or export of the returned session shall return the imported conversation, including records larger than a default scanner token; an undecodable format, a malformed record, or a record carrying no supported role shall be rejected rather than imported; and when the conversation cannot be persisted, the system shall leave no session the caller cannot reach.
+**AGP-63** When the Gemini CLI adapter imports a conversation, the system shall return that conversation from a subsequent history read or export of the returned session.
 
-**AGP-64** When the Gemini CLI adapter persists an imported conversation, a reader shall observe either the complete imported history or the prior history, never a partial or truncated one, and each import shall occupy a history namespace distinct from every concurrent import.
+**AGP-65** When an imported record is larger than a default scanner token but within the adapter's history record limit, the system shall preserve the AGP-63 round trip, and shall reject a record over that limit at import rather than persist it.
+
+**AGP-66** When an import supplies a format the adapter cannot decode, the system shall reject it rather than create a session.
+
+**AGP-67** When an imported record is not decodable as a message, or decodes without a supported role, the system shall reject the import rather than persist a turn with no speaker.
+
+**AGP-68** When an imported conversation cannot be persisted, the system shall leave no session the caller cannot reach, and shall report a cleanup failure rather than discard the only remaining handle to a surviving process.
+
+**AGP-64** When the Gemini CLI adapter persists an imported conversation, the system shall present a reader either the complete imported history or the prior history, never a partial or truncated one.
+
+**AGP-69** When imports occur concurrently, the system shall give each one a history namespace distinct from every other.
 
 ### Harness Doctor Health
 

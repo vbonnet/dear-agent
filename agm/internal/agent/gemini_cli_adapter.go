@@ -297,7 +297,7 @@ func (a *GeminiCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 	// A default Scanner tops out at 64 KiB per line, which is smaller than a
 	// single long conversation turn. Without this an import would write a
 	// record that the matching read then fails on, breaking the round trip
-	// AGP-63 promises.
+	// AGP-63 and AGP-65 promise.
 	scanner.Buffer(make([]byte, 0, 64*1024), maxHistoryLineBytes)
 	for scanner.Scan() {
 		var msg Message
@@ -375,14 +375,22 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		if len(line) == 0 {
 			continue
 		}
+		// GetHistory's scanner caps a single line at maxHistoryLineBytes. A
+		// record accepted here but larger than that would write successfully
+		// and then make every later GetHistory or ExportConversation call fail
+		// with "token too long" for the whole file, not just this record.
+		// AGP-65 requires rejecting it up front, before a session exists.
+		if len(line) > maxHistoryLineBytes {
+			return nil, fmt.Errorf("message record is %d bytes, over the %d-byte history limit", len(line), maxHistoryLineBytes)
+		}
 		var msg Message
 		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("failed to parse message: %w", err)
 		}
 		// json.Unmarshal accepts `null` and `{}` into a Message and leaves it
 		// zero-valued, so decoding alone does not establish that a record IS a
-		// message. AGP-63 requires a malformed record to be rejected rather
-		// than imported as an empty turn with no speaker.
+		// message. AGP-67 requires a record with no supported role to be
+		// rejected rather than imported as an empty turn with no speaker.
 		if msg.Role != RoleUser && msg.Role != RoleAssistant {
 			return nil, fmt.Errorf("message has unsupported role %q", msg.Role)
 		}
@@ -490,13 +498,35 @@ func (a *GeminiCLIAdapter) ImportConversation(data []byte, format ConversationFo
 		// The caller never receives this session's ID, so it could not
 		// terminate the tmux process or clear the store entry itself. Roll
 		// back rather than leave an unreachable session behind.
-		if termErr := a.TerminateSession(sessionID); termErr != nil {
-			return "", fmt.Errorf("failed to import conversation history: %w (rollback also failed: %w)", err, termErr)
+		if rollbackErr := a.rollbackFailedImport(sessionID, metadata.TmuxName); rollbackErr != nil {
+			return "", fmt.Errorf("failed to import conversation history: %w (rollback also failed: %w)", err, rollbackErr)
 		}
 		return "", fmt.Errorf("failed to import conversation history: %w", err)
 	}
 
 	return sessionID, nil
+}
+
+// rollbackFailedImport cleans up a session created for an import whose
+// history could not be persisted.
+//
+// TerminateSession's graceful "exit" is best-effort by design: it logs a
+// send failure and still deletes the store entry, which is the right
+// behavior for a caller that holds the session ID and can retry. Here the
+// caller never received the ID, so a discarded store entry would make the
+// session permanently unreachable even if the tmux process were still
+// alive. KillSessionChecked instead confirms the process is gone (or was
+// already gone) before the store entry is removed, so a cleanup failure
+// stays observable and the record survives for another cleanup attempt
+// instead of being silently dropped.
+func (a *GeminiCLIAdapter) rollbackFailedImport(sessionID SessionID, tmuxName string) error {
+	if err := tmux.KillSessionChecked(tmuxName); err != nil {
+		return fmt.Errorf("tmux session %q could not be confirmed terminated: %w", tmuxName, err)
+	}
+	if err := a.sessionStore.Delete(sessionID); err != nil {
+		return fmt.Errorf("failed to remove session record: %w", err)
+	}
+	return nil
 }
 
 // Capabilities returns Gemini's feature capabilities.
