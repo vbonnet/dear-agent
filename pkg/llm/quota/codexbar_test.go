@@ -266,6 +266,42 @@ func TestParseCodexBarDashboardTakesMostConstrainedWhenBothSourcesReadable(t *te
 	}
 }
 
+// mergeFamily must exclude each source's expired windows from the
+// most-constrained comparison, the same way Evaluate and Breaker do for a
+// single source's own windows. Otherwise a stale exhausted window from
+// one aliased source (gemini here) can beat the other source's active
+// reading (antigravity) purely because MostConstrained ignores reset
+// times — silently discarding the actually-binding source and leaving
+// the guardrail closed on data that has already reset (codex review on
+// #1218, fourth pass).
+func TestParseCodexBarDashboardMergeExcludesExpiredWindows(t *testing.T) {
+	payload := `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":[
+	  {"id":"gemini","enabled":true,"windows":[
+	    {"kind":"daily","label":"Gemini daily","remainingPercent":0,"usedPercent":100,"resetAt":"2025-12-31T00:00:00Z"},
+	    {"kind":"weekly","label":"Gemini weekly","remainingPercent":80,"usedPercent":20,"resetAt":"2026-01-08T00:00:00Z"}
+	  ]},
+	  {"id":"antigravity","enabled":true,"windows":[
+	    {"kind":"weekly","label":"Antigravity weekly","remainingPercent":10,"usedPercent":90,"resetAt":"2026-01-08T00:00:00Z"}
+	  ]}
+	]}`
+	snapshot, err := quota.ParseCodexBarDashboard([]byte(payload), nil)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gemini, ok := snapshot.Provider("gemini")
+	if !ok {
+		t.Fatal("no merged gemini entry")
+	}
+	worst, ok := gemini.MostConstrainedActive(snapshot.GeneratedAt)
+	if !ok {
+		t.Fatal("no active windows")
+	}
+	if worst.RemainingPercent != 10 {
+		t.Errorf("RemainingPercent = %.1f, want 10 (antigravity's active reading, not gemini's expired 0%%"+
+			" or its own active 80%%)", worst.RemainingPercent)
+	}
+}
+
 func TestParseCodexBarDashboardKeepsUnmappedProviderUnderItsOwnID(t *testing.T) {
 	payload := `{"schemaVersion":1,"providers":[{"id":"NewVendor","enabled":true,"windows":[{"kind":"weekly","remainingPercent":40,"usedPercent":60}]}]}`
 	snapshot, err := quota.ParseCodexBarDashboard([]byte(payload), nil)

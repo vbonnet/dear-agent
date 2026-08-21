@@ -252,7 +252,7 @@ func ParseCodexBarDashboard(data []byte, aliases map[string]string) (*Snapshot, 
 			byFamily[quota.Family] = quota
 			continue
 		}
-		byFamily[quota.Family] = mergeFamily(existing, quota)
+		byFamily[quota.Family] = mergeFamily(existing, quota, snapshot.GeneratedAt)
 	}
 
 	snapshot.Providers = make([]ProviderQuota, 0, len(order))
@@ -386,8 +386,12 @@ func classifyAuthFailure(message string) bool {
 // reading. A readable entry always beats an unreadable one, so Gemini
 // resolves to whichever of gemini/antigravity is actually signed in. When
 // both are readable the more constrained one wins, because both budgets
-// bind the same family.
-func mergeFamily(existing, incoming ProviderQuota) ProviderQuota {
+// bind the same family. now excludes each source's expired windows from
+// that comparison — an aliased source's stale exhausted window must not
+// beat the other source's active reading, or this silently discards the
+// actually-binding source and leaves the guardrail closed (codex review
+// on #1218, fourth pass).
+func mergeFamily(existing, incoming ProviderQuota, now time.Time) ProviderQuota {
 	switch {
 	case existing.Availability.Known() && !incoming.Availability.Known():
 		return existing
@@ -401,8 +405,16 @@ func mergeFamily(existing, incoming ProviderQuota) ProviderQuota {
 		return incoming
 	}
 
-	existingWorst, _ := existing.MostConstrained()
-	incomingWorst, _ := incoming.MostConstrained()
+	existingWorst, existingOK := existing.MostConstrainedActive(now)
+	incomingWorst, incomingOK := incoming.MostConstrainedActive(now)
+	switch {
+	case existingOK && !incomingOK:
+		return existing
+	case !existingOK && incomingOK:
+		return incoming
+	case !existingOK && !incomingOK:
+		return existing
+	}
 	if incomingWorst.RemainingPercent < existingWorst.RemainingPercent {
 		return incoming
 	}

@@ -238,6 +238,58 @@ func TestSubmitHarnessLaunchConfirmedFailureDoesNotFinalizeNonDeferredEffects(t 
 	}
 }
 
+func TestSubmitHarnessLaunchConfirmedFailureReleasesThrottleReservation(t *testing.T) {
+	refusal := errors.New("tmux rejected submission")
+	aborted := false
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			return got, nil
+		},
+		OnAbort: func() {
+			aborted = true
+		},
+	}, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(bool, ...*override.Reservation) error {
+			return nil
+		},
+		Cancel: func() error {
+			return nil
+		},
+	}, func() error {
+		return refusal
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("submitHarnessLaunch() error = %v, want %v", err, refusal)
+	}
+	if !aborted {
+		t.Fatal("a confirmed submission failure must release any throttle reservation BeforeSpawn made — four such failures would otherwise consume the entire hourly allowance for no real launch")
+	}
+}
+
+func TestSubmitHarnessLaunchUncertainDeliveryDoesNotReleaseThrottleReservation(t *testing.T) {
+	aborted := false
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			return got, nil
+		},
+		OnAbort: func() {
+			aborted = true
+		},
+	}, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(bool, ...*override.Reservation) error {
+			return nil
+		},
+	}, func() error {
+		return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+	})
+	if err != nil {
+		t.Fatalf("submitHarnessLaunch() error = %v, want nil", err)
+	}
+	if aborted {
+		t.Fatal("an uncertain submission must NOT release the throttle reservation — the harness may already have received the launch despite the lost acknowledgement")
+	}
+}
+
 func TestSubmitHarnessLaunchUncertainDeliveryFinalizesNonDeferredEffects(t *testing.T) {
 	var events []string
 	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{

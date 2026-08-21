@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 )
 
@@ -104,8 +105,12 @@ func TestReserveProviderQuotaAdmissionIfWiredWritesTheLedgerWhenThrottled(t *tes
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	publishAnthropicState(t, quota.BreakerThrottled)
 
-	if err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", time.Now()); err != nil {
+	family, err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", time.Now())
+	if err != nil {
 		t.Fatalf("reserveProviderQuotaAdmissionIfWired: %v", err)
+	}
+	if family != "anthropic" {
+		t.Errorf("reservedFamily = %q, want anthropic", family)
 	}
 	if got := readThrottleLedgerCount(t, "anthropic"); got != 1 {
 		t.Errorf("ledger entries for anthropic = %d, want 1", got)
@@ -119,8 +124,12 @@ func TestReserveProviderQuotaAdmissionIfWiredSkipsWhenNotThrottled(t *testing.T)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	publishAnthropicState(t, quota.BreakerClosed)
 
-	if err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", time.Now()); err != nil {
+	family, err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", time.Now())
+	if err != nil {
 		t.Fatalf("reserveProviderQuotaAdmissionIfWired: %v", err)
+	}
+	if family != "" {
+		t.Errorf("reservedFamily = %q, want empty — nothing was reserved", family)
 	}
 	if got := readThrottleLedgerCount(t, "anthropic"); got != 0 {
 		t.Errorf("a healthy family must not touch the ledger, got %d entries", got)
@@ -135,11 +144,11 @@ func TestReserveProviderQuotaAdmissionIfWiredSkipsWhenThereIsNothingToReserve(t 
 	publishAnthropicState(t, quota.BreakerThrottled)
 	now := time.Now()
 
-	if err := reserveProviderQuotaAdmissionIfWired("claude-code", "", now); err != nil {
-		t.Fatalf("empty model: %v", err)
+	if family, err := reserveProviderQuotaAdmissionIfWired("claude-code", "", now); err != nil || family != "" {
+		t.Fatalf("empty model: family=%q err=%v, want (\"\", nil)", family, err)
 	}
-	if err := reserveProviderQuotaAdmissionIfWired("pi-cli", "sonnet", now); err != nil {
-		t.Fatalf("pi-cli: %v", err)
+	if family, err := reserveProviderQuotaAdmissionIfWired("pi-cli", "sonnet", now); err != nil || family != "" {
+		t.Fatalf("pi-cli: family=%q err=%v, want (\"\", nil)", family, err)
 	}
 	if got := readThrottleLedgerCount(t, "anthropic"); got != 0 {
 		t.Errorf("want no ledger entries written, got %d", got)
@@ -155,11 +164,47 @@ func TestReserveProviderQuotaAdmissionIfWiredRefusesOnceTheAllowanceIsSpent(t *t
 	now := time.Now()
 
 	for i := range quota.DefaultThrottledSpawnsPerHour {
-		if err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", now); err != nil {
+		if _, err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", now); err != nil {
 			t.Fatalf("reservation #%d: want allowed, got %v", i, err)
 		}
 	}
-	if err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", now); err == nil {
+	if _, err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", now); err == nil {
 		t.Fatal("want a refusal once the hourly allowance is spent")
+	}
+}
+
+// A launch whose reservation succeeded but then definitely failed before
+// real work started must release the reservation, or repeated failed
+// attempts would consume the entire hourly allowance and block the next
+// real launch for an hour even though no work ran (codex review on
+// #1218, fourth pass). This exercises the same release path
+// admission.go's beforeSpawn wires up via circuitbreaker.ReleaseThrottledAdmission.
+func TestReleasedReservationFreesTheAllowanceForTheNextAttempt(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	publishAnthropicState(t, quota.BreakerThrottled)
+	now := time.Now()
+
+	for i := range quota.DefaultThrottledSpawnsPerHour {
+		if _, err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", now); err != nil {
+			t.Fatalf("reservation #%d: want allowed, got %v", i, err)
+		}
+	}
+	if got := readThrottleLedgerCount(t, "anthropic"); got != quota.DefaultThrottledSpawnsPerHour {
+		t.Fatalf("ledger count = %d, want %d before release", got, quota.DefaultThrottledSpawnsPerHour)
+	}
+
+	// Simulate the last of those reservations belonging to a launch that
+	// then definitely failed (FinalizeLaunch/submission), the same as
+	// admission.go's onAbort closure would do.
+	if err := circuitbreaker.ReleaseThrottledAdmission("anthropic", now); err != nil {
+		t.Fatalf("ReleaseThrottledAdmission: %v", err)
+	}
+	if got := readThrottleLedgerCount(t, "anthropic"); got != quota.DefaultThrottledSpawnsPerHour-1 {
+		t.Errorf("ledger count after release = %d, want %d", got, quota.DefaultThrottledSpawnsPerHour-1)
+	}
+
+	// The freed allowance must be usable by the next attempt.
+	if _, err := reserveProviderQuotaAdmissionIfWired("claude-code", "sonnet", now); err != nil {
+		t.Errorf("reservation after release: want allowed, got %v", err)
 	}
 }

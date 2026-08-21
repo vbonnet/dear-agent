@@ -30,6 +30,25 @@ func TestCheckQuotaMeterStateReportsUnevaluatedOnAStaleReading(t *testing.T) {
 	}
 }
 
+// An undated reading (GeneratedAt zero) must report the same as a stale
+// one, not as a confirmed-healthy exit 0: State.Age reports zero age for
+// it by design, which would otherwise pass the maxAge comparison
+// unconditionally (codex review on #1218, fourth pass).
+func TestCheckQuotaMeterStateReportsUnevaluatedOnAnUndatedReading(t *testing.T) {
+	now := time.Now()
+	state := &quota.State{} // GeneratedAt zero
+	providers := []quota.ProviderState{{Family: "openai", BreakerState: string(quota.BreakerOpen), Reason: "spent"}}
+
+	err := checkQuotaMeterState(state, providers, 90*time.Minute, now)
+	if err == nil {
+		t.Fatal("want an error: an undated reading must not report as a confirmed-healthy exit 0")
+	}
+	var exitErr *exitError
+	if errors.As(err, &exitErr) {
+		t.Errorf("want a plain error (exit 1, generic), not an exitError with code %d", exitErr.code)
+	}
+}
+
 func TestCheckQuotaMeterStateRefusesOnAFreshOpenBreaker(t *testing.T) {
 	now := time.Now()
 	state := &quota.State{GeneratedAt: now.Add(-5 * time.Minute)}

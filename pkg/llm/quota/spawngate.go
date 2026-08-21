@@ -214,6 +214,20 @@ func (g *SpawnGate) AllowSpawn(model string) SpawnDecision {
 	}
 
 	if maxAge := g.maxAge(); maxAge > 0 {
+		// A missing/unparseable generatedAt is an unknown age, not a
+		// fresh one: State.Age reports a zero-GeneratedAt state as age 0
+		// by design (so staleness alone never discards it — see Age's
+		// doc comment), but that makes an undated reading look younger
+		// than any real one and pass the check below unconditionally,
+		// evaluating a breaker verdict this gate cannot actually vouch
+		// for the freshness of. policy.go's Evaluate already treats
+		// this the same way, gated the same way on maxAge > 0 — an
+		// operator who has explicitly disabled the freshness check
+		// (negative MaxAge) still gets that (codex review on #1218,
+		// fourth pass).
+		if state.GeneratedAt.IsZero() {
+			return failOpen("no-generation-time", "quota reading has no generation time, cannot confirm freshness", family)
+		}
 		if age := state.Age(g.now()); age > maxAge {
 			return failOpen("stale-reading", fmt.Sprintf("quota reading is %s old, past the %s gating limit",
 				age.Round(time.Second), maxAge), family)

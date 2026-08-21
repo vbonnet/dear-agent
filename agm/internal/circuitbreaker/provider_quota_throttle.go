@@ -82,6 +82,29 @@ func ReserveThrottledAdmission(family string, limit int, now time.Time) (allowed
 	return reserveThrottledAdmission(family, limit, now)
 }
 
+// ReleaseThrottledAdmission undoes one reservation ReserveThrottledAdmission
+// made at exactly at, for a launch that reserved an allowance and then
+// definitely failed before any real work started (FinalizeLaunch could not
+// bind the handoff, or submission was positively rejected) — otherwise four
+// such failed attempts would consume the entire hourly allowance and block
+// the next real launch for an hour even though no work ran (codex review on
+// #1218, fourth pass). Only ever release a launch that is DEFINITELY not
+// proceeding: an uncertain submission (the harness may have received it
+// despite a lost acknowledgement) must keep its reservation, the same
+// direction ResolveHarnessLaunchSubmission already treats that ambiguity.
+//
+// Matches by exact timestamp, not "most recent for family": if this call
+// races another process's concurrent reservation for the same family, only
+// the entry this caller itself made is removed, never one it didn't create.
+// A missing/unreadable ledger is not an error here — there is nothing left
+// to release, matching the rest of the package's fail-open philosophy.
+func ReleaseThrottledAdmission(family string, at time.Time) error {
+	if family == "" {
+		return nil
+	}
+	return releaseThrottledAdmission(family, at)
+}
+
 // recentThrottledAdmissions reports how many admissions family has
 // recorded in the last hour. It fails open (0, nil error semantics for
 // callers that treat an error as "cannot evaluate"): a missing ledger is
@@ -149,6 +172,51 @@ func reserveThrottledAdmission(family string, limit int, now time.Time) (bool, e
 		return true, err
 	}
 	return allowed, nil
+}
+
+// releaseThrottledAdmission removes exactly one entry equal to at from
+// family's slice, under the same flock reserveThrottledAdmission uses, so a
+// concurrent reservation or release for the same family cannot race this
+// one. It also prunes every family's entries older than an hour while it
+// already holds the lock, the same as a reservation would.
+func releaseThrottledAdmission(family string, at time.Time) error {
+	path, err := throttleLedgerPath()
+	if err != nil {
+		return err
+	}
+
+	fl, err := lock.New(path + ".lock")
+	if err != nil {
+		return err
+	}
+	if err := fl.Lock(); err != nil {
+		return err
+	}
+	defer fl.Unlock()
+
+	entries, err := readThrottleLedger(path)
+	if err != nil {
+		return err
+	}
+
+	cutoff := time.Now().Add(-time.Hour)
+	pruned := pruneExpiredEntries(entries, cutoff, family)
+	kept := activeEntriesSince(entries[family], cutoff)
+
+	removed := false
+	remaining := kept[:0]
+	for _, ts := range kept {
+		if !removed && ts.Equal(at) {
+			removed = true
+			continue
+		}
+		remaining = append(remaining, ts)
+	}
+	if len(remaining) > 0 {
+		pruned[family] = remaining
+	}
+
+	return writeThrottleLedger(path, pruned)
 }
 
 // pruneExpiredEntries copies entries, dropping every timestamp at or

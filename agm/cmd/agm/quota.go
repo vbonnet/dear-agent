@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -126,7 +127,20 @@ func runQuotaMeter(cmd *cobra.Command, _ []string) error {
 // confirms no provider is halted — the two are opposite levels of
 // confidence, and collapsing them lets an orchestrator mistake a dead
 // job for a healthy one (codex review on #1218, third pass).
+//
+// An undated reading (GeneratedAt zero — CodexBar omitted or malformed
+// generatedAt) is unevaluated for the same reason a stale one is, not a
+// fresh one: State.Age reports zero age for it by design, which would
+// otherwise pass the maxAge comparison below unconditionally and let
+// --check exit 0 as though freshness were confirmed. pkg/llm/quota's
+// Evaluate and SpawnGate.AllowSpawn both already refuse to treat a
+// zero-GeneratedAt reading as fresh; --check must agree (codex review on
+// #1218, fourth pass).
 func checkQuotaMeterState(state *quota.State, providers []quota.ProviderState, maxAge time.Duration, now time.Time) error {
+	if maxAge > 0 && state.GeneratedAt.IsZero() {
+		return errors.New("quota reading has no generation time, cannot confirm freshness — unevaluated," +
+			" not confirmed healthy (run 'agm quota-meter --refresh')")
+	}
 	if maxAge > 0 && state.Age(now) > maxAge {
 		return fmt.Errorf("quota reading is %s old, past the %s --check limit — unevaluated, not confirmed healthy"+
 			" (run 'agm quota-meter --refresh')", state.Age(now).Round(time.Second), maxAge)

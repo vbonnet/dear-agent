@@ -216,6 +216,16 @@ func TestSpawnGateFailsOpen(t *testing.T) {
 			want: "gating limit",
 		},
 		{
+			// State.Age reports a zero GeneratedAt as age 0 by design, so
+			// without an explicit check an undated reading would pass the
+			// maxAge comparison unconditionally and evaluate a verdict
+			// this gate cannot actually vouch for the freshness of
+			// (codex review on #1218, fourth pass).
+			name: "undated reading",
+			gate: &quota.SpawnGate{Path: publish(t, time.Time{}, provider("openai", 0, nil)), MaxAge: time.Minute, Now: func() time.Time { return now }},
+			want: "no generation time",
+		},
+		{
 			name: "provider needs credentials",
 			gate: &quota.SpawnGate{Path: unreadable, Now: func() time.Time { return now }},
 			want: "unreadable, not exhausted",

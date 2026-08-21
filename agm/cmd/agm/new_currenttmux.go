@@ -54,6 +54,11 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 			if admission != nil {
 				spec.BeforeSpawn = admission.beforeSpawn
 				spec.AfterAuthorization = admission.afterAuthorization
+				spec.OnAbort = func() {
+					if admission.onAbort != nil {
+						admission.onAbort()
+					}
+				}
 			}
 			if err := startCurrentTmuxHarness(ctx, spec); err != nil {
 				return ops.CreateSessionLaunchResult{}, err

@@ -81,6 +81,11 @@ func newCLICreateSessionRuntime(
 			if admission != nil {
 				spec.BeforeSpawn = admission.beforeSpawn
 				spec.AfterAuthorization = admission.afterAuthorization
+				spec.OnAbort = func() {
+					if admission.onAbort != nil {
+						admission.onAbort()
+					}
+				}
 			}
 			return launchCLICreateSession(ctx, spec, existed, trustPreConfigured)
 		},

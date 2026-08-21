@@ -41,6 +41,11 @@ import (
 type circuitBreakerAdmission struct {
 	beforeSpawn        func(...*override.Reservation) ([]*override.Reservation, error)
 	afterAuthorization func()
+	// onAbort releases the throttle-ledger reservation beforeSpawn made,
+	// for a launch that definitely failed before any real work started.
+	// nil (and always safe to call) when beforeSpawn never reserved one —
+	// the family wasn't throttled, or beforeSpawn itself never ran.
+	onAbort func()
 }
 
 func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreakerAdmission, error) {
@@ -138,8 +143,24 @@ func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreaker
 		// atomically under one lock closes the race two concurrent agm
 		// processes would otherwise hit right at the hourly cap (codex
 		// review on #1218, fourth pass).
-		if err := reserveProviderQuotaAdmissionIfWired(harness, model, time.Now()); err != nil {
+		reservedAt := time.Now()
+		reservedFamily, err := reserveProviderQuotaAdmissionIfWired(harness, model, reservedAt)
+		if err != nil {
 			return nil, err
+		}
+		if reservedFamily != "" {
+			// The launch this admission is for has not proceeded yet — only
+			// release if it definitely never does (see onAbort's doc
+			// comment). Guarded so a launch path that never calls onAbort,
+			// or calls it after already succeeding, cannot double-release.
+			var released sync.Once
+			admission.onAbort = func() {
+				released.Do(func() {
+					if err := circuitbreaker.ReleaseThrottledAdmission(reservedFamily, reservedAt); err != nil {
+						debug.Log("Warning: failed to release provider-quota admission: %v", err)
+					}
+				})
+			}
 		}
 		return reservations, nil
 	}
@@ -173,33 +194,37 @@ func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreaker
 // open — logged, never fatal — the same direction as every other quota
 // read in this package. Only a definite, atomically-confirmed "the
 // allowance is spent" refuses the spawn.
-func reserveProviderQuotaAdmissionIfWired(harness, model string, now time.Time) error {
+//
+// On success, reservedFamily is non-empty exactly when a ledger entry was
+// actually appended, so the caller can release it if the launch this
+// admission was for then definitely fails before any real work starts.
+func reserveProviderQuotaAdmissionIfWired(harness, model string, now time.Time) (reservedFamily string, err error) {
 	if model == "" {
-		return nil
+		return "", nil
 	}
 	family := providerQuotaFamilyResolver(harness)(model)
 	if family == "" {
-		return nil
+		return "", nil
 	}
 
 	gate := quota.SpawnGate{FamilyForModel: func(string) string { return family }}
 	decision := gate.AllowSpawn(model)
 	if !decision.Evaluated || decision.State != quota.BreakerThrottled {
-		return nil
+		return "", nil
 	}
 
 	allowed, err := circuitbreaker.ReserveThrottledAdmission(family, quota.DefaultThrottledSpawnsPerHour, now)
 	if err != nil {
 		debug.Log("Warning: failed to reserve provider-quota admission: %v", err)
-		return nil
+		return "", nil
 	}
 	if !allowed {
-		return fmt.Errorf("%s quota is throttled and the hourly allowance (%d starts) is already spent: %s"+
+		return "", fmt.Errorf("%s quota is throttled and the hourly allowance (%d starts) is already spent: %s"+
 			" Start this session on a provider with headroom (`agm quota-meter` shows all of them),"+
 			" or override with %s=off",
 			family, quota.DefaultThrottledSpawnsPerHour, decision.Reason, quota.SpawnGateOverrideEnvVar)
 	}
-	return nil
+	return family, nil
 }
 
 // providerQuotaFamilyResolver returns the family resolver the provider-quota
