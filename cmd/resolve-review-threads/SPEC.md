@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 2.5
+**Version:** 2.6
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -104,6 +104,12 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-44** When advising a retry that depends on posting the identical reply body, the system shall include that exact body, POSIX-shell-quoted so a literal copy-paste reproduces it unchanged, rather than a generic placeholder or a representation (such as a Go string literal) that a shell would not round-trip.
 
 **RESOLVE-REVIEW-THREADS-45** When a resolution mutation reports an error, the system shall re-read the thread before treating that as a clean no-op, since the client can fail after GitHub already applied the mutation server-side; if the re-read confirms it resolved, the system shall apply the same anchor verification and reopen-on-mismatch as a normally-reported success.
+
+**RESOLVE-REVIEW-THREADS-46** When a reply mutation reports an error, the system shall re-read the thread's history before reporting the reply as failed, since the client can fail after GitHub already applied the mutation server-side; if a comment matching the attempted body is found, the system shall use it as the resolution anchor rather than invite a reworded, duplicating retry.
+
+**RESOLVE-REVIEW-THREADS-47** When an automatic reopen is attempted, the system shall verify the mutation's own resolved-state postcondition rather than treat a nil error as proof the thread reopened, since another actor can race the same thread; on an access-denial failure, the system shall say so distinctly, since retrying the same reopen with the same credentials repeats the denial.
+
+**RESOLVE-REVIEW-THREADS-48** When a resolution's named anchor is no longer the thread's last comment AND the thread is already resolved, the system shall reopen it before reporting the evidence refusal, so a later retry does not silently no-op against a resolved thread whose intervening comment was never read.
 
 ## BDD Traceability
 

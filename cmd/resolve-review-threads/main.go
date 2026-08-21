@@ -140,7 +140,7 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 		return fail("usage: %s <threadId> [--force]", cmd)
 	}
 	if cmd == "unresolve" {
-		msg, _, err := mutateThread(ctx, cmd, args[0])
+		msg, _, _, err := mutateThread(ctx, cmd, args[0])
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -316,6 +316,16 @@ func postReplyOrExit(ctx context.Context, threadID, body string) (id string, cod
 			"re-run with the EXACT SAME body below and reply-resolve will find "+
 			"your reply by its text and resolve without duplicating it:\n"+
 			"  resolve-review-threads reply-resolve %s %s", err, threadID, shellQuote(body))
+	}
+	// gh can fail client-side (network drop, timeout) after GitHub already
+	// applied the mutation server-side: this error alone does not prove the
+	// reply never posted. Re-read history before reporting "failed, safe to
+	// retry" — a retry with different wording would duplicate an already-
+	// live comment, same risk as errReplyIDMissing above.
+	if history, histErr := fetchAllComments(ctx, threadID); histErr == nil {
+		if foundID := findReplyID(history, body); foundID != "" {
+			return foundID, -1
+		}
 	}
 	return "", fail("reply failed, thread left unresolved: %v", err)
 }
@@ -531,6 +541,21 @@ func classifyPriorReply(tail []tailComment, body string) priorReplyState {
 	default:
 		return priorReplySuperseded
 	}
+}
+
+// findReplyID returns the ID of the last tail comment whose body matches
+// want, or "" if none does. Used to recover from an ambiguous reply-mutation
+// error: gh can fail client-side after GitHub already applied the mutation,
+// so a comment matching what we tried to post may already be there even
+// though postReply reported failure.
+func findReplyID(tail []tailComment, want string) string {
+	id := ""
+	for _, c := range tail {
+		if sameReplyBody(c.Body, want) {
+			id = c.ID
+		}
+	}
+	return id
 }
 
 // printThreads emits one compact JSON object per line, matching the original

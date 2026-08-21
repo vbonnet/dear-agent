@@ -520,6 +520,47 @@ func TestClassifyPriorReply(t *testing.T) {
 	}
 }
 
+// TestFindReplyID pins the ambiguous-reply-mutation recovery path: after a
+// client-side postReply error, postReplyOrExit re-reads history and uses
+// this to find the comment it may have already posted, rather than trust a
+// failure that doesn't prove the mutation never applied.
+func TestFindReplyID(t *testing.T) {
+	reply := "Fixed - moved the check into the helper."
+	tests := []struct {
+		name string
+		tail []tailComment
+		want string
+	}{
+		{
+			name: "found",
+			tail: []tailComment{{ID: "c1", Body: "P1: fix this"}, {ID: "c2", Body: reply}},
+			want: "c2",
+		},
+		{
+			name: "not present",
+			tail: []tailComment{{ID: "c1", Body: "P1: fix this"}},
+			want: "",
+		},
+		{
+			name: "empty tail",
+			tail: nil,
+			want: "",
+		},
+		{
+			name: "last match wins on duplicates",
+			tail: []tailComment{{ID: "c1", Body: reply}, {ID: "c2", Body: "other"}, {ID: "c3", Body: reply}},
+			want: "c3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := findReplyID(tt.tail, reply); got != tt.want {
+				t.Errorf("findReplyID = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestClassifyPriorReplyMultiLine pins that the prior-reply scan uses the same
 // lossless comparison as the retry guard, since real replies are multi-line.
 func TestClassifyPriorReplyMultiLine(t *testing.T) {

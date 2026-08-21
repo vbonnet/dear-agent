@@ -370,9 +370,7 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 		return "", false, err
 	}
 	if wantLastID != "" && cur.LastID != wantLastID {
-		return "", false, &unansweredError{msg: fmt.Sprintf(
-			"%s %s: the comment this resolution was based on is no longer last "+
-				"(someone commented after it)", threadID, cur.Path)}
+		return "", false, staleAnchorError(ctx, threadID, cur)
 	}
 	if cur.IsResolved {
 		// Someone else closed it between the listing and now. Report it, but
@@ -397,7 +395,7 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 	if effectiveWantID == "" && !force {
 		effectiveWantID = cur.LastID
 	}
-	msg, gotLastID, err := mutateThread(ctx, "resolve", threadID)
+	msg, gotLastID, _, err := mutateThread(ctx, "resolve", threadID)
 	if err != nil {
 		// gh api can fail on the client side (network drop, timeout) after
 		// GitHub already applied the mutation server-side: this error alone
@@ -427,15 +425,11 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 	// verified (the same reasoning as errReplyIDMissing for the reply
 	// mutation).
 	if effectiveWantID != "" && gotLastID != effectiveWantID {
-		if _, _, uErr := mutateThread(ctx, "unresolve", threadID); uErr != nil {
-			return "", false, &failedReopenError{msg: fmt.Sprintf(
-				"%s %s: resolved on stale or unverifiable evidence (someone "+
-					"commented while the mutation was in flight, or GitHub's "+
-					"response didn't confirm what it resolved against) AND "+
-					"reopening it failed: %v — the thread is STILL RESOLVED. "+
-					"Run this before anything else: "+
-					"resolve-review-threads unresolve %s, then read the new "+
-					"comment and answer it", threadID, cur.Path, uErr, threadID)}
+		reason := "resolved on stale or unverifiable evidence (someone " +
+			"commented while the mutation was in flight, or GitHub's " +
+			"response didn't confirm what it resolved against)"
+		if rErr := reopenOrFail(ctx, threadID, cur.Path, reason); rErr != nil {
+			return "", false, rErr
 		}
 		return "", false, &unansweredError{msg: fmt.Sprintf(
 			"%s %s: reopened — someone commented while the resolve mutation was "+
@@ -443,6 +437,54 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 				"against, so it is not accounted for", threadID, cur.Path)}
 	}
 	return msg, true, nil
+}
+
+// reopenOrFail attempts to reopen a thread whose resolution is being
+// corrected, and reports a failedReopenError if that doesn't work.
+// It checks the mutation's own IsResolved postcondition, not just a nil
+// error: another resolver can race the unresolve and re-resolve it before
+// this response lands, or the mutation can fail without a transport error
+// surfacing at all. An access-denial failure gets a distinct hint, since
+// retrying the same unresolve command with the same credentials just
+// repeats the denial rather than fixing anything.
+// staleAnchorError builds the refusal for an anchor that is no longer last,
+// reopening the thread first if it was resolved on that stale evidence. A
+// reviewer follow-up and another resolver can both act before the read that
+// found the mismatch, leaving the thread simultaneously resolved and
+// anchor-stale; reporting the refusal without reopening would leave that
+// follow-up resolved away unread, and a later retry would just see
+// IsResolved at readOrExit and silently no-op instead of reopening it.
+func staleAnchorError(ctx context.Context, threadID string, cur thread) error {
+	if cur.IsResolved {
+		if rErr := reopenOrFail(ctx, threadID, cur.Path, "resolved on stale evidence"); rErr != nil {
+			return rErr
+		}
+	}
+	return &unansweredError{msg: fmt.Sprintf(
+		"%s %s: the comment this resolution was based on is no longer last "+
+			"(someone commented after it)", threadID, cur.Path)}
+}
+
+func reopenOrFail(ctx context.Context, threadID, path, reason string) error {
+	_, _, stillResolved, uErr := mutateThread(ctx, "unresolve", threadID)
+	if uErr == nil && !stillResolved {
+		return nil
+	}
+	detail := fmt.Sprintf("%s AND the reopen mutation reported the thread as "+
+		"still resolved", reason)
+	access := ""
+	if uErr != nil {
+		detail = fmt.Sprintf("%s AND reopening it failed: %v", reason, uErr)
+		if isAccessDenied(uErr) {
+			access = " This is an access problem: check `gh auth status` and " +
+				"fix credentials before retrying unresolve — re-running it " +
+				"unchanged will be denied again."
+		}
+	}
+	return &failedReopenError{msg: fmt.Sprintf(
+		"%s %s: %s — the thread is STILL RESOLVED.%s Run this before anything "+
+			"else: resolve-review-threads unresolve %s, then read the new "+
+			"comment and answer it", threadID, path, detail, access, threadID)}
 }
 
 // failedReopenError marks a resolution that went through on stale or
@@ -561,15 +603,19 @@ func fetchHistoryTail(ctx context.Context, threadID string) (history []tailComme
 // returns a human-readable confirmation line. lastCommentID is the thread's
 // last comment as of the SAME response as the mutation, when the query
 // requested it (currently only resolveMutation does); it is empty for
-// "unresolve", which has no caller that needs it.
-func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommentID string, err error) {
+// "unresolve", which has no caller that needs it. isResolved is the
+// mutation's own postcondition, not an assumption from its action: an
+// "unresolve" whose GraphQL call succeeds is not proof the thread is now
+// open — another resolver can race it — so callers reopening a thread must
+// check this rather than treat a nil error as the postcondition itself.
+func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommentID string, isResolved bool, err error) {
 	query, field := resolveMutation, "resolveReviewThread"
 	if action == "unresolve" {
 		query, field = unresolveMutation, "unresolveReviewThread"
 	}
 	raw, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "query="+query)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	var resp struct {
 		Data map[string]struct {
@@ -585,13 +631,13 @@ func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommen
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", "", fmt.Errorf("parse %s response: %w", field, err)
+		return "", "", false, fmt.Errorf("parse %s response: %w", field, err)
 	}
 	th := resp.Data[field].Thread
 	if n := th.Comments.Nodes; len(n) > 0 {
 		lastCommentID = n[len(n)-1].ID
 	}
-	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, th.IsResolved), lastCommentID, nil
+	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, th.IsResolved), lastCommentID, th.IsResolved, nil
 }
 
 // ghGraphQL runs `gh api graphql <args...>` and returns stdout. Stderr is
