@@ -149,7 +149,7 @@ worse failure than one spawn too many.
 Reading the meter takes seconds, so no consumer may do it inline. One
 scheduled job (`agm admin install-quota-schedule`, every 30 minutes) publishes
 `~/.local/state/dear-agent/quota/latest.json` atomically; the guardrail,
-`agm quota`, and the orchestrator all read that file in O(1).
+`agm quota-meter`, and the orchestrator all read that file in O(1).
 
 The file is versioned and carries the verdicts, not just raw percentages, so
 consumers do not each re-derive policy. It records `readable` separately from
@@ -159,7 +159,7 @@ exhausted one.
 The interval is half the 90-minute gating age, so one missed run still leaves
 a usable reading. If the job dies, readings go stale and the guardrail stops
 halting spawns — safe, but it means a dead job silently removes the guardrail.
-`agm quota` prints STALE so the condition is visible rather than silent.
+`agm quota-meter` prints STALE so the condition is visible rather than silent.
 
 ## Alternatives
 
@@ -211,3 +211,18 @@ Quota readings are host-local. Several dear-agent processes on one machine share
 the meter's view but each keep their own cache, so their reorderings agree only
 to within a refresh interval. That is sufficient for load spreading and is not
 sufficient for a hard budget cap — which this ADR does not attempt.
+
+**Known gap: a pre-existing `agm quota` command overlaps this one.**
+`agm quota` (`agm/cmd/agm/dispatch_surfaces.go`, backed by
+`agm/internal/dispatchstate.ReadQuotaStatus`) predates this ADR and reads
+the same published state file this design writes, but with its own
+staleness threshold (30 minutes, vs. this guardrail's 90), its own default
+provider (`codex`, vs. every family), and its own JSON schema — a second,
+diverging way to ask the same question. `agm quota-meter` (this ADR's
+command) is the canonical interface going forward: it is what the
+guardrail, the scheduled refresh, and this document describe throughout.
+`agm quota` is not removed here — it also backs the
+`agm_get_quota_status` MCP tool, a stable surface whose callers were not
+audited as part of this change — but new integrations should prefer `agm
+quota-meter`, and consolidating the two onto one implementation is
+follow-up work, not yet done.

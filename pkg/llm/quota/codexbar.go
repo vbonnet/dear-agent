@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // Reader produces one Snapshot per call. Implementations must not surface
@@ -26,6 +28,29 @@ const DefaultCodexBarCommand = "codexbar"
 // refreshes providers over the network on a cold cache, so this is sized
 // for the slow path; the Meter keeps it off the routing path entirely.
 const DefaultReadTimeout = 45 * time.Second
+
+// MinAuditedCodexBarVersion is the floor ADR-038 sets: earlier CodexBar
+// builds carry a recorded SQLite cost-store defect and were never part
+// of the security review (engram-research #313). A reading from a build
+// below this floor must not gate spawns or routing — the guardrail
+// would be trusting evidence nobody has audited.
+const MinAuditedCodexBarVersion = "0.49.0"
+
+// MeetsMinCodexBarVersion reports whether installed is at or above
+// MinAuditedCodexBarVersion. An unparseable installed version is treated
+// as not meeting the floor — silently trusting an unrecognized version
+// string would defeat the point of a floor check.
+func MeetsMinCodexBarVersion(installed string) bool {
+	v := installed
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	if !semver.IsValid(v) {
+		return false
+	}
+	floor := "v" + MinAuditedCodexBarVersion
+	return semver.Compare(v, floor) >= 0
+}
 
 // DefaultFamilyAliases maps CodexBar's provider ids onto dear-agent
 // provider families. Several source ids can feed one family: Gemini
@@ -227,7 +252,7 @@ func ParseCodexBarDashboard(data []byte, aliases map[string]string) (*Snapshot, 
 			byFamily[quota.Family] = quota
 			continue
 		}
-		byFamily[quota.Family] = mergeFamily(existing, quota)
+		byFamily[quota.Family] = mergeFamily(existing, quota, snapshot.GeneratedAt)
 	}
 
 	snapshot.Providers = make([]ProviderQuota, 0, len(order))
@@ -361,8 +386,12 @@ func classifyAuthFailure(message string) bool {
 // reading. A readable entry always beats an unreadable one, so Gemini
 // resolves to whichever of gemini/antigravity is actually signed in. When
 // both are readable the more constrained one wins, because both budgets
-// bind the same family.
-func mergeFamily(existing, incoming ProviderQuota) ProviderQuota {
+// bind the same family. now excludes each source's expired windows from
+// that comparison — an aliased source's stale exhausted window must not
+// beat the other source's active reading, or this silently discards the
+// actually-binding source and leaves the guardrail closed (codex review
+// on #1218, fourth pass).
+func mergeFamily(existing, incoming ProviderQuota, now time.Time) ProviderQuota {
 	switch {
 	case existing.Availability.Known() && !incoming.Availability.Known():
 		return existing
@@ -376,8 +405,16 @@ func mergeFamily(existing, incoming ProviderQuota) ProviderQuota {
 		return incoming
 	}
 
-	existingWorst, _ := existing.MostConstrained()
-	incomingWorst, _ := incoming.MostConstrained()
+	existingWorst, existingOK := existing.MostConstrainedActive(now)
+	incomingWorst, incomingOK := incoming.MostConstrainedActive(now)
+	switch {
+	case existingOK && !incomingOK:
+		return existing
+	case !existingOK && incomingOK:
+		return incoming
+	case !existingOK && !incomingOK:
+		return existing
+	}
 	if incomingWorst.RemainingPercent < existingWorst.RemainingPercent {
 		return incoming
 	}

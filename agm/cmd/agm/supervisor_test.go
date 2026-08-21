@@ -132,7 +132,9 @@ func TestSubmitSupervisorLaunchBindsEffectsAfterLiveAdmission(t *testing.T) {
 	}, func() error {
 		events = append(events, "run")
 		return nil
-	}, reservation)
+	}, reservation, func() {
+		events = append(events, "abort")
+	})
 	if err != nil {
 		t.Fatalf("submitSupervisorLaunch() error: %v", err)
 	}
@@ -154,12 +156,35 @@ func TestSubmitSupervisorLaunchDoesNotBindRefusedLaunch(t *testing.T) {
 	}, func() error {
 		events = append(events, "run")
 		return nil
-	}, reservation)
+	}, reservation, func() {
+		events = append(events, "abort")
+	})
 	if !errors.Is(err, refusal) {
 		t.Fatalf("submitSupervisorLaunch() error = %v, want %v", err, refusal)
 	}
 	if got, want := strings.Join(events, ","), "admission"; got != want {
 		t.Fatalf("refused launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitSupervisorLaunchReleasesOnFailedBind(t *testing.T) {
+	var events []string
+	bindFailure := errors.New("bind transaction refused")
+	err := submitSupervisorLaunch(func(reservations ...*override.Reservation) ([]*override.Reservation, error) {
+		return reservations, nil
+	}, func(bool, ...*override.Reservation) error {
+		return bindFailure
+	}, func() error {
+		events = append(events, "run")
+		return nil
+	}, nil, func() {
+		events = append(events, "abort")
+	})
+	if !errors.Is(err, bindFailure) {
+		t.Fatalf("submitSupervisorLaunch() error = %v, want %v", err, bindFailure)
+	}
+	if got, want := strings.Join(events, ","), "abort"; got != want {
+		t.Fatalf("failed-bind boundary events = %q, want %q — a bind failure means the process never started, so any throttle reservation must be released", got, want)
 	}
 }
 
@@ -175,12 +200,14 @@ func TestSubmitSupervisorLaunchReturnsConfirmedExecutorStartFailure(t *testing.T
 	}, func() error {
 		events = append(events, "run")
 		return startFailure
-	}, nil)
+	}, nil, func() {
+		events = append(events, "abort")
+	})
 	if !errors.Is(err, startFailure) {
 		t.Fatalf("submitSupervisorLaunch() error = %v, want %v", err, startFailure)
 	}
 	if got, want := strings.Join(events, ","), "bind,run"; got != want {
-		t.Fatalf("failed executor events = %q, want %q", got, want)
+		t.Fatalf("failed executor events = %q, want %q — run() failing after bind must NOT release the reservation: exec.Cmd.Run's error covers both never-started and started-then-exited, and a process that did start drew down real load", got, want)
 	}
 }
 

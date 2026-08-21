@@ -84,15 +84,25 @@ func TestMeterWithoutReaderLeavesRoutingUntouched(t *testing.T) {
 	assertOrder(t, got, configured)
 }
 
-func TestMeterOrdersRealReadingByHeadroom(t *testing.T) {
+func TestMeterOrdersRealReadingByHeadroomExcludingUnimplementedGemini(t *testing.T) {
 	meter := liveMeter(t, quota.Policy{})
 
 	// Live capture: openai/codex is 52% used (48% left, band 1);
-	// gemini/antigravity has 99.8% left (band 0); anthropic/claude is
-	// unreadable (unknown, band 0, keeps its configured slot).
+	// gemini/antigravity has 99.8% left (band 0, the best reading in this
+	// snapshot) but gemini has no constructible provider yet
+	// (provider.Factory's newGeminiProvider is a stub for both auth
+	// methods), so it stays pinned to its configured last slot instead of
+	// being promoted ahead of openai (review on #1218); anthropic/claude
+	// is unreadable (unknown, also keeps its configured slot). With
+	// gemini excluded, openai is the only candidate quota can actually
+	// move, and it has nothing left to move past — the order comes out
+	// unchanged from roles.yaml.
 	configured := []string{"claude-opus-4-8", "gpt-5.5-pro", "gemini-3.1-pro"}
-	got, _ := meter.OrderModels(configured)
-	assertOrder(t, got, []string{"claude-opus-4-8", "gemini-3.1-pro", "gpt-5.5-pro"})
+	got, decisions := meter.OrderModels(configured)
+	assertOrder(t, got, configured)
+	if decisions[2].Known() {
+		t.Errorf("gemini decision = %+v, want ClassUnknown (excluded from quota promotion)", decisions[2])
+	}
 }
 
 func TestMeterKeepsConfiguredOrderWithinABand(t *testing.T) {

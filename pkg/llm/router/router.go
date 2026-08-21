@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/provider"
+	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 )
 
 // FactoryFunc constructs a provider for a given (family, model) pair.
@@ -33,6 +34,13 @@ type Options struct {
 	// values pick sensible defaults: 3 consecutive failures trips,
 	// 30 s cooldown.
 	CircuitBreaker provider.CircuitBreakerConfig
+
+	// Quota, when set, reorders a role's candidate chain so providers
+	// with more remaining quota are tried first. Nil — and any meter
+	// with no usable reading — leaves the configured order untouched.
+	// The meter never removes a candidate; the chain still ends where
+	// roles.yaml says it ends.
+	Quota *quota.Meter
 }
 
 // Router routes a role to a concrete provider call, falling through the
@@ -43,6 +51,7 @@ type Router struct {
 	resolver *provider.Resolver
 	factory  FactoryFunc
 	cbCfg    provider.CircuitBreakerConfig
+	quota    *quota.Meter
 
 	mu        sync.Mutex
 	providers map[string]*entry // key: family|model
@@ -74,6 +83,7 @@ func New(opts Options) (*Router, error) {
 		resolver:  resolver,
 		factory:   factory,
 		cbCfg:     opts.CircuitBreaker,
+		quota:     opts.Quota,
 		providers: make(map[string]*entry),
 	}, nil
 }
@@ -93,14 +103,15 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 	if err != nil {
 		return nil, err
 	}
-	candidates := spec.Candidates()
-	if len(candidates) == 0 {
+	configured := spec.Candidates()
+	if len(configured) == 0 {
 		return nil, fmt.Errorf("router: role %q has no model candidates", resolvedRole)
 	}
+	candidates, decisions := r.quota.OrderModels(configured)
 
 	var attempts []string
 	var lastErr error
-	for _, modelID := range candidates {
+	for i, modelID := range candidates {
 		family, model, rerr := r.resolver.Resolve(modelID)
 		if rerr != nil {
 			lastErr = fmt.Errorf("resolve %q: %w", modelID, rerr)
@@ -116,6 +127,18 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 
 		// Override the request's Model with the resolved name and tag
 		// the cost record's Component with the role for budget tracking.
+		//
+		// Deliberately no quota fields here. This same *callReq is what
+		// CircuitBreaker.GenerateWithSource forwards verbatim to its own
+		// internal fallback when the primary call fails and the breaker
+		// trips — the router has no say in that hop. A provider such as
+		// OpenAI echoes req.Metadata back under response
+		// Metadata["request_metadata"], so quota data merged in here
+		// would ride along into the fallback's response and mislabel it
+		// with the primary's verdict even though the fallback-aware
+		// response metadata below correctly omits its own top-level
+		// quota fields on that path. The verdict is attached once,
+		// below, after source.Fallback is known.
 		callReq := *req
 		callReq.Model = model
 		callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
@@ -128,13 +151,25 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 			callErr = fmt.Errorf("provider %s/%s returned a nil response", family, model)
 		}
 		if callErr == nil {
-			resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+			// decisions[i] is the quota verdict for the configured candidate
+			// (family, model) at position i. When the circuit breaker's own
+			// fallback served the request instead, source.Provider/Model name
+			// a different provider than decisions[i] was evaluated against —
+			// attaching it here would mislabel the fallback's response with
+			// the failed primary's quota class and remaining percent. Quota
+			// metadata is only meaningful for the exact candidate it was
+			// computed for, so omit it on a fallback response.
+			quotaMD := quotaMetadata(decisions[i])
+			if source.Fallback {
+				quotaMD = nil
+			}
+			resp.Metadata = mergeMetadata(resp.Metadata, mergeMetadata(map[string]any{
 				"router_provider":        source.Provider,
 				"router_model":           source.Model,
 				"router_candidate_model": modelID,
 				"router_role":            resolvedRole,
 				"router_fallback":        source.Fallback,
-			})
+			}, quotaMD))
 			return resp, nil
 		}
 
@@ -155,6 +190,12 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 // GenerateForModel bypasses role lookup and routes a literal model id
 // through the resolver + circuit breaker. Used by AIExecutor when a
 // workflow node specifies AINode.Model directly.
+//
+// It records the same quota verdict Generate does (LLM-ROUTER-16):
+// GenerateForModel is the only path an explicit-model workflow node takes,
+// so skipping quota metadata here would leave every cost record for such a
+// node silently missing the guardrail decision that applied — invisible
+// rather than merely absent (codex review on #1218).
 func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *provider.GenerateRequest) (*provider.GenerateResponse, error) {
 	if req == nil {
 		return nil, errors.New("router: request cannot be nil")
@@ -170,6 +211,12 @@ func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *prov
 	if err != nil {
 		return nil, err
 	}
+	decision := r.quota.DecisionForModel(modelID)
+
+	// No quota fields on the request, for the same reason Generate omits
+	// them: this *callReq is what CircuitBreaker.GenerateWithSource
+	// forwards verbatim to its own internal fallback, and a provider such
+	// as OpenAI echoes request metadata back into its response.
 	callReq := *req
 	callReq.Model = model
 	callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
@@ -182,12 +229,20 @@ func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *prov
 	if resp == nil {
 		return nil, fmt.Errorf("router: provider %s/%s returned a nil response", family, model)
 	}
-	resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+	// The verdict was computed for modelID, the candidate actually
+	// requested; a circuit-breaker fallback serves a different provider,
+	// so — as in Generate — omit it there rather than mislabel the
+	// fallback's response with it.
+	quotaMD := quotaMetadata(decision)
+	if source.Fallback {
+		quotaMD = nil
+	}
+	resp.Metadata = mergeMetadata(resp.Metadata, mergeMetadata(map[string]any{
 		"router_provider":        source.Provider,
 		"router_model":           source.Model,
 		"router_candidate_model": modelID,
 		"router_fallback":        source.Fallback,
-	})
+	}, quotaMD))
 	return resp, nil
 }
 
@@ -253,6 +308,22 @@ func summariseErr(err error) string {
 	msg = strings.ReplaceAll(msg, "\n", " ")
 	msg = strings.ReplaceAll(msg, "\t", " ")
 	return msg
+}
+
+// quotaMetadata renders a quota verdict for request and response
+// metadata. An unknown verdict contributes nothing, so an unmetered
+// deployment produces byte-identical metadata to before quota routing
+// existed.
+func quotaMetadata(d quota.Decision) map[string]any {
+	if !d.Known() {
+		return nil
+	}
+	return map[string]any{
+		"router_quota_class":     string(d.Class),
+		"router_quota_family":    d.Family,
+		"router_quota_remaining": d.RemainingPercent,
+		"router_quota_window":    d.ConstrainedWindow,
+	}
 }
 
 func mergeMetadata(base, extra map[string]any) map[string]any {

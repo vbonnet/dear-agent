@@ -81,6 +81,11 @@ func newCLICreateSessionRuntime(
 			if admission != nil {
 				spec.BeforeSpawn = admission.beforeSpawn
 				spec.AfterAuthorization = admission.afterAuthorization
+				spec.OnAbort = func() {
+					if admission.onAbort != nil {
+						admission.onAbort()
+					}
+				}
 			}
 			return launchCLICreateSession(ctx, spec, existed, trustPreConfigured)
 		},
@@ -373,7 +378,7 @@ func preflight(sessionName string) (*circuitBreakerAdmission, error) {
 	if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 		return nil, dupErr
 	}
-	admission, err := enforceCircuitBreakers(sessionName)
+	admission, err := enforceCircuitBreakers(sessionName, harnessName, modelName)
 	if err != nil {
 		return nil, err
 	}

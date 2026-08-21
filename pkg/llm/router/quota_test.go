@@ -3,305 +3,412 @@ package router
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/provider"
+	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 )
 
-type fakeCommandRunner struct {
-	name string
-	args []string
-	out  []byte
-	err  error
-}
-
-func (f *fakeCommandRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
-	f.name = name
-	f.args = append([]string(nil), args...)
-	return f.out, f.err
-}
-
-func TestParseCodexBarDashboard(t *testing.T) {
-	data := []byte(`{
-		"generatedAt": "2026-08-10T06:00:00Z",
-		"providers": [
-			{
-				"id": "anthropic",
-				"family": "anthropic",
-				"account": "redacted",
-				"windows": [
-					{"name": "weekly", "remainingPercent": 7.5, "usedPercent": 92.5, "resetAt": "2026-08-14T00:00:00Z"},
-					{"name": "daily", "remainingPercent": 41.0, "usedPercent": 59.0, "resetAt": "2026-08-11T00:00:00Z"}
-				]
-			},
-			{
-				"id": "openai",
-				"account": "redacted",
-				"windows": [
-					{"name": "monthly", "remainingPercent": 68.0, "usedPercent": 32.0}
-				]
-			}
-		]
-	}`)
-
-	snapshot, err := ParseCodexBarDashboard(data, time.Time{})
-	if err != nil {
-		t.Fatalf("ParseCodexBarDashboard: %v", err)
-	}
-	if snapshot.Source != "codexbar" {
-		t.Fatalf("source = %q, want codexbar", snapshot.Source)
-	}
-	if got := snapshot.Generated.Format(time.RFC3339); got != "2026-08-10T06:00:00Z" {
-		t.Fatalf("generated = %s", got)
-	}
-	if len(snapshot.Providers) != 2 {
-		t.Fatalf("providers = %d, want 2", len(snapshot.Providers))
-	}
-	if snapshot.Providers[0].Family != "anthropic" || len(snapshot.Providers[0].Windows) != 2 {
-		t.Fatalf("anthropic provider = %#v", snapshot.Providers[0])
-	}
-	if snapshot.Providers[1].Family != "openai" {
-		t.Fatalf("provider without family should fall back to id, got %#v", snapshot.Providers[1])
-	}
-}
-
-// TestParseCodexBarDashboardCanonicalizesAliases guards against CodexBar's
-// own labels ("claude", "codex", "google") never matching the router's
-// resolved families ("anthropic", "openai", "gemini"), which would make
-// EvaluateProviderQuota's exact family match silently ignore the provider's
-// quota (codex review on #1197, ADR-038 alias table).
-func TestParseCodexBarDashboardCanonicalizesAliases(t *testing.T) {
-	data := []byte(`{
-		"providers": [
-			{"id": "claude", "windows": [{"name": "daily", "remainingPercent": 40}]},
-			{"family": "codex", "windows": [{"name": "daily", "remainingPercent": 40}]},
-			{"id": "google", "windows": [{"name": "daily", "remainingPercent": 40}]}
-		]
-	}`)
-
-	snapshot, err := ParseCodexBarDashboard(data, time.Time{})
-	if err != nil {
-		t.Fatalf("ParseCodexBarDashboard: %v", err)
-	}
-	want := []string{"anthropic", "openai", "gemini"}
-	for i, w := range want {
-		if snapshot.Providers[i].Family != w {
-			t.Fatalf("provider[%d].Family = %q, want %q", i, snapshot.Providers[i].Family, w)
-		}
-	}
-}
-
-// TestParseCodexBarDashboardSkipsWindowsWithoutRemainingPercent guards
-// against a missing/null remainingPercent silently unmarshalling to zero,
-// which would read as exhausted quota and could avoid a provider even
-// though the ADR requires unavailable data not to affect availability
-// (codex review on #1197).
-func TestParseCodexBarDashboardSkipsWindowsWithoutRemainingPercent(t *testing.T) {
-	data := []byte(`{
-		"providers": [
-			{"id": "anthropic", "windows": [
-				{"name": "daily", "usedPercent": 10},
-				{"name": "weekly", "remainingPercent": 55, "usedPercent": 45}
-			]}
-		]
-	}`)
-
-	snapshot, err := ParseCodexBarDashboard(data, time.Time{})
-	if err != nil {
-		t.Fatalf("ParseCodexBarDashboard: %v", err)
-	}
-	windows := snapshot.Providers[0].Windows
-	if len(windows) != 1 {
-		t.Fatalf("windows = %#v, want only the window with an explicit remainingPercent", windows)
-	}
-	if windows[0].Name != "weekly" {
-		t.Fatalf("windows[0] = %#v, want the weekly window", windows[0])
-	}
-}
-
-func TestEvaluateProviderQuotaAvoidsMostConstrainedWindow(t *testing.T) {
-	snapshot := &QuotaSnapshot{
-		Generated: time.Date(2026, 8, 10, 6, 0, 0, 0, time.UTC),
-		Providers: []ProviderQuota{{
-			Family: "anthropic",
-			Windows: []QuotaWindow{
-				{Name: "daily", RemainingPercent: 35},
-				{Name: "weekly", RemainingPercent: 6},
-			},
-		}},
-	}
-
-	decision := EvaluateProviderQuota(snapshot, "anthropic", "", snapshot.Generated.Add(time.Minute), QuotaPolicy{
-		AvoidBelowRemainingPercent:        10,
-		DeprioritizeBelowRemainingPercent: 25,
-		MaxSnapshotAge:                    time.Hour,
-	})
-	if !decision.Avoid || decision.Deprioritize {
-		t.Fatalf("decision = %#v, want avoid only", decision)
-	}
-	if decision.MinRemaining != 6 {
-		t.Fatalf("min remaining = %v, want 6", decision.MinRemaining)
-	}
-	if !strings.Contains(decision.Reason, "avoid threshold") {
-		t.Fatalf("reason = %q, want avoid threshold", decision.Reason)
-	}
-}
-
-func TestEvaluateProviderQuotaDeprioritizes(t *testing.T) {
-	snapshot := &QuotaSnapshot{
-		Generated: time.Date(2026, 8, 10, 6, 0, 0, 0, time.UTC),
-		Providers: []ProviderQuota{{
-			Family:  "gemini",
-			Windows: []QuotaWindow{{Name: "daily", RemainingPercent: 18}},
-		}},
-	}
-
-	decision := EvaluateProviderQuota(snapshot, "gemini", "", snapshot.Generated, QuotaPolicy{
-		AvoidBelowRemainingPercent:        10,
-		DeprioritizeBelowRemainingPercent: 25,
-	})
-	if decision.Avoid || !decision.Deprioritize {
-		t.Fatalf("decision = %#v, want deprioritize only", decision)
-	}
-}
-
-func TestEvaluateProviderQuotaStaleSnapshotDoesNotAvoid(t *testing.T) {
-	snapshot := &QuotaSnapshot{
-		Generated: time.Date(2026, 8, 10, 6, 0, 0, 0, time.UTC),
-		Providers: []ProviderQuota{{
-			Family:  "openai",
-			Windows: []QuotaWindow{{Name: "daily", RemainingPercent: 1}},
-		}},
-	}
-
-	decision := EvaluateProviderQuota(snapshot, "openai", "", snapshot.Generated.Add(3*time.Hour), QuotaPolicy{
-		AvoidBelowRemainingPercent: 10,
-		MaxSnapshotAge:             time.Hour,
-	})
-	if decision.Avoid || !decision.SnapshotStale {
-		t.Fatalf("decision = %#v, want stale without avoid", decision)
-	}
-}
-
-// TestEvaluateProviderQuotaZeroGeneratedIsStale guards against a zero
-// Generated timestamp bypassing freshness enforcement: its age cannot be
-// established, so it must be treated as stale rather than allowed to
-// influence routing indefinitely (codex review on #1197).
-func TestEvaluateProviderQuotaZeroGeneratedIsStale(t *testing.T) {
-	snapshot := &QuotaSnapshot{
-		Providers: []ProviderQuota{{
-			Family:  "openai",
-			Windows: []QuotaWindow{{Name: "daily", RemainingPercent: 1}},
-		}},
-	}
-
-	decision := EvaluateProviderQuota(snapshot, "openai", "", time.Now(), QuotaPolicy{
-		AvoidBelowRemainingPercent: 10,
-		MaxSnapshotAge:             time.Hour,
-	})
-	if decision.Avoid || !decision.SnapshotStale {
-		t.Fatalf("decision = %#v, want stale without avoid", decision)
-	}
-}
-
-// TestEvaluateProviderQuotaSkipsExpiredWindow guards against an exhausted
-// window whose reset time has already passed continuing to drag the
-// provider's minimum down after its quota period actually reset (codex
-// review on #1197).
-func TestEvaluateProviderQuotaSkipsExpiredWindow(t *testing.T) {
-	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
-	snapshot := &QuotaSnapshot{
-		Generated: now,
-		Providers: []ProviderQuota{{
-			Family: "anthropic",
-			Windows: []QuotaWindow{
-				// Exhausted, but its reset time is in the past: expired.
-				{Name: "daily", RemainingPercent: 0, ResetAt: now.Add(-time.Hour)},
-				{Name: "weekly", RemainingPercent: 60, ResetAt: now.Add(6 * 24 * time.Hour)},
-			},
-		}},
-	}
-
-	decision := EvaluateProviderQuota(snapshot, "anthropic", "", now, QuotaPolicy{
-		AvoidBelowRemainingPercent: 10,
-	})
-	if decision.Avoid {
-		t.Fatalf("decision = %#v, want no avoid once the exhausted window has reset", decision)
-	}
-	if decision.MinRemaining != 60 {
-		t.Fatalf("min remaining = %v, want 60 (expired window excluded)", decision.MinRemaining)
-	}
-}
-
-// TestEvaluateProviderQuotaScopesToAccount guards against an exhausted
-// inactive account under the same family causing Avoid for the healthy
-// account actually routed to (codex review on #1197).
-func TestEvaluateProviderQuotaScopesToAccount(t *testing.T) {
-	snapshot := &QuotaSnapshot{
-		Generated: time.Date(2026, 8, 10, 6, 0, 0, 0, time.UTC),
-		Providers: []ProviderQuota{
-			{
-				Family:  "anthropic",
-				Account: "work",
-				Windows: []QuotaWindow{{Name: "daily", RemainingPercent: 1}},
-			},
-			{
-				Family:  "anthropic",
-				Account: "personal",
-				Windows: []QuotaWindow{{Name: "daily", RemainingPercent: 80}},
+// quotaConfig is one role whose chain spans all three vendors, which is
+// the shape the shipped roles.yaml uses.
+func quotaConfig() *Config {
+	return &Config{
+		Version:     1,
+		DefaultRole: "implementer",
+		Roles: map[string]RoleSpec{
+			"implementer": {
+				Primary:   "claude-opus-4-8",
+				Secondary: "gpt-5.5-pro",
+				Tertiary:  "gemini-3.1-pro",
 			},
 		},
 	}
+}
 
-	decision := EvaluateProviderQuota(snapshot, "anthropic", "personal", snapshot.Generated, QuotaPolicy{
-		AvoidBelowRemainingPercent: 10,
-	})
-	if decision.Avoid {
-		t.Fatalf("decision = %#v, want no avoid for the healthy scoped account", decision)
-	}
-	if decision.MinRemaining != 80 {
-		t.Fatalf("min remaining = %v, want 80 (exhausted other account excluded)", decision.MinRemaining)
+func quotaProviders() map[string]provider.Provider {
+	return map[string]provider.Provider{
+		"anthropic|claude-opus-4-8": &fakeProvider{name: "anthropic"},
+		"openai|gpt-5.5-pro":        &fakeProvider{name: "openai"},
+		"gemini|gemini-3.1-pro":     &fakeProvider{name: "gemini"},
 	}
 }
 
-func TestCodexBarQuotaReaderUsesRedactedDashboardCommand(t *testing.T) {
-	runner := &fakeCommandRunner{out: []byte(`{
-		"generatedAt": "2026-08-10T06:00:00Z",
-		"providers": [{"id": "anthropic", "windows": [{"name": "daily", "remainingPercent": 50}]}]
-	}`)}
-	reader := CodexBarQuotaReader{
-		Command: "codexbar-test",
-		Runner:  runner,
-		Timeout: time.Second,
+type fixedReader struct{ snapshot *quota.Snapshot }
+
+func (f fixedReader) Read(context.Context) (*quota.Snapshot, error) { return f.snapshot, nil }
+
+// meterWith builds a warmed meter over a hand-written reading, one
+// window per family.
+func meterWith(t *testing.T, remaining map[string]float64) *quota.Meter {
+	t.Helper()
+	snapshot := &quota.Snapshot{Source: "test", GeneratedAt: time.Now()}
+	for family, pct := range remaining {
+		snapshot.Providers = append(snapshot.Providers, quota.ProviderQuota{
+			Family:       family,
+			SourceID:     family,
+			Availability: quota.AvailabilityOK,
+			Windows: []quota.Window{{
+				ID:               "weekly",
+				Label:            "Weekly",
+				RemainingPercent: pct,
+				UsedPercent:      100 - pct,
+			}},
+		})
+	}
+	meter := quota.New(quota.Options{Reader: fixedReader{snapshot: snapshot}, RefreshInterval: -1})
+	if _, err := meter.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh meter: %v", err)
+	}
+	return meter
+}
+
+func newQuotaRouter(t *testing.T, meter *quota.Meter, providers map[string]provider.Provider) *Router {
+	t.Helper()
+	r, err := New(Options{
+		Config: quotaConfig(),
+		Quota:  meter,
+		Factory: func(family, model string) (provider.Provider, error) {
+			p, ok := providers[family+"|"+model]
+			if !ok {
+				return nil, errors.New("no provider registered for " + family + "|" + model)
+			}
+			return p, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return r
+}
+
+func TestRouterRoutesToTheRoomiestProvider(t *testing.T) {
+	providers := quotaProviders()
+	// The configured primary (Anthropic) is nearly spent; Gemini has the
+	// most headroom of all three, but gemini is excluded from quota
+	// promotion (no constructible provider yet — review on #1218), so
+	// OpenAI, the roomiest candidate that can actually be promoted, takes
+	// the request even though roles.yaml ranks it after Anthropic.
+	meter := meterWith(t, map[string]float64{
+		"anthropic": 8,
+		"openai":    55,
+		"gemini":    95,
+	})
+	r := newQuotaRouter(t, meter, providers)
+
+	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Model != "gpt-5.5-pro" {
+		t.Errorf("routed to %q, want gpt-5.5-pro", resp.Model)
+	}
+	if got := providers["anthropic|claude-opus-4-8"].(*fakeProvider).calls; got != 0 {
+		t.Errorf("the near-limit provider was called %d times, want 0", got)
+	}
+	if got := providers["gemini|gemini-3.1-pro"].(*fakeProvider).calls; got != 0 {
+		t.Errorf("the unimplemented-provider family was called %d times, want 0", got)
+	}
+}
+
+func TestRouterKeepsConfiguredOrderWhenQuotaDoesNotDistinguish(t *testing.T) {
+	providers := quotaProviders()
+	meter := meterWith(t, map[string]float64{
+		"anthropic": 90,
+		"openai":    88,
+		"gemini":    95,
+	})
+	r := newQuotaRouter(t, meter, providers)
+
+	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Model != "claude-opus-4-8" {
+		t.Errorf("routed to %q, want the configured primary claude-opus-4-8", resp.Model)
+	}
+}
+
+// The fail-safe contract at the router boundary: no meter, an unreadable
+// meter, and a stale meter must all route exactly as before.
+func TestRouterWithoutUsableQuotaRoutesAsConfigured(t *testing.T) {
+	unreadable := quota.New(quota.Options{
+		Reader: fixedReader{snapshot: &quota.Snapshot{
+			Source:      "test",
+			GeneratedAt: time.Now(),
+			Providers: []quota.ProviderQuota{{
+				Family:       "anthropic",
+				Availability: quota.AvailabilityAuthRequired,
+				Note:         "No Claude session key found in browser cookies.",
+			}},
+		}},
+		RefreshInterval: -1,
+	})
+	if _, err := unreadable.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh: %v", err)
 	}
 
-	snapshot, err := reader.ReadQuota(context.Background())
+	stale := quota.New(quota.Options{
+		Reader: fixedReader{snapshot: &quota.Snapshot{
+			Source:      "test",
+			GeneratedAt: time.Now().Add(-24 * time.Hour),
+			Providers: []quota.ProviderQuota{{
+				Family:       "anthropic",
+				Availability: quota.AvailabilityOK,
+				Windows:      []quota.Window{{Label: "Weekly", RemainingPercent: 1}},
+			}},
+		}},
+		Policy:          quota.Policy{MaxSnapshotAge: time.Minute},
+		RefreshInterval: -1,
+	})
+	if _, err := stale.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		meter *quota.Meter
+	}{
+		{name: "no meter", meter: nil},
+		{name: "meter with no reader", meter: quota.New(quota.Options{})},
+		{name: "provider needs credentials", meter: unreadable},
+		{name: "reading past its max age", meter: stale},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newQuotaRouter(t, tc.meter, quotaProviders())
+			resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if resp.Model != "claude-opus-4-8" {
+				t.Errorf("routed to %q, want the configured primary claude-opus-4-8", resp.Model)
+			}
+		})
+	}
+}
+
+func TestRouterStillFallsThroughAnExhaustedChain(t *testing.T) {
+	providers := quotaProviders()
+	// Everything is spent. The router must still try, and still succeed,
+	// rather than refusing to route.
+	meter := meterWith(t, map[string]float64{"anthropic": 0, "openai": 0, "gemini": 0})
+	r := newQuotaRouter(t, meter, providers)
+
+	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})
 	if err != nil {
-		t.Fatalf("ReadQuota: %v", err)
+		t.Fatalf("Generate: %v", err)
 	}
-	if runner.name != "codexbar-test" {
-		t.Fatalf("command = %q, want codexbar-test", runner.name)
+	if resp.Model == "" {
+		t.Fatal("want a routed model even when every provider is out of quota")
 	}
-	wantArgs := []string{"dashboard", "--identity", "redacted"}
-	if len(runner.args) != len(wantArgs) {
-		t.Fatalf("args = %#v, want %#v", runner.args, wantArgs)
+}
+
+func TestRouterRecordsTheQuotaVerdictInMetadata(t *testing.T) {
+	meter := meterWith(t, map[string]float64{"anthropic": 90, "openai": 55, "gemini": 95})
+	r := newQuotaRouter(t, meter, quotaProviders())
+
+	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
 	}
-	for i := range wantArgs {
-		if runner.args[i] != wantArgs[i] {
-			t.Fatalf("args = %#v, want %#v", runner.args, wantArgs)
+	if got := resp.Metadata["router_quota_class"]; got != string(quota.ClassHealthy) {
+		t.Errorf("router_quota_class = %v, want healthy", got)
+	}
+	if got := resp.Metadata["router_quota_family"]; got != "anthropic" {
+		t.Errorf("router_quota_family = %v, want anthropic", got)
+	}
+	if got := resp.Metadata["router_quota_remaining"]; got != 90.0 {
+		t.Errorf("router_quota_remaining = %v, want 90", got)
+	}
+	if got := resp.Metadata["router_quota_window"]; got != "Weekly" {
+		t.Errorf("router_quota_window = %v, want Weekly", got)
+	}
+}
+
+// TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback guards against
+// attributing the failed primary candidate's quota verdict to a response
+// that the circuit breaker's fallback provider actually served: the
+// fallback is a different (family, model) than decisions[i] was evaluated
+// against, so its quota class/remaining would describe the wrong provider
+// (codex review on #1218).
+func TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "claude-opus-4-7"},
+	}}
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+
+	r, err := New(Options{
+		Config: cfg,
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Metadata["router_fallback"] != true {
+		t.Fatalf("expected a fallback response, got metadata = %#v", resp.Metadata)
+	}
+	for key := range resp.Metadata {
+		if len(key) > 12 && key[:12] == "router_quota" {
+			t.Errorf("fallback response carried the primary candidate's quota metadata: %q = %v", key, resp.Metadata[key])
 		}
 	}
-	if snapshot.Providers[0].Family != "anthropic" {
-		t.Fatalf("snapshot = %#v", snapshot)
+}
+
+// TestRouterDoesNotSendQuotaMetadataToTheProvider guards the request side
+// of the same leak TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback
+// guards on the response side. CircuitBreaker.GenerateWithSource forwards
+// the router's *GenerateRequest verbatim to its own internal fallback when
+// the primary fails, and a real provider (OpenAI) echoes req.Metadata back
+// under response Metadata["request_metadata"] — so quota fields merged
+// into the outgoing request would ride along into the fallback's response
+// and mislabel it with the primary's verdict, even though the top-level
+// response metadata correctly omits them on that path (codex review on
+// #1218). The fix is to never put quota fields on the request at all;
+// this asserts that directly against what each provider actually
+// received, independent of what any specific provider does with it.
+func TestRouterDoesNotSendQuotaMetadataToTheProvider(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "claude-opus-4-7"},
+	}}
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+
+	r, err := New(Options{
+		Config: cfg,
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	for _, p := range []*fakeProvider{primary, fallback} {
+		if p.lastReq == nil {
+			t.Fatalf("%s: provider was never called", p.name)
+		}
+		for key := range p.lastReq.Metadata {
+			if len(key) > 12 && key[:12] == "router_quota" {
+				t.Errorf("%s: request metadata carried a quota field: %q = %v", p.name, key, p.lastReq.Metadata[key])
+			}
+		}
 	}
 }
 
-func TestCodexBarQuotaReaderWrapsCommandErrors(t *testing.T) {
-	reader := CodexBarQuotaReader{
-		Runner: &fakeCommandRunner{err: errors.New("missing binary")},
+// GenerateForModel is the only path an explicit-model workflow node takes
+// (AIExecutor.Generate calls it instead of the role-chain Generate), so it
+// must record the same quota verdict Generate does or cost records for
+// such a node silently lose the guardrail decision that applied
+// (LLM-ROUTER-16, codex review on #1218).
+func TestGenerateForModelRecordsTheQuotaVerdictInMetadata(t *testing.T) {
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+	r, err := New(Options{
+		Config: &Config{Version: 1, Roles: map[string]RoleSpec{}},
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return &fakeProvider{name: "anthropic", resp: &provider.GenerateResponse{Text: "ok"}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
-	_, err := reader.ReadQuota(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "read dashboard") {
-		t.Fatalf("err = %v, want wrapped command error", err)
+
+	resp, err := r.GenerateForModel(context.Background(), "claude-opus-4-8", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("GenerateForModel: %v", err)
+	}
+	if got := resp.Metadata["router_quota_class"]; got != string(quota.ClassHealthy) {
+		t.Errorf("router_quota_class = %v, want healthy", got)
+	}
+	if got := resp.Metadata["router_quota_family"]; got != "anthropic" {
+		t.Errorf("router_quota_family = %v, want anthropic", got)
+	}
+}
+
+// Same leak class TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback and
+// TestRouterDoesNotSendQuotaMetadataToTheProvider guard on the role-chain
+// path, exercised here through the literal-model path instead.
+func TestGenerateForModelOmitsQuotaMetadataOnFallbackAndNeverSendsItToTheProvider(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+
+	r, err := New(Options{
+		Config: &Config{Version: 1, Roles: map[string]RoleSpec{}},
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := r.GenerateForModel(context.Background(), "claude-opus-4-8", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("GenerateForModel: %v", err)
+	}
+	if resp.Metadata["router_fallback"] != true {
+		t.Fatalf("expected a fallback response, got metadata = %#v", resp.Metadata)
+	}
+	for key := range resp.Metadata {
+		if len(key) > 12 && key[:12] == "router_quota" {
+			t.Errorf("fallback response carried the primary candidate's quota metadata: %q = %v", key, resp.Metadata[key])
+		}
+	}
+	for _, p := range []*fakeProvider{primary, fallback} {
+		if p.lastReq == nil {
+			t.Fatalf("%s: provider was never called", p.name)
+		}
+		for key := range p.lastReq.Metadata {
+			if len(key) > 12 && key[:12] == "router_quota" {
+				t.Errorf("%s: request metadata carried a quota field: %q = %v", p.name, key, p.lastReq.Metadata[key])
+			}
+		}
+	}
+}
+
+func TestRouterOmitsQuotaMetadataWhenUnmetered(t *testing.T) {
+	r := newQuotaRouter(t, nil, quotaProviders())
+	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for key := range resp.Metadata {
+		if len(key) > 12 && key[:12] == "router_quota" {
+			t.Errorf("unmetered routing emitted %q", key)
+		}
 	}
 }

@@ -18,6 +18,13 @@ const StateFileVersion = 1
 // operator finds it where they already look.
 const DefaultStateFileRelPath = "dear-agent/quota/latest.json"
 
+// DefaultThrottleLedgerRelPath is the persistent per-family
+// admission-throttle ledger's location, alongside the published state
+// file. It records when a spawn was actually admitted while a family was
+// throttled, so the guardrail's hourly allowance can be enforced across
+// separate process invocations rather than only within one.
+const DefaultThrottleLedgerRelPath = "dear-agent/quota/throttle-admissions.json"
+
 // State is the published quota reading: the stable contract between
 // whatever refreshes the meter and everything that consumes it.
 //
@@ -143,6 +150,20 @@ func DefaultStateFilePath() (string, error) {
 		return "", fmt.Errorf("quota: resolve home directory: %w", err)
 	}
 	return filepath.Join(home, ".local", "state", DefaultStateFileRelPath), nil
+}
+
+// DefaultThrottleLedgerPath resolves the admission-throttle ledger's
+// location the same way DefaultStateFilePath does, so both files move
+// together under XDG_STATE_HOME.
+func DefaultThrottleLedgerPath() (string, error) {
+	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
+		return filepath.Join(dir, DefaultThrottleLedgerRelPath), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("quota: resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".local", "state", DefaultThrottleLedgerRelPath), nil
 }
 
 // BuildState renders a snapshot plus the two policies into the published

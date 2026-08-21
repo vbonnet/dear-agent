@@ -85,7 +85,7 @@ func submitHarnessLaunch(
 	spec ops.HarnessLaunchSpec,
 	launch ops.HarnessLaunchCommand,
 	submit func() error,
-) error {
+) (err error) {
 	reservations, err := runBeforeHarnessSpawn(spec, launch.Reservations...)
 	if err != nil {
 		return errors.Join(
@@ -93,6 +93,17 @@ func submitHarnessLaunch(
 			launch.CancelUndelivered(),
 		)
 	}
+	// BeforeSpawn has now run and may have reserved a throttle allowance.
+	// Release it on any definite abort below — ResolveHarnessLaunchSubmission
+	// never returns a non-nil error for an uncertain submission (the harness
+	// may already have received it despite a lost acknowledgement), so a
+	// non-nil err here always means the launch definitely did not proceed
+	// (codex review on #1218, fourth pass).
+	defer func() {
+		if err != nil && spec.OnAbort != nil {
+			spec.OnAbort()
+		}
+	}()
 	if launch.BindOverrideReservations != nil {
 		if err := launch.FinalizeLaunch(true, reservations...); err != nil {
 			return errors.Join(

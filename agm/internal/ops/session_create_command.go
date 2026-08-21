@@ -57,6 +57,15 @@ type HarnessLaunchSpec struct {
 	// committed or sealed successfully and command delivery is successful or
 	// uncertain.
 	AfterAuthorization func()
+	// OnAbort releases whatever BeforeSpawn reserved, for a launch that
+	// definitely fails after BeforeSpawn succeeds but before real work
+	// starts. Callers invoke it only on a definite failure, never on an
+	// uncertain one (the harness may already have received the launch
+	// despite a lost acknowledgement) — the same direction
+	// ResolveHarnessLaunchSubmission already treats that ambiguity. Safe to
+	// call even when BeforeSpawn reserved nothing, and nil when there is
+	// nothing to release.
+	OnAbort func()
 	// DeferredUntilCallerExit is set only by current-pane launchers whose
 	// queued command cannot run until the producing AGM process releases tmux.
 	DeferredUntilCallerExit bool

@@ -360,6 +360,7 @@ func submitSupervisorLaunch(
 	bind func(bool, ...*override.Reservation) error,
 	run func() error,
 	reservation *override.Reservation,
+	onAbort func(),
 ) error {
 	var reservations []*override.Reservation
 	if reservation != nil {
@@ -372,10 +373,26 @@ func submitSupervisorLaunch(
 			return fmt.Errorf("supervisor: launch admission: %w", err)
 		}
 	}
+	// beforeSpawn has now run and may have reserved a throttle allowance.
+	// Release it only for a failure strictly before the process starts —
+	// bind's transaction never reaching the executor, same as
+	// submitHarnessLaunch's FinalizeLaunch case (codex review on #1218,
+	// fourth pass). run() failing is different: exec.Cmd.Run's error covers
+	// both "never started" and "started, then exited non-zero" without
+	// distinguishing them, and a process that did start drew down real
+	// load on the family regardless of how it exited — releasing there
+	// would undercount genuine throttled launches, the opposite of what
+	// this ledger exists to prevent.
 	if bind == nil {
+		if onAbort != nil {
+			onAbort()
+		}
 		return errors.New("supervisor: private Claude executor cannot bind launch effects")
 	}
 	if err := bind(true, reservations...); err != nil {
+		if onAbort != nil {
+			onAbort()
+		}
 		return fmt.Errorf("supervisor: bind launch override transaction: %w", err)
 	}
 	if err := run(); err != nil {
@@ -422,7 +439,7 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	var admission *circuitBreakerAdmission
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
-		admission, admissionErr = enforceCircuitBreakers(supervisorID)
+		admission, admissionErr = enforceCircuitBreakers(supervisorID, "claude-code", supervisorClaudeModel)
 		return admissionErr
 	})
 	if err != nil {
@@ -488,6 +505,11 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		prepared.BindOverrideReservations,
 		claudeCmd.Run,
 		oauthOverride,
+		func() {
+			if admission.onAbort != nil {
+				admission.onAbort()
+			}
+		},
 	); err != nil {
 		return err
 	}
