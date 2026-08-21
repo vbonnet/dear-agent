@@ -21,10 +21,10 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/telemetry/usage"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
+	"github.com/vbonnet/dear-agent/internal/telemetry/usage"
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
