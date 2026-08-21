@@ -108,13 +108,15 @@
       "agm/internal/tmux/tmux.go (1258 lines)",
       "agm/internal/tmux/tmux_test.go (1109 lines)",
       "agm/internal/ui/table.go (1054 lines)",
+      "agm/test/bdd/steps/declarative_runtime_guardrails_steps.go (1119 lines)",
       "agm/test/bdd/steps/harness_parity_steps.go (4980 lines)",
-      "agm/test/bdd/steps/local_development_guardrails_steps.go (1112 lines)",
+      "agm/test/bdd/steps/local_development_guardrails_steps.go (1109 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps.go (1608 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
       "agm/test/performance/eventbus_load_test.go (1065 lines)",
       "cmd/ai-review/spec_contract.go (3119 lines)",
       "cmd/ai-review/spec_contract_test.go (2398 lines)",
+      "cmd/merge-audit/main.go (1010 lines)",
       "cmd/vroom-dispatch-direct/main.go (1173 lines)",
       "cmd/vroom-dispatch/main.go (1618 lines)",
       "cmd/vroom-dispatch/main_test.go (1240 lines)",
@@ -870,6 +872,35 @@
       },
       "reason": "PR #1263 (ce-chhd.28): sandbox-cleanup retry/lock-timeout logic, BDD scenario coverage for the retry+lock-serialization behavior, and race-skipped-SLA marker hardening grew these already-oversized files further",
       "reference": "vbonnet/dear-agent#1263"
+    },
+    {
+      "previous_baseline_sha256": "2456d3b26968b4098230336426855d2e1a01bfa54ad8400cff0feab168a44201",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/declarative_runtime_guardrails_steps.go (1119 lines)",
+          "agm/test/bdd/steps/local_development_guardrails_steps.go (1109 lines)",
+          "cmd/merge-audit/main.go (1010 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/local_development_guardrails_steps.go (1112 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "cmd/merge-audit/main.go grew with ruleset.go's audit-tier logic; declarative_runtime_guardrails_steps.go crossed the line threshold from unrelated upstream growth already on main",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1348"
     }
   ]
 }
