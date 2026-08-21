@@ -33,11 +33,25 @@ jobs:
     outputs:
       should_comment: ${{ steps.scope.outputs.should_comment }}
       mixed_concern: ${{ steps.concern.outputs.mixed_concern }}
+      crap_flagged: ${{ steps.crap.outputs.crap_flagged }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The PR head itself, not the default merge commit. The crap-lint
+          # step measures coverage by running the changed packages' tests
+          # against the checkout, and it refuses to score at all when the
+          # checkout is not the head revision, so on the merge commit it would
+          # silently measure nothing. The scope and concern steps below are
+          # unaffected: they name base and head as explicit revisions and never
+          # read the working tree.
+          #
+          # Checking out PR head code is safe here because this job holds no
+          # secret beyond the default GITHUB_TOKEN and never runs on
+          # pull_request_target. The tests it runs are the PR's own, which the
+          # ordinary CI workflow already runs on the same code.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Compute PR scope
         id: scope
@@ -150,6 +164,33 @@ jobs:
             -min-new-logic "$MIN_NEW_LOGIC_LINES" \
             -github-output >> "$GITHUB_OUTPUT"
 
+      # Neither threshold above can see complexity that no test exercises. A
+      # 40-line diff can add a branchy function to a package whose tests build
+      # the binary and exec it, which reads as 0% covered while the zero-test
+      # scan in cmd/structural-health sees test files and stays quiet. This
+      # step joins gocyclo-equivalent complexity with go cover on the changed
+      # functions and reports the join.
+      #
+      # It deliberately does not re-check discarded error returns or raw
+      # complexity: errcheck and gocyclo already own those in .golangci.yml,
+      # already diff-scoped via new-from-merge-base, and already hard-gating.
+      #
+      # Advisory by construction: the command exits 0 either way, so it can
+      # never become the reason a PR cannot merge. It runs the changed
+      # packages' tests to measure coverage, so it is bounded and allowed to
+      # fail without failing the job.
+      - name: Score changed functions for complexity against coverage
+        id: crap
+        continue-on-error: true
+        env:
+          CI: "true"
+          CI_SKIP_TMUX: "true"
+        run: |
+          go run ./tools/crap-lint \
+            -base "${{ github.event.pull_request.base.sha }}" \
+            -head "${{ github.event.pull_request.head.sha }}" \
+            -github-output >> "$GITHUB_OUTPUT"
+
       - name: Comment with split suggestion
         # A pull_request run from a fork, or one opened by Dependabot (whose
         # workflow runs also get a read-only GITHUB_TOKEN even though the head
@@ -161,7 +202,7 @@ jobs:
         # PR flips actor to that human while the token stays read-only — the
         # step would then run and fail. The author is stable across every event
         # on the PR.
-        if: (steps.scope.outputs.should_comment == 'true' || steps.concern.outputs.mixed_concern == 'true') && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: (steps.scope.outputs.should_comment == 'true' || steps.concern.outputs.mixed_concern == 'true' || steps.crap.outputs.crap_flagged == 'true') && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -171,21 +212,26 @@ jobs:
           TOP_LEVEL_AREAS: ${{ steps.scope.outputs.top_level_areas }}
           REASONS: ${{ steps.scope.outputs.reasons }}
           CONCERN_REASON: ${{ steps.concern.outputs.reason }}
+          CRAP_REPORT: ${{ steps.crap.outputs.crap_report }}
         run: |
           set -euo pipefail
           body=/tmp/pr-size-scope-comment.md
           {
             echo "<!-- pr-size-scope -->"
-            echo "## PR size and scope signal"
+            echo "## PR size, scope, and code health signals"
             echo
-            echo "This PR tripped a deterministic split-suggestion signal:"
-            echo
-            [ -n "$REASONS" ] && printf '%s\n' "$REASONS"
-            [ -n "$CONCERN_REASON" ] && printf '%s\n' "$CONCERN_REASON"
-            echo
-            echo "Current scope: ${CHANGED_LINES} changed lines, ${CHANGED_FILES} changed files, ${TOP_LEVEL_AREAS} top-level areas."
-            echo
-            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands."
+            if [ -n "$REASONS" ] || [ -n "$CONCERN_REASON" ]; then
+              echo "This PR tripped a deterministic split-suggestion signal:"
+              echo
+              [ -n "$REASONS" ] && printf '%s\n' "$REASONS"
+              [ -n "$CONCERN_REASON" ] && printf '%s\n' "$CONCERN_REASON"
+              echo
+              echo "Current scope: ${CHANGED_LINES} changed lines, ${CHANGED_FILES} changed files, ${TOP_LEVEL_AREAS} top-level areas."
+              echo
+              echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands."
+              echo
+            fi
+            [ -n "$CRAP_REPORT" ] && printf '%s\n' "$CRAP_REPORT"
           } > "$body"
 
           # Edit the existing marker comment in place when there is one. The
@@ -213,7 +259,7 @@ jobs:
       - name: Remove stale split-suggestion comment
         # A later synchronize run can drop below every threshold; clear any
         # marker comment left by an earlier, larger revision of this PR.
-        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && steps.crap.outputs.crap_flagged != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
