@@ -34,7 +34,7 @@ threads or an out-of-date branch. See the DEAR retro
    | `CONFLICTS` | `safe-rebase` onto base, resolve, `safe-push` |
    | `FAILING_REQUIRED_CHECK` | fix the named check; known flakes get one rerun |
    | `PENDING_REQUIRED_CHECK` | `gh pr checks <n> --watch` |
-   | `UNRESOLVED_THREADS` | address, then `resolve-review-threads resolve-all <owner> <repo> <n>` to ZERO |
+   | `UNRESOLVED_THREADS` | address in code, then per thread: `resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
    | `CHANGES_REQUESTED` | address the review, push, re-request |
    | `REVIEW_REQUIRED` | obtain an approving review |
    | `BEHIND` | `gh pr update-branch <n>` |
@@ -46,15 +46,65 @@ threads or an out-of-date branch. See the DEAR retro
 
 ## The two traps this skill kills
 
-- **Outdated threads still block.** The GitHub UI collapses them behind
-  "Show outdated" and casual queries omit them, but required conversation
-  resolution counts every unresolved thread. The inverse guess is just as
-  wrong: do not assume unresolved threads are stale noise; measure with the
-  query below. Unresolved must reach zero, outdated or not.
+- **Outdated threads still block, and outdated is not obsolete.** The GitHub
+  UI collapses them behind "Show outdated" and casual queries omit them, but
+  required conversation resolution counts every unresolved thread. The inverse
+  guess is just as wrong: do not assume unresolved threads are stale noise;
+  measure with the query below. Unresolved must reach zero, outdated or not.
+  `isOutdated` only means the diff hunk moved. On #1242 all three outdated
+  threads were unaddressed P1 findings, so outdated never licenses a resolve.
 - **BEHIND churn is normal, not a defect.** Branch protection requires
   branches up to date with base, so every merge flips sibling PRs to BEHIND.
   The fix is one `gh pr update-branch`, not an investigation. Expect a bot
   re-review after any push; resolve the new threads and go again.
+
+## Resolving threads: evidence, not volume
+
+Resolving a thread asserts its point was handled. Two opposite failures have
+both shipped here, and both are invisible afterwards because a resolved thread
+looks the same either way:
+
+- **Bulk-resolve without addressing.** Measured 2026-08-20 across the 24 open
+  PRs: 30 of 134 resolved threads had no reply at all, and on #1242 and #1263
+  every resolved thread was closed without one.
+- **Reply and never resolve.** Four unresolved threads carried replies, leaving
+  their PRs blocked on conversation resolution for nothing.
+
+So the tool now enforces the rule instead of asking you to remember it. A
+thread counts as ANSWERED when someone other than its opening author had the
+last word:
+
+```sh
+# thread IDs: pr-blockers prints them in brackets, or list them directly
+resolve-review-threads list <owner> <repo> <n>
+
+# the normal path: state the reason and close the thread in one step
+resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"
+
+# sweep: resolves ANSWERED threads, refuses the rest by name, exits non-zero
+# (add a login argument after <n> to sweep one author only)
+resolve-review-threads resolve-all <owner> <repo> <n>
+```
+
+Every `resolve-review-threads` path enforces this, including single-thread
+`resolve <threadId>`, and each one re-reads the thread immediately before
+mutating it, so a reviewer comment landing mid-sweep is never resolved away on
+stale state.
+
+**Known gap, do not assume it is covered:** `mergeloop` resolves threads through
+its own GraphQL mutation in `cmd/mergeloop/threads.go`, not through
+`resolve-review-threads`, so the evidence rule does not reach it. It
+auto-resolves any unresolved thread whose every comment is from a known review
+bot, which is exactly an unanswered bot finding, and it runs unattended. That is
+a deliberate throughput trade (an advisory finding should not park a green PR on
+required conversation resolution forever) but it means a resolved thread on a
+mergeloop-touched PR is NOT evidence a person read it. Whether that path should
+annotate, gate, or stop auto-resolving is an open policy question, tracked
+separately.
+
+`resolve-all --force` resolves unanswered threads. Use it only to dismiss a
+finding deliberately, and say why in a PR comment. Never reach for it to make
+a refusal go away.
 
 ## Verification
 

@@ -171,7 +171,10 @@ Blockers detected, with their fixes:
   CONFLICTS               safe-rebase onto base, resolve, safe-push
   FAILING_REQUIRED_CHECK  fix the named check (gh pr checks <n>)
   PENDING_REQUIRED_CHECK  gh pr checks <n> --watch
-  UNRESOLVED_THREADS      address, then resolve-review-threads resolve-all (outdated threads count!)
+  UNRESOLVED_THREADS      address in code, then per thread:
+                          resolve-review-threads reply-resolve <threadId> "Fixed - ..."
+                          (sweep answered ones with resolve-all; it refuses threads with
+                           no reply. Outdated threads count, and outdated is not obsolete!)
   CHANGES_REQUESTED       address the review, push, re-request
   REVIEW_REQUIRED         obtain an approving review
   BEHIND                  gh pr update-branch <n>
