@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -851,5 +852,23 @@ func TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure(t *testing.T
 	}
 	if sessionID != "" {
 		t.Errorf("expected an empty session ID on failure, got %q", sessionID)
+	}
+
+	// The error and empty ID alone would also be exactly what a version with
+	// rollbackFailedImport silently dropped from ImportConversation returns,
+	// since writeHistory's own error already produces both. Inspecting the
+	// store and the real tmux server directly is what actually proves the
+	// rollback ran, rather than merely that the write failed.
+	sessions, err := store.List()
+	if err != nil {
+		t.Fatalf("store.List returned error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("session store still holds %d entr(y/ies) after rollback: %#v", len(sessions), sessions)
+	}
+
+	out, _ := exec.Command("tmux", "-S", server.SocketPath, "list-sessions").CombinedOutput()
+	if strings.Contains(string(out), "imported-") {
+		t.Errorf("tmux still has the imported session after rollback: %s", out)
 	}
 }

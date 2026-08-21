@@ -207,9 +207,11 @@ with the kill confirmed and unconfirmed. The latter proves the composition:
 itself against an isolated real tmux server and reads the result back through
 `GetHistory`, and
 `TestGeminiCLIAdapter_ImportConversationRollsBackOnWriteFailure` forces the
-write to fail after a real session is already launched and asserts both an
-error and an empty session ID — the case a helper-only suite could not tell
-apart from a silently-dropped rollback call.
+write to fail after a real session is already launched, then inspects the
+session store and the real tmux server directly and requires both to hold no
+trace of the session — the error and empty ID alone would also be produced by
+a version that silently dropped the `rollbackFailedImport` call, since
+`writeHistory`'s own error already yields both.
 
 If `gemini-cli` is ever promoted into the active parity set, AGP-12 already
 requires BDD scenarios at that point, which is the correct trigger for adding

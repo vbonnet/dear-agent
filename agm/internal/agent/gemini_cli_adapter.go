@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -407,9 +409,16 @@ func parseImportedMessages(data []byte, format ConversationFormat) ([]Message, e
 		}
 		// Decode reads exactly one JSON value and leaves anything after it
 		// alone, so a line holding a valid message immediately followed by
-		// another JSON value would decode the first and silently discard the
-		// second instead of rejecting the record.
-		if dec.More() {
+		// trailing data would decode the first value and silently discard the
+		// rest instead of rejecting the record. dec.More() is not the right
+		// check: it reports whether another element remains in the array or
+		// object currently being parsed, so it also returns false when the
+		// very next byte is a stray `]` or `}` — trailing garbage, not proof
+		// there is nothing left. Requiring a second Decode to hit io.EOF is
+		// the actual "nothing left" check: a nil error means another value
+		// followed, and any other error means unparseable trailing bytes:
+		// both are trailing data.
+		if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("message record has trailing data after its JSON value")
 		}
 		// json.Unmarshal accepts `null` and `{}` into a Message and leaves it

@@ -461,6 +461,24 @@ func TestParseImportedMessagesRejectsTrailingJSONValue(t *testing.T) {
 	}
 }
 
+// TestParseImportedMessagesRejectsTrailingBracket covers what dec.More()
+// alone would miss: More reports whether another element remains in the
+// array or object currently being parsed, so it also reports false when the
+// very next byte is a stray `]` or `}` — trailing garbage, not proof nothing
+// is left. A second Decode that must hit io.EOF is what actually tells them
+// apart.
+func TestParseImportedMessagesRejectsTrailingBracket(t *testing.T) {
+	line := []byte(`{"role":"user","content":"ok"}]` + "\n")
+
+	messages, err := parseImportedMessages(line, FormatJSONL)
+	if err == nil {
+		t.Fatalf("expected a rejection, got %d messages", len(messages))
+	}
+	if !strings.Contains(err.Error(), "trailing data") {
+		t.Errorf("error = %v, want it to name trailing data", err)
+	}
+}
+
 // TestWriteHistoryRoundTripsRecordAtExactlyTheLimit covers the off-by-one this
 // fixes: writeHistory appends a newline after every record, and ScanLines can
 // only locate that delimiter by buffering it along with the record itself, so
