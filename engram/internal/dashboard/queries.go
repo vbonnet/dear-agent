@@ -46,7 +46,7 @@ type TrendMetric struct {
 // with the same eight lines, which is most of what made the four functions
 // token-identical to a clone detector.
 func applyTimeRange(query string, since, until time.Time) (string, []any) {
-	args := []any{}
+	var args []any
 
 	if !since.IsZero() {
 		query += " AND created_at >= ?"

@@ -35,7 +35,7 @@ func (l *jsonlEventLogger) MinLevel() Level {
 
 // OnEvent appends a matching event to the logger's JSONL file. A
 // non-matching event is ignored, which is how several loggers share one bus.
-func (l *jsonlEventLogger) OnEvent(event *Event) error {
+func (l *jsonlEventLogger) OnEvent(event *Event) (err error) {
 	if event.Type != l.eventType {
 		return nil
 	}
@@ -62,9 +62,17 @@ func (l *jsonlEventLogger) OnEvent(event *Event) error {
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
-	defer f.Close()
+	// Close reports errors that Write cannot: a buffered flush can fail at
+	// close time on a full disk, and discarding that turns a lost log line
+	// into a silent success. Reported only when the write itself succeeded,
+	// so a real write error is never masked by the close.
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("failed to close log file: %w", cerr)
+		}
+	}()
 
-	if _, err := f.Write(append(jsonBytes, '\n')); err != nil {
+	if _, err = f.Write(append(jsonBytes, '\n')); err != nil {
 		return fmt.Errorf("failed to write to log file: %w", err)
 	}
 
