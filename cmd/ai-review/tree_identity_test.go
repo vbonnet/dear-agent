@@ -587,6 +587,17 @@ func TestTreeIdentityInventoryBoundIsDerivedFromEntryLimit(t *testing.T) {
 	if worstCasePathBytes+recordMetadataBytes > maxTreeIdentityRecordBytes {
 		t.Errorf("record bound %d cannot hold a %d-component path", maxTreeIdentityRecordBytes, maxTreeIdentityPathComponents)
 	}
+	// The real ceiling is safeGitPath's maxGitPathBytes, not the
+	// component-count estimate above: a single long component (or a handful
+	// of them) can reach maxGitPathBytes while using far fewer than
+	// maxTreeIdentityPathComponents components. Every path safeGitPath admits
+	// must fit one record, or a path safeGitPath accepts elsewhere in this
+	// package would be rejected here as "unauthenticated metadata" and fail
+	// plan construction for every PR touching a repository that merely
+	// contains it.
+	if maxGitPathBytes+recordMetadataBytes > maxTreeIdentityRecordBytes {
+		t.Errorf("record bound %d cannot hold safeGitPath's maximum %d-byte path", maxTreeIdentityRecordBytes, maxGitPathBytes)
+	}
 }
 
 func TestBuildReviewPlan_ProtectedFileDirectoryRelationsFailClosed(t *testing.T) {

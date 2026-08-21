@@ -14,11 +14,21 @@ const (
 	maxTreeIdentityEntries        = 2 * maxHeadPaths
 	maxTreeIdentityPathComponents = 256
 	maxTreeIdentityPeers          = 32
+	// maxTreeIdentityRecordMetadataBytes bounds the non-path portion of one
+	// `ls-tree -z` record: a mode (up to 6 digits), a space, a type (up to
+	// "commit", 6 bytes), a space, a 40-hex object id, a tab, and the
+	// trailing NUL the +1 in parseTreeIdentityEntry accounts for. 64 is a
+	// generous round margin over the ~49 bytes that format actually takes.
+	maxTreeIdentityRecordMetadataBytes = 64
 	// maxTreeIdentityRecordBytes bounds one `ls-tree -z` record: mode, type,
-	// object id, tab, path, NUL. The fixed metadata is 53 bytes, so this
-	// admits a ~970-byte path, comfortably above the 256-component bound at
-	// any realistic component length.
-	maxTreeIdentityRecordBytes = 1024
+	// object id, tab, path, NUL. Sized from maxGitPathBytes — the same
+	// path-length ceiling safeGitPath enforces everywhere else — plus
+	// metadata, rather than from an assumed "realistic" path length: a record
+	// this parser rejects as oversized must actually exceed what the shared
+	// path validator allows, or a single long-but-otherwise-valid path
+	// anywhere in either complete tree (not just a changed one) would fail
+	// plan construction for every PR, not only ones that touch it.
+	maxTreeIdentityRecordBytes = maxGitPathBytes + maxTreeIdentityRecordMetadataBytes
 	// maxTreeIdentityBytes bounds a *complete* repository inventory rather
 	// than a diff. maxGitMetadataBytes is a diff-sized budget, and applying it
 	// to `ls-tree -r -t` made an undeclared byte cap bind long before

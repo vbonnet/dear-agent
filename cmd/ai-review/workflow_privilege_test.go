@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
@@ -248,6 +249,96 @@ func TestWorkflowPrivilegeReason_CurrentTreeGolden(t *testing.T) {
 	}
 	if !slices.Equal(privileged, want) {
 		t.Fatalf("current privileged workflow inventory = %v, want %v", privileged, want)
+	}
+}
+
+// requiredContextOwners is the hand-audited context-to-owning-workflow
+// mapping backing TestRequiredCheckOwningWorkflowsMatchRuleset. It is
+// deliberately a second, independently maintained table rather than derived
+// by matching job `name:` strings against required contexts: a job name is
+// not always a reliable prefix of the context it produces (go-ci-reusable.yml
+// declares a job named exactly "Build & Test", called from security-audit.yml
+// and unrelated to the "Build & Test (ubuntu-latest)"/"(macos-latest)"
+// contexts ci.yml's own matrixed job produces, so a naive prefix match
+// resolves that pair to the wrong file), and some contexts are suffixed by
+// the calling Action at runtime rather than by YAML matrix templating
+// (codeql.yml's job is named exactly "Analyze Go Code"; the CodeQL Action
+// appends the analyzed language to produce "Analyze Go Code (go)"). Keeping
+// this as an explicit table forces a human decision -- not a heuristic
+// guess -- whenever the ruleset's required-context set changes.
+var requiredContextOwners = map[string]string{
+	"CI Gateway":                             ".github/workflows/ci.yml",
+	"Build & Test (ubuntu-latest)":           ".github/workflows/ci.yml",
+	"Build & Test (macos-latest)":            ".github/workflows/ci.yml",
+	"Analyze Go Code (go)":                   ".github/workflows/codeql.yml",
+	"govulncheck":                            ".github/workflows/ci.yml",
+	"Bash Script Size Check (20-line limit)": ".github/workflows/language-policy.yml",
+	"Vulnerability Scan":                     ".github/workflows/sbom-scan.yml",
+	"Identity, index, and lifecycle parity":  ".github/workflows/adr-integrity.yml",
+	"Header block format":                    ".github/workflows/doc-header-lint.yml",
+	"Structural Health (baselined)":          ".github/workflows/structural-health.yml",
+}
+
+// TestRequiredCheckOwningWorkflowsMatchRuleset keeps requiredCheckOwningWorkflows
+// from silently drifting away from .github/rulesets/main.json, per PR #1205
+// review. It fails in both directions: a required context absent from
+// requiredContextOwners forces a human to audit and record its owner (rather
+// than the test guessing one), and an audited owner absent from
+// requiredCheckOwningWorkflows means a later content change to that file
+// would ride the ordinary automated path undetected (see
+// TestPrivilegedWorkflowEscalationTriggers_RequiredCheckOwner).
+func TestRequiredCheckOwningWorkflowsMatchRuleset(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "rulesets", "main.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ruleset struct {
+		Rules []struct {
+			Type       string `json:"type"`
+			Parameters struct {
+				RequiredStatusChecks []struct {
+					Context string `json:"context"`
+				} `json:"required_status_checks"`
+			} `json:"parameters"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(raw, &ruleset); err != nil {
+		t.Fatal(err)
+	}
+	var contexts []string
+	for _, rule := range ruleset.Rules {
+		if rule.Type != "required_status_checks" {
+			continue
+		}
+		for _, check := range rule.Parameters.RequiredStatusChecks {
+			contexts = append(contexts, check.Context)
+		}
+	}
+	if len(contexts) == 0 {
+		t.Fatal("no required status checks found in .github/rulesets/main.json")
+	}
+
+	for _, ctx := range contexts {
+		owner, audited := requiredContextOwners[ctx]
+		if !audited {
+			t.Errorf("required status check %q has no audited owner in requiredContextOwners; add one and update requiredCheckOwningWorkflows if it isn't already covered", ctx)
+			continue
+		}
+		if !requiredCheckOwningWorkflows[owner] {
+			t.Errorf("required status check %q is audited as owned by %s, which is missing from requiredCheckOwningWorkflows", ctx, owner)
+		}
+	}
+	// The audited table itself must not claim more contexts than the live
+	// ruleset actually requires, or a removed context would leave a stale,
+	// misleading entry behind.
+	live := make(map[string]bool, len(contexts))
+	for _, ctx := range contexts {
+		live[ctx] = true
+	}
+	for ctx := range requiredContextOwners {
+		if !live[ctx] {
+			t.Errorf("requiredContextOwners has a stale entry for %q, which is no longer a required status check", ctx)
+		}
 	}
 }
 
@@ -624,6 +715,43 @@ func TestPrivilegedWorkflowEscalationTriggers_UnicodeFoldAliasSeesPrivilegedBase
 	}
 	if got := privilegedWorkflowEscalationTriggers(context.Background(), base, head, paths); len(got) == 0 {
 		t.Fatal("ordinary Unicode-fold alias of privileged base workflow must escalate")
+	}
+}
+
+// TestPrivilegedWorkflowEscalationTriggers_CaseFoldRenameOfScheduledWorkflowIsNeutral
+// covers the gap reported in PR #1205 review: canonicalWorkflowSchedules used
+// to prefix each schedule value with the peer's raw path before comparing, so
+// a pure case- or Unicode-normalization-only rename of an already-scheduled
+// workflow (same folded workflowIdentity, differently spelled base and head
+// peer paths) produced two different value sets even though the declared
+// cron entry never changed, and reported a misleading "schedule change"
+// trigger.
+func TestPrivilegedWorkflowEscalationTriggers_CaseFoldRenameOfScheduledWorkflowIsNeutral(t *testing.T) {
+	scheduled := strings.Replace(ordinaryReadOnlyWorkflow, "on:\n  pull_request:\n",
+		"on:\n  pull_request:\n  schedule:\n    - cron: '0 6 * * 1'\n", 1)
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	writeWorkflowFile(t, dir, ".github/workflows/scheduled.yml", scheduled)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+
+	object := trim(git("hash-object", "-w", filepath.Join(".github", "workflows", "scheduled.yml")))
+	git("rm", "-q", ".github/workflows/scheduled.yml")
+	git("update-index", "--add", "--cacheinfo", "100644,"+object+",.github/workflows/Scheduled.yml")
+	git("commit", "-q", "-m", "case-only rename")
+	head := trim(git("rev-parse", "HEAD"))
+
+	chdir(t, dir)
+	paths, err := gitChangedPaths(base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := privilegedWorkflowEscalationTriggers(context.Background(), base, head, paths); len(got) != 0 {
+		t.Fatalf("case-only rename of scheduled workflow escalated: %v", got)
 	}
 }
 

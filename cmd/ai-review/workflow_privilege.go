@@ -148,10 +148,18 @@ func changedWorkflowSchedule(base, head []workflowBlobEvidence) (bool, error) {
 	return !slices.Equal(baseSchedules, headSchedules), nil
 }
 
-// canonicalWorkflowSchedules returns the declared schedules only. Peers with no
-// schedule contribute nothing, so adding or deleting an unscheduled workflow
-// compares equal and stays on the automated path, while adding, retiming, or
-// removing a cron entry does not.
+// canonicalWorkflowSchedules returns the declared schedules only, independent
+// of each peer's raw path spelling. Peers with no schedule contribute
+// nothing, so adding or deleting an unscheduled workflow compares equal and
+// stays on the automated path, while adding, retiming, or removing a cron
+// entry does not. Comparing schedule content alone, rather than
+// path-prefixed content, keeps a pure case- or Unicode-normalization-only
+// rename of an already-scheduled workflow (same folded workflowIdentity, but
+// a base peer path spelled differently from its head peer) from reporting a
+// schedule change that never happened: changedWorkflowTrigger only reaches
+// this check once semanticallyEqualWorkflowEvidence has already established
+// that *something* changed, and that separate, path-inclusive comparison is
+// the one responsible for detecting the rename itself.
 func canonicalWorkflowSchedules(peers []workflowBlobEvidence) ([]string, error) {
 	values := make([]string, 0, len(peers))
 	for _, peer := range peers {
@@ -162,7 +170,7 @@ func canonicalWorkflowSchedules(peers []workflowBlobEvidence) ([]string, error) 
 		if schedule == "" {
 			continue
 		}
-		values = append(values, peer.path+"\x00"+schedule)
+		values = append(values, schedule)
 	}
 	sort.Strings(values)
 	return values, nil
