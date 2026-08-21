@@ -281,6 +281,10 @@ Feature: Harness parity
     And active async preview should not start a detached reaper
     And dry-run preview should preserve async state validation
     And validated persisted sandbox ownership should control archive cleanup after reload
+    And archive cleanup should wait for transient child exit without weakening safety gates
+    And archive cleanup should preserve settings written during retry grace
+    And unarchive should serialize with archive cleanup
+    And admin reconcile fixes should serialize and revalidate under the archive lock
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured

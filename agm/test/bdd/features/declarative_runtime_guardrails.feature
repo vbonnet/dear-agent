@@ -22,10 +22,15 @@
 # RELATED-SPEC: agm/youtube-plugin/.claude-plugin/SPEC.md
 # RELATED-SPEC: cmd/dear-agent-bumblebee/templates/SPEC.md
 # RELATED-SPEC: cmd/shellcheck-diff/SPEC.md
+# RELATED-SPEC: cmd/tofu-import-plan/SPEC.md
+# RELATED-SPEC: cmd/merge-audit/SPEC.md
 # RELATED-SPEC: config/SPEC.md
 # RELATED-SPEC: configs/workflows/SPEC.md
 # RELATED-SPEC: deploy/SPEC.md
 # RELATED-SPEC: deploy/launchd/SPEC.md
+# RELATED-SPEC: infra/SPEC.md
+# RELATED-SPEC: infra/modules/managed-repo/SPEC.md
+# RELATED-SPEC: internal/tofuimport/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/go/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/python/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/typescript/SPEC.md
@@ -132,6 +137,31 @@ Feature: Declarative runtime guardrails
     Then every checked-in jq program should have a fixture case
     And jq fixtures should assert output and refusal alike
     And the jq gate should fail rather than skip when jq is absent from CI
+
+  Scenario: State-mutating imports decide before they mutate
+    Given the OpenTofu importer is configured
+    When AGM validates importer authority boundaries
+    Then the importer script should delegate every decision
+    And import identities should resolve before any state is mutated
+    And an existing state address should be verified, not assumed
+    And an unrecognized provider failure should stop the run
+
+  Scenario: The checked-in ruleset is the source OpenTofu projects from
+    Given the canonical ruleset projection is configured
+    When AGM validates canonical ruleset authority
+    Then the projection should read the checked-in canonical ruleset
+    And the projection should preserve zero bypass actors
+    And the projection should preserve required-check app identities
+    And policy outside the supported subset should fail closed
+    And pull request validation should stay credential-free
+
+  Scenario: The ruleset audit fails closed on incomplete evidence
+    Given the ruleset audit surfaces are configured
+    When AGM validates ruleset audit authority
+    Then the audit should compare live state against the canonical policy
+    And the audit should normalize both sides through the tested jq policy library
+    And the audit should withhold private repository identities
+    And incomplete evidence should never read as a clean audit
 
   Scenario: CI schedules credential-free Codex contract evidence
     Given the repository CI workflow is configured

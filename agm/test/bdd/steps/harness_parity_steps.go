@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -170,6 +171,31 @@ type harnessParityState struct {
 
 type harnessParityStateKey struct{}
 
+type bddBehaviorSuiteResult struct {
+	output       string
+	testErr      error
+	executionErr error
+}
+
+type bddBehaviorSuiteCache struct {
+	once   sync.Once
+	result bddBehaviorSuiteResult
+}
+
+func (c *bddBehaviorSuiteCache) load(run func() bddBehaviorSuiteResult) bddBehaviorSuiteResult {
+	c.once.Do(func() {
+		c.result = run()
+	})
+	return c.result
+}
+
+var (
+	sharedAgyLifecycleBehaviorSuite    bddBehaviorSuiteCache
+	sharedCodexHookReviewBehaviorSuite bddBehaviorSuiteCache
+)
+
+const codexHookReviewBehaviorSuiteTimeout = 2 * time.Minute
+
 type bddCreateSessionRuntime struct {
 	tmux *session.MockTmux
 }
@@ -296,6 +322,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^active async preview should not start a detached reaper$`, activeAsyncPreviewShouldNotStartDetachedReaper)
 	ctx.Step(`^dry-run preview should preserve async state validation$`, dryRunPreviewShouldPreserveAsyncStateValidation)
 	ctx.Step(`^validated persisted sandbox ownership should control archive cleanup after reload$`, validatedPersistedSandboxOwnershipShouldControlArchiveCleanupAfterReload)
+	ctx.Step(`^archive cleanup should wait for transient child exit without weakening safety gates$`, archiveCleanupShouldWaitForTransientChildExitWithoutWeakeningSafetyGates)
+	ctx.Step(`^archive cleanup should preserve settings written during retry grace$`, archiveCleanupShouldPreserveSettingsWrittenDuringRetryGrace)
+	ctx.Step(`^unarchive should serialize with archive cleanup$`, unarchiveShouldSerializeWithArchiveCleanup)
+	ctx.Step(`^admin reconcile fixes should serialize and revalidate under the archive lock$`, adminReconcileFixesShouldSerializeAndRevalidateUnderTheArchiveLock)
 	ctx.Step(`^the retained A2A coordination implementation$`, retainedA2ACoordinationImplementation)
 	ctx.Step(`^AGM validates A2A coordination specification drift$`, agmValidatesA2ACoordinationSpecificationDrift)
 	ctx.Step(`^A2A coordination specifications should describe only retained behavior$`, a2aCoordinationSpecificationsShouldDescribeOnlyRetainedBehavior)
@@ -2304,7 +2334,7 @@ func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/cmd/agm-reaper", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/reaper",
-		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities|ReloadedSandboxOwnershipControlsCleanup)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets|TestBuildReaperArgsSeparatesStableAndTmuxIdentities|TestSQLite(SandboxOwnershipMetadataRoundTripsForArchive|MissingSandboxMetadataDoesNotInferOwnership|InvalidSandboxMetadataDoesNotAuthorizeCleanup)|TestCleanupSandboxDirWithChecker_(RemovesOwnedSandbox|RejectsUnownedMergedPath))$`,
+		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities|ReloadedSandboxOwnershipControlsCleanup)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets|TestBuildReaperArgsSeparatesStableAndTmuxIdentities|TestSQLite(SandboxOwnershipMetadataRoundTripsForArchive|MissingSandboxMetadataDoesNotInferOwnership|InvalidSandboxMetadataDoesNotAuthorizeCleanup)|TestCleanupSandboxDirWithChecker_(RemovesOwnedSandbox|RejectsUnownedMergedPath|RetriesOnlyTransientLiveProcess|RefreshesSettingsDuringRetryGrace)|TestRestoreArchivedSessionSerializesWithArchiveCleanup|TestReconcileLifecycleMismatch(SerializesWithArchiveCleanup|RevalidatesTmuxUnderLock))$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2383,6 +2413,70 @@ func requireArchiveDryRunTests(ctx context.Context, testNames ...string) error {
 		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
 	}
 	for _, testName := range testNames {
+		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+		}
+	}
+	return nil
+}
+
+func archiveCleanupShouldWaitForTransientChildExitWithoutWeakeningSafetyGates(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	const testName = "TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess"
+	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+	}
+	return nil
+}
+
+func archiveCleanupShouldPreserveSettingsWrittenDuringRetryGrace(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	const testName = "TestCleanupSandboxDirWithChecker_RefreshesSettingsDuringRetryGrace"
+	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+	}
+	return nil
+}
+
+func unarchiveShouldSerializeWithArchiveCleanup(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	const testName = "TestRestoreArchivedSessionSerializesWithArchiveCleanup"
+	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+	}
+	return nil
+}
+
+func adminReconcileFixesShouldSerializeAndRevalidateUnderTheArchiveLock(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	for _, testName := range []string{
+		"TestReconcileLifecycleMismatchSerializesWithArchiveCleanup",
+		"TestReconcileLifecycleMismatchRevalidatesTmuxUnderLock",
+	} {
 		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
 			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
 		}
@@ -3762,6 +3856,15 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	if harnessState.agyLifecycleTestOutput != "" || harnessState.agyLifecycleTestErr != nil {
 		return nil
 	}
+	result := sharedAgyLifecycleBehaviorSuite.load(func() bddBehaviorSuiteResult {
+		return executeAgyLifecycleBehaviorSuite(ctx)
+	})
+	harnessState.agyLifecycleTestOutput = result.output
+	harnessState.agyLifecycleTestErr = result.testErr
+	return result.executionErr
+}
+
+func executeAgyLifecycleBehaviorSuite(ctx context.Context) bddBehaviorSuiteResult {
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test",
@@ -3806,7 +3909,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	)
 	lockCmd.Dir = bddRepoRoot()
 	lockOutput, lockErr := lockCmd.CombinedOutput()
-	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(transcriptOutput) + "\n" + string(resumeOnboardingOutput) + "\n" + string(sharedReadinessOutput) + "\n" + string(lockOutput)
+	combinedOutput := string(output) + "\n" + string(transcriptOutput) + "\n" + string(resumeOnboardingOutput) + "\n" + string(sharedReadinessOutput) + "\n" + string(lockOutput)
 	if runErr == nil {
 		runErr = transcriptErr
 	}
@@ -3819,11 +3922,17 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	if runErr == nil {
 		runErr = lockErr
 	}
-	harnessState.agyLifecycleTestErr = runErr
 	if testCtx.Err() != nil {
-		return fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err())
+		return bddBehaviorSuiteResult{
+			output:       combinedOutput,
+			testErr:      runErr,
+			executionErr: fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err()),
+		}
 	}
-	return nil
+	return bddBehaviorSuiteResult{
+		output:  combinedOutput,
+		testErr: runErr,
+	}
 }
 
 func agmValidatesTheAgyAdapterLifecycle(ctx context.Context) error {
@@ -4203,23 +4312,13 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if harnessState.codexHookReviewTestOutput == "" && harnessState.codexHookReviewTestErr == nil {
-		testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/session", "./agm/internal/ops", "./agm/cmd/agm",
-			"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexHookReviewFailsBeforeActivityUpdate)$`,
-			"-count=1", "-v",
-		)
-		cmd.Dir = bddRepoRoot()
-		if os.Getenv("CI_SKIP_TMUX") != "true" {
-			cmd.Env = append(os.Environ(), "AGM_TEST_TMUX=1")
-		}
-		output, runErr := cmd.CombinedOutput()
-		harnessState.codexHookReviewTestOutput = string(output)
-		harnessState.codexHookReviewTestErr = runErr
-		if testCtx.Err() != nil {
-			return fmt.Errorf("codex hook review behavior suite timed out: %w", testCtx.Err())
-		}
+	result := sharedCodexHookReviewBehaviorSuite.load(func() bddBehaviorSuiteResult {
+		return executeCodexHookReviewBehaviorSuite(ctx)
+	})
+	harnessState.codexHookReviewTestOutput = result.output
+	harnessState.codexHookReviewTestErr = result.testErr
+	if result.executionErr != nil {
+		return result.executionErr
 	}
 	if harnessState.codexHookReviewTestErr != nil {
 		return fmt.Errorf("codex hook review behavior suite failed: %w\n%s", harnessState.codexHookReviewTestErr, harnessState.codexHookReviewTestOutput)
@@ -4243,6 +4342,28 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func executeCodexHookReviewBehaviorSuite(ctx context.Context) bddBehaviorSuiteResult {
+	testCtx, cancel := context.WithTimeout(ctx, codexHookReviewBehaviorSuiteTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/session", "./agm/internal/ops", "./agm/cmd/agm",
+		"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexHookReviewFailsBeforeActivityUpdate)$`,
+		"-count=1", "-v",
+	)
+	cmd.Dir = bddRepoRoot()
+	if os.Getenv("CI_SKIP_TMUX") != "true" {
+		cmd.Env = append(os.Environ(), "AGM_TEST_TMUX=1")
+	}
+	output, runErr := cmd.CombinedOutput()
+	result := bddBehaviorSuiteResult{
+		output:  string(output),
+		testErr: runErr,
+	}
+	if testCtx.Err() != nil {
+		result.executionErr = fmt.Errorf("codex hook review behavior suite timed out: %w", testCtx.Err())
+	}
+	return result
 }
 
 func agmShouldAutoAcceptAGYTrustPromptBeforePromptDelivery(ctx context.Context) error {

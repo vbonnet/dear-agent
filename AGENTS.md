@@ -123,6 +123,10 @@ example, `agm --help`, `agm session --help`, `agm acceptance show`,
 ## Guarded delivery
 
 - Commit each logical unit. Do not claim uncommitted work as progress.
+- Never put a Claude Code session identifier or session URL in a commit message,
+  PR title, PR body, or PR comment. It names a private transcript, gives
+  reviewers nothing, and squash-merge makes it permanent. `safe-push` and
+  `safe-pr` reject it.
 - Publish branches with `safe-push`.
 - Rebase stale branches with `safe-rebase`; do not resolve semantic conflicts
   automatically.

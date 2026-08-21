@@ -1,0 +1,96 @@
+name: PR Size Audit
+
+# Audit leg of the PR-size DEAR cycle (retro 2026-08-19).
+#
+# pr-size-scope.yml flags an oversized PR while it is open and its split-request
+# job asks for a split. Neither records what happened next. A sweep of merged
+# history on 2026-08-19 found every oversized PR merged since that gate shipped
+# had received its comment and merged unsplit anyway — 5 of 5 — and nothing in
+# the system knew. An advisory gate with no audit leg is a notification, not a
+# gate: declining costs nothing and the decline rate stays invisible.
+#
+# This closes that loop by measuring OUTCOMES on main, not intentions on open
+# PRs, and posting the trend where it cannot be missed.
+#
+# Detect and report ONLY. It reverts nothing, blocks nothing, and fails nothing
+# — same contract as merge-audit.yml, where remediation is a human decision.
+# The job deliberately does not fail on offenders: a red scheduled job trains
+# people to ignore it, which is the exact failure this leg exists to correct.
+
+on:
+  schedule:
+    # Mondays 09:00 UTC — a weekly window is long enough for a trend to mean
+    # something and short enough to catch a regression while its PRs are recent.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Number of most recent merges to sweep"
+        required: false
+        default: "50"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: pr-size-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: PR size and concern-mixing audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history: the sweep walks merge commits and diffs each against
+          # its parent, so a shallow clone would silently report an empty window.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Sweep recent merges
+        env:
+          LIMIT: ${{ github.event.inputs.limit || '50' }}
+        run: |
+          go run ./cmd/pr-size-audit -base origin/main -limit "$LIMIT" \
+            > /tmp/pr-size-audit.md
+          cat /tmp/pr-size-audit.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ensure the audit label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh label create pr-size-audit \
+            --color "fbca04" \
+            --description "Weekly PR size and concern-mixing sweep" \
+            --repo "$REPO" 2>/dev/null || true
+
+      - name: Publish the report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # One rolling issue, updated in place, rather than a new issue each
+          # week. A weekly issue stream becomes noise and gets muted; a single
+          # issue whose body changes keeps the trend readable in one place and
+          # notifies only the people who chose to subscribe to it.
+          existing=$(gh issue list --repo "$REPO" --label pr-size-audit \
+            --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$REPO" --body-file /tmp/pr-size-audit.md
+            echo "Updated issue #${existing}"
+          else
+            gh issue create --repo "$REPO" --label pr-size-audit \
+              --title "PR size and concern-mixing audit" \
+              --body-file /tmp/pr-size-audit.md
+          fi

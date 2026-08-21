@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -152,6 +153,122 @@ func TestWorkflowJobTimeoutMinutesStaysWithinNamedJob(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("workflowJobTimeoutMinutes = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSourceHasRaceSuppressedSLARequiresStructuralMarker proves discovery
+// keys off the fixed raceSkippedSLAMarker token, not the human-readable
+// skip/log wording next to it — so rewording a skip message (which used to
+// be one of several recognized sentences) can no longer silently drop a
+// package from "every race-skipped SLA published to preflight.sh" coverage.
+// See docs/policies/harness-hygiene.ai.md#L31-L32.
+func TestSourceHasRaceSuppressedSLARequiresStructuralMarker(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "marker with arbitrary skip wording",
+			source: `if race` + `Enabled { /* SLA-RACE-SKIP */ t.Skip("some new phrasing nobody has seen before") }`,
+			want:   true,
+		},
+		{
+			name:   "marker with arbitrary log wording",
+			source: `if race` + `Enabled { /* SLA-RACE-SKIP */ t.Log("latency is only observed, not enforced, right now") }`,
+			want:   true,
+		},
+		{
+			name:   "marker without race guard",
+			source: `/* SLA-RACE-SKIP */ t.Skip("wall-clock parser latency is enforced without race instrumentation")`,
+		},
+		{
+			name:   "race guard without SLA marker",
+			source: `if race` + `Enabled { t.Skip("unrelated test") }`,
+		},
+		{
+			name:   "race guard with old recognized prose but no marker",
+			source: `if race` + `Enabled { t.Skip("wall-clock parser latency is enforced without race instrumentation") }`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sourceHasRaceSuppressedSLA(test.source); got != test.want {
+				t.Fatalf("sourceHasRaceSuppressedSLA() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestFullPreflightDiscoversEveryRaceSuppressedSLAPackage(t *testing.T) {
+	state := &localDevGuardrailState{}
+	ctx := context.WithValue(context.Background(), localDevGuardrailStateKey{}, state)
+	if err := fullPreflightOrdinaryPerformanceGateIsConfigured(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	slices.Sort(state.raceSkippedSLAs)
+	want := []string{
+		"./agm/test/performance",
+		"./internal/telemetry/enrichment",
+		"./pkg/validation/scope",
+		"./pkg/workflow",
+	}
+	if !slices.Equal(state.raceSkippedSLAs, want) {
+		t.Fatalf("race-skipped SLA packages = %v, want %v", state.raceSkippedSLAs, want)
+	}
+	if !state.ordinarySLASanitized {
+		t.Fatal("ordinary SLA gate does not clear inherited GOFLAGS and force ordinary test modes")
+	}
+}
+
+func TestValidateGoToolInstallResolutionHonorsGOBINBeforeGOPATH(t *testing.T) {
+	valid := strings.Join([]string{
+		`GOVULNCHECK_BIN="$(command -v govulncheck || true)"`,
+		`GO_TOOL_INSTALL_BIN="$(go env GOBIN)"`,
+		`if [[ -z "$GO_TOOL_INSTALL_BIN" ]]; then`,
+		`GOPATH_VALUE="$(go env GOPATH)"`,
+		`GO_TOOL_INSTALL_BIN="${GOPATH_VALUE%%:*}/bin"`,
+		`GOVULNCHECK_CANDIDATE="$GO_TOOL_INSTALL_BIN/govulncheck"`,
+		`[[ -x "$GOVULNCHECK_CANDIDATE" ]]`,
+		`GOVULNCHECK_BIN="$GOVULNCHECK_CANDIDATE"`,
+		`"$GOVULNCHECK_BIN" -format json -scan package ./...`,
+	}, "\n")
+
+	if err := validateGoToolInstallResolution(valid); err != nil {
+		t.Fatalf("valid resolution contract rejected: %v", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "missing configured GOBIN",
+			source: strings.Replace(valid, `GO_TOOL_INSTALL_BIN="$(go env GOBIN)"`, "", 1),
+		},
+		{
+			name: "GOPATH probed before GOBIN",
+			source: strings.Replace(
+				valid,
+				"GO_TOOL_INSTALL_BIN=\"$(go env GOBIN)\"\n"+
+					"if [[ -z \"$GO_TOOL_INSTALL_BIN\" ]]; then\n"+
+					"GOPATH_VALUE=\"$(go env GOPATH)\"",
+				"GOPATH_VALUE=\"$(go env GOPATH)\"\n"+
+					"GO_TOOL_INSTALL_BIN=\"$(go env GOBIN)\"\n"+
+					"if [[ -z \"$GO_TOOL_INSTALL_BIN\" ]]; then",
+				1,
+			),
+		},
+		{
+			name:   "whole GOPATH list used as directory",
+			source: strings.Replace(valid, `GO_TOOL_INSTALL_BIN="${GOPATH_VALUE%%:*}/bin"`, `GO_TOOL_INSTALL_BIN="$GOPATH_VALUE/bin"`, 1),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateGoToolInstallResolution(test.source); err == nil {
+				t.Fatal("invalid resolution contract accepted")
 			}
 		})
 	}

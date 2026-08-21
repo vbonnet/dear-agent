@@ -1,6 +1,7 @@
 # SPEC: internal/safegit/SPEC.md
 # RELATED-SPEC: internal/safepr/SPEC.md
 # RELATED-SPEC: internal/safesrc/SPEC.md
+# RELATED-SPEC: internal/sessionid/SPEC.md
 # RELATED-SPEC: internal/safeunlock/SPEC.md
 # RELATED-SPEC: cmd/safe-push/SPEC.md
 # RELATED-SPEC: cmd/safe-pr/SPEC.md
@@ -89,6 +90,11 @@ Feature: Local development guardrails
     When AGM validates the safe-pr preflight budget
     Then safe-pr should allow at least 60 minutes for preflight-full
 
+  Scenario: Full preflight enforces every race-skipped wall-clock SLA
+    Given the full preflight ordinary performance gate is configured
+    When AGM validates race-skipped wall-clock SLA coverage
+    Then every race-skipped SLA package should run without inherited test modes or race instrumentation
+
   Scenario Outline: Safe PR creation preserves worktree lock ownership
     Given a safe-pr linked worktree with "<initial_lock>" lock ownership
     When safe-pr protects a "<outcome>" preflight and PR creation transaction
@@ -129,6 +135,10 @@ Feature: Local development guardrails
     When AGM runs the safe-pr no-merge subprocess regression
     Then safe-pr creation should not invoke a merge subprocess
 
+  Scenario: Publish wrappers refuse leaked Claude session references
+    When AGM runs the session reference leak regressions
+    Then safe-pr and safe-push should refuse published session references
+
   Scenario: Bounded affected runner commands own their complete process trees
     When AGM runs the affected runner process-tree regressions
     Then bounded affected runner commands should terminate their descendants
@@ -151,3 +161,4 @@ Feature: Local development guardrails
     Given local and required CI govulncheck allowlists are configured
     When AGM validates govulncheck policy parity
     Then the local and required CI govulncheck allowlists should match
+    And local preflight should resolve configured GOBIN and first-GOPATH Go tool installs outside PATH

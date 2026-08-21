@@ -73,6 +73,18 @@ type declarativeRuntimeRouteState struct {
 	terraformLint string
 	// jqLint is the jq fixture gate workflow.
 	jqLint string
+	// importScript is infra/import.sh, whose contract is that it decides
+	// nothing itself.
+	importScript string
+	// rulesetLocals is infra/locals.tf, which projects the checked-in
+	// canonical ruleset onto the provider resource. tofuPlan is the workflow
+	// that validates that projection on a pull request.
+	rulesetLocals string
+	tofuPlan      string
+	// rulesetAudit is the scheduled branch-protection audit workflow;
+	// mergeAuditSpec is the contract its Go half must keep.
+	rulesetAudit   string
+	mergeAuditSpec string
 }
 
 // RegisterDeclarativeRuntimeGuardrailSteps registers runtime configuration coverage steps.
@@ -110,6 +122,382 @@ func RegisterDeclarativeRuntimeGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every checked-in jq program should have a fixture case$`, everyJQProgramHasAFixtureCase)
 	ctx.Step(`^jq fixtures should assert output and refusal alike$`, jqFixturesAssertOutputAndRefusal)
 	ctx.Step(`^the jq gate should fail rather than skip when jq is absent from CI$`, jqGateFailsWhenJQAbsentInCI)
+	ctx.Step(`^the OpenTofu importer is configured$`, openTofuImporterIsConfigured)
+	ctx.Step(`^AGM validates importer authority boundaries$`, agmValidatesImporterAuthorityBoundaries)
+	ctx.Step(`^the importer script should delegate every decision$`, importerScriptDelegatesEveryDecision)
+	ctx.Step(`^import identities should resolve before any state is mutated$`, importIdentitiesResolveBeforeMutation)
+	ctx.Step(`^an existing state address should be verified, not assumed$`, existingStateAddressIsVerified)
+	ctx.Step(`^an unrecognized provider failure should stop the run$`, unrecognizedProviderFailureStopsRun)
+	ctx.Step(`^the canonical ruleset projection is configured$`, canonicalRulesetProjectionIsConfigured)
+	ctx.Step(`^AGM validates canonical ruleset authority$`, agmValidatesCanonicalRulesetAuthority)
+	ctx.Step(`^the projection should read the checked-in canonical ruleset$`, projectionReadsCheckedInCanonicalRuleset)
+	ctx.Step(`^the projection should preserve zero bypass actors$`, projectionPreservesZeroBypassActors)
+	ctx.Step(`^the projection should preserve required-check app identities$`, projectionPreservesRequiredCheckAppIdentities)
+	ctx.Step(`^policy outside the supported subset should fail closed$`, policyOutsideSupportedSubsetFailsClosed)
+	ctx.Step(`^pull request validation should stay credential-free$`, pullRequestValidationStaysCredentialFree)
+	ctx.Step(`^the ruleset audit surfaces are configured$`, rulesetAuditSurfacesAreConfigured)
+	ctx.Step(`^AGM validates ruleset audit authority$`, agmValidatesRulesetAuditAuthority)
+	ctx.Step(`^the audit should compare live state against the canonical policy$`, auditComparesLiveStateAgainstCanonicalPolicy)
+	ctx.Step(`^the audit should normalize both sides through the tested jq policy library$`, auditNormalizesThroughTestedJQLibrary)
+	ctx.Step(`^the audit should withhold private repository identities$`, auditWithholdsPrivateRepositoryIdentities)
+	ctx.Step(`^incomplete evidence should never read as a clean audit$`, incompleteEvidenceNeverReadsAsClean)
+}
+
+func rulesetAuditSurfacesAreConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, source := range []struct {
+		path []string
+		into *string
+	}{
+		{[]string{".github", "workflows", "branch-protection-audit.yml"}, &state.rulesetAudit},
+		{[]string{"cmd", "merge-audit", "SPEC.md"}, &state.mergeAuditSpec},
+	} {
+		data, readErr := os.ReadFile(filepath.Join(append([]string{packageSpecBDDRepoRoot()}, source.path...)...))
+		if readErr != nil {
+			return fmt.Errorf("read %s: %w", filepath.Join(source.path...), readErr)
+		}
+		*source.into = string(data)
+	}
+	return nil
+}
+
+func agmValidatesRulesetAuditAuthority(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.rulesetAudit == "" || state.mergeAuditSpec == "" {
+		return fmt.Errorf("ruleset audit surfaces were not loaded")
+	}
+	return nil
+}
+
+func auditComparesLiveStateAgainstCanonicalPolicy(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.rulesetAudit, ".github/rulesets/main.json") {
+		return fmt.Errorf("audit does not compare against the checked-in canonical ruleset")
+	}
+	return nil
+}
+
+// auditNormalizesThroughTestedJQLibrary is what makes the comparison
+// trustworthy: both sides go through the same jq programs, and those programs
+// are covered by tests/jq fixtures. A hand-rolled comparison in the workflow
+// would be untested and could report drift, or miss it, on field ordering
+// alone.
+func auditNormalizesThroughTestedJQLibrary(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	root := packageSpecBDDRepoRoot()
+	for _, program := range []string{
+		".github/rulesets/normalize.jq",
+		".github/rulesets/missing-required-checks.jq",
+	} {
+		if !strings.Contains(state.rulesetAudit, program) {
+			return fmt.Errorf("audit does not use %s", program)
+		}
+		if _, statErr := os.Stat(filepath.Join(root, program)); statErr != nil {
+			return fmt.Errorf("audit references a missing jq program %s: %w", program, statErr)
+		}
+	}
+	covered, err := jqProgramsNamedByFixtures(filepath.Join(root, "tests", "jq", "testdata"))
+	if err != nil {
+		return err
+	}
+	for _, program := range []string{
+		".github/rulesets/normalize.jq",
+		".github/rulesets/missing-required-checks.jq",
+	} {
+		if !covered[program] {
+			return fmt.Errorf("audit depends on %s, which has no fixture coverage", program)
+		}
+	}
+	return nil
+}
+
+// auditWithholdsPrivateRepositoryIdentities matters because this repository is
+// public and the audit reads a private inventory. Findings must describe drift
+// without naming the repositories it was found in.
+func auditWithholdsPrivateRepositoryIdentities(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// Findings and progress lines must describe drift without naming the
+	// repository, and the aggregate issue this workflow opens is public.
+	for _, required := range []string{
+		"managed repository identity withheld",
+		"identity withheld",
+		"intentionally withheld from this public issue",
+	} {
+		if !strings.Contains(state.rulesetAudit, required) {
+			return fmt.Errorf("audit workflow does not withhold private repository identities: missing %q", required)
+		}
+	}
+	return nil
+}
+
+// incompleteEvidenceNeverReadsAsClean is the contract that separates a real
+// audit from a decorative one: a query that failed must not report compliance.
+func incompleteEvidenceNeverReadsAsClean(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range []string{"MAC-06", "MAC-07", "MAC-09"} {
+		if !strings.Contains(state.mergeAuditSpec, "**"+id+"**") {
+			return fmt.Errorf("merge-audit SPEC no longer records %s", id)
+		}
+	}
+	if !strings.Contains(state.mergeAuditSpec, "rather than silently declaring compliance") {
+		return fmt.Errorf("merge-audit SPEC no longer forbids declaring compliance on a failed query")
+	}
+	if !strings.Contains(state.mergeAuditSpec, "never emit a partial or empty findings payload") {
+		return fmt.Errorf("merge-audit SPEC no longer forbids an empty payload after an audit error")
+	}
+	return nil
+}
+
+func canonicalRulesetProjectionIsConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, source := range []struct {
+		path []string
+		into *string
+	}{
+		{[]string{"infra", "locals.tf"}, &state.rulesetLocals},
+		{[]string{".github", "workflows", "tofu-plan.yml"}, &state.tofuPlan},
+	} {
+		data, readErr := os.ReadFile(filepath.Join(append([]string{packageSpecBDDRepoRoot()}, source.path...)...))
+		if readErr != nil {
+			return fmt.Errorf("read %s: %w", filepath.Join(source.path...), readErr)
+		}
+		*source.into = string(data)
+	}
+	return nil
+}
+
+func agmValidatesCanonicalRulesetAuthority(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.rulesetLocals == "" || state.tofuPlan == "" {
+		return fmt.Errorf("canonical ruleset projection sources were not loaded")
+	}
+	return nil
+}
+
+// projectionReadsCheckedInCanonicalRuleset pins the single source of authority.
+// A second hand-written copy of the policy in HCL is exactly the drift this
+// projection exists to remove.
+func projectionReadsCheckedInCanonicalRuleset(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.rulesetLocals, ".github/rulesets/main.json") {
+		return fmt.Errorf("projection does not read the checked-in canonical ruleset")
+	}
+	return nil
+}
+
+func projectionPreservesZeroBypassActors(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// The bypass set must be carried through from the canonical document, not
+	// re-declared in HCL, or the zero-bypass invariant could hold in the JSON
+	// and not in the provider.
+	if !strings.Contains(state.rulesetLocals, "bypass_actors = local.dear_agent_main_ruleset.bypass_actors") {
+		return fmt.Errorf("projection does not carry bypass actors through from the canonical document")
+	}
+	canonical, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), ".github", "rulesets", "main.json"))
+	if err != nil {
+		return fmt.Errorf("read canonical ruleset: %w", err)
+	}
+	var document struct {
+		BypassActors []any `json:"bypass_actors"`
+	}
+	if unmarshalErr := json.Unmarshal(canonical, &document); unmarshalErr != nil {
+		return fmt.Errorf("parse canonical ruleset: %w", unmarshalErr)
+	}
+	if len(document.BypassActors) != 0 {
+		return fmt.Errorf("canonical ruleset declares %d bypass actors; the invariant is zero", len(document.BypassActors))
+	}
+	return nil
+}
+
+// projectionPreservesRequiredCheckAppIdentities keeps a required context from
+// being satisfiable by any app that posts that name.
+func projectionPreservesRequiredCheckAppIdentities(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.rulesetLocals, "integration_id = try(check.integration_id, null)") {
+		return fmt.Errorf("projection drops the GitHub App identity from required checks")
+	}
+	return nil
+}
+
+// policyOutsideSupportedSubsetFailsClosed is the property that makes the narrow
+// projection safe: Terraform's structural conversion would otherwise discard an
+// unmodelled nested key, so the canonical document could declare policy the
+// provider never receives and nothing would say so.
+func policyOutsideSupportedSubsetFailsClosed(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, required := range []string{
+		"unsupported_rule_types",
+		"unsupported_condition_keys",
+		"unsupported_pull_request_parameter_keys",
+		"unsupported_status_check_parameter_keys",
+		"unsupported_policy_paths",
+	} {
+		if !strings.Contains(state.rulesetLocals, required) {
+			return fmt.Errorf("projection does not detect %s", required)
+		}
+	}
+	return nil
+}
+
+// pullRequestValidationStaysCredentialFree pins the property this slice owns:
+// the projection assertions run on every infra pull request and prove a
+// malformed canonical ruleset is refused, without needing the private
+// inventory or any provider credential.
+//
+// It deliberately does NOT assert the whole workflow is secret-free. The
+// speculative plan step around it takes secrets.GITHUB_TOKEN to post its
+// result as a pull request comment; that is a deliberate, documented choice on
+// main, and this slice does not override it.
+func pullRequestValidationStaysCredentialFree(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.tofuPlan, "DEAR_AGENT_RUN_TOFU_MUTATION_TESTS") {
+		return fmt.Errorf("pull request workflow does not run the canonical ruleset projection assertions")
+	}
+	if !strings.Contains(state.tofuPlan, "TestCanonicalRulesetProjectionRejectsInvalidRequiredReviewers") {
+		return fmt.Errorf("pull request workflow does not assert malformed required reviewers are refused")
+	}
+	// The private fleet inventory must never reach a pull request workflow;
+	// the assertions run against the tracked public fixture instead.
+	if strings.Contains(state.tofuPlan, "repos.auto.tfvars") {
+		return fmt.Errorf("pull request workflow references the private inventory")
+	}
+	return nil
+}
+
+func openTofuImporterIsConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "infra", "import.sh"))
+	if err != nil {
+		return fmt.Errorf("read importer script: %w", err)
+	}
+	state.importScript = string(data)
+	return nil
+}
+
+func agmValidatesImporterAuthorityBoundaries(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.importScript == "" {
+		return fmt.Errorf("importer script was not loaded")
+	}
+	return nil
+}
+
+// importerScriptDelegatesEveryDecision holds the boundary this refactor
+// established: the script collects evidence and executes a plan, and every
+// fail-closed decision lives in a tested command instead.
+func importerScriptDelegatesEveryDecision(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.importScript, "$planner") {
+		return fmt.Errorf("importer script does not delegate to the planner command")
+	}
+	// The script must not re-grow its own policy. A jq filter with an error
+	// path here would mean a decision moved back out of Go, which is what the
+	// 20-line shell policy and this refactor exist to prevent.
+	for _, forbidden := range []string{"jq -e", "jq -er", "jq -ce"} {
+		if strings.Contains(state.importScript, forbidden) {
+			return fmt.Errorf("importer script re-implements a decision with %q", forbidden)
+		}
+	}
+	// It started at 103 lines and #1166 grew it to 300. The ceiling is what
+	// stops that happening again without anyone noticing.
+	if lines := strings.Count(state.importScript, "\n"); lines > 80 {
+		return fmt.Errorf("importer script has grown to %d lines; move logic into the planner", lines)
+	}
+	return nil
+}
+
+func importIdentitiesResolveBeforeMutation(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// Planning must complete before the first `tofu import`, so an ambiguous
+	// listing cannot surface halfway through and leave a partial state.
+	planIndex := strings.Index(state.importScript, "\"$planner\" plan")
+	importIndex := strings.Index(state.importScript, "tofu import")
+	if planIndex < 0 || importIndex < 0 {
+		return fmt.Errorf("importer script does not both plan and import")
+	}
+	if planIndex > importIndex {
+		return fmt.Errorf("importer script mutates state before resolving every identity")
+	}
+	return nil
+}
+
+func existingStateAddressIsVerified(context.Context) error {
+	return requireImporterContract("TIP-08", "stale binding")
+}
+
+func unrecognizedProviderFailureStopsRun(context.Context) error {
+	return requireImporterContract("TIP-11", "recognized absent-object message")
+}
+
+// requireImporterContract asserts the named EARS requirement is still recorded
+// in the importer's SPEC. The behavior itself is proved by the package tests
+// and by tests/bats/infra-import.bats; this keeps the contract from being
+// deleted while those tests are quietly weakened.
+func requireImporterContract(id, phrase string) error {
+	specPath := filepath.Join(packageSpecBDDRepoRoot(), "internal", "tofuimport", "SPEC.md")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return fmt.Errorf("read importer SPEC: %w", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "**"+id+"**") {
+		return fmt.Errorf("importer SPEC no longer records %s", id)
+	}
+	if !strings.Contains(text, phrase) {
+		return fmt.Errorf("importer SPEC %s no longer states %q", id, phrase)
+	}
+	return nil
 }
 
 func jqPolicyGateIsConfigured(ctx context.Context) error {
@@ -369,7 +757,7 @@ func openTofuGatesRequireNoCredentials(ctx context.Context) error {
 	if strings.Contains(state.terraformLint, "tofu plan") {
 		return fmt.Errorf("OpenTofu lint gate must not plan; planning needs credentials it deliberately lacks")
 	}
-	if strings.Contains(state.terraformLint, "secrets.") {
+	if strings.Contains(state.terraformLint, "${{ secrets.") {
 		return fmt.Errorf("OpenTofu lint gate must not consume repository secrets")
 	}
 	return nil

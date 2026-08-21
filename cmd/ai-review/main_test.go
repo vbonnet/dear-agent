@@ -535,7 +535,7 @@ func TestFinalReviewOutcomeAndSynthesisDisplayPreserveAuthoritativeBlocks(t *tes
 	}{
 		{name: "SPEC needs work", specVerdict: NeedsWork, want: NeedsWork},
 		{name: "SPEC human review", specVerdict: NeedsHumanReview, want: NeedsHumanReview},
-		{name: "mandatory escalation wins over rejected SPEC", specVerdict: Rejected, triggers: []string{"CI/CD pipeline edit"}, want: NeedsHumanReview},
+		{name: "mandatory escalation wins over rejected SPEC", specVerdict: Rejected, triggers: []string{"critical trust-root change"}, want: NeedsHumanReview},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -781,6 +781,47 @@ func TestGitChangedPaths_IncludesRenameSource(t *testing.T) {
 	}
 	if got := EscalationTriggers(paths, "", ""); len(got) == 0 {
 		t.Fatal("renaming a protected settings file away must still escalate")
+	}
+}
+
+// TestGitChangedPaths_CaseFoldTrustRootAliasEscalates guards addition-only
+// aliases on case-insensitive checkouts. Git can store both spellings while
+// such a checkout exposes only one set of bytes at the canonical path.
+func TestGitChangedPaths_CaseFoldTrustRootAliasEscalates(t *testing.T) {
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string {
+		return sandbox.Run(t, dir, args...)
+	}
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "REVIEW.md"), []byte("canonical policy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "REVIEW.md")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+
+	// Add the colliding spelling through Git plumbing so the fixture is
+	// portable even when the host filesystem cannot represent both paths.
+	if err := os.WriteFile(filepath.Join(dir, "shadow-policy"), []byte("shadow policy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shadowBlob := trim(git("hash-object", "-w", "shadow-policy"))
+	git("update-index", "--add", "--cacheinfo", "100644,"+shadowBlob+",review.md")
+	git("commit", "-q", "-m", "add case-fold alias")
+	head := trim(git("rev-parse", "HEAD"))
+
+	chdir(t, dir)
+	paths, err := gitChangedPaths(base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != "review.md" {
+		t.Fatalf("changed paths = %v, want addition-only alias review.md", paths)
+	}
+	if got := EscalationTriggers(paths, "", ""); len(got) == 0 {
+		t.Fatal("case-fold alias of REVIEW.md must escalate")
 	}
 }
 

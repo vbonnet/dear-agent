@@ -119,7 +119,7 @@ override _GOVERNED_BUILD_TARGETS := \
 #   preflight               Fast local CI-parity gates: vet + build + AI skills + lint (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-race          preflight + go test -race — catch data races before push
-#   preflight-full          preflight + go test -race + govulncheck (full parity)
+#   preflight-full          race tests + ordinary performance SLAs + govulncheck
 #   health-check            Run the codebase health auditor (cmd/repo-health)
 #   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
@@ -275,9 +275,9 @@ preflight-tests:
 preflight-race:
 	@./scripts/preflight.sh --race
 
-# Full CI parity: preflight + `go test -race -count=1` + govulncheck with
-# the same allowlist as ci.yml. Slower but gives the highest confidence
-# before pushing.
+# Publication gate: CI-parity race tests, ordinary (non-race) performance SLA
+# enforcement, and govulncheck with the same allowlist as ci.yml. Slower but
+# gives the highest confidence before pushing.
 preflight-full:
 	@./scripts/preflight.sh --full
 
@@ -816,11 +816,13 @@ uninstall-mergeloop-launchagent:
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
 	@echo "Removed plist (if present)."
 
-# Build resolve-review-threads: atomic wrapper for the resolveReviewThread
-# GraphQL mutation. Agents must use this instead of raw `gh api graphql`
-# because the classifier blocks bare GraphQL mutations. The binary shells out
-# to `gh api graphql` internally, so authentication uses the gh CLI token.
-# Usage: resolve-review-threads resolve-all <owner> <repo> <pr> [author]
+# Build resolve-review-threads: the sanctioned wrapper for GitHub review-thread
+# reply and resolution mutations. Agents must use this instead of raw
+# `gh api graphql` because the classifier blocks bare GraphQL mutations. The
+# binary shells out to `gh api graphql` internally, so authentication uses the
+# gh CLI token. Resolution requires evidence that the thread was answered; see
+# `resolve-review-threads --help` for the subcommands rather than duplicating
+# the usage catalogue here, where it goes stale.
 build-resolve-review-threads:
 	@echo "Building resolve-review-threads..."
 	go build $(BUILD_STAMP_FLAGS) -o bin/resolve-review-threads ./cmd/resolve-review-threads/

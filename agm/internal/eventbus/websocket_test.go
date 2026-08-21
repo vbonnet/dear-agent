@@ -205,8 +205,7 @@ func TestHub_SessionFiltering(t *testing.T) {
 		Action:    "subscribe",
 		SessionID: "session-specific",
 	})
-
-	time.Sleep(50 * time.Millisecond)
+	waitForSubscriptions(t, hub, "session-specific", 1)
 
 	// Broadcast event for specific session
 	event1, err := NewEvent(EventSessionStuck, "session-specific", SessionStuckPayload{
@@ -259,8 +258,7 @@ func TestHub_Subscribe(t *testing.T) {
 		Action:    "subscribe",
 		SessionID: "session-abc",
 	})
-
-	time.Sleep(50 * time.Millisecond)
+	waitForSubscriptions(t, hub, "session-abc", 1)
 
 	// Verify subscription by broadcasting event
 	event, err := NewEvent(EventSessionStuck, "session-abc", SessionStuckPayload{
@@ -292,8 +290,7 @@ func TestHub_Unsubscribe(t *testing.T) {
 	sendJSONMessage(t, conn, ClientMessage{
 		Action: "unsubscribe",
 	})
-
-	time.Sleep(50 * time.Millisecond)
+	waitForSubscriptions(t, hub, "", 1)
 
 	// Try to broadcast an event
 	event, err := NewEvent(EventSessionStuck, "session-123", SessionStuckPayload{

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -47,11 +48,22 @@ type mismatch struct {
 	Description   string
 }
 
+// reconcileLifecycleStore is the legacy scan-based interface setLifecycle
+// still uses in tests; production repairs go through reconcileLifecycleStorage
+// and reconcileLifecycleMismatch below, which lock and revalidate.
 type reconcileLifecycleStore interface {
 	ListSessions(filter *dolt.SessionFilter) ([]*manifest.Manifest, error)
 	UpdateSession(session *manifest.Manifest) error
 	ReactivateSession(session *manifest.Manifest) (dolt.ReactivateSessionResult, error)
 }
+
+type reconcileLifecycleStorage interface {
+	GetSession(sessionID string) (*manifest.Manifest, error)
+	UpdateSession(*manifest.Manifest) error
+}
+
+type reconcileSessionLocker func(sessionID string, transaction func() error) error
+type reconcileTmuxSessionCheck func(name string) (bool, error)
 
 func reconcileRun(cmd *cobra.Command, args []string) error {
 	// Get tmux sessions
@@ -183,25 +195,33 @@ func detectOrphans(allSessions []*manifest.Manifest, tmuxSet map[string]bool) []
 
 // applyReconcileFixes applies the fix action implied by each mismatch.
 // Returns (fixed, failed) counts.
-func applyReconcileFixes(adapter reconcileLifecycleStore, mismatches []mismatch) (int, int) {
+func applyReconcileFixes(adapter reconcileLifecycleStorage, mismatches []mismatch) (int, int) {
 	var fixed, failed int
 	for _, mm := range mismatches {
 		switch mm.Kind {
 		case "zombie":
 			fmt.Printf("Fixing zombie: unarchiving %s in Dolt...", mm.DoltName)
-			if err := setLifecycle(adapter, mm.SessionID, ""); err != nil {
+			changed, err := reconcileLifecycleMismatch(adapter, mm)
+			switch {
+			case err != nil:
 				fmt.Printf(" FAILED: %v\n", err)
 				failed++
-			} else {
+			case !changed:
+				fmt.Printf(" SKIPPED: mismatch changed\n")
+			default:
 				fmt.Printf(" OK\n")
 				fixed++
 			}
 		case "orphan":
 			fmt.Printf("Fixing orphan: archiving %s in Dolt...", mm.DoltName)
-			if err := setLifecycle(adapter, mm.SessionID, manifest.LifecycleArchived); err != nil {
+			changed, err := reconcileLifecycleMismatch(adapter, mm)
+			switch {
+			case err != nil:
 				fmt.Printf(" FAILED: %v\n", err)
 				failed++
-			} else {
+			case !changed:
+				fmt.Printf(" SKIPPED: mismatch changed\n")
+			default:
 				fmt.Printf(" OK\n")
 				fixed++
 			}
@@ -210,6 +230,8 @@ func applyReconcileFixes(adapter reconcileLifecycleStore, mismatches []mismatch)
 	return fixed, failed
 }
 
+// setLifecycle is the legacy scan-based mutator, kept for its test coverage.
+// Production repairs go through reconcileLifecycleMismatch below.
 func setLifecycle(adapter reconcileLifecycleStore, sessionID, lifecycle string) error {
 	filter := &dolt.SessionFilter{}
 	sessions, err := adapter.ListSessions(filter)
@@ -227,6 +249,84 @@ func setLifecycle(adapter reconcileLifecycleStore, sessionID, lifecycle string) 
 		}
 	}
 	return fmt.Errorf("session %s not found", sessionID)
+}
+
+func reconcileLifecycleMismatch(adapter reconcileLifecycleStorage, mm mismatch) (bool, error) {
+	return reconcileLifecycleMismatchWithLocker(
+		adapter,
+		mm,
+		ops.WithArchiveCleanupAwareSessionLock,
+		tmux.HasSessionStrict,
+	)
+}
+
+func reconcileLifecycleMismatchWithLocker(
+	adapter reconcileLifecycleStorage,
+	mm mismatch,
+	withLock reconcileSessionLocker,
+	hasSession reconcileTmuxSessionCheck,
+) (bool, error) {
+	if withLock == nil || hasSession == nil {
+		return false, fmt.Errorf("reconcile lock or tmux-check dependency is missing")
+	}
+	if mm.SessionID == "" {
+		return false, fmt.Errorf("session ID is required")
+	}
+	var changed bool
+	err := withLock(mm.SessionID, func() error {
+		applied, err := applyReconcileLifecycleMismatch(adapter, mm, hasSession)
+		changed = applied
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
+// applyReconcileLifecycleMismatch revalidates and applies one mismatch's fix
+// under the caller's session lock. Split out of
+// reconcileLifecycleMismatchWithLocker to keep that function's cyclomatic
+// complexity within the repository's gocyclo ceiling.
+func applyReconcileLifecycleMismatch(
+	adapter reconcileLifecycleStorage,
+	mm mismatch,
+	hasSession reconcileTmuxSessionCheck,
+) (bool, error) {
+	m, err := adapter.GetSession(mm.SessionID)
+	if err != nil {
+		return false, err
+	}
+	if m == nil {
+		return false, fmt.Errorf("session %s not found", mm.SessionID)
+	}
+	if m.Tmux.SessionName == "" {
+		return false, nil
+	}
+	exists, err := hasSession(m.Tmux.SessionName)
+	if err != nil {
+		return false, fmt.Errorf("revalidating tmux session %q: %w", m.Tmux.SessionName, err)
+	}
+	switch mm.Kind {
+	case "zombie":
+		if !exists ||
+			(m.Lifecycle != manifest.LifecycleArchived &&
+				m.Lifecycle != manifest.LifecycleReaping) {
+			return false, nil
+		}
+		m.Lifecycle = ""
+	case "orphan":
+		if exists || m.Lifecycle == manifest.LifecycleArchived {
+			return false, nil
+		}
+		m.Lifecycle = manifest.LifecycleArchived
+	default:
+		return false, fmt.Errorf("unsupported reconcile mismatch kind %q", mm.Kind)
+	}
+	if err := adapter.UpdateSession(m); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func countNonArchived(sessions []*manifest.Manifest) int {

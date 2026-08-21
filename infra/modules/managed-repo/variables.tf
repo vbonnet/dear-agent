@@ -17,17 +17,72 @@ variable "visibility" {
   }
 }
 
-variable "required_checks" {
+variable "ruleset" {
   description = <<-EOT
-    Exact GitHub Actions check-run names that must pass before merge. An empty
-    list yields PR-required branch protection with no status-check gate (the
-    required_status_checks rule is omitted entirely to avoid a no-op rule).
-    Derive names from:
-      gh api /repos/<owner>/<repo>/commits/<branch>/check-runs \
-        --jq '[.check_runs[].name] | unique[]'
+    Explicitly supported zero-bypass branch-protection subset. Every required
+    check is identified by its context and optional GitHub App integration ID,
+    so reconciliation does not collapse distinct check identities to strings.
+    The caller must declare an active, zero-bypass ruleset.
   EOT
-  type        = list(string)
-  default     = []
+  type = object({
+    name        = string
+    target      = string
+    enforcement = string
+    bypass_actors = list(object({
+      actor_id    = number
+      actor_type  = string
+      bypass_mode = string
+    }))
+    conditions = object({
+      ref_name = object({
+        include = list(string)
+        exclude = list(string)
+      })
+    })
+    policy_validation = object({
+      unsupported_rule_types                  = list(string)
+      unsupported_condition_keys              = list(string)
+      unsupported_pull_request_parameter_keys = list(string)
+      unsupported_status_check_parameter_keys = list(string)
+      unsupported_policy_paths                = optional(list(string), [])
+    })
+    rules = object({
+      deletion                = bool
+      non_fast_forward        = bool
+      required_linear_history = bool
+      pull_request = object({
+        allowed_merge_methods             = list(string)
+        required_approving_review_count   = number
+        dismiss_stale_reviews_on_push     = bool
+        require_code_owner_review         = bool
+        require_last_push_approval        = bool
+        required_review_thread_resolution = bool
+        required_reviewers = list(object({
+          file_patterns     = list(string)
+          minimum_approvals = number
+          reviewer = object({
+            id   = number
+            type = string
+          })
+        }))
+      })
+      required_status_checks = object({
+        enabled                              = bool
+        strict_required_status_checks_policy = bool
+        do_not_enforce_on_create             = bool
+        required_checks = list(object({
+          context        = string
+          integration_id = optional(number)
+        }))
+      })
+    })
+  })
+}
+
+variable "enforce_canonical_ruleset_invariants" {
+  description = "Enforce dear-agent's non-negotiable canonical strict-check and GitHub Actions identity invariants. Leave false for legacy inventory-owned fleet policy."
+  type        = bool
+  default     = false
 }
 
 variable "default_branch" {
@@ -65,22 +120,4 @@ variable "claude_code_oauth_token" {
   type        = string
   default     = null
   sensitive   = true
-}
-
-variable "strict_required_status_checks" {
-  description = <<-EOT
-    Require a pull-request branch to be up to date with the base branch before
-    merging (GitHub's "strict" status-check policy).
-
-    Defaults to true. With strict = false, two PRs whose checks each passed
-    against an older base can merge seconds apart into a semantic conflict that
-    no gate ever evaluated — that is how dear-agent broke `main` for ~50 minutes
-    (PRs #1264/#1265). Checks are only evidence about the merge result if they
-    ran against the tip they will land on.
-
-    The cost is serialization: each merge invalidates every other open PR's
-    up-to-date status, so a deep queue must rebase between merges.
-  EOT
-  type        = bool
-  default     = true
 }

@@ -13,10 +13,19 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/override"
 )
+
+type unarchiveStorage interface {
+	GetSession(identifier string) (*manifest.Manifest, error)
+	UpdateSession(*manifest.Manifest) error
+	ReactivateSession(*manifest.Manifest) (dolt.ReactivateSessionResult, error)
+}
+
+type unarchiveSessionLocker func(sessionID string, transaction func() error) error
 
 var unarchiveCmd = &cobra.Command{
 	Use:   "unarchive <pattern>",
@@ -142,8 +151,8 @@ func runUnarchive(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// restoreArchivedSession restores a single archived session
-func restoreArchivedSession(adapter *dolt.Adapter, archived *session.ArchivedSession) error {
+// restoreArchivedSession restores a single archived session.
+func restoreArchivedSession(adapter unarchiveStorage, archived *session.ArchivedSession) error {
 	// Read manifest from Dolt
 	m, err := adapter.GetSession(archived.SessionID)
 	if err != nil {
@@ -193,6 +202,64 @@ func restoreArchivedSession(adapter *dolt.Adapter, archived *session.ArchivedSes
 		}
 	}
 
+	return restoreArchivedSessionTransaction(adapter, archived, ops.WithArchiveCleanupAwareSessionLock)
+}
+
+func restoreArchivedSessionTransaction(
+	adapter unarchiveStorage,
+	archived *session.ArchivedSession,
+	lock unarchiveSessionLocker,
+) error {
+	if lock == nil {
+		return fmt.Errorf("unarchive session lock dependency is missing")
+	}
+	return lock(archived.SessionID, func() error {
+		// Archive holds this same stable-ID lock through lifecycle mutation and
+		// every cleanup retry. Reloading here prevents unarchive from
+		// reactivating a session while archive can still remove its sandbox.
+		current, err := adapter.GetSession(archived.SessionID)
+		if err != nil {
+			ui.PrintError(err, "Failed to reload session from Dolt",
+				fmt.Sprintf("  • SessionID: %s\n"+
+					"  • Check database connection", archived.SessionID))
+			return err
+		}
+		if current == nil {
+			return fmt.Errorf("session %s not found", archived.SessionID)
+		}
+		if current.Lifecycle != manifest.LifecycleArchived {
+			ui.PrintWarning(fmt.Sprintf("Session '%s' is not archived", archived.Name))
+			fmt.Printf("\nSession is already active.\n")
+			return nil
+		}
+		manifestPath := resolveArchivedManifestPath(archived.SessionID, archived.ManifestPath)
+		return restoreArchivedSessionLocked(adapter, archived, current, manifestPath)
+	})
+}
+
+// resolveArchivedManifestPath finds where sessionID's manifest actually lives
+// on disk right now, preferring the legacy .archive-old-format/ location over
+// the caller-supplied fallback. session.FindArchived synthesizes ManifestPath
+// deterministically from the session ID without reading disk, so a session
+// discovered before this call acquired the archive lock can since have been
+// relocated by an in-flight archive's legacy-directory move (see
+// archiveLegacySessionDir). Re-resolving here, under the same lock, keeps
+// restore from misclassifying a relocated session as an in-place one and
+// leaving it stranded under .archive-old-format.
+func resolveArchivedManifestPath(sessionID, fallback string) string {
+	legacyPath := filepath.Join(cfg.SessionsDir, ".archive-old-format", sessionID, "manifest.yaml")
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+	return fallback
+}
+
+func restoreArchivedSessionLocked(
+	adapter unarchiveStorage,
+	archived *session.ArchivedSession,
+	m *manifest.Manifest,
+	manifestPath string,
+) error {
 	// Atomically claim the active name before restoring the durable lifecycle.
 	reactivation, reactivateErr := adapter.ReactivateSession(m)
 	if reactivateErr != nil && !reactivation.StorageCommitted {
@@ -210,10 +277,10 @@ func restoreArchivedSession(adapter *dolt.Adapter, archived *session.ArchivedSes
 	}
 
 	// Auto-commit manifest change if in git repo
-	_ = git.CommitManifest(archived.ManifestPath, "unarchive", archived.Name) // Errors logged internally
+	_ = git.CommitManifest(manifestPath, "unarchive", archived.Name) // Errors logged internally
 
 	// Check if session is in archive directory and needs to be moved
-	sessionDir := filepath.Dir(archived.ManifestPath)
+	sessionDir := filepath.Dir(manifestPath)
 	archiveDir := filepath.Join(cfg.SessionsDir, ".archive-old-format")
 	inArchiveDir := filepath.Dir(sessionDir) == archiveDir
 

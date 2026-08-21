@@ -390,11 +390,9 @@ func TestGracefulDegradation(t *testing.T) {
 
 	t.Run("timeout_handling", func(t *testing.T) {
 		provider := sandbox.NewMockProvider()
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+		ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
 		defer cancel()
-
-		// Wait for timeout
-		time.Sleep(10 * time.Millisecond)
+		require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
 
 		req := sandbox.SandboxRequest{
 			SessionID:    "test-timeout",

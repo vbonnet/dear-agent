@@ -122,3 +122,18 @@ infra/*.tfvars
 
 # Compiled docref-lint binary (built into the repo root by `go build ./tools/docref-lint`)
 /docref-lint
+
+# Binaries built by `go build ./cmd/<name>` land at the repository root under
+# the command's own name. They are large and easy to sweep in with `git add -A`.
+/tofu-import-plan
+/shellcheck-diff
+
+# Stray binary from `go build ./tools/language-policy` run at the repo root.
+/language-policy
+
+# Stray root-level builds from `go build ./cmd/<name>/` without -o. The
+# Makefile targets all write into bin/, so anything here is an accident.
+/resolve-review-threads
+/pr-blockers
+/safe-merge
+/safe-push

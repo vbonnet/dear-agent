@@ -1,10 +1,12 @@
 # Branch Protection for `main` (zero-bypass ruleset)
 
 `main` is protected by a **repository ruleset**, defined as code in
-[`.github/rulesets/main.json`](../.github/rulesets/main.json) and applied via
-`gh api`. The ruleset is **zero-bypass** (`bypass_actors: []`) — it binds
-*everyone*, including the repo owner. This is the source of truth; the GitHub UI
-mirrors it but should not be edited by hand.
+[`.github/rulesets/main.json`](../.github/rulesets/main.json) and deployed only
+through the OpenTofu root in [`infra/`](../infra/). The ruleset is
+**zero-bypass** (`bypass_actors: []`) — it binds *everyone*, including the repo
+owner. `.github/rulesets/main.json` is the policy authority; R2 state records
+the reviewed provider binding, while the GitHub API and UI expose deployed
+observation and must not be used to hand-edit policy.
 
 Per `docs/design-safe-merge.md` §4.1 / §5 (P1), this replaces the legacy
 **classic** branch-protection rules, which allowed admin bypass
@@ -29,8 +31,8 @@ Per `docs/design-safe-merge.md` §4.1 / §5 (P1), this replaces the legacy
 ### Required status checks
 
 Each is pinned to `integration_id: 15368` (the GitHub Actions app) so a
-same-named check from a *different* app can never satisfy the gate — the failure
-mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research/blob/main/retrospectives/2026-06-08-phantom-trivy-required-check.md).
+same-named check from a *different* app can never satisfy the gate — a failure
+mode documented in the private retrospective archive.
 
 | Context | Produced by |
 |---------|-------------|
@@ -49,8 +51,8 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 added by #991, then paused 2026-07-27 — `ANTHROPIC_API_KEY` was never funded
 (no quota outside the Max plan, which the workflow can't bill against), so the
 gate ran fail-closed on every PR. It was removed here rather than left in
-`main.json` unapplied, so a routine `gh api ... --method PUT` sync of this file
-can't silently start blocking merges on a check nobody is funding.
+`main.json` unapplied, so a reviewed OpenTofu reconciliation cannot silently
+start blocking merges on a check nobody is funding.
 
 To re-enable: set the `ANTHROPIC_API_KEY` repo secret, and re-add the context
 to `main.json` + re-apply (below) if you also want it required again. Nothing
@@ -85,30 +87,31 @@ otherwise the gate becomes unsatisfiable.
 ## Applying the ruleset
 
 > [!WARNING]
-> Applying this binds the repo owner immediately and is intended to go in
-> through a reviewed PR, not an ad-hoc push. Run these only after the change is
-> approved.
+> Applying this binds the repo owner immediately. Merge the declaration first,
+> then plan from a clean checkout of that reviewed commit. Never hand-edit the
+> ruleset in the GitHub UI or through a write API call.
 
-**Create** (first time):
+Follow the complete [OpenTofu setup and saved-plan workflow](../infra/README.md).
+It requires the production R2 backend, complete private fleet inventory, the
+real managed-secret inputs, and a GitHub credential with the scopes documented
+there. For an existing installation, `./import.sh` must prove the state address
+still resolves to immutable ruleset ID `18061003` before planning.
 
-```sh
-gh api repos/vbonnet/dear-agent/rulesets \
-  --method POST --input .github/rulesets/main.json
-```
-
-**Update** the existing ruleset in place (find its id with
-`gh api repos/vbonnet/dear-agent/rulesets`):
-
-```sh
-gh api repos/vbonnet/dear-agent/rulesets/<RULESET_ID> \
-  --method PUT --input .github/rulesets/main.json
-```
-
-**Verify**:
+Save the plan, inspect those exact bytes, and apply that same plan file. Stop if
+the plan creates or destroys a ruleset, changes another fleet resource, or does
+anything beyond the approved policy delta. After apply, run every assertion in
+[`infra/README.md`'s post-apply verification](../infra/README.md#post-apply-verification),
+including the state binding, no-drift plan, canonical `merge-audit`, effective
+rules query, and fresh-PR enforcement canary. The canonical drift assertion is:
 
 ```sh
-gh api repos/vbonnet/dear-agent/rulesets/<RULESET_ID> \
-  | jq '{enforcement, bypass_actors, rules: [.rules[].type]}'
+go run ./cmd/merge-audit \
+  --repos vbonnet/dear-agent \
+  --ruleset .github/rulesets/main.json \
+  --days 1 \
+  --dry-run \
+  --json \
+  | jq -e '[.[] | select(.type == "ruleset-drift")] | length == 0'
 ```
 
 ## Out-of-date churn and the merge-queue question
@@ -133,16 +136,13 @@ path.
 
 ## Retiring classic branch protection
 
-Once the ruleset is active and verified, remove the legacy classic protection
-so there is a single source of truth:
-
-```sh
-gh api -X DELETE repos/vbonnet/dear-agent/branches/main/protection
-```
+The legacy classic protection has already been retired. Do not recreate it: the
+repository ruleset is the sole branch-protection mechanism, and any future
+provider change must go through the reviewed OpenTofu workflow above.
 
 > [!IMPORTANT]
 > The daily **Branch Protection Audit** (`.github/workflows/branch-protection-audit.yml`)
-> historically read only the classic-protection endpoint. It has been updated to
-> also accept a qualifying active ruleset, so retiring classic protection will
-> **not** trigger false-positive `branch-protection` issues. Retire classic
-> protection only on a version of `main` that already contains that audit update.
+> historically read only the classic-protection endpoint. It now requires
+> exactly one active default-branch ruleset whose complete supported policy
+> matches the declaration, rejects surviving classic protection or competing
+> authority, and fails when a required context lacks recent check-run evidence.

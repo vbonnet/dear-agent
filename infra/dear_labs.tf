@@ -12,9 +12,9 @@
 #
 # NOTE: applying THIS resource requires a token with admin:org (ruleset write)
 # on dear-labs. The default `gh auth token` here carries only read:org, so a
-# full `tofu apply` will 403 on this resource. Apply it separately once an
-# admin:org-scoped token is available; the personal-repo rulesets in
-# rulesets.tf apply independently and do not depend on it.
+# full apply will 403 on this resource. Treat admin:org as a production-plan
+# prerequisite; do not use a targeted apply to evade an incomplete full-root
+# review.
 #
 # Required status checks are deliberately omitted at the org level: check
 # context names are repo-specific. Add a github_repository_ruleset per repo
@@ -25,7 +25,7 @@
 # MIGRATION GATE: NO github_repository resources may be added to this file
 # until the dear-labs → vbonnet org migration decision is finalized.
 # Trigger: first external collaborator need OR first org-level feature need.
-# See: engram-research/analyses/2026-06-14-repo-org-strategy.md (R1)
+# The decision record is retained in the private research archive.
 #
 # All new repos should be created under github.com/vbonnet until migration
 # is decided. dear-labs is in standby mode.
