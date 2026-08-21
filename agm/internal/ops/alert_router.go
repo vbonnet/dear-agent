@@ -19,6 +19,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/lock"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // AlertSeverity is how urgent an alert is, as classified from its text.
@@ -306,10 +307,18 @@ func (r *AlertRouter) deliver(ctx context.Context, req AlertRequest, fp string) 
 // permission prompt, say) even though another live supervisor was ready to
 // take it.
 func (r *AlertRouter) dispatchToAgent(ctx context.Context, rec *AlertRecord, explicit string) {
-	candidates := r.deliveryCandidates(explicit)
+	candidates, listErr := r.deliveryCandidates(explicit)
 	if len(candidates) == 0 {
 		rec.Status = AlertStatusQueued
-		rec.Error = "no live supervisor session discovered"
+		if listErr != nil {
+			// Surface the storage failure rather than reporting the
+			// misleading "no live supervisor session discovered": nothing
+			// was actually ruled out here, the session list needed to look
+			// could not be read at all.
+			rec.Error = fmt.Sprintf("no candidates: session list unavailable: %v", listErr)
+		} else {
+			rec.Error = "no live supervisor session discovered"
+		}
 		return
 	}
 	var failures []string
@@ -336,7 +345,7 @@ func (r *AlertRouter) dispatchToAgent(ctx context.Context, rec *AlertRecord, exp
 // then letting Route rediscover its own would reopen the window where an
 // event is relayed into the very session it reports.
 func (r *AlertRouter) ResolveTarget(explicit string) string {
-	candidates := r.deliveryCandidates(explicit)
+	candidates, _ := r.deliveryCandidates(explicit)
 	if len(candidates) == 0 {
 		return ""
 	}
@@ -350,17 +359,65 @@ func (r *AlertRouter) ResolveTarget(explicit string) string {
 // explicit target would discard a perfectly good pinned recipient whose
 // name happens not to contain a supervisor keyword, which is exactly what
 // pinning is for.
-func (r *AlertRouter) deliveryCandidates(explicit string) []string {
+//
+// The active session list is fetched once and shared by both the explicit
+// lookup and supervisor discovery, which otherwise each ran the identical
+// ListSessions query back to back on every routed alert.
+//
+// The returned error is the ListSessions failure, if any, so a caller that
+// ends up with no candidates can tell "genuinely nothing is live" from "the
+// session store could not be read" instead of reporting the former for
+// both.
+func (r *AlertRouter) deliveryCandidates(explicit string) ([]string, error) {
+	sessions, listErr := r.activeSessions()
+
 	var candidates []string
-	if target := strings.TrimSpace(explicit); target != "" && r.sessionIsReachable(target) {
-		candidates = append(candidates, target)
+	if target := strings.TrimSpace(explicit); target != "" {
+		switch m := r.resolveTargetManifest(target, sessions); {
+		case m != nil && r.isReachable(m):
+			// Deliver through the canonical identity resolveTargetManifest
+			// actually matched, not the raw target string. A target accepted
+			// only via the case-insensitive name match or an ID prefix — an
+			// alias resolveTargetManifest recognizes but SendMessage's own
+			// resolver (exact-case name, or full/GetSession ID) does not —
+			// would otherwise still carry the unresolved string forward, and
+			// the later explicit send would fail to find it despite this
+			// candidate having been declared reachable.
+			candidates = append(candidates, m.Name)
+		case m == nil && listErr != nil:
+			// The name/ID-prefix search never got to run against real data
+			// because listing failed; that is an inconclusive lookup, not
+			// proof the target is gone. Treating it as absent here would
+			// turn a transient storage error into a confident routing
+			// decision that silently drops a real recipient. Keep the
+			// operator's pinned target as a candidate and let the send
+			// itself succeed or fail.
+			candidates = append(candidates, target)
+		}
 	}
-	for _, name := range r.discoverSupervisors() {
+	for _, name := range r.discoverSupervisorsFromSessions(sessions) {
 		if !slices.Contains(candidates, name) {
 			candidates = append(candidates, name)
 		}
 	}
-	return candidates
+	return candidates, listErr
+}
+
+// activeSessions lists the workspace's non-archived sessions once, for
+// callers that need to search or rank the live set.
+//
+// The query is unbounded on purpose: a page limit here would let a
+// workspace with more live sessions than that limit silently exclude an
+// older-but-live session from ever being found by name — only the
+// GetSession ID fast path in resolveTargetManifest would still reach it. A
+// nil, nil result (no error, no rows) means the router has no storage
+// configured, which is a valid, if inert, configuration rather than a
+// failure.
+func (r *AlertRouter) activeSessions() ([]*manifest.Manifest, error) {
+	if r.ctx == nil || r.ctx.Storage == nil {
+		return nil, nil
+	}
+	return r.ctx.Storage.ListSessions(&dolt.SessionFilter{ExcludeArchived: true})
 }
 
 func classifyAlert(req AlertRequest) AlertRequest {
@@ -545,12 +602,24 @@ func (r *AlertRouter) DrainQueued(ctx context.Context) (int, error) {
 // sessionIsReachable reports whether name is a session that exists and is
 // not terminal. It deliberately applies no name heuristic: see
 // deliveryCandidates.
+//
+// It runs its own activeSessions fetch, independent of deliveryCandidates'
+// shared one: this method is also a standalone predicate exercised on its
+// own (directly, and via tests), so it cannot assume a caller has already
+// fetched the list for it.
 func (r *AlertRouter) sessionIsReachable(name string) bool {
-	m := r.resolveTargetManifest(name)
-	if m == nil {
-		return false
+	sessions, _ := r.activeSessions()
+	m := r.resolveTargetManifest(name, sessions)
+	return m != nil && r.isReachable(m)
+}
+
+// isReachable reports whether m can receive a delivery right now.
+func (r *AlertRouter) isReachable(m *manifest.Manifest) bool {
+	var tmux session.TmuxInterface
+	if r.ctx != nil {
+		tmux = r.ctx.Tmux
 	}
-	return !sessionIsTerminal(m)
+	return SessionIsLiveConfirmed(m, tmux)
 }
 
 // minTargetIDPrefix is the shortest session-ID prefix a target may name.
@@ -570,7 +639,11 @@ const minTargetIDPrefix = 8
 // name and the command's own help documents naming one. Routing then fell
 // through to discovery and recorded "no live supervisor session
 // discovered" while the configured recipient sat idle and reachable.
-func (r *AlertRouter) resolveTargetManifest(target string) *manifest.Manifest {
+//
+// sessions is the caller's already-fetched active session list (see
+// activeSessions); nil means listing failed or was never attempted, and
+// only the GetSession ID fast path below can still resolve target.
+func (r *AlertRouter) resolveTargetManifest(target string, sessions []*manifest.Manifest) *manifest.Manifest {
 	target = strings.TrimSpace(target)
 	if r.ctx == nil || r.ctx.Storage == nil || target == "" {
 		return nil
@@ -579,10 +652,6 @@ func (r *AlertRouter) resolveTargetManifest(target string) *manifest.Manifest {
 	// target really is an ID.
 	if m, err := r.ctx.Storage.GetSession(target); err == nil && m != nil {
 		return m
-	}
-	sessions, err := r.ctx.Storage.ListSessions(&dolt.SessionFilter{ExcludeArchived: true, Limit: 1000})
-	if err != nil {
-		return nil
 	}
 	// Name first: a session name is what the relay-target surfaces accept,
 	// and an exact name must never lose to another session's ID prefix.
@@ -625,24 +694,31 @@ func matchesSessionID(m *manifest.Manifest, target string) bool {
 		strings.EqualFold(id[:len(target)], target)
 }
 
-// discoverSupervisors lists live supervisor sessions in preference order.
+// discoverSupervisors lists live supervisor sessions in preference order,
+// fetching the active session list itself. deliveryCandidates instead calls
+// discoverSupervisorsFromSessions with a list it already fetched, so a
+// routed alert triggers one ListSessions query rather than two; this form
+// remains for callers (including tests) exercising discovery on its own.
+func (r *AlertRouter) discoverSupervisors() []string {
+	sessions, err := r.activeSessions()
+	if err != nil {
+		return nil
+	}
+	return r.discoverSupervisorsFromSessions(sessions)
+}
+
+// discoverSupervisorsFromSessions lists live supervisor sessions in
+// preference order from an already-fetched active session list.
 //
 // A session qualifies by conventional name or by an explicit supervisor
 // role tag. Requiring the name alone would queue alerts on a mesh whose
 // supervisor is called something like control-plane but is tagged
 // role:supervisor, even though it is live and ready.
-func (r *AlertRouter) discoverSupervisors() []string {
-	if r.ctx == nil || r.ctx.Storage == nil {
-		return nil
-	}
-	sessions, err := r.ctx.Storage.ListSessions(&dolt.SessionFilter{ExcludeArchived: true, Limit: 1000})
-	if err != nil {
-		return nil
-	}
+func (r *AlertRouter) discoverSupervisorsFromSessions(sessions []*manifest.Manifest) []string {
 	var names []string
 	for _, preferred := range supervisorNamePreference {
 		for _, m := range sessions {
-			if m == nil || sessionIsTerminal(m) {
+			if m == nil || !r.isReachable(m) {
 				continue
 			}
 			if strings.Contains(strings.ToLower(m.Name), preferred) && !slices.Contains(names, m.Name) {
@@ -653,7 +729,7 @@ func (r *AlertRouter) discoverSupervisors() []string {
 	// Role-tagged supervisors rank after conventionally named ones, but
 	// they are candidates rather than being invisible.
 	for _, m := range sessions {
-		if m == nil || sessionIsTerminal(m) || !sessionHasSupervisorRoleTag(m) {
+		if m == nil || !r.isReachable(m) || !sessionHasSupervisorRoleTag(m) {
 			continue
 		}
 		if !slices.Contains(names, m.Name) {
@@ -729,8 +805,65 @@ func SessionIsLiveSupervisorCandidate(m *manifest.Manifest) bool {
 // SessionIsLive reports whether a session can still receive input. It is
 // the one liveness rule every routing surface shares, so escalation and
 // alerting cannot drift on what counts as an archived or finished session.
+//
+// It trusts the manifest State as recorded. Callers that can verify actual
+// harness liveness (any surface holding a session.TmuxInterface) should
+// prefer SessionIsLiveConfirmed instead: DONE is ambiguous on its own (see
+// that function), and this predicate has no way to disambiguate it.
 func SessionIsLive(m *manifest.Manifest) bool {
 	return !sessionIsTerminal(m)
+}
+
+// SessionIsLiveConfirmed reports whether m can currently receive input,
+// additionally verifying actual harness-process liveness for DONE.
+//
+// DONE is not one signal but two, conflated in the manifest State field.
+// The completion watcher only ever stamps it after confirming the composer
+// is idle and input-ready (see CompletionWatcher.harnessIdle) — a live
+// session that just finished a task, exactly what made this PR's fix
+// necessary. But AGM's state detector (session.ResolveSessionState,
+// session.DetectState) also stamps DONE as its "safe default" whenever hook
+// state is stale or terminal parsing is inconclusive, with no such
+// confirmation — the pane may still exist while the interactive harness
+// process has actually exited. Every other manifest state already implies a
+// confirmed-running harness upstream of the write, so only DONE needs the
+// extra check here.
+//
+// tmux may be nil, or an implementation that does not provide the
+// HarnessLivenessChecker capability (lightweight mocks, or any TmuxInterface
+// predating it): either way verification is unavailable and the manifest
+// state is trusted, which is this function's behavior before the capability
+// existed and remains sound — it just cannot catch the zombie case without
+// the check.
+func SessionIsLiveConfirmed(m *manifest.Manifest, tmux session.TmuxInterface) bool {
+	if !SessionIsLive(m) {
+		return false
+	}
+	if strings.ToUpper(strings.TrimSpace(m.State)) != manifest.StateDone {
+		return true
+	}
+	checker, ok := tmux.(session.HarnessLivenessChecker)
+	if !ok {
+		return true
+	}
+	name := strings.TrimSpace(m.Tmux.SessionName)
+	if name == "" {
+		name = m.Name
+	}
+	info, err := checker.HarnessLiveness(name)
+	if err != nil {
+		// The check itself is inconclusive; do not let a liveness-probe
+		// error demote a session the manifest otherwise reports as done and
+		// live to unreachable.
+		return true
+	}
+	if info.SessionExists && !info.HarnessAlive {
+		// The pane is still there but nothing about it is confirmed as a
+		// running harness process: the ce-axsr zombie case this check
+		// exists to catch.
+		return false
+	}
+	return true
 }
 
 // SupervisorNamePreference returns the conventional supervisor name order,

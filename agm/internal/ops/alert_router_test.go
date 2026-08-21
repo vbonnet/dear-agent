@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // testRouter builds a router with an isolated queue and a delivery seam
@@ -505,6 +507,236 @@ func TestReadAlertRecordsWithStatusFiltersBeforeLimiting(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "stranded" {
 		t.Fatalf("got %v, want the stranded queued alert", got)
+	}
+}
+
+// deliveryCandidates must fetch the active session list once, not once for
+// the explicit-target lookup and again for supervisor discovery: the two
+// were triggering the identical ListSessions query back to back on every
+// routed alert.
+func TestDeliveryCandidatesFetchesSessionListOnce(t *testing.T) {
+	storage := &mockStorage{sessions: []*manifest.Manifest{
+		testManifest("control-plane", manifest.StateReady, time.Now()),
+		testManifest("Dispatch", manifest.StateReady, time.Now()),
+	}}
+	router := NewAlertRouter(&OpContext{Storage: storage})
+	router.SetQueuePath(filepath.Join(t.TempDir(), "alerts.jsonl"))
+	router.sendMessage = func(context.Context, string, string) error { return nil }
+
+	if _, err := router.Route(context.Background(), AlertRequest{
+		Kind: "checker", Source: "c", Title: "t", Subject: "s",
+		Actionability: AlertAgentActionable, Target: "control-plane",
+		OccurredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Route() error = %v", err)
+	}
+	if storage.listCalls != 1 {
+		t.Fatalf("ListSessions called %d times, want exactly 1 (resolveTargetManifest and discoverSupervisors must share one fetch)", storage.listCalls)
+	}
+}
+
+// The explicit-target search must see the complete active set: an artificial
+// page limit here (rather than in discovery, which only ranks candidates)
+// would let a workspace with more live sessions than that limit silently
+// exclude an older-but-live pinned recipient from ever being found by name.
+func TestDeliveryCandidatesSearchesUnboundedActiveSet(t *testing.T) {
+	storage := &mockStorage{sessions: []*manifest.Manifest{
+		testManifest("Dispatch", manifest.StateReady, time.Now()),
+	}}
+	router := NewAlertRouter(&OpContext{Storage: storage})
+	router.SetQueuePath(filepath.Join(t.TempDir(), "alerts.jsonl"))
+
+	if _, err := router.deliveryCandidates("Dispatch"); err != nil {
+		t.Fatalf("deliveryCandidates() error = %v", err)
+	}
+	if storage.lastFilter == nil {
+		t.Fatal("ListSessions was not called")
+	}
+	if storage.lastFilter.Limit != 0 {
+		t.Fatalf("ListSessions filter Limit = %d, want unbounded (0)", storage.lastFilter.Limit)
+	}
+}
+
+// A ListSessions failure while searching for an explicit target is a lookup
+// failure, not proof the target is gone. Treating the two the same would let
+// a transient storage error silently drop the operator's configured relay
+// target and reroute the alert elsewhere (or queue it) while the real
+// recipient may have been live the whole time.
+func TestDeliveryCandidatesKeepsExplicitTargetWhenListingFails(t *testing.T) {
+	storage := &mockStorage{listErr: fmt.Errorf("dolt: connection reset")}
+	router := NewAlertRouter(&OpContext{Storage: storage})
+	router.SetQueuePath(filepath.Join(t.TempDir(), "alerts.jsonl"))
+
+	candidates, err := router.deliveryCandidates("merge-non-dearagent-prs")
+	if err == nil {
+		t.Fatal("deliveryCandidates() error = nil, want the ListSessions failure surfaced")
+	}
+	if len(candidates) != 1 || candidates[0] != "merge-non-dearagent-prs" {
+		t.Fatalf("candidates = %v, want the explicit target kept despite the lookup failure", candidates)
+	}
+}
+
+// End to end: a storage error must not silently vanish into the generic "no
+// live supervisor session discovered" — that message asserts something was
+// checked and found absent, when in fact nothing could be checked at all.
+func TestAlertRouterRecordsListErrorRatherThanFalseAbsence(t *testing.T) {
+	storage := &mockStorage{listErr: fmt.Errorf("dolt: connection reset")}
+	router := NewAlertRouter(&OpContext{Storage: storage})
+	router.SetQueuePath(filepath.Join(t.TempDir(), "alerts.jsonl"))
+
+	rec, err := router.Route(context.Background(), AlertRequest{
+		Kind: "checker", Source: "c", Title: "t", Subject: "s",
+		Actionability: AlertAgentActionable, OccurredAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("Route() error = %v", err)
+	}
+	if rec.Status != AlertStatusQueued {
+		t.Fatalf("Status = %q, want queued", rec.Status)
+	}
+	if !strings.Contains(rec.Error, "connection reset") {
+		t.Fatalf("Error = %q, want it to surface the underlying storage failure", rec.Error)
+	}
+}
+
+// A target resolved only via the case-insensitive name match or an ID
+// prefix must be delivered through the canonical manifest identity, not the
+// raw string the operator or event supplied: SendMessage's own resolver
+// (exact-case name via findActiveByName, or a full ID via GetSession) does
+// not accept either alias, so delivering the raw string would fail despite
+// this candidate having just been declared reachable.
+func TestAlertRouterDeliversUsingCanonicalNameForCaseInsensitiveTarget(t *testing.T) {
+	router, sent := testRouterIDOnly(t, testManifest("Dispatch", manifest.StateDone, time.Now()))
+
+	rec, err := router.Route(context.Background(), AlertRequest{
+		Kind: "completion", Source: "s", Title: "t", Subject: "s",
+		Actionability: AlertAgentActionable, Target: "dispatch",
+		OccurredAt: time.Now(), DedupeKey: "canonical-name",
+	})
+	if err != nil {
+		t.Fatalf("Route() error = %v", err)
+	}
+	if rec.Status != AlertStatusDispatched {
+		t.Fatalf("Status = %q (error %q), want dispatched", rec.Status, rec.Error)
+	}
+	if rec.Target != "Dispatch" {
+		t.Fatalf("Target = %q, want the canonical name %q", rec.Target, "Dispatch")
+	}
+	if len(*sent) != 1 || (*sent)[0] != "Dispatch" {
+		t.Fatalf("sent = %v, want delivery addressed to the canonical name, not the lowercase alias", *sent)
+	}
+}
+
+// Same regression, for the ID-prefix alias.
+func TestAlertRouterDeliversUsingCanonicalNameForIDPrefixTarget(t *testing.T) {
+	m := testManifest("worker", manifest.StateDone, time.Now())
+	m.SessionID = "164eb3e7-6603-49d6-9c29-4ee88e9b7fe0"
+	router, sent := testRouterIDOnly(t, m)
+
+	rec, err := router.Route(context.Background(), AlertRequest{
+		Kind: "completion", Source: "s", Title: "t", Subject: "s",
+		Actionability: AlertAgentActionable, Target: "164eb3e7",
+		OccurredAt: time.Now(), DedupeKey: "canonical-id-prefix",
+	})
+	if err != nil {
+		t.Fatalf("Route() error = %v", err)
+	}
+	if rec.Status != AlertStatusDispatched {
+		t.Fatalf("Status = %q (error %q), want dispatched", rec.Status, rec.Error)
+	}
+	if rec.Target != "worker" {
+		t.Fatalf("Target = %q, want the canonical name %q, not the raw ID prefix", rec.Target, "worker")
+	}
+	if len(*sent) != 1 || (*sent)[0] != "worker" {
+		t.Fatalf("sent = %v, want delivery addressed to the canonical name", *sent)
+	}
+}
+
+// SessionIsLiveConfirmed is the seam ce-6 (the state-detector DONE ambiguity)
+// lives in: DONE covers both a completion watcher's confirmed-idle
+// observation and the state detector's unconfirmed "safe default", and only
+// a harness-liveness check can tell them apart.
+func TestSessionIsLiveConfirmedVerifiesDoneAgainstHarnessLiveness(t *testing.T) {
+	live := testManifest("dispatch", manifest.StateDone, time.Now())
+	zombie := testManifest("zombie-dispatch", manifest.StateDone, time.Now())
+	ready := testManifest("ready-dispatch", manifest.StateReady, time.Now())
+
+	tm := &mockTmuxWithLiveness{
+		mockTmux: newMockTmux(),
+		liveness: map[string]session.LivenessInfo{
+			"dispatch":        {SessionExists: true, HarnessAlive: true},
+			"zombie-dispatch": {SessionExists: true, HarnessAlive: false},
+			"ready-dispatch":  {SessionExists: true, HarnessAlive: false},
+		},
+	}
+
+	if !SessionIsLiveConfirmed(live, tm) {
+		t.Fatal("SessionIsLiveConfirmed() = false for a DONE session with a confirmed-live harness")
+	}
+	if SessionIsLiveConfirmed(zombie, tm) {
+		t.Fatal("SessionIsLiveConfirmed() = true for a DONE session whose harness process is confirmed gone")
+	}
+	// READY already implies a confirmed-running harness upstream of the
+	// manifest write (see state.DetectState), so it is not re-verified here
+	// even though the fake liveness map says otherwise for this name.
+	if !SessionIsLiveConfirmed(ready, tm) {
+		t.Fatal("SessionIsLiveConfirmed() = false for a READY session; only DONE should be re-verified")
+	}
+}
+
+// Without a HarnessLivenessChecker (nil tmux, or a TmuxInterface that does
+// not implement the capability), verification is unavailable and the
+// manifest state must be trusted, matching every routing surface's behavior
+// before this capability existed.
+func TestSessionIsLiveConfirmedTrustsStateWithoutALivenessChecker(t *testing.T) {
+	done := testManifest("dispatch", manifest.StateDone, time.Now())
+	if !SessionIsLiveConfirmed(done, nil) {
+		t.Fatal("SessionIsLiveConfirmed() = false for a nil tmux; should fail open and trust the state")
+	}
+	if !SessionIsLiveConfirmed(done, newMockTmux()) {
+		t.Fatal("SessionIsLiveConfirmed() = false for a tmux without the liveness capability; should fail open")
+	}
+}
+
+// End to end: routing must not hand a completion alert to a DONE session
+// whose harness process has actually exited, even though this PR's fix
+// otherwise treats DONE as reachable.
+func TestAlertRouterFallsThroughAZombieDoneExplicitTarget(t *testing.T) {
+	zombieTarget := testManifest("zombie-dispatch", manifest.StateDone, time.Now())
+	backupSupervisor := testManifest("vroom-orchestrator", manifest.StateReady, time.Now())
+	tm := &mockTmuxWithLiveness{
+		mockTmux: newMockTmux(),
+		liveness: map[string]session.LivenessInfo{
+			"zombie-dispatch": {SessionExists: true, HarnessAlive: false},
+		},
+	}
+	router := NewAlertRouter(&OpContext{
+		Storage: &mockStorage{sessions: []*manifest.Manifest{zombieTarget, backupSupervisor}},
+		Tmux:    tm,
+	})
+	router.SetQueuePath(filepath.Join(t.TempDir(), "alerts.jsonl"))
+	var sent []string
+	router.sendMessage = func(_ context.Context, recipient, _ string) error {
+		sent = append(sent, recipient)
+		return nil
+	}
+
+	rec, err := router.Route(context.Background(), AlertRequest{
+		Kind: "completion", Source: "s", Title: "t", Subject: "s",
+		Actionability: AlertAgentActionable, Target: "zombie-dispatch",
+		OccurredAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("Route() error = %v", err)
+	}
+	if rec.Target == "zombie-dispatch" {
+		t.Fatal("Target = zombie-dispatch, want routing to skip a DONE target with no confirmed-live harness")
+	}
+	if rec.Status != AlertStatusDispatched || rec.Target != "vroom-orchestrator" {
+		t.Fatalf("Status/Target = %q/%q, want dispatched to the live fallback supervisor", rec.Status, rec.Target)
+	}
+	if len(sent) != 1 || sent[0] != "vroom-orchestrator" {
+		t.Fatalf("sent = %v, want the zombie target skipped entirely", sent)
 	}
 }
 
