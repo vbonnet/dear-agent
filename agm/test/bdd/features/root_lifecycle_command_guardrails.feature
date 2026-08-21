@@ -10,7 +10,9 @@
 # RELATED-SPEC: cmd/ai-review/SPEC.md
 # RELATED-SPEC: internal/prreviewer/SPEC.md
 # RELATED-SPEC: cmd/pr-size-audit/SPEC.md
+# RELATED-SPEC: internal/craplens/SPEC.md
 # RELATED-SPEC: internal/prconcern/SPEC.md
+# RELATED-SPEC: tools/crap-lint/SPEC.md
 # RELATED-SPEC: tools/pr-concern-lint/SPEC.md
 Feature: Root lifecycle command guardrails
   Repository lifecycle commands should keep executable SPEC traceability, and
@@ -35,8 +37,10 @@ Feature: Root lifecycle command guardrails
       | cmd/mergeloop            |
       | cmd/pr-size-audit        |
       | internal/mergeloop       |
+      | internal/craplens        |
       | internal/prconcern       |
       | internal/prreviewer      |
+      | tools/crap-lint          |
       | tools/pr-concern-lint    |
 
   Scenario Outline: Merge repair agents preserve active harness routes
