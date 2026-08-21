@@ -174,3 +174,40 @@ func WriteStore(w io.Writer, all []Exception) error {
 	}
 	return bw.Flush()
 }
+
+// Baseline is the waiver ratchet: a ceiling on how many waivers a rule may
+// carry. It exists because this store grew to 110 entries against 22 compliant
+// scripts without any check observing it. The ceiling may only be lowered, so
+// the backlog can shrink but never silently refill.
+type Baseline struct {
+	Rules map[string]struct {
+		MaxWaivers int    `json:"max_waivers"`
+		Goal       string `json:"goal"`
+	} `json:"rules"`
+}
+
+// LoadBaseline reads the ratchet file.
+func LoadBaseline(r io.Reader) (*Baseline, error) {
+	var b Baseline
+	if err := json.NewDecoder(r).Decode(&b); err != nil {
+		return nil, fmt.Errorf("invalid baseline: %w", err)
+	}
+	return &b, nil
+}
+
+// CheckRatchet reports an error when a rule carries more waivers than its
+// declared ceiling.
+func (b *Baseline) CheckRatchet(rule string, count int) error {
+	r, ok := b.Rules[rule]
+	if !ok {
+		return fmt.Errorf("no baseline declared for rule %q; add one to the baseline file", rule)
+	}
+	if count > r.MaxWaivers {
+		return fmt.Errorf(
+			"waiver ratchet exceeded for %s: %d waivers against a ceiling of %d. "+
+				"Adding a waiver means a script was exempted rather than shortened or tested. "+
+				"Add a test under %s/ or shorten the script instead of raising the ceiling",
+			rule, count, r.MaxWaivers, testDir)
+	}
+	return nil
+}

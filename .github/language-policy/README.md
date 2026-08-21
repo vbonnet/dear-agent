@@ -15,7 +15,7 @@ One JSON object per line, sorted by `(rule, path)`:
 | ---------- | ----------------------------------------------------------------------- |
 | `rule`     | Rule the waiver applies to.                                              |
 | `path`     | Repo-relative path, no leading `./`.                                     |
-| `status`   | `active`, `grandfathered`, `revoked`, or `expired`.                      |
+| `status`   | `active` (a considered exemption), `grandfathered` (unmigrated backlog), `revoked`, or `expired`. |
 | `reason`   | Why the script cannot meet the rule. Not "pre-existing".                 |
 | `approver` | Who granted it.                                                          |
 | `sunset`   | `YYYY-MM-DD` when the waiver lapses, or `null` for open-ended.            |
@@ -38,6 +38,36 @@ stylistic preference here; it buys three things a binary store cannot:
 See the retrospective in the research repository:
 `retrospectives/2026-08-19-language-policy-binary-store-and-inverted-exceptions.md`.
 
+## The rule: short, or tested
+
+A shell script passes if **either** holds:
+
+1. it is at or under 20 countable lines (non-blank, non-comment); or
+2. a bats test under `tests/bats/` exercises it.
+
+Only a script that is **both long and untested** needs a waiver.
+
+This is deliberate. A raw line count measures a proxy; untested complexity is
+the actual risk. Crediting a test makes the way out productive: cover the
+script, and the waiver becomes unnecessary and can be deleted. The
+`shell-matrix` workflow already runs these tests across interpreters, so this
+reuses the existing harness rather than inventing a second notion of "tested".
+
+## The ratchet
+
+`baseline.json` declares a ceiling on how many waivers a rule may carry.
+`verify-store` fails if the store exceeds it.
+
+**The ceiling may only ever be lowered.** A change that raises it is the change
+to question: it means a script was exempted instead of shortened or tested.
+When waivers are removed, lower `max_waivers` to match, so the backlog cannot
+silently refill. A test asserts the ceiling equals the actual count, so slack
+cannot accumulate.
+
+The nightly sweep also reports the calibration ratio and warns while waivers
+outnumber passing scripts. It warns rather than fails: the ratchet is the
+enforcing half, and a permanently red nightly is a muted one.
+
 ## Adding a waiver
 
 Append a line, then normalise ordering and formatting:
@@ -53,6 +83,13 @@ added to this directory. The same checks run as ordinary Go tests
 (`tools/language-policy/store_test.go`), so `make preflight` catches them
 locally before CI does.
 
-A waiver should carry a real `reason` and, wherever possible, a `sunset` date.
-An open-ended waiver with a generic reason is how this store grew to 110
-entries against 22 compliant scripts.
+Prefer not to. Adding a test or shortening the script clears the entry
+permanently; a waiver only defers it.
+
+A waiver must carry a real `reason` and, wherever possible, a `sunset` date. An
+open-ended waiver with a generic reason is how this store reached 110 entries
+against 22 compliant scripts: 103 of them were granted in the single commit
+that introduced the rule, all with the same text and no expiry.
+
+Current state: 77 waivers (72 `grandfathered`, 5 `active`) against 27 passing
+scripts. The backlog burns down through ce-kx3fm.

@@ -33,25 +33,37 @@ in a diff. See
 
 **LANGPOLICY-CMD-08** When a script's countable line count is at or below the limit, the system shall record it as compliant.
 
-**LANGPOLICY-CMD-09** When a script exceeds the limit and an unexpired waiver covers it for the rule, the system shall record it as waived and not as a violation.
+**LANGPOLICY-CMD-09** When a script exceeds the limit and a shell test under `tests/bats/` references it by basename, the system shall record it as tested and shall not require a waiver for it.
 
-**LANGPOLICY-CMD-10** When a waiver carries a sunset date that has passed, or a sunset date that cannot be parsed, the system shall treat that waiver as inactive.
+**LANGPOLICY-CMD-10** When no shell test suite directory is present, the system shall credit no test coverage and shall not report an error.
 
-**LANGPOLICY-CMD-11** When a script exceeds the limit with no applicable exemption, the system shall record a violation and exit with code 1.
+**LANGPOLICY-CMD-11** When a script exceeds the limit, is untested, and an unexpired waiver covers it for the rule, the system shall record it as waived and not as a violation.
 
-**LANGPOLICY-CMD-12** When `--github` is provided, the system shall emit violations as GitHub Actions error annotations.
+**LANGPOLICY-CMD-12** When a waiver carries a sunset date that has passed, or a sunset date that cannot be parsed, the system shall treat that waiver as inactive.
 
-**LANGPOLICY-CMD-13** When `sweep` is invoked, the system shall report waivers whose sunset date has passed and waivers whose target file no longer exists.
+**LANGPOLICY-CMD-13** When a script exceeds the limit, is untested, and has no active waiver, the system shall record a violation and exit with code 1.
 
-**LANGPOLICY-CMD-14** When `verify-store` is invoked and a file with a binary database extension (`.db`, `.sqlite`, `.sqlite3`, `.db3`) is present in the waiver store directory, the system shall report an error and exit with code 1.
+**LANGPOLICY-CMD-14** When `--github` is provided, the system shall emit violations as GitHub Actions error annotations.
 
-**LANGPOLICY-CMD-15** When `verify-store` is invoked and the waiver store contains NUL bytes, the system shall report an error and exit with code 1.
+**LANGPOLICY-CMD-15** When `sweep` is invoked, the system shall report waivers whose sunset date has passed and waivers whose target file no longer exists.
 
-**LANGPOLICY-CMD-16** When the waiver store cannot be parsed, contains a duplicate rule and path pair, or declares an unrecognised status, the system shall report an error naming the line number and exit with code 1, and shall not treat the store as empty.
+**LANGPOLICY-CMD-16** When `sweep` is invoked, the system shall report the counts of compliant, tested, and waived scripts.
 
-**LANGPOLICY-CMD-17** When `verify-store` is invoked and the waiver store is not sorted by rule then path, the system shall report an error and exit with code 1.
+**LANGPOLICY-CMD-17** When `sweep` is invoked and the waiver count exceeds the number of passing scripts, the system shall emit a warning and shall not fail the run.
 
-**LANGPOLICY-CMD-18** When `format` is invoked, the system shall rewrite the waiver store sorted by rule then path, one compact JSON object per line, preserving the file's existing permissions.
+**LANGPOLICY-CMD-18** When `verify-store` is invoked and a file with a binary database extension (`.db`, `.sqlite`, `.sqlite3`, `.db3`) is present in the waiver store directory, the system shall report an error and exit with code 1.
+
+**LANGPOLICY-CMD-19** When `verify-store` is invoked and the waiver store contains NUL bytes, the system shall report an error and exit with code 1.
+
+**LANGPOLICY-CMD-20** When the waiver store cannot be parsed, contains a duplicate rule and path pair, or declares an unrecognised status, the system shall report an error naming the line number and exit with code 1, and shall not treat the store as empty.
+
+**LANGPOLICY-CMD-21** When `verify-store` is invoked and the waiver store is not sorted by rule then path, the system shall report an error and exit with code 1.
+
+**LANGPOLICY-CMD-22** When `verify-store` is invoked and a rule's waiver count exceeds the ceiling declared for it in the baseline file, the system shall report an error and exit with code 1.
+
+**LANGPOLICY-CMD-23** When `verify-store` is invoked and the baseline file declares no ceiling for the rule being enforced, the system shall report an error and exit with code 1.
+
+**LANGPOLICY-CMD-24** When `format` is invoked, the system shall rewrite the waiver store sorted by rule then path, one compact JSON object per line, preserving the file's existing permissions.
 
 ## BDD Traceability
 
