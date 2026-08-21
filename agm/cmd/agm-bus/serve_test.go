@@ -450,6 +450,42 @@ func TestStartHeartbeatWatcher(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// Bind an isolated broker for the watcher's emitter to dial.
+		// startHeartbeatWatcher copies srv.SocketPath onto the emitter, and
+		// an empty SocketPath (what "&bus.Server{}" gives it) makes
+		// Emitter.ensureConn resolve AGM_BUS_SOCKET or ~/.agm/bus.sock —
+		// i.e. a real broker, if one happens to be running on the host —
+		// and inject a synthetic heartbeat event into it. Pointing srv at
+		// our own socket keeps the frame off any live broker and gives the
+		// test something to verify delivery against.
+		brokerBuf, brokerLogger := captureLogger(t, false)
+		brokerSock := filepath.Join(shortTempDir(t, "agmbus-hbsrv-"), "s")
+		broker, err := bus.NewServer(brokerSock, brokerLogger)
+		if err != nil {
+			t.Fatalf("bus.NewServer: %v", err)
+		}
+		brokerCtx, brokerCancel := context.WithCancel(context.Background())
+		brokerDone := make(chan struct{})
+		go func() {
+			_ = broker.Start(brokerCtx)
+			close(brokerDone)
+		}()
+		t.Cleanup(func() {
+			brokerCancel()
+			select {
+			case <-brokerDone:
+			case <-time.After(3 * time.Second):
+				t.Log("isolated broker did not exit within 3s")
+			}
+		})
+		brokerDeadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(brokerDeadline) {
+			if _, statErr := os.Stat(brokerSock); statErr == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
 		buf, logger := captureLogger(t, false)
 		opts := offlineOptions("")
 		opts.supervisorsDir = supervisors
@@ -458,7 +494,7 @@ func TestStartHeartbeatWatcher(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		if err := startHeartbeatWatcher(ctx, opts, &bus.Server{}, logger); err != nil {
+		if err := startHeartbeatWatcher(ctx, opts, &bus.Server{SocketPath: brokerSock}, logger); err != nil {
 			t.Fatalf("startHeartbeatWatcher: %v", err)
 		}
 
@@ -470,18 +506,23 @@ func TestStartHeartbeatWatcher(t *testing.T) {
 		}
 
 		// Run scans once immediately, so the emit shows up without waiting an
-		// interval. There is no broker on the socket, so the emit itself
-		// fails and the watcher logs that; either the emit line or the
-		// emit-failed line proves the goroutine ran and read the directory.
+		// interval. Assert against the isolated broker's own log rather than
+		// the watcher's "heartbeat event emitted" line: Emitter.Emit
+		// swallows dial and write failures and that line logs unconditionally,
+		// so it can't tell a real delivery from a silently dropped one. The
+		// broker logging "session connected" for the emitter's session id can
+		// only happen if our Hello actually completed a handshake over this
+		// socket, which is the thing AGMBUS-12 needs verified.
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
-			out := buf.String()
-			if strings.Contains(out, "heartbeat event emitted") || strings.Contains(out, "emit failed") {
+			out := brokerBuf.String()
+			if strings.Contains(out, "session connected") && strings.Contains(out, "agm-bus-daemon") {
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		t.Errorf("watcher never scanned the supervisors dir:\n%s", buf.String())
+		t.Errorf("watcher's emitter never reached the isolated broker:\nwatcher log:\n%s\nbroker log:\n%s",
+			buf.String(), brokerBuf.String())
 	})
 }
 
