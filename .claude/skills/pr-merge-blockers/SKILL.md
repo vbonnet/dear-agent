@@ -82,7 +82,8 @@ resolve-review-threads list <owner> <repo> <n>
 resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"
 
 # sweep: resolves ANSWERED threads, refuses the rest by name, exits non-zero
-resolve-review-threads resolve-all <owner> <repo> <n> [author]
+# (add a login argument after <n> to sweep one author only)
+resolve-review-threads resolve-all <owner> <repo> <n>
 ```
 
 Every `resolve-review-threads` path enforces this, including single-thread

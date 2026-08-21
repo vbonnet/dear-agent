@@ -320,6 +320,26 @@ func TestUnansweredErrorIsDistinguishable(t *testing.T) {
 	}
 }
 
+// TestFailedReopenErrorIsDistinguishable pins the same split one level up:
+// a resolution that went through on stale evidence AND whose automatic
+// reopen also failed must be recognisable via errors.As and NOT match
+// unansweredError, because the two need opposite retry advice — the thread
+// is still resolved, so "just retry reply-resolve" would silently no-op at
+// readOrExit's IsResolved check instead of reopening and re-reading it.
+func TestFailedReopenErrorIsDistinguishable(t *testing.T) {
+	var reopenTarget *failedReopenError
+	if !errors.As(error(&failedReopenError{msg: "reopen failed"}), &reopenTarget) {
+		t.Fatal("failedReopenError not matched by errors.As")
+	}
+	var unansweredTarget *unansweredError
+	if errors.As(error(&failedReopenError{msg: "reopen failed"}), &unansweredTarget) {
+		t.Error("failedReopenError was misclassified as unansweredError")
+	}
+	if errors.As(error(&unansweredError{msg: "unanswered"}), &reopenTarget) {
+		t.Error("unansweredError was misclassified as failedReopenError")
+	}
+}
+
 // TestSameReplyBody pins the retry guard's comparison. cleanBody collapses
 // whitespace and truncates to a preview, so using it here would fail to match
 // any multi-line or long reply and repost it on every retry.

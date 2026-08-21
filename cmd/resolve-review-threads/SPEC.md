@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 2.3
+**Version:** 2.4
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -95,7 +95,13 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-40** When a reply mutation succeeds but its response omits the new comment's ID, the system shall leave the thread unresolved, state that the reply may already be live, and direct the user to re-run the same command rather than reword and repost.
 
-**RESOLVE-REVIEW-THREADS-41** When resolving a thread whose resolution names a specific last comment, the system shall verify that comment against the resolution mutation's own response and, on a mismatch, reopen the thread rather than leave it resolved on stale evidence.
+**RESOLVE-REVIEW-THREADS-41** When resolving a thread without `--force`, the system shall verify the comment its evidence read was based on against the resolution mutation's own response — using the caller-named anchor when one was given, otherwise the last comment observed by the pre-mutation evidence check — and, on a mismatch, reopen the thread rather than leave it resolved on stale evidence.
+
+**RESOLVE-REVIEW-THREADS-42** When a resolution mutation succeeds but its response omits the thread's last comment, the system shall treat that as unverifiable and reopen the thread, the same as an actual mismatch, rather than treat a missing anchor as confirmed.
+
+**RESOLVE-REVIEW-THREADS-43** When a stale-evidence resolution is detected and the automatic reopen also fails, the system shall report the thread as still resolved and direct the user to run `unresolve` before any other action, distinctly from the advice given when the reviewer has simply commented again.
+
+**RESOLVE-REVIEW-THREADS-44** When advising a retry that depends on posting the identical reply body, the system shall include that exact body in the suggested command rather than a generic placeholder, since a reworded retry is a new reply that resolves on top of unread commentary instead of a safe no-op.
 
 ## BDD Traceability
 

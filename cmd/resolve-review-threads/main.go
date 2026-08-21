@@ -228,11 +228,26 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		}
 		anchorID = id
 	}
-	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID); code != 0 {
+	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID, body); code != 0 {
 		return code
 	}
 	msg, _, rErr := resolveWithEvidence(ctx, threadID, false, anchorID)
 	if rErr != nil {
+		var reopenFailed *failedReopenError
+		if errors.As(rErr, &reopenFailed) {
+			// The thread is STILL marked resolved on GitHub. Every other
+			// branch here treats "not resolved" as ground truth and tells the
+			// operator retrying reply-resolve is safe — but retrying now
+			// would hit readOrExit's IsResolved check first, print "skipped
+			// (already resolved)", and exit 0 without ever reopening the
+			// thread or reading what landed on it. unresolve must run first.
+			return fail("your reply is posted, but resolving it failed AND "+
+				"reopening it also failed: %v\n"+
+				"do NOT just retry reply-resolve — it would see the thread as "+
+				"already resolved and silently no-op. Reopen it first:\n"+
+				"  resolve-review-threads unresolve %s\n"+
+				"then read what landed on it and answer it", rErr, threadID)
+		}
 		var unanswered *unansweredError
 		if errors.As(rErr, &unanswered) {
 			// The reviewer commented again in the gap, so they now hold the
@@ -248,20 +263,25 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			// Retrying immediately would just repeat the denied mutation; the
 			// credential problem has to be fixed first. Once it is, prefer
 			// reply-resolve over bare resolve for the same reason as the
-			// generic case below: it preserves the anchor check.
+			// generic case below: it preserves the anchor check. The body is
+			// spelled out, not "...", because retry safety depends on
+			// text equality: a DIFFERENT body is a new reply that lands after
+			// whatever showed up while this was failing, not a safe retry.
 			return fail("your reply is posted, but GitHub refused the resolution: %v\n"+
 				"this is an access problem, not a transient one: retrying immediately "+
 				"will be denied too.\n"+
 				"check `gh auth status` and that the token can resolve threads on this "+
-				"repo, then finish with:\n"+
-				"  resolve-review-threads reply-resolve %s \"...\"", rErr, threadID)
+				"repo, then finish with the EXACT SAME body:\n"+
+				"  resolve-review-threads reply-resolve %s %q", rErr, threadID, body)
 		}
 		return fail("the reply is posted but the thread is NOT resolved (likely "+
 			"transient): %v\n"+
-			"this is safe to retry: reply-resolve will see your reply is already "+
-			"last and resolve without reposting it. Bare resolve would work too, "+
-			"but it drops the anchor check this thread is relying on, so prefer:\n"+
-			"  resolve-review-threads reply-resolve %s \"...\"", rErr, threadID)
+			"this is safe to retry with the EXACT SAME body below (not a "+
+			"reworded one — retry safety depends on text equality): "+
+			"reply-resolve will see your reply is already last and resolve "+
+			"without reposting it. Bare resolve would work too, but it drops "+
+			"the anchor check this thread is relying on, so prefer:\n"+
+			"  resolve-review-threads reply-resolve %s %q", rErr, threadID, body)
 	}
 	fmt.Println(msg)
 	return 0
@@ -293,9 +313,9 @@ func postReplyOrExit(ctx context.Context, threadID, body string) (id string, cod
 		return "", fail("your reply was posted, but GitHub's response did not "+
 			"confirm its ID, so it cannot be used as the resolution anchor: %v\n"+
 			"the thread was left UNRESOLVED on purpose. Do NOT reword and repost: "+
-			"re-run this exact command and reply-resolve will find your reply by "+
-			"its text and resolve without duplicating it:\n"+
-			"  resolve-review-threads reply-resolve %s \"...\"", err, threadID)
+			"re-run with the EXACT SAME body below and reply-resolve will find "+
+			"your reply by its text and resolve without duplicating it:\n"+
+			"  resolve-review-threads reply-resolve %s %q", err, threadID, body)
 	}
 	return "", fail("reply failed, thread left unresolved: %v", err)
 }
@@ -367,15 +387,17 @@ func checkReplyPlacement(gotPrev, gotLast, wantPrev, wantLast string) replyPlace
 
 // verifyReplyPlacement re-reads the thread and applies checkReplyPlacement.
 // Returns 0 when the reply is exactly where we expect it.
-func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID string) int {
+func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID, body string) int {
 	after, err := fetchThread(ctx, threadID)
 	if err != nil {
 		return fail("your reply is posted but the thread state could not be "+
 			"re-read, so it was NOT resolved (likely transient): %v\n"+
-			"this is safe to retry: reply-resolve will see your reply is already "+
-			"last and resolve without reposting it. Bare resolve would work too, "+
-			"but it drops the anchor check this thread is relying on, so prefer:\n"+
-			"  resolve-review-threads reply-resolve %s \"...\"", err, threadID)
+			"this is safe to retry with the EXACT SAME body below (not a "+
+			"reworded one — retry safety depends on text equality): "+
+			"reply-resolve will see your reply is already last and resolve "+
+			"without reposting it. Bare resolve would work too, but it drops "+
+			"the anchor check this thread is relying on, so prefer:\n"+
+			"  resolve-review-threads reply-resolve %s %q", err, threadID, body)
 	}
 	switch checkReplyPlacement(after.PrevID, after.LastID, wantPrevID, wantLastID) {
 	case replyBuried:

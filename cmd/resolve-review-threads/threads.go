@@ -384,6 +384,19 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 			"reply with the reason instead: resolve-review-threads reply-resolve %s \"Fixed - <what changed>\"",
 			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)}
 	}
+	// effectiveWantID is what the post-mutation check below verifies against.
+	// reply-resolve already names its own anchor via wantLastID. resolve-all
+	// and bare resolve pass "" — force means "resolve regardless of
+	// evidence", so a late follow-up shouldn't block it either, but a
+	// NON-forced call just proved cur.LastID answered the thread, and that
+	// same comment is the evidence a mid-flight follow-up would invalidate.
+	// Without this, those two paths passed no anchor at all, so the
+	// reconciliation below was silently skipped for everything except
+	// reply-resolve.
+	effectiveWantID := wantLastID
+	if effectiveWantID == "" && !force {
+		effectiveWantID = cur.LastID
+	}
 	msg, gotLastID, err := mutateThread(ctx, "resolve", threadID)
 	if err != nil {
 		return msg, false, err
@@ -394,21 +407,40 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 	// is against the mutation applying, not a separate read after it — the
 	// closest this client can get to atomic. A mismatch means the resolution
 	// just went through on stale evidence; reopen it rather than leave a
-	// thread with unread commentary silently closed.
-	if wantLastID != "" && gotLastID != "" && gotLastID != wantLastID {
+	// thread with unread commentary silently closed. An EMPTY gotLastID
+	// counts as a mismatch too: GitHub accepted the mutation but the response
+	// didn't confirm what it resolved against, so it cannot be treated as
+	// verified (the same reasoning as errReplyIDMissing for the reply
+	// mutation).
+	if effectiveWantID != "" && gotLastID != effectiveWantID {
 		if _, _, uErr := mutateThread(ctx, "unresolve", threadID); uErr != nil {
-			return "", false, fmt.Errorf(
-				"%s %s: resolved on stale evidence (someone commented while the "+
-					"mutation was in flight) AND reopening it failed: %w — "+
-					"resolve-review-threads unresolve %s, then read the new comment "+
-					"and answer it", threadID, cur.Path, uErr, threadID)
+			return "", false, &failedReopenError{msg: fmt.Sprintf(
+				"%s %s: resolved on stale or unverifiable evidence (someone "+
+					"commented while the mutation was in flight, or GitHub's "+
+					"response didn't confirm what it resolved against) AND "+
+					"reopening it failed: %v — the thread is STILL RESOLVED. "+
+					"Run this before anything else: "+
+					"resolve-review-threads unresolve %s, then read the new "+
+					"comment and answer it", threadID, cur.Path, uErr, threadID)}
 		}
 		return "", false, &unansweredError{msg: fmt.Sprintf(
 			"%s %s: reopened — someone commented while the resolve mutation was "+
-				"in flight, so it is not accounted for", threadID, cur.Path)}
+				"in flight, or GitHub's response didn't confirm what it resolved "+
+				"against, so it is not accounted for", threadID, cur.Path)}
 	}
 	return msg, true, nil
 }
+
+// failedReopenError marks a resolution that went through on stale or
+// unverifiable evidence AND whose automatic reopen also failed: the thread is
+// left resolved on GitHub despite that. It is distinguished from
+// unansweredError because a caller's generic "safe to retry" advice for that
+// type is actively wrong here — reply-resolve's own readOrExit would see
+// IsResolved, print "skipped ... (already resolved)", and exit 0 without ever
+// reading the intervening comment or reopening the thread.
+type failedReopenError struct{ msg string }
+
+func (e *failedReopenError) Error() string { return e.msg }
 
 // isAccessDenied reports whether an error is GitHub refusing the caller rather
 // than a transient failure. Retrying a denial just repeats it, so the two need
