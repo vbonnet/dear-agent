@@ -66,10 +66,16 @@ jobs:
           check_evidence_cutoff_epoch=$(( $(date -u +%s) - CHECK_EVIDENCE_MAX_AGE_DAYS * 86400 ))
           check_evidence_cutoff_iso=$(date -u -d "@${check_evidence_cutoff_epoch}" +%Y-%m-%dT%H:%M:%SZ)
           # Bounds the default-branch commit walk-back below: each candidate
-          # costs its own timeout-bounded check-runs API call, so this caps
-          # worst-case cost on a busy repository rather than letting the walk
-          # scale with however many commits landed in the window.
-          branch_walk_max_commits=20
+          # costs its own timeout(30s)-bounded check-runs API call, and this
+          # job's own timeout-minutes is 15 and loops over every managed
+          # repository, not just one. A cap of 20 could alone consume 10
+          # minutes per repo on top of the pre-existing 20-PR-head walk's
+          # own worst case — kept small enough that even a repo needing the
+          # full walk leaves the rest of the job (and any other repos in
+          # this run) real headroom, at the cost of only catching evidence
+          # that lags the tip by a handful of commits rather than the full
+          # declared window on a pathological repo.
+          branch_walk_max_commits=5
 
           record_finding() {
             finding_count=$((finding_count + 1))
@@ -265,7 +271,13 @@ jobs:
                       and all(.[];
                         type == "array"
                         and all(.[]; type == "object" and (.sha | type) == "string" and (.sha | length) > 0))
-                  then flatten(1) | map(.sha) | unique | .[0:$cap]
+                  # The commits API returns each page newest-first and
+                  # --paginate --slurp preserves page order, so slicing
+                  # before deduping keeps the cap on the $cap MOST RECENT
+                  # commits. unique() sorts, so doing it first (as an
+                  # earlier revision did) would cap an arbitrary
+                  # lexicographic subset instead (gemini review on #1349).
+                  then flatten(1) | map(.sha) | .[0:$cap] | unique
                   else error("unexpected paginated commits response")
                   end
                 ' <<<"$branch_commit_pages"); then
