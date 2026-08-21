@@ -120,6 +120,15 @@ func writeGitHubOutput(w io.Writer, r craplens.Report) {
 	// unmeasured run also has nothing to say. Matches unflaggedSummary, which
 	// already surfaces r.Unmeasured in the prose form.
 	fmt.Fprintf(w, "crap_unknown=%t\n", r.CheckoutMismatch || len(r.Unknown) > 0 || r.Unmeasured > 0)
+	// crap_summary carries the one-line "why nothing is flagged" prose for a
+	// crap_unknown run with no other signal tripped: without it, the first
+	// unknown-only run on a diff has crap_flagged=false, crap_report="", and
+	// nothing at all to show for why coverage could not be trusted.
+	if !r.Flagged() {
+		fmt.Fprintf(w, "crap_summary=%s\n", strings.TrimSpace(unflaggedSummary(r)))
+	} else {
+		fmt.Fprintln(w, "crap_summary=")
+	}
 	body := r.Render()
 	if body == "" {
 		fmt.Fprintln(w, "crap_report=")

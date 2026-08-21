@@ -82,6 +82,7 @@ tests/test_helper/
 /disk-watchdog
 /vroom-governor
 /vroom-dispatch
+/crap-lint
 
 # Local runtime state
 .local/
