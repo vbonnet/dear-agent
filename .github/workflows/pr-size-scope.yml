@@ -261,7 +261,15 @@ jobs:
         # second one had grown well past what a workflow step should carry —
         # API reads, prior-section recovery, rendering, and patch/create/
         # dedupe selection.
-        if: (!github.event.pull_request.head.repo.fork) && github.event.pull_request.user.login != 'dependabot[bot]'
+        #
+        # !cancelled(), not the bare expression: an `if:` with no status
+        # function implies success(), so a failure in "Install gocyclo" or
+        # "Verify complexity parity" — upstream of this step, neither
+        # continue-on-error — would skip this step entirely despite its own
+        # continue-on-error, silently losing the already-computed size and
+        # mixed-concern results and leaving the sticky comment unable to
+        # recover or self-correct on the next push.
+        if: (!cancelled()) && (!github.event.pull_request.head.repo.fork) && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}

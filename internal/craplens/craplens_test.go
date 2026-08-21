@@ -301,6 +301,126 @@ func Classify(n int, a, b, c, d bool) string {
 	return dir
 }
 
+// TestAnalyzeTreatsExistingPackageWithQuotedBaseFilenameAsNotNew guards
+// against a real regression: text-mode `git ls-tree` C-quotes a base-side
+// filename containing a non-ASCII byte, and the retained closing quote made
+// the .go suffix check false, so a package whose only pre-existing source
+// needs quoting was mislabeled as brand new the moment any file was added to
+// it.
+func TestAnalyzeTreatsExistingPackageWithQuotedBaseFilenameAsNotNew(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain unavailable")
+	}
+	dir := t.TempDir()
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+	gittest.Run(t, dir, "config", "user.name", "Test")
+	write(t, dir, "go.mod", "module example.test\n\ngo 1.24\n")
+	write(t, dir, "existing/café.go", "package existing\n")
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "base")
+	gittest.Run(t, dir, "branch", "base")
+
+	write(t, dir, "existing/new.go", `package existing
+
+// Classify is branchy and has no test at all.
+func Classify(n int, a, b, c, d bool) string {
+	if n > 10 && a {
+		return "high-a"
+	}
+	if n > 10 || b {
+		return "high-b"
+	}
+	if n > 5 && c {
+		return "mid-c"
+	}
+	if n > 5 || d {
+		return "mid-d"
+	}
+	return "low"
+}
+`)
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "add new.go to an existing package")
+
+	report, err := Analyze(t.Context(), dir, "base", "HEAD", DefaultThreshold)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if report.CheckoutMismatch {
+		t.Fatal("the fixture checkout is at head; coverage should have been measured")
+	}
+	var found *Package
+	for i, p := range report.Untested {
+		if p.ImportPath == "existing" {
+			found = &report.Untested[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("the existing package's untested new function should have been reported")
+	}
+	if found.New {
+		t.Error("a package whose only pre-existing file needs quoting was mislabeled as new")
+	}
+}
+
+// TestAnalyzeMeasuresGoSourceMarkedBinaryInGitattributes guards against a
+// real regression: a head-tree .gitattributes marking *.go as binary made
+// `git diff` emit only "Binary files ... differ" with no +++ header or
+// hunk, so parseUnifiedDiff saw an empty touched set and Analyze reported a
+// clean, fully-known verdict for a PR it never actually measured.
+func TestAnalyzeMeasuresGoSourceMarkedBinaryInGitattributes(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain unavailable")
+	}
+	dir := t.TempDir()
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+	gittest.Run(t, dir, "config", "user.name", "Test")
+	write(t, dir, "go.mod", "module example.test\n\ngo 1.24\n")
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "base")
+	gittest.Run(t, dir, "branch", "base")
+
+	write(t, dir, ".gitattributes", "*.go binary\n")
+	write(t, dir, "risky/risky.go", `package risky
+
+// Classify is branchy and has no test at all.
+func Classify(n int, a, b, c, d bool) string {
+	if n > 10 && a {
+		return "high-a"
+	}
+	if n > 10 || b {
+		return "high-b"
+	}
+	if n > 5 && c {
+		return "mid-c"
+	}
+	if n > 5 || d {
+		return "mid-d"
+	}
+	return "low"
+}
+`)
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "add a binary-marked package")
+
+	report, err := Analyze(t.Context(), dir, "base", "HEAD", DefaultThreshold)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if report.CheckoutMismatch {
+		t.Fatal("the fixture checkout is at head; coverage should have been measured")
+	}
+	var names []string
+	for _, p := range report.Untested {
+		names = append(names, p.ImportPath)
+	}
+	if len(names) != 1 || names[0] != "risky" {
+		t.Fatalf("untested packages = %v, want [risky]: a .gitattributes binary marker on *.go silently emptied the touched set", names)
+	}
+}
+
 func write(t *testing.T, dir, rel, body string) {
 	t.Helper()
 	full := filepath.Join(dir, rel)

@@ -91,7 +91,9 @@ func run(ctx context.Context, args []string, _, stderr io.Writer) int {
 	case actionDelete:
 		return deleteStaleComments(ctx, repo, pr, stderr)
 	case actionUpsert:
-		return upsertComment(ctx, repo, pr, in, stderr)
+		return upsertComment(ctx, repo, pr, in, false, stderr)
+	case actionRefreshIfExists:
+		return upsertComment(ctx, repo, pr, in, true, stderr)
 	case actionNone:
 		return 0
 	}
@@ -114,6 +116,7 @@ const (
 	actionNone action = iota
 	actionUpsert
 	actionDelete
+	actionRefreshIfExists
 )
 
 // decide reproduces the workflow's two `if:` conditions as one testable
@@ -126,9 +129,27 @@ func decide(in inputs) action {
 	if in.shouldComment || in.mixedConcern || in.crapFlagged || in.crapUnknown {
 		return actionUpsert
 	}
-	if !in.shouldComment && !in.mixedConcern && in.crapOutcome == "success" && !in.crapFlagged && !in.crapUnknown {
+	if in.crapOutcome == "success" {
 		return actionDelete
 	}
+	if in.crapOutcome == "failure" {
+		// Nothing about this revision currently flags size, mixed concern,
+		// or code health, but the code-health step ran and operationally
+		// failed (continue-on-error swallows it into the workflow's own
+		// exit code, not this one). We cannot safely delete on an
+		// unconfirmed result, but doing nothing is wrong too: shouldComment
+		// and mixedConcern are computed fresh regardless of the CRAP step's
+		// outcome, so if an earlier, larger revision left a comment claiming
+		// this PR is oversized, that comment is now stale and must be
+		// refreshed to the current, accurate scope check. Refresh only if a
+		// marker comment already exists — there is nothing worth posting
+		// for the first time over a mere CRAP hiccup on an otherwise
+		// unremarkable PR.
+		return actionRefreshIfExists
+	}
+	// Any other outcome (cancelled, skipped, or genuinely absent — the
+	// step never ran) carries no confirmed signal either way; matches the
+	// long-standing no-op behavior for that ambiguity.
 	return actionNone
 }
 
@@ -247,6 +268,11 @@ func extractCrapSection(body string) string {
 // body, and edits the existing marker comment in place or posts a new one.
 // Best effort throughout: a comment-update failure must never fail the job
 // for a signal that promises never to.
+//
+// onlyIfExists is set for actionRefreshIfExists: when nothing about this
+// revision currently flags anything but the CRAP step's own result could not
+// be confirmed clean, there is a stale comment to correct if one exists, but
+// nothing worth posting for the first time.
 // exitFailedOperation is returned when the decided action ran but at least
 // one gh operation it depended on failed. It is distinct from the flag/usage
 // exit code (2) and from success (0): the workflow step that calls this
@@ -256,25 +282,34 @@ func extractCrapSection(body string) string {
 // signal reviewers rely on silently went stale or missing.
 const exitFailedOperation = 1
 
-func upsertComment(ctx context.Context, repo, pr string, in inputs, stderr io.Writer) int {
+func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists bool, stderr io.Writer) int {
 	ids, err := markerCommentIDs(ctx, repo, pr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr-size-comment: could not list existing comments: %v\n", err)
 		return exitFailedOperation
 	}
+	if onlyIfExists && len(ids) == 0 {
+		return 0
+	}
 
-	failed := false
 	prior := ""
 	if needsCrapRecovery(in) && len(ids) > 0 {
 		body, err := commentBody(ctx, repo, ids[0])
 		if err != nil {
+			// Do not fall through to patching with prior == "": recovery
+			// exists precisely because this run has nothing fresh of its
+			// own to show, so patching now would overwrite the only stored
+			// code-health finding with a blank section — the exact data
+			// recovery was meant to preserve — instead of leaving the
+			// existing, still-accurate comment alone until a future run can
+			// actually read it.
 			fmt.Fprintf(stderr, "pr-size-comment: could not read the existing comment to recover: %v\n", err)
-			failed = true
-		} else {
-			prior = extractCrapSection(body)
+			return exitFailedOperation
 		}
+		prior = extractCrapSection(body)
 	}
 
+	failed := false
 	body := composeBody(in, prior)
 
 	if len(ids) > 0 {

@@ -83,8 +83,14 @@ func changedGoFiles(ctx context.Context, repoDir, base, head string) (touchedSet
 	// non-ASCII bytes, so `docs/café.go` arrives as "docs/caf\303\251.go"
 	// and the +++ header parse below silently drops the file. Turning quoting
 	// off keeps the pathname verbatim.
+	// --text: a head-tree .gitattributes marking *.go as binary would
+	// otherwise make git diff emit only "Binary files ... differ" with no
+	// +++ header or hunk at all, so parseUnifiedDiff sees an empty touched
+	// set — Analyze then reports a clean, fully-known verdict for a PR it
+	// never actually measured, which could delete a standing code-health
+	// finding instead of leaving it in place. Go source is always text.
 	argv = append(argv, "-c", "core.quotePath=false",
-		"diff", "-M", "-U0", "--diff-filter=ACMR", base+"..."+head, "--", "*.go")
+		"diff", "-M", "-U0", "--text", "--diff-filter=ACMR", base+"..."+head, "--", "*.go")
 	cmd := exec.CommandContext(ctx, "git", argv...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -370,7 +376,14 @@ func treeHasGoFiles(ctx context.Context, repoDir, rev, dir string) bool {
 	if dir == "." || dir == "" {
 		spec = rev + ":"
 	}
-	argv = append(argv, "ls-tree", "--name-only", spec)
+	// -c core.quotePath=false, matching changedGoFiles above: git otherwise
+	// C-quotes a base-side filename with a non-ASCII byte (e.g. `café.go`
+	// arrives as `"caf\303\251.go"`), and the retained closing quote makes
+	// the .go suffix check below false, so an existing package whose only
+	// source file needs quoting is mislabeled as having none — a package
+	// with a genuinely new file added to it then reports the addition as a
+	// brand new package instead of a change to an existing one.
+	argv = append(argv, "-c", "core.quotePath=false", "ls-tree", "--name-only", spec)
 	out, err := exec.CommandContext(ctx, "git", argv...).Output()
 	if err != nil {
 		// The directory did not exist at that revision, which is exactly the
