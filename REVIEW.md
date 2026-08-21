@@ -56,9 +56,11 @@ Regardless of finding severity, the synthesis agent must escalate when the
 diff touches any of the following:
 
 - **Agent permissions** — any edit to `permissions.allow`, `permissions.ask`, or `permissions.deny`.
-- **Pre-tool hooks** — any change to hook scripts or hook registration in `settings.json`.
+- **Pre/post-tool hooks** — any change to hook scripts or hook registration in `settings.json`. Canonical `SPEC.md` contracts under protected hook owners do not escalate solely because of that ownership and continue through the ordinary semantic-governance rules, as do exact lowercase `_test.go` files under authenticated Go-package hook owners; noncanonical aliases, production sources, scripts, registrations, and ambiguous tree evidence remain protected.
 - **Security boundaries** — write guards, deny rules, `~/src` enforcement, PII manifests.
-- **Infrastructure that is expensive to reverse** — database schema changes, launchd plist installs, CI/CD pipeline edits.
+- **Protected review policy, production enforcement, and provider rules** — this policy, the trusted AI-review workflow, production reviewer implementation, ruleset declarations, and repository-local action manifests (`.github/actions/`, or any `action.yml`/`action.yaml`). A local action runs inside its caller's job with the caller's secrets and token, and no workflow path changes when only the action does, so the action owner stays protected. Go files with the exact lowercase ASCII `_test.go` suffix under `cmd/ai-review/` stay in the automated review loop because those files cannot enter the production reviewer binary; that carveout is local to this trigger, so such a file still escalates on an independent permission, migration, or infrastructure trigger, and a rename crossing the boundary still escalates through its production-side path.
+- **Privileged workflow authority** — executable changes to a workflow whose authenticated base or head can consume custom secrets, mint OIDC, write source/review/gate/deployment/signing state, label or otherwise control pull-request review state, use a privileged default-branch trigger, target an environment, delegate unresolved reusable-workflow or runner authority, or run on self-hosted infrastructure. `issues: write` counts as review control: GitHub models pull requests as issues, so that scope adds and removes the merge-gate labels the merge loop treats as a human-only block. A change to a workflow's `schedule` block also escalates, because cron frequency governs unattended, billed execution and no permission scope reveals it. Unclassifiable workflow evidence also fails closed.
+- **Infrastructure that is expensive to reverse** — database schema changes, infrastructure-as-code, launchd plist installs, and systemd service installs.
 - **Explicit `HUMAN REVIEW REQUIRED` label** in the PR description or commit message.
 
 Escalation is not a failure state — it is a correct outcome that preserves
@@ -156,14 +158,88 @@ change.
 The reviewer binary and workflow definition are loaded from the protected base
 revision; the PR revision is only ever diffed, never executed.
 
-Changes to either `.github/workflows/` or `cmd/ai-review/` are deterministic
-§3 escalation triggers, so they require human review before becoming trusted.
+Changes to `REVIEW.md`, `.github/workflows/review.yml`, `.github/rulesets/`,
+repository-local action manifests, or production and governance files under
+`cmd/ai-review/` are deterministic §3
+escalation triggers, so the candidate revision cannot approve changes to its
+own review authority. Protected owner and dependency paths use normalized
+Unicode case-fold identities and symmetric ancestor/descendant matching, so a
+file/directory alias, a slashless protected directory such as `vendor`, or a
+changed ancestor cannot shadow a canonical trust root. One bounded authenticated
+base/head tree index supplies the raw spelling, mode, type, and complete
+directory ancestry for all of these decisions. Tree-only directory aliases and
+one unique non-tree peer per revision may remain automated; a tree/non-tree
+conflict, multiple non-tree peers, or a cross-revision tree/non-tree transition
+fails closed. Protected static leaves and SPEC controls retain their stricter
+canonical spelling rules.
+Changes confined to Go files with the exact lowercase ASCII `_test.go` suffix
+under that package stay automated only when the same tree evidence proves a
+regular-blob test leaf and compatible directory ancestry. Unique
+case/normalization-fold test-to-test renames and regular/executable mode changes
+remain automated because both exact lowercase-suffix paths stay outside the
+production package.
+Changed-path extraction
+disables rename detection and retains both sides, so a rename crossing into or
+out of production still escalates. Other workflow changes stay in the automated
+review loop. A bounded authenticated comparison
+of every changed workflow identity inspects all normalized Unicode case-fold
+peers in both the merge base and head, so removing privilege or adding a shadow
+alias cannot evade classification. Proven read-only or low-blast workflows, and
+comment/format/key-order-only edits whose executable YAML is unchanged remain
+automated; critical authority or ambiguous evidence escalates.
+Matrix axis order is retained because Actions uses that order to determine job
+creation order; swapping those keys is therefore an executable change.
+
+The protected OpenCode, Pi, AGM Git-hook, AGM internal-hook, and Codex-hook
+owners apply the same distinction: their executable hook surfaces remain
+human-review triggers, while an exact canonical regular `SPEC.md` is left to
+the ordinary semantic contract rules; independent ownership validation still
+applies, as do independent permission, migration, and infrastructure triggers.
+Exact lowercase `_test.go` changes are additionally
+automated only beneath enumerated Go-package hook owners. Both carveouts depend
+on authenticated canonical directory ancestry and regular Git blobs;
+simultaneous same-revision normalized peers, owner aliases,
+file/directory conflicts, symlinks, gitlinks, and noncanonical suffixes or
+basenames fail closed.
+
+This classifier is deliberately scoped to changed workflow YAML. It does not
+yet compute transitive authority through separately changed scripts, reusable
+workflow targets, local actions, or workflow-to-workflow event, artifact, and
+cache producer/consumer edges. Direct reusable-call jobs fail closed as
+delegated authority; separately changed dependencies and upstream workflows
+remain outside this classifier unless another deterministic path rule covers
+them. Authenticated dependency-closure enforcement—including ambiguous or
+dynamic workflow, artifact, and cache names—is tracked in `ce-juhj.22.3`.
+
+The finite standard GitHub-hosted runner allowlist proves only the workflow's
+single declared label, matched byte-exactly apart from ASCII case; quoted
+leading or trailing whitespace is label data and fails closed. Event names,
+permission scopes, and permission levels follow the same rule, because YAML
+syntax whitespace is already removed while quoted whitespace remains semantic
+data. Multi-label sequences fail closed because Actions
+requires one runner to satisfy every label, and a self-hosted runner can claim
+the whole conjunction even when each spelling is a standard hosted label. The
+static allowlist cannot authenticate provider-side runner registration or a
+self-hosted/larger-runner label collision; that inventory boundary is tracked
+in `ce-juhj.22.4`.
 
 Changed `SPEC.md` files have an additional authenticated contract review. The
+same fail-closed boundary inventories complete normalized Unicode case-fold
+path identities in both the authenticated merge base and head. It rejects
+noncanonical basenames, multiple non-tree control peers, nonregular control
+leaves, tree/non-tree ancestor conflicts, and control-leaf spelling drift across
+revisions. Addition-only file/directory shadows and case-only or
+normalization-only control renames therefore cannot evade review, while
+tree-only directory peers and one stable unique regular control leaf remain in
+the automated contract-review path. A directory merely named `SPEC.md` or
+`SPEC.owner` is not itself a contract unless an authenticated non-tree control
+exists at that identity. The
 trusted base supplies both the canonical authoring policy and the exact
 package-level `activeHarnesses` registry. Additions or modifications under a
 registered dotted root, plugin root, or explicit harness grouping are rejected
 as local normative owners, including when nested beneath `internal/` or `cmd/`.
+Those root, plugin, grouping, and member identities are normalized so a
+checkout alias cannot create a harness-local contract owner.
 Those package seams remain valid locations when they own a logical product or
 domain contract without an intrinsic registration root. Every current promise
 in an added or modified SPEC must receive a
