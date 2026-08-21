@@ -494,39 +494,63 @@ func hasLoneSurrogateEscape(line []byte) bool {
 			pos++
 			continue
 		}
-		switch {
-		case b == '"':
+		if b == '"' {
 			inString = false
 			pos++
-		case b != '\\':
-			pos++
-		case pos+1 >= len(line):
-			// A truncated escape at the end of the record; json.Decode will
-			// report the real syntax error.
-			return false
-		case line[pos+1] != 'u':
-			pos += 2 // an ordinary two-byte escape such as \n or \"
-		case pos+6 > len(line):
-			return false
-		default:
-			r, err := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32)
-			if err != nil {
-				return false
-			}
-			pos += 6
-			if r < 0xD800 || r > 0xDFFF {
-				continue // an ordinary \uXXXX escape, not a surrogate half
-			}
-			if r <= 0xDBFF && pos+6 <= len(line) && line[pos] == '\\' && line[pos+1] == 'u' {
-				if r2, err2 := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32); err2 == nil && r2 >= 0xDC00 && r2 <= 0xDFFF {
-					pos += 6 // consumed the matching low surrogate too
-					continue
-				}
-			}
-			return true // a high surrogate with no matching low, or a lone low surrogate
+			continue
 		}
+		if b != '\\' {
+			pos++
+			continue
+		}
+		next, r, isSurrogate := scanEscape(line, pos)
+		if !isSurrogate {
+			pos = next
+			continue
+		}
+		if consumesMatchingLowSurrogate(line, next, r) {
+			pos = next + 6 // consumed the matching low surrogate too
+			continue
+		}
+		return true // a high surrogate with no matching low, or a lone low surrogate
 	}
 	return false
+}
+
+// scanEscape advances past one JSON string escape starting at line[pos]
+// ('\\') and reports the code point if it is a \uXXXX escape whose value
+// falls in the UTF-16 surrogate range (U+D800-U+DFFF). Any other escape, or
+// one too short to read safely at the end of the record, is left for
+// json.Decode to validate — this only needs to find escapes worth a closer
+// look, not police JSON syntax generally.
+func scanEscape(line []byte, pos int) (next int, r uint64, isSurrogate bool) {
+	if pos+1 >= len(line) || line[pos+1] != 'u' || pos+6 > len(line) {
+		return pos + 2, 0, false
+	}
+	value, err := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32)
+	if err != nil || value < 0xD800 || value > 0xDFFF {
+		return pos + 6, 0, false
+	}
+	return pos + 6, value, true
+}
+
+// consumesMatchingLowSurrogate reports whether a valid low-surrogate escape
+// (U+DC00-U+DFFF) immediately follows at pos, given that high is the
+// surrogate half scanEscape just found. Only a high surrogate
+// (U+D800-U+DBFF) can be validly paired; a low surrogate on its own can
+// never be the start of a pair.
+func consumesMatchingLowSurrogate(line []byte, pos int, high uint64) bool {
+	if high > 0xDBFF {
+		return false
+	}
+	if pos+6 > len(line) || line[pos] != '\\' || line[pos+1] != 'u' {
+		return false
+	}
+	low, err := strconv.ParseUint(string(line[pos+2:pos+6]), 16, 32)
+	if err != nil {
+		return false
+	}
+	return low >= 0xDC00 && low <= 0xDFFF
 }
 
 // writeHistory persists messages as the session's history.jsonl.
