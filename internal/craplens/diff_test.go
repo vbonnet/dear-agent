@@ -1,0 +1,258 @@
+package craplens
+
+import (
+	"strings"
+	"testing"
+)
+
+// TestParseHunkHeader pins the diff arithmetic the whole signal rests on. A
+// wrong head-side span attributes changes to the wrong function.
+func TestParseHunkHeader(t *testing.T) {
+	tests := []struct {
+		name   string
+		line   string
+		want   lineRange
+		wantOK bool
+	}{
+		{name: "explicit count", line: "@@ -10,3 +20,5 @@ func x()", want: lineRange{20, 24}, wantOK: true},
+		{name: "implicit single line", line: "@@ -10 +20 @@", want: lineRange{20, 20}, wantOK: true},
+		{name: "pure deletion has no head lines", line: "@@ -10,3 +20,0 @@", wantOK: false},
+		{name: "malformed", line: "@@ nonsense @@", wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseHunkHeader(tc.line)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && got != tc.want {
+				t.Errorf("range = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsScorableGoFile pins the exclusions. Scoring test files would let a diff
+// improve its own score by adding a branchy test.
+func TestIsScorableGoFile(t *testing.T) {
+	tests := map[string]bool{
+		"agm/cmd/agm-bus/main.go":      true,
+		"internal/craplens/diff.go":    true,
+		"agm/cmd/agm-bus/main_test.go": false,
+		"vendor/x/y.go":                false,
+		"pkg/testdata/fixture.go":      false,
+		"api/service.pb.go":            false,
+		"pkg/x_generated.go":           false,
+		"README.md":                    false,
+	}
+
+	for path, want := range tests {
+		if got := isScorableGoFile(path); got != want {
+			t.Errorf("isScorableGoFile(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+// TestParseUnifiedDiffTracksAddedFiles pins that a wholly-new file is
+// recognised as added, which is what distinguishes a new package shipping
+// untested from an existing untested package that got edited.
+func TestParseUnifiedDiffTracksAddedFiles(t *testing.T) {
+	out := strings.Join([]string{
+		"diff --git a/pkg/new/thing.go b/pkg/new/thing.go",
+		"new file mode 100644",
+		"--- /dev/null",
+		"+++ b/pkg/new/thing.go",
+		"@@ -0,0 +1,12 @@",
+		"diff --git a/pkg/old/thing.go b/pkg/old/thing.go",
+		"index 111..222 100644",
+		"--- a/pkg/old/thing.go",
+		"+++ b/pkg/old/thing.go",
+		"@@ -5,2 +5,3 @@",
+		"diff --git a/pkg/old/thing_test.go b/pkg/old/thing_test.go",
+		"--- a/pkg/old/thing_test.go",
+		"+++ b/pkg/old/thing_test.go",
+		"@@ -1,2 +1,9 @@",
+	}, "\n")
+
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatalf("parseUnifiedDiff: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("parsed %d files, want 2 (the test file must be excluded): %v", len(files), sortedKeys(files))
+	}
+	if !files["pkg/new/thing.go"].Added {
+		t.Error("pkg/new/thing.go should be marked added")
+	}
+	if files["pkg/old/thing.go"].Added {
+		t.Error("pkg/old/thing.go is an edit, not an addition")
+	}
+	if got := files["pkg/old/thing.go"].Ranges; len(got) != 1 || got[0] != (lineRange{5, 7}) {
+		t.Errorf("pkg/old/thing.go ranges = %+v, want [{5 7}]", got)
+	}
+}
+
+// TestParseUnifiedDiffDropsPureDeletions pins that a file whose every hunk
+// removed lines is not reported: it has no head-side line left to score.
+func TestParseUnifiedDiffDropsPureDeletions(t *testing.T) {
+	out := strings.Join([]string{
+		"diff --git a/pkg/x/y.go b/pkg/x/y.go",
+		"--- a/pkg/x/y.go",
+		"+++ b/pkg/x/y.go",
+		"@@ -5,9 +4,0 @@",
+	}, "\n")
+
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatalf("parseUnifiedDiff: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("parsed %v, want nothing for a pure deletion", sortedKeys(files))
+	}
+}
+
+// TestAllFilesAdded pins the diff-side half of the new-package decision. It is
+// necessary but not sufficient on its own: the caller also confirms the
+// directory held no Go source at the base, because adding one file to an
+// existing package also makes every changed file an addition.
+func TestAllFilesAdded(t *testing.T) {
+	files := touchedSet{
+		"pkg/fresh/a.go": {Path: "pkg/fresh/a.go", Added: true},
+		"pkg/fresh/b.go": {Path: "pkg/fresh/b.go", Added: true},
+		"pkg/mixed/a.go": {Path: "pkg/mixed/a.go", Added: true},
+		"pkg/mixed/b.go": {Path: "pkg/mixed/b.go", Added: false},
+	}
+
+	if !files.allFilesAdded("pkg/fresh") {
+		t.Error("pkg/fresh should be new")
+	}
+	if files.allFilesAdded("pkg/mixed") {
+		t.Error("pkg/mixed has an edited file, so it is not new")
+	}
+	if files.allFilesAdded("pkg/absent") {
+		t.Error("a package the diff did not touch is not new")
+	}
+}
+
+// TestIsGeneratedSource pins detection by the standard toolchain marker rather
+// than by filename. CRAPLENS-02 excludes generated files, and this repository
+// contains generated source whose name matches no generated-looking suffix.
+func TestIsGeneratedSource(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{
+			name: "standard marker",
+			src:  "// Code generated by tool. DO NOT EDIT.\n\npackage p\n",
+			want: true,
+		},
+		{
+			name: "marker with a different generator",
+			src:  "// Code generated from patterns.yaml; DO NOT EDIT.\n\npackage p\n",
+			want: true,
+		},
+		{name: "handwritten", src: "// Package p does a thing.\npackage p\n", want: false},
+		{name: "prose mentioning generation", src: "// This code generated a report once.\npackage p\n", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isGeneratedSource([]byte(tc.src)); got != tc.want {
+				t.Errorf("isGeneratedSource = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHeaderPathDecodesQuotedPathnames covers the pathnames git C-quotes even
+// with core.quotePath=false. Requiring a bare `b/` prefix dropped those files
+// silently, which is the same class of miss the quotePath flag fixed for
+// non-ASCII bytes.
+func TestHeaderPathDecodesQuotedPathnames(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+		ok   bool
+	}{
+		{name: "plain", raw: "b/pkg/a.go", want: "pkg/a.go", ok: true},
+		{name: "non-ascii verbatim", raw: "b/pkg/café.go", want: "pkg/café.go", ok: true},
+		{name: "quoted tab", raw: `"b/pkg/tab\tname.go"`, want: "pkg/tab\tname.go", ok: true},
+		{name: "quoted backslash", raw: `"b/pkg/back\\slash.go"`, want: `pkg/back\slash.go`, ok: true},
+		{name: "quoted octal", raw: `"b/pkg/caf\303\251.go"`, want: "pkg/café.go", ok: true},
+		{name: "dev null", raw: "/dev/null", ok: false},
+		{name: "test file still excluded", raw: "b/pkg/a_test.go", ok: false},
+		{name: "quoted test file still excluded", raw: `"b/pkg/tab\tname_test.go"`, ok: false},
+		{name: "unparseable quote", raw: `"b/pkg/bad`, ok: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := headerPath(tc.raw)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.ok, got)
+			}
+			if ok && got != tc.want {
+				t.Errorf("path = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseUnifiedDiffRejectsTruncatedInput covers the scanner-error path. A
+// truncated diff returned as a complete one would silently drop every file
+// after the offending hunk out of the signal.
+func TestParseUnifiedDiffRejectsTruncatedInput(t *testing.T) {
+	huge := strings.Repeat("x", 9<<20)
+	out := strings.Join([]string{
+		"diff --git a/pkg/a.go b/pkg/a.go",
+		"--- a/pkg/a.go",
+		"+++ b/pkg/a.go",
+		"@@ -1 +1 @@",
+		"+" + huge,
+		"diff --git a/pkg/b.go b/pkg/b.go",
+		"--- a/pkg/b.go",
+		"+++ b/pkg/b.go",
+		"@@ -1 +1 @@",
+	}, "\n")
+
+	if _, err := parseUnifiedDiff(out); err == nil {
+		t.Fatal("expected a truncated diff to be rejected rather than returned as complete")
+	}
+}
+
+// TestParseUnifiedDiffIgnoresAddedLinesThatLookLikeHeaders covers added source
+// text beginning with "++ ": git prefixes it with the addition marker, so the
+// emitted line starts with "+++ " and was mistaken for a file header, clearing
+// the current file and dropping every later hunk in it.
+func TestParseUnifiedDiffIgnoresAddedLinesThatLookLikeHeaders(t *testing.T) {
+	out := strings.Join([]string{
+		"diff --git a/pkg/a.go b/pkg/a.go",
+		"--- a/pkg/a.go",
+		"+++ b/pkg/a.go",
+		"@@ -1,0 +5,2 @@",
+		`+	doc := ` + "`" + `++ not a header` + "`",
+		"+++ still source, not a header",
+		"@@ -20,0 +30,3 @@",
+		"+more source",
+	}, "\n")
+
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatalf("parseUnifiedDiff: %v", err)
+	}
+	f := files["pkg/a.go"]
+	if f == nil {
+		t.Fatal("pkg/a.go was dropped entirely")
+	}
+	if len(f.Ranges) != 2 {
+		t.Fatalf("got %d hunks, want 2: a later hunk was lost to a fake header: %+v", len(f.Ranges), f.Ranges)
+	}
+	if f.Ranges[1] != (lineRange{30, 32}) {
+		t.Errorf("second hunk = %+v, want {30 32}", f.Ranges[1])
+	}
+}
