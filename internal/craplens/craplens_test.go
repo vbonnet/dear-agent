@@ -815,3 +815,83 @@ func TestPackageDirOfHandlesTheModuleRoot(t *testing.T) {
 		t.Error("an untouched package must not match")
 	}
 }
+
+// TestHeaderPathDecodesQuotedPathnames covers the pathnames git C-quotes even
+// with core.quotePath=false. Requiring a bare `b/` prefix dropped those files
+// silently, which is the same class of miss the quotePath flag fixed for
+// non-ASCII bytes.
+func TestHeaderPathDecodesQuotedPathnames(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+		ok   bool
+	}{
+		{name: "plain", raw: "b/pkg/a.go", want: "pkg/a.go", ok: true},
+		{name: "non-ascii verbatim", raw: "b/pkg/café.go", want: "pkg/café.go", ok: true},
+		{name: "quoted tab", raw: `"b/pkg/tab\tname.go"`, want: "pkg/tab\tname.go", ok: true},
+		{name: "quoted backslash", raw: `"b/pkg/back\\slash.go"`, want: `pkg/back\slash.go`, ok: true},
+		{name: "quoted octal", raw: `"b/pkg/caf\303\251.go"`, want: "pkg/café.go", ok: true},
+		{name: "dev null", raw: "/dev/null", ok: false},
+		{name: "test file still excluded", raw: "b/pkg/a_test.go", ok: false},
+		{name: "quoted test file still excluded", raw: `"b/pkg/tab\tname_test.go"`, ok: false},
+		{name: "unparseable quote", raw: `"b/pkg/bad`, ok: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := headerPath(tc.raw)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.ok, got)
+			}
+			if ok && got != tc.want {
+				t.Errorf("path = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseSpanHandlesColonInFilename covers a filename containing a colon:
+// cutting the profile location at the first colon truncated the path and made
+// the span unparseable, silently leaving the function unmeasured.
+func TestParseSpanHandlesColonInFilename(t *testing.T) {
+	raw := "mode: set\nexample.test/p/a:b.go:2.14,2.26 1 1\n"
+	data := unmeasured([]string{"p"})
+
+	parseProfile(raw, "example.test", data)
+
+	blocks := data.blocks["p/a:b.go"]
+	if len(blocks) != 1 {
+		t.Fatalf("parsed %d blocks for a colon-containing filename, want 1", len(blocks))
+	}
+	if blocks[0].startLine != 2 || blocks[0].numStmt != 1 || blocks[0].count != 1 {
+		t.Errorf("block = %+v", blocks[0])
+	}
+}
+
+// TestBoundedBufferStopsAtItsLimit covers the capture cap. Reporting a short
+// write would make exec treat the truncation as a pipe error and fail the
+// whole coverage run, so the writer must always claim the full length.
+func TestBoundedBufferStopsAtItsLimit(t *testing.T) {
+	b := &boundedBuffer{limit: 10}
+
+	n, err := b.Write([]byte("12345"))
+	if n != 5 || err != nil {
+		t.Fatalf("first write = (%d, %v)", n, err)
+	}
+	n, err = b.Write([]byte("67890EXTRA"))
+	if n != 10 || err != nil {
+		t.Fatalf("overflowing write must report the full length, got (%d, %v)", n, err)
+	}
+	if got := b.String(); got != "1234567890" {
+		t.Errorf("buffered %q, want %q", got, "1234567890")
+	}
+
+	n, err = b.Write([]byte("more"))
+	if n != 4 || err != nil {
+		t.Fatalf("write past the limit = (%d, %v)", n, err)
+	}
+	if got := b.String(); got != "1234567890" {
+		t.Errorf("buffer grew past its limit: %q", got)
+	}
+}

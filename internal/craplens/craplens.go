@@ -195,7 +195,7 @@ func Analyze(ctx context.Context, repoDir, base, head string, threshold float64)
 	applyCoverage(funcs, cov)
 
 	report := Report{Threshold: threshold, Changed: len(funcs)}
-	scoreFunctions(&report, funcs, threshold)
+	scoreFunctions(&report, funcs, threshold, cov)
 	classifyPackages(ctx, &report, cov, touched, repoDir, base)
 	return report, nil
 }
@@ -215,14 +215,18 @@ func applyCoverage(funcs []Function, cov coverageData) {
 
 // scoreFunctions fills in the scored counts and the over-threshold list,
 // ordered worst first.
-func scoreFunctions(report *Report, funcs []Function, threshold float64) {
+func scoreFunctions(report *Report, funcs []Function, threshold float64, cov coverageData) {
 	for _, f := range funcs {
 		if f.Coverage == CoverageUnknown {
-			// A file excluded from the profile (a build-tagged file on the
-			// wrong runner, for example) leaves its functions unmeasured even
-			// when the package total is known. Counting them keeps that
-			// visible instead of silently narrowing what was scored.
-			report.Unmeasured++
+			// Count this only when the PACKAGE was measured. A function left
+			// unknown because its whole package could not be measured is
+			// already reported through report.Unknown; counting it here too
+			// would double-report it and contradict what this field and the
+			// rendered text say it means, which is a per-function gap such as
+			// a build-tagged file excluded on this platform.
+			if pc, ok := cov.packages[f.Package]; ok && pc.coverage != CoverageUnknown {
+				report.Unmeasured++
+			}
 			continue
 		}
 		report.Scored++

@@ -23,16 +23,12 @@ import (
 func changedFunctions(ctx context.Context, repoDir, head string, files touchedSet) []Function {
 	var out []Function
 
+	dropGeneratedFiles(ctx, repoDir, head, files)
+
 	for _, rel := range sortedKeys(files) {
 		tf := files[rel]
 		src, err := fileAt(ctx, repoDir, head, rel)
 		if err != nil {
-			continue
-		}
-		// A path check cannot find every generated file; the toolchain marker
-		// can. CRAPLENS-02 excludes generated source, and asking for tests on
-		// a file a generator will overwrite is noise.
-		if isGeneratedSource(src) {
 			continue
 		}
 		fset := token.NewFileSet()
@@ -111,6 +107,24 @@ func declaredFuncs(decl ast.Decl) []candidate {
 		return out
 	default:
 		return nil
+	}
+}
+
+// dropGeneratedFiles removes marker-generated files from the touched set.
+//
+// Removed rather than skipped: leaving them in means packagesOf and
+// classifyPackages still see the package, so a PR that changes only a
+// generated file would have its package reported as untested even though
+// CRAPLENS-02 excludes the only file that put it there.
+func dropGeneratedFiles(ctx context.Context, repoDir, head string, files touchedSet) {
+	for _, rel := range sortedKeys(files) {
+		src, err := fileAt(ctx, repoDir, head, rel)
+		if err != nil {
+			continue
+		}
+		if isGeneratedSource(src) {
+			delete(files, rel)
+		}
 	}
 }
 

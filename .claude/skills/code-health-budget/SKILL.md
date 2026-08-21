@@ -32,7 +32,8 @@ fully-tested paths. Two numbers matter:
   point under the alarm.
 
 For intuition: a function with complexity 8 and no tests scores 72. The same
-function at 70% coverage scores 14. At full coverage, 8.
+function at 70% coverage scores 9.7. At full coverage, 8. Most of the drop
+comes from the first tests you write, because the uncovered fraction is cubed.
 
 ## What each gate already owns
 
@@ -109,10 +110,16 @@ complexity dropping from 46 to 4 and no behavior change.
    go run ./tools/crap-lint -base origin/main -head HEAD
    ```
 
-2. If it prints `clean:`, you are done. Check the second number it reports:
-   how many of your changed functions are at or under 6. Raising it is the
-   goal even when nothing is over 30. If it prints `not measured:`, nothing
-   was checked at all, which is not a pass; fix what it names and re-run.
+2. If it prints `clean:` with nothing after it, you are done. Check the second
+   number it reports: how many of your changed functions are at or under 6.
+   Raising it is the goal even when nothing is over 30.
+
+   If it prints `clean: ...; N package(s) unmeasured (...)`, you are not done.
+   Part of your diff was scored and part was not measured at all, and step 4
+   applies to the unmeasured part.
+
+   If it prints `not measured:`, nothing was checked; fix what it names and
+   re-run.
 
 3. If it names a function, pick one of the three answers above and act on it.
    Re-run until it is clean, or until the remaining entries are ones you can
