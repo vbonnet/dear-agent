@@ -253,3 +253,38 @@ func TestTrack_Async(t *testing.T) {
 		t.Errorf("Command = %v, want %v", parsed.Command, event.Command)
 	}
 }
+
+// TestTrackSync_ErrorEvent covers a failed command: the recorded event must
+// carry the error text, not just the failure flag. Ported from the retired
+// agm/internal/telemetry/usage copy of this package, which was the only place
+// this case was covered.
+func TestTrackSync_ErrorEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	tracker, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := tracker.TrackSync(Event{
+		Command: "bad-cmd",
+		Success: false,
+		Error:   "unknown command",
+	}); err != nil {
+		t.Fatalf("TrackSync: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var decoded Event
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.Error != "unknown command" {
+		t.Errorf("Error = %q, want %q", decoded.Error, "unknown command")
+	}
+	if decoded.Success {
+		t.Error("Success = true, want false")
+	}
+}

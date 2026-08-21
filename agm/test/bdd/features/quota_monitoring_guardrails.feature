@@ -1,7 +1,6 @@
 # SPEC: pkg/costtrack/SPEC.md
 # RELATED-SPEC: cmd/cc-usage-monitor/SPEC.md
 # RELATED-SPEC: internal/telemetry/usage/SPEC.md
-# RELATED-SPEC: agm/internal/telemetry/usage/SPEC.md
 Feature: Quota monitoring guardrails
   Cost tracking, Claude Code usage monitoring, and CLI usage telemetry should
   carry executable SPEC traceability so quota monitoring parity does not drift
@@ -17,5 +16,4 @@ Feature: Quota monitoring guardrails
       | pkg/costtrack                |
       | cmd/cc-usage-monitor         |
       | internal/telemetry/usage     |
-      | agm/internal/telemetry/usage |
 
