@@ -158,7 +158,7 @@ compatibility.
 
 **AGP-63** When the Gemini CLI adapter imports a conversation, the system shall return that conversation from a subsequent history read or export of the returned session.
 
-**AGP-65** When an imported record is larger than a default scanner token but within the adapter's history record limit, the system shall preserve the AGP-63 round trip, and shall reject a record over that limit at import rather than persist it.
+**AGP-65** When an imported record is larger than the adapter's 8 MiB history record limit, the system shall reject it at import rather than persist a record a later history read cannot return; a record at or under that limit shall still satisfy the AGP-63 round trip.
 
 **AGP-66** When an import supplies a format the adapter cannot decode, the system shall reject it rather than create a session.
 
@@ -184,3 +184,24 @@ compatibility.
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`, `agm/internal/agent/gemini_import_history_test.go`
+
+### No-BDD rationale for AGP-63 through AGP-69
+
+These contracts are proven by deterministic package tests rather than by
+scenarios in `harness_parity.feature`, and the reason is that feature's own
+subject: it exercises the ACTIVE parity matrix, and AGP-02 states that
+`gemini-cli` is accepted only as a deprecated compatibility harness and is not
+in that set. AGP-05 already excludes its aliases from shared model choices for
+the same reason. A cross-harness scenario here would assert parity for a
+harness the matrix deliberately excludes.
+
+The evidence is `agm/internal/agent/gemini_import_history_test.go`, which
+covers each requirement as a separate observable outcome: the round trip, both
+sides of the 8 MiB record boundary, every rejected format, a malformed record,
+a record with no supported role, rollback both when the kill is confirmed and
+when it is not, replacement of prior history rather than a partial write, and
+namespace distinctness across imports.
+
+If `gemini-cli` is ever promoted into the active parity set, AGP-12 already
+requires BDD scenarios at that point, which is the correct trigger for adding
+them rather than now.

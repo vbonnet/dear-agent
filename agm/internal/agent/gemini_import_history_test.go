@@ -328,3 +328,50 @@ func TestParseImportedMessagesAcceptsLargeRecordUnderTheLimit(t *testing.T) {
 		t.Fatalf("got %d messages, want 1", len(messages))
 	}
 }
+
+// stubTmuxOnPath installs a fake `tmux` binary as the only entry on PATH so
+// tests can control kill-session outcomes without a real tmux server. The
+// binary is a shell script: the kernel resolves its shebang directly, so the
+// narrowed PATH does not need to keep /bin/sh reachable.
+func stubTmuxOnPath(t *testing.T, script string) {
+	t.Helper()
+	binDir := t.TempDir()
+	fakeTmux := filepath.Join(binDir, "tmux")
+	if err := os.WriteFile(fakeTmux, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+}
+
+// TestRollbackFailedImportRemovesRecordOnConfirmedKill covers the success
+// path: once tmux confirms the session is gone, the store entry — the only
+// thing that could leak the session — is safe to remove.
+func TestRollbackFailedImportRemovesRecordOnConfirmedKill(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+	stubTmuxOnPath(t, "#!/bin/sh\nexit 0\n")
+
+	if err := adapter.rollbackFailedImport(sessionID, metadata.TmuxName); err != nil {
+		t.Fatalf("rollbackFailedImport returned error: %v", err)
+	}
+	if _, err := adapter.sessionStore.Get(sessionID); err == nil {
+		t.Fatalf("session record still present after a confirmed kill")
+	}
+}
+
+// TestRollbackFailedImportKeepsRecordWhenKillUnconfirmed covers the bug this
+// fixes: TerminateSession only logged a failed tmux exit and still deleted
+// the store entry, so a caller with no session ID lost the only handle to a
+// possibly-still-running process. rollbackFailedImport must instead keep the
+// record and surface the failure when tmux cannot confirm termination.
+func TestRollbackFailedImportKeepsRecordWhenKillUnconfirmed(t *testing.T) {
+	adapter, sessionID, metadata := newGeminiHistoryFixture(t)
+	stubTmuxOnPath(t, "#!/bin/sh\necho 'server not found' >&2\nexit 1\n")
+
+	err := adapter.rollbackFailedImport(sessionID, metadata.TmuxName)
+	if err == nil {
+		t.Fatalf("expected rollbackFailedImport to report the unconfirmed kill")
+	}
+	if _, getErr := adapter.sessionStore.Get(sessionID); getErr != nil {
+		t.Fatalf("session record was removed despite an unconfirmed kill: %v", getErr)
+	}
+}
