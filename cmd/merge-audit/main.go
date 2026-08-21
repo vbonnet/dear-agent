@@ -279,24 +279,26 @@ func auditRepo(ctx context.Context, repo string, since time.Time, rulesetPath st
 // failed. The combined error (nil if every source succeeded) marks the
 // overall audit incomplete without discarding what was gathered.
 func auditRepoWithDependencies(ctx context.Context, repo string, since time.Time, rulesetPath string, deps repoAuditDependencies) ([]Violation, error) {
-	branch, err := deps.defaultBranch(ctx, repo)
-	if err != nil {
-		return nil, fmt.Errorf("default branch: %w", err)
-	}
-
 	var out []Violation
 	var errs []error
 
-	prVs, err := deps.auditMergedPRs(ctx, repo, branch, since)
-	out = append(out, prVs...)
+	branch, err := deps.defaultBranch(ctx, repo)
 	if err != nil {
-		errs = append(errs, err)
-	}
+		// Ruleset drift does not depend on the default branch name, so it
+		// still runs even when this resolution fails.
+		errs = append(errs, fmt.Errorf("default branch: %w", err))
+	} else {
+		prVs, err := deps.auditMergedPRs(ctx, repo, branch, since)
+		out = append(out, prVs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
 
-	pushVs, err := deps.auditDirectPushes(ctx, repo, branch, since)
-	out = append(out, pushVs...)
-	if err != nil {
-		errs = append(errs, err)
+		pushVs, err := deps.auditDirectPushes(ctx, repo, branch, since)
+		out = append(out, pushVs...)
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	rulesetVs, err := deps.auditRulesetDrift(ctx, repo, rulesetPath)

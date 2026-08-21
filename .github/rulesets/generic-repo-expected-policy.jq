@@ -22,7 +22,7 @@
     end) as $legacy_checks
    | [$legacy_checks[] | {context: ., integration_id: null}]
  end)
-| map({context, integration_id: (if has("integration_id") then .integration_id else null end)}) as $checks
+| map({context, integration_id}) as $checks
 | {
     name: "branch-protection",
     target: "branch",

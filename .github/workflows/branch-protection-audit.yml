@@ -65,6 +65,11 @@ jobs:
           fi
           check_evidence_cutoff_epoch=$(( $(date -u +%s) - CHECK_EVIDENCE_MAX_AGE_DAYS * 86400 ))
           check_evidence_cutoff_iso=$(date -u -d "@${check_evidence_cutoff_epoch}" +%Y-%m-%dT%H:%M:%SZ)
+          # Bounds the default-branch commit walk-back below: each candidate
+          # costs its own timeout-bounded check-runs API call, so this caps
+          # worst-case cost on a busy repository rather than letting the walk
+          # scale with however many commits landed in the window.
+          branch_walk_max_commits=20
 
           record_finding() {
             finding_count=$((finding_count + 1))
@@ -255,17 +260,22 @@ jobs:
               if ! branch_commit_pages=$(timeout 30 gh api --paginate --slurp \
                   "repos/${slug}/commits?sha=${default_branch_path}&since=${check_evidence_cutoff_iso}&per_page=100" 2>/dev/null); then
                 evidence_error="required-check production evidence is unavailable"
-              elif ! branch_refs=$(jq -ce '
+              elif ! branch_refs=$(jq -ce --argjson cap "$branch_walk_max_commits" '
                   if type == "array"
                       and all(.[];
                         type == "array"
                         and all(.[]; type == "object" and (.sha | type) == "string" and (.sha | length) > 0))
-                  then flatten(1) | map(.sha) | unique
+                  then flatten(1) | map(.sha) | unique | .[0:$cap]
                   else error("unexpected paginated commits response")
                   end
                 ' <<<"$branch_commit_pages"); then
                 evidence_error="required-check production evidence is malformed"
               else
+                # Each iteration issues its own timeout-bounded API call
+                # (collect_check_runs), so an unbounded commit count here
+                # could exhaust the job's timeout on a busy repository before
+                # a genuinely-missing check is ever concluded. branch_refs is
+                # already capped to branch_walk_max_commits above.
                 while IFS= read -r candidate_ref; do
                   if collect_check_runs "$candidate_ref"; then
                     :
