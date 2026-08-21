@@ -175,7 +175,27 @@ func selectAIExecutor(nodes []workflow.Node, rolesPath, quotaMode string, logger
 // install as an unreadable meter rather than silently doing nothing;
 // routing is unchanged either way, because an unreadable meter yields no
 // verdicts.
+// validateQuotaMode rejects a -quota value that isn't one of the tri-state's
+// three spellings. It is pure and does no I/O on purpose: buildExecutor
+// calls it unconditionally, on every path, including the no-roles.yaml
+// direct-Anthropic fallback that never calls buildQuotaMeter — otherwise a
+// typo like "-quota=onn" is silently accepted there and the workflow runs
+// unmetered instead of returning this documented error, which can
+// invalidate a quota-routing experiment with no diagnostic at all (codex
+// review on #1218, third pass).
+func validateQuotaMode(mode string) error {
+	switch mode {
+	case "", "auto", "on", "off":
+		return nil
+	default:
+		return fmt.Errorf("bad -quota %q; expect auto, on, or off", mode)
+	}
+}
+
 func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
+	if err := validateQuotaMode(mode); err != nil {
+		return nil, err
+	}
 	switch mode {
 	case "off":
 		return nil, nil
@@ -185,8 +205,6 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 			logger.Debug("quota routing: disabled, no meter installed", "command", quota.DefaultCodexBarCommand)
 			return nil, nil
 		}
-	default:
-		return nil, fmt.Errorf("bad -quota %q; expect auto, on, or off", mode)
 	}
 
 	// SkipPace: true — Router.OrderModels and the router metadata this
@@ -265,17 +283,30 @@ func (r credentialFilteredReader) Read(ctx context.Context) (*quota.Snapshot, er
 	return snapshot, nil
 }
 
-// usesDirectlyBilledCredentials reports whether the router will reach
-// family through a credential CodexBar's CLI/subscription reading cannot
-// represent: an API key or Vertex AI/ADC. Families with no detected
-// credential, or a local/no-auth family such as ollama, are left alone —
-// neither conflicts with a CodexBar reading the way a directly-billed
-// account does.
+// usesDirectlyBilledCredentials reports whether family should be excluded
+// from quota-aware promotion: either because the router will reach it
+// through a credential CodexBar's CLI/subscription reading cannot
+// represent (an API key or Vertex AI/ADC), or because it cannot be
+// constructed at all with the credentials actually present.
+//
+// AuthNone is the second case, not a "leave it alone" case: every family
+// auth.DetectAuthMethod can report — anthropic, gemini, openrouter,
+// openai — falls through to AuthNone only when it found no usable
+// credential, and provider.Factory's own auth-hierarchy switch
+// unconditionally fails to construct every one of them under AuthNone
+// (see pkg/llm/provider/factory.go's newOpenAIProvider et al.). A
+// favorable CodexBar reading could otherwise promote a candidate the
+// factory is about to refuse anyway, burning one candidate attempt
+// before falling through on every such role generation — the same
+// failure mode meter.go's unimplementedProviderFamilies already excludes
+// gemini for (codex review on #1218, third pass). AuthLocal is the one
+// family that genuinely constructs with no credential (ollama) and stays
+// excluded from this filter.
 func usesDirectlyBilledCredentials(family string) bool {
 	switch auth.DetectAuthMethod(family) {
-	case auth.AuthAPIKey, auth.AuthVertexAI:
+	case auth.AuthAPIKey, auth.AuthVertexAI, auth.AuthNone:
 		return true
-	case auth.AuthLocal, auth.AuthNone:
+	case auth.AuthLocal:
 		return false
 	default:
 		return false
@@ -310,6 +341,12 @@ func hasAINode(nodes []workflow.Node) bool {
 //  3. Direct-Anthropic fallback so existing single-provider setups keep
 //     working without forcing every operator to ship a roles.yaml.
 func buildExecutor(rolesPath, quotaMode string, logger *slog.Logger) (workflow.AIExecutor, error) {
+	// Validated here, unconditionally, before branching: the direct-Anthropic
+	// fallback below never calls buildQuotaMeter, so without this a bad
+	// -quota value is silently accepted whenever no roles.yaml is found.
+	if err := validateQuotaMode(quotaMode); err != nil {
+		return nil, err
+	}
 	if rolesPath == "" {
 		const defaultPath = "config/roles.yaml"
 		if _, err := os.Stat(defaultPath); err == nil {

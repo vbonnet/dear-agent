@@ -119,9 +119,17 @@ func runQuotaMeter(cmd *cobra.Command, _ []string) error {
 // polling this command can keep admissions halted indefinitely off a
 // BreakerState the refresh job stopped updating long ago, even though
 // the live spawn gate has already recovered (codex review on #1218).
+//
+// A stale reading is reported as exit 1 ("no usable reading"), not exit
+// 0. Returning nil here would make --check on a dead refresh job
+// indistinguishable from --check on a fresh reading that positively
+// confirms no provider is halted — the two are opposite levels of
+// confidence, and collapsing them lets an orchestrator mistake a dead
+// job for a healthy one (codex review on #1218, third pass).
 func checkQuotaMeterState(state *quota.State, providers []quota.ProviderState, maxAge time.Duration, now time.Time) error {
 	if maxAge > 0 && state.Age(now) > maxAge {
-		return nil
+		return fmt.Errorf("quota reading is %s old, past the %s --check limit — unevaluated, not confirmed healthy"+
+			" (run 'agm quota-meter --refresh')", state.Age(now).Round(time.Second), maxAge)
 	}
 	for _, p := range providers {
 		if quota.BreakerState(p.BreakerState) == quota.BreakerOpen {

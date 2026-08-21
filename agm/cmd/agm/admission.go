@@ -18,6 +18,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
@@ -119,29 +120,86 @@ func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreaker
 		if !liveResult.Allowed {
 			return nil, fmt.Errorf("%s", circuitbreaker.FormatDenied(liveResult))
 		}
+
+		// Recorded here, not in afterAuthorization: repo-wide search shows
+		// afterAuthorization is assigned to spec.AfterAuthorization but is
+		// never actually invoked by any launch path — submitHarnessLaunch's
+		// working route commits through launch.BindOverrideReservations /
+		// FinalizeLaunch instead, and the MCP session-creation path doesn't
+		// go through this admission function at all. beforeSpawn, by
+		// contrast, IS called by every one of those launch paths
+		// immediately before the irreversible submission boundary, and the
+		// consumed guard above makes it fire at most once, so this cannot
+		// double-count the way calling it from inside the quota gate
+		// itself would (codex review on #1218, third pass). This is also
+		// the authoritative throttle-allowance reservation, not just a
+		// recording: it can still refuse here even though the quota gate
+		// above already passed, because only a check-and-reserve done
+		// atomically under one lock closes the race two concurrent agm
+		// processes would otherwise hit right at the hourly cap (codex
+		// review on #1218, fourth pass).
+		if err := reserveProviderQuotaAdmissionIfWired(harness, model, time.Now()); err != nil {
+			return nil, err
+		}
 		return reservations, nil
 	}
 	admission.afterAuthorization = func() {
 		if err := st.RecordSpawn(time.Now()); err != nil {
 			debug.Log("Warning: failed to record spawn time: %v", err)
 		}
-		// Recorded exactly once, here, after every live gate has passed
-		// and the spawn is truly proceeding — not inside the quota gate
-		// itself, which runs at both preflight and live confirmation and
-		// would double-count a single spawn (ce-93lw.18 class bug: this
-		// is the one admission point every sanctioned spawn path goes
-		// through). An empty model leaves the quota gate off entirely, so
-		// there is nothing to record.
-		if model != "" {
-			family := providerQuotaFamilyResolver(harness)(model)
-			if family != "" {
-				if err := circuitbreaker.RecordProviderQuotaAdmission(family, time.Now()); err != nil {
-					debug.Log("Warning: failed to record provider-quota admission: %v", err)
-				}
-			}
-		}
 	}
 	return admission, nil
+}
+
+// reserveProviderQuotaAdmissionIfWired atomically reserves one throttle
+// allowance for the family model resolves to under harness, when — and
+// only when — that family is currently throttled. It is a no-op when
+// there is nothing to evaluate: an empty model leaves the quota gate off
+// entirely, and a harness like pi-cli whose billing identity isn't
+// established resolves to an empty family via providerQuotaFamilyResolver.
+//
+// A fresh SpawnGate.AllowSpawn call here (rather than threading the
+// decision through from the quota gate that already ran moments earlier
+// inside circuitbreaker.Check) is a small extra file read, but it keeps
+// this function self-contained and correct on its own terms rather than
+// coupled to CheckResult's shape. Only a family the guardrail currently
+// reports as BreakerThrottled draws down the hourly allowance — a
+// healthy or halted family neither needs it (halted already refused
+// upstream) nor should count toward it, matching
+// quota.Breaker.Admit's own "no accounting outside the throttled band"
+// rule.
+//
+// Every failure to evaluate (unreadable state, ledger I/O error) fails
+// open — logged, never fatal — the same direction as every other quota
+// read in this package. Only a definite, atomically-confirmed "the
+// allowance is spent" refuses the spawn.
+func reserveProviderQuotaAdmissionIfWired(harness, model string, now time.Time) error {
+	if model == "" {
+		return nil
+	}
+	family := providerQuotaFamilyResolver(harness)(model)
+	if family == "" {
+		return nil
+	}
+
+	gate := quota.SpawnGate{FamilyForModel: func(string) string { return family }}
+	decision := gate.AllowSpawn(model)
+	if !decision.Evaluated || decision.State != quota.BreakerThrottled {
+		return nil
+	}
+
+	allowed, err := circuitbreaker.ReserveThrottledAdmission(family, quota.DefaultThrottledSpawnsPerHour, now)
+	if err != nil {
+		debug.Log("Warning: failed to reserve provider-quota admission: %v", err)
+		return nil
+	}
+	if !allowed {
+		return fmt.Errorf("%s quota is throttled and the hourly allowance (%d starts) is already spent: %s"+
+			" Start this session on a provider with headroom (`agm quota-meter` shows all of them),"+
+			" or override with %s=off",
+			family, quota.DefaultThrottledSpawnsPerHour, decision.Reason, quota.SpawnGateOverrideEnvVar)
+	}
+	return nil
 }
 
 // providerQuotaFamilyResolver returns the family resolver the provider-quota

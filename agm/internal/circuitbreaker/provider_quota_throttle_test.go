@@ -19,19 +19,28 @@ func TestRecentThrottledAdmissionsIsZeroWithNoLedger(t *testing.T) {
 	}
 }
 
+func reserveN(t *testing.T, family string, n int, now time.Time) {
+	t.Helper()
+	for i := range n {
+		allowed, err := reserveThrottledAdmission(family, 1000, now)
+		if err != nil {
+			t.Fatalf("reserveThrottledAdmission #%d: %v", i, err)
+		}
+		if !allowed {
+			t.Fatalf("reserveThrottledAdmission #%d: refused under a limit of 1000", i)
+		}
+	}
+}
+
 // The ledger has to survive across separate calls the way separate agm
 // process invocations would use it — nothing here holds anything open
 // between calls, so this is exactly the cross-process scenario
 // quota.Breaker.Admit's in-memory counter cannot cover.
-func TestRecordThrottledAdmissionPersistsAcrossCalls(t *testing.T) {
+func TestReserveThrottledAdmissionPersistsAcrossCalls(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Now()
 
-	for i := range 3 {
-		if err := recordThrottledAdmission("openai", now); err != nil {
-			t.Fatalf("recordThrottledAdmission #%d: %v", i, err)
-		}
-	}
+	reserveN(t, "openai", 3, now)
 
 	count, err := recentThrottledAdmissions("openai", now)
 	if err != nil {
@@ -46,12 +55,8 @@ func TestRecentThrottledAdmissionsPrunesEntriesOlderThanAnHour(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Now()
 
-	if err := recordThrottledAdmission("openai", now.Add(-90*time.Minute)); err != nil {
-		t.Fatalf("record old: %v", err)
-	}
-	if err := recordThrottledAdmission("openai", now.Add(-10*time.Minute)); err != nil {
-		t.Fatalf("record recent: %v", err)
-	}
+	reserveN(t, "openai", 1, now.Add(-90*time.Minute))
+	reserveN(t, "openai", 1, now.Add(-10*time.Minute))
 
 	count, err := recentThrottledAdmissions("openai", now)
 	if err != nil {
@@ -62,18 +67,12 @@ func TestRecentThrottledAdmissionsPrunesEntriesOlderThanAnHour(t *testing.T) {
 	}
 }
 
-func TestRecordThrottledAdmissionKeepsFamiliesSeparate(t *testing.T) {
+func TestReserveThrottledAdmissionKeepsFamiliesSeparate(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Now()
 
-	for range 2 {
-		if err := recordThrottledAdmission("openai", now); err != nil {
-			t.Fatalf("record openai: %v", err)
-		}
-	}
-	if err := recordThrottledAdmission("anthropic", now); err != nil {
-		t.Fatalf("record anthropic: %v", err)
-	}
+	reserveN(t, "openai", 2, now)
+	reserveN(t, "anthropic", 1, now)
 
 	openaiCount, err := recentThrottledAdmissions("openai", now)
 	if err != nil {
@@ -91,10 +90,14 @@ func TestRecordThrottledAdmissionKeepsFamiliesSeparate(t *testing.T) {
 	}
 }
 
-func TestRecordProviderQuotaAdmissionIgnoresAnEmptyFamily(t *testing.T) {
+func TestReserveThrottledAdmissionIgnoresAnEmptyFamily(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if err := RecordProviderQuotaAdmission("", time.Now()); err != nil {
+	allowed, err := ReserveThrottledAdmission("", 4, time.Now())
+	if err != nil {
 		t.Errorf("want no error for an empty family, got %v", err)
+	}
+	if !allowed {
+		t.Error("an empty family must never be refused")
 	}
 	count, err := recentThrottledAdmissions("", time.Now())
 	if err != nil {
@@ -105,19 +108,51 @@ func TestRecordProviderQuotaAdmissionIgnoresAnEmptyFamily(t *testing.T) {
 	}
 }
 
-// This is the finding's actual scenario: a family the published state
+// This is the concurrency finding's actual scenario: two "processes"
+// (sequential calls here, since the ledger is the only shared state)
+// both attempt the last reservation under a limit of 1. Only one may
+// succeed — the check and the append must be atomic under one lock, not
+// a separate read followed by a separate write, or both could observe
+// "under the limit" and both would be admitted (codex review on #1218,
+// fourth pass).
+func TestReserveThrottledAdmissionIsAtomicAtTheLimit(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Now()
+
+	first, err := ReserveThrottledAdmission("openai", 1, now)
+	if err != nil {
+		t.Fatalf("first reserve: %v", err)
+	}
+	if !first {
+		t.Fatal("first reservation under limit 1 must be allowed")
+	}
+
+	second, err := ReserveThrottledAdmission("openai", 1, now)
+	if err != nil {
+		t.Fatalf("second reserve: %v", err)
+	}
+	if second {
+		t.Fatal("second reservation must be refused once the limit is spent — this is the race the atomic reserve exists to close")
+	}
+
+	count, err := recentThrottledAdmissions("openai", now)
+	if err != nil {
+		t.Fatalf("recentThrottledAdmissions: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("count = %d, want exactly 1 — the refused reservation must not have been recorded", count)
+	}
+}
+
+// This is the finding's original scenario: a family the published state
 // marks Throttled, with the persistent ledger already holding the
-// hourly allowance's worth of admissions. checkProviderQuota must refuse
-// the spawn instead of letting the throttled band admit an unbounded
-// burst.
+// hourly allowance's worth of admissions. checkProviderQuota's advisory
+// check must refuse the spawn early, before ReserveThrottledAdmission's
+// atomic check ever runs.
 func TestCheckProviderQuotaEnforcesTheHourlyThrottleAllowance(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Now()
-	for i := range quota.DefaultThrottledSpawnsPerHour {
-		if err := recordThrottledAdmission("openai", now); err != nil {
-			t.Fatalf("record #%d: %v", i, err)
-		}
-	}
+	reserveN(t, "openai", quota.DefaultThrottledSpawnsPerHour, now)
 
 	gate := &stubQuotaGate{decision: quota.SpawnDecision{
 		Allowed:   true,
@@ -142,9 +177,7 @@ func TestCheckProviderQuotaEnforcesTheHourlyThrottleAllowance(t *testing.T) {
 func TestCheckProviderQuotaAllowsThrottledBelowTheAllowance(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Now()
-	if err := recordThrottledAdmission("openai", now); err != nil {
-		t.Fatalf("record: %v", err)
-	}
+	reserveN(t, "openai", 1, now)
 
 	gate := &stubQuotaGate{decision: quota.SpawnDecision{
 		Allowed:   true,

@@ -9,18 +9,24 @@ import (
 )
 
 // A published state older than --max-age is unevaluated, not evidence that
-// a provider is still halted. --check must fail open past that age, the
-// same way SpawnGate does, or an orchestrator polling this command can
-// keep admissions halted indefinitely off a BreakerState the refresh job
-// stopped updating long ago (codex review on #1218).
-func TestCheckQuotaMeterStateFailsOpenOnAStaleReading(t *testing.T) {
+// a provider is still halted — but "unevaluated" must not read as exit 0
+// either, since that is indistinguishable from a fresh reading positively
+// confirming nothing is halted. --check on a stale reading reports exit 1
+// ("no usable reading"), never the frozen open-breaker's exit 4 and never
+// a silent success (codex review on #1218, third pass corrects the
+// original fix, which returned nil here).
+func TestCheckQuotaMeterStateReportsUnevaluatedOnAStaleReading(t *testing.T) {
 	now := time.Now()
 	state := &quota.State{GeneratedAt: now.Add(-2 * time.Hour)}
 	providers := []quota.ProviderState{{Family: "openai", BreakerState: string(quota.BreakerOpen), Reason: "spent"}}
 
 	err := checkQuotaMeterState(state, providers, 90*time.Minute, now)
-	if err != nil {
-		t.Fatalf("want nil (stale reading must not gate), got %v", err)
+	if err == nil {
+		t.Fatal("want an error: a stale reading must not report as a confirmed-healthy exit 0")
+	}
+	var exitErr *exitError
+	if errors.As(err, &exitErr) {
+		t.Errorf("want a plain error (exit 1, generic), not an exitError with code %d — a stale reading is not a state conflict", exitErr.code)
 	}
 }
 

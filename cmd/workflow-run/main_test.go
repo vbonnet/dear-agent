@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -182,7 +183,9 @@ func readFile(f *os.File) string {
 // TestUsesDirectlyBilledCredentials guards against attaching a CodexBar
 // CLI/subscription reading to a family the router actually reaches through
 // a directly-billed API key or Vertex AI credential — a different billing
-// pool entirely (codex review on #1218).
+// pool entirely (codex review on #1218) — and separately against
+// promoting a family provider.Factory cannot construct at all with no
+// credential present (codex review on #1218, third pass).
 func TestUsesDirectlyBilledCredentials(t *testing.T) {
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -191,11 +194,21 @@ func TestUsesDirectlyBilledCredentials(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 	t.Setenv("OPENROUTER_API_KEY", "")
 
-	if usesDirectlyBilledCredentials("anthropic") {
-		t.Error("no credential detected: want false")
+	// No credential detected (AuthNone) still excludes: provider.Factory's
+	// newAnthropicProvider/newOpenAIProvider/newOpenRouterProvider/
+	// newGeminiProvider all unconditionally fail to construct under
+	// AuthNone, so a favorable CodexBar reading would otherwise promote a
+	// candidate the factory is about to refuse anyway.
+	if !usesDirectlyBilledCredentials("anthropic") {
+		t.Error("no credential detected (AuthNone): want true — the factory cannot construct this family either way")
 	}
+	if !usesDirectlyBilledCredentials("openai") {
+		t.Error("no credential detected (AuthNone): want true")
+	}
+	// ollama is the one family that genuinely constructs with no
+	// credential (AuthLocal), and must stay unfiltered.
 	if usesDirectlyBilledCredentials("ollama") {
-		t.Error("local family: want false")
+		t.Error("local family (AuthLocal): want false")
 	}
 
 	t.Setenv("OPENAI_API_KEY", "sk-test")
@@ -217,7 +230,9 @@ func TestUsesDirectlyBilledCredentials(t *testing.T) {
 
 // TestCredentialFilteredReaderDropsDirectlyBilledFamilies guards the
 // Reader wrapper itself: a snapshot family the router reaches through an
-// API key must not reach the meter's cache at all.
+// API key must not reach the meter's cache at all, and (as of the third
+// review pass on #1218) neither must one it cannot construct at all —
+// only ollama's no-credential-needed family survives filtering here.
 func TestCredentialFilteredReaderDropsDirectlyBilledFamilies(t *testing.T) {
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -228,6 +243,7 @@ func TestCredentialFilteredReaderDropsDirectlyBilledFamilies(t *testing.T) {
 		Providers: []quota.ProviderQuota{
 			{Family: "openai", Availability: quota.AvailabilityOK},
 			{Family: "anthropic", Availability: quota.AvailabilityOK},
+			{Family: "ollama", Availability: quota.AvailabilityOK},
 		},
 	}
 	reader := credentialFilteredReader{inner: fakeQuotaReader{snapshot: snapshot}}
@@ -235,8 +251,12 @@ func TestCredentialFilteredReaderDropsDirectlyBilledFamilies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if len(got.Providers) != 1 || got.Providers[0].Family != "anthropic" {
-		t.Errorf("filtered providers = %+v, want only anthropic (openai is API-key billed)", got.Providers)
+	// openai: API-key billed, filtered. anthropic: no credential
+	// detected (AuthNone) — provider.Factory cannot construct it either,
+	// filtered too. ollama: AuthLocal, genuinely constructs with no
+	// credential, survives.
+	if len(got.Providers) != 1 || got.Providers[0].Family != "ollama" {
+		t.Errorf("filtered providers = %+v, want only ollama", got.Providers)
 	}
 }
 
@@ -248,3 +268,35 @@ func (f fakeQuotaReader) Read(context.Context) (*quota.Snapshot, error) { return
 // (TestMeetsMinCodexBarVersion) so agm's own scheduled refresh can
 // enforce the same floor before publishing, rather than living only
 // here where nothing else could reach it.
+
+func TestValidateQuotaModeAcceptsTheThreeSpellings(t *testing.T) {
+	for _, mode := range []string{"", "auto", "on", "off"} {
+		if err := validateQuotaMode(mode); err != nil {
+			t.Errorf("validateQuotaMode(%q): want no error, got %v", mode, err)
+		}
+	}
+}
+
+func TestValidateQuotaModeRejectsAnythingElse(t *testing.T) {
+	if err := validateQuotaMode("onn"); err == nil {
+		t.Fatal("want an error for an unrecognized -quota value")
+	}
+}
+
+// buildExecutor's no-roles.yaml direct-Anthropic fallback never calls
+// buildQuotaMeter, so a bad -quota value was previously accepted silently
+// on that path instead of surfacing the documented error — a typo could
+// invalidate a quota-routing experiment with no diagnostic (codex review
+// on #1218, third pass).
+func TestBuildExecutorRejectsABadQuotaModeEvenWithoutARolesFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, err := buildExecutor("", "onn", logger)
+	if err == nil {
+		t.Fatal("want an error for -quota=onn, even with no roles.yaml present")
+	}
+	if !strings.Contains(err.Error(), "onn") {
+		t.Errorf("error %q does not name the bad value", err.Error())
+	}
+}

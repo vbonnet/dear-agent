@@ -15,16 +15,23 @@ package circuitbreaker
 //
 // This ledger is the file-backed equivalent for the process that does
 // sit on the spawn path: agm itself. It is deliberately independent of
-// quota.Breaker's in-memory admitted map (pkg/llm/quota cannot import
-// agm/internal/lock — the flock helper is scoped to the agm module tree)
-// and deliberately simpler: it records every admission agm actually
-// authorizes for a family regardless of the breaker state at the moment
-// of recording, and the hourly cap is enforced only when reading, and
-// only while the family is currently throttled. That keeps the write
-// path (admission.go's afterAuthorization, called once per authorized
-// spawn) unconditional and cheap, and keeps the enforcement decision
-// exactly where the finding says it belongs: the final admission
-// boundary.
+// quota.Breaker's in-memory admitted map, because pkg/llm/quota cannot
+// import agm/internal/lock — the flock helper is scoped to the agm
+// module tree.
+//
+// admission.go calls into this in two layers: a cheap, read-only,
+// advisory check (recentThrottledAdmissions, via checkProviderQuota) that
+// can refuse early before any launch preparation happens, and the
+// authoritative ReserveThrottledAdmission — a single atomic
+// check-then-append under one flock — called once a spawn has passed
+// every other live gate and is about to proceed. The advisory check
+// alone is not enough: two concurrent agm processes can each observe
+// "under the limit" before either has recorded its own admission, and
+// both proceed. Only a check and an append performed under the same lock
+// closes that race; that is what ReserveThrottledAdmission does, and why
+// admission.go's beforeSpawn can still refuse a spawn at that point even
+// after the earlier advisory check passed it (codex review on #1218,
+// third pass).
 //
 // Every failure mode here fails open, matching the rest of the quota
 // package's philosophy: a ledger this process cannot read or write is
@@ -48,17 +55,31 @@ import (
 // XDG_STATE_HOME/HOME process-global state.
 var throttleLedgerPath = quota.DefaultThrottleLedgerPath
 
-// RecordProviderQuotaAdmission records one admission for family in the
-// persistent throttle ledger. Callers record exactly once per spawn that
+// ReserveThrottledAdmission atomically checks family's hourly admission
+// count against limit and, only if it is still under the limit, records
+// this admission — all under the same cross-process lock. allowed is
+// meaningful only when err is nil; a non-nil err means the ledger could
+// not be evaluated at all (fail open, like every other quota read in this
+// package: unreadable is never evidence of exhaustion).
+//
+// The check-then-append MUST happen under one lock, not as two separate
+// calls (a read via recentThrottledAdmissions, then a write via a
+// separate append): two concurrent agm processes each observing
+// count < limit before either has written would otherwise both proceed,
+// admitting one more start than the limit allows — worse under a larger
+// number of concurrent starts. Callers record exactly once per spawn that
 // actually launches — after every live gate has passed and the spawn is
 // truly proceeding, never at a preflight check that might not lead to a
 // launch — so the ledger reflects real load rather than double-counting
 // the same spawn's repeated admission checks.
-func RecordProviderQuotaAdmission(family string, now time.Time) error {
+func ReserveThrottledAdmission(family string, limit int, now time.Time) (allowed bool, err error) {
 	if family == "" {
-		return nil
+		return true, nil
 	}
-	return recordThrottledAdmission(family, now)
+	if limit < 0 {
+		return true, nil
+	}
+	return reserveThrottledAdmission(family, limit, now)
 }
 
 // recentThrottledAdmissions reports how many admissions family has
@@ -84,52 +105,78 @@ func recentThrottledAdmissions(family string, now time.Time) (int, error) {
 	return count, nil
 }
 
-// recordThrottledAdmission appends one admission timestamp for family,
-// pruning entries older than an hour for every family while it has the
-// ledger open. Concurrent agm processes serialize on an flock so a
-// read-modify-write race cannot drop an update.
-func recordThrottledAdmission(family string, now time.Time) error {
+// reserveThrottledAdmission is ReserveThrottledAdmission's implementation:
+// prune entries older than an hour for every family, check family's
+// remaining count against limit, and append only if it is still under —
+// all while holding the ledger's flock, so a concurrent agm process
+// cannot observe the pre-append count and race this one.
+func reserveThrottledAdmission(family string, limit int, now time.Time) (bool, error) {
 	path, err := throttleLedgerPath()
 	if err != nil {
-		return err
+		return true, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+		return true, err
 	}
 
 	fl, err := lock.New(path + ".lock")
 	if err != nil {
-		return err
+		return true, err
 	}
 	if err := fl.Lock(); err != nil {
-		return err
+		return true, err
 	}
 	defer fl.Unlock()
 
 	entries, err := readThrottleLedger(path)
 	if err != nil {
-		return err
+		return true, err
 	}
+
 	cutoff := now.Add(-time.Hour)
+	pruned := pruneExpiredEntries(entries, cutoff, family)
+	keptFamily := activeEntriesSince(entries[family], cutoff)
+
+	allowed := len(keptFamily) < limit
+	if allowed {
+		keptFamily = append(keptFamily, now)
+	}
+	if len(keptFamily) > 0 {
+		pruned[family] = keptFamily
+	}
+
+	if err := writeThrottleLedger(path, pruned); err != nil {
+		return true, err
+	}
+	return allowed, nil
+}
+
+// pruneExpiredEntries copies entries, dropping every timestamp at or
+// before cutoff and omitting exceptFamily entirely — the caller computes
+// exceptFamily's kept slice separately, since a reservation may still
+// append to it.
+func pruneExpiredEntries(entries map[string][]time.Time, cutoff time.Time, exceptFamily string) map[string][]time.Time {
 	pruned := make(map[string][]time.Time, len(entries))
 	for fam, ats := range entries {
-		var kept []time.Time
-		for _, at := range ats {
-			if at.After(cutoff) {
-				kept = append(kept, at)
-			}
+		if fam == exceptFamily {
+			continue
 		}
-		if fam == family {
-			kept = append(kept, now)
-		}
-		if len(kept) > 0 {
+		if kept := activeEntriesSince(ats, cutoff); len(kept) > 0 {
 			pruned[fam] = kept
 		}
 	}
-	if _, ok := pruned[family]; !ok {
-		pruned[family] = []time.Time{now}
+	return pruned
+}
+
+// activeEntriesSince returns the timestamps in ats that are after cutoff.
+func activeEntriesSince(ats []time.Time, cutoff time.Time) []time.Time {
+	var kept []time.Time
+	for _, at := range ats {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
 	}
-	return writeThrottleLedger(path, pruned)
+	return kept
 }
 
 func readThrottleLedger(path string) (map[string][]time.Time, error) {
