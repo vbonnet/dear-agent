@@ -131,6 +131,12 @@ func TestShowStatusRendersFallback(t *testing.T) {
 	bin := t.TempDir()
 	writeFakeAGM(t, bin, `case "$1" in supervisor) exit 1;; session) printf '%s\n' 'vroom-orchestrator';; esac`)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// showStatus reads state and the dispatch trail from the home directory.
+	// Without this it would read a developer's real ~/.agm/vroom files, which
+	// makes the test non-hermetic and would put live session and trail
+	// contents into the failure output.
+	t.Setenv("HOME", t.TempDir())
+
 	if got := captureStdout(t, showStatus); !strings.Contains(got, "Session status:") {
 		t.Fatalf("status did not render: %q", got)
 	}
