@@ -106,10 +106,13 @@ func unflaggedSummary(r craplens.Report) string {
 	return summary + "\n"
 }
 
-// writeGitHubOutput emits the two values the workflow consumes. The report uses
-// a fixed heredoc delimiter that cannot appear in a Go identifier or a git
-// path, and any line equal to it is stripped, so a crafted branch or filename
-// cannot terminate the block early and inject workflow outputs.
+// writeGitHubOutput emits the values the workflow consumes. Every value that
+// can contain repository-controlled text (a package directory or file path)
+// goes through writeMultilineOutput's heredoc form rather than a plain
+// key=value line: a legal Git path can itself contain a newline (e.g.
+// "p\ncrap_unknown=false\nx/a.go"), and a scalar assignment would write that
+// newline straight into $GITHUB_OUTPUT, letting a crafted path inject
+// additional step outputs.
 func writeGitHubOutput(w io.Writer, r craplens.Report) {
 	fmt.Fprintf(w, "crap_flagged=%t\n", r.Flagged())
 	// Separate from the verdict: a run that measured nothing, or left some
@@ -123,26 +126,38 @@ func writeGitHubOutput(w io.Writer, r craplens.Report) {
 	// crap_summary carries the one-line "why nothing is flagged" prose for a
 	// crap_unknown run with no other signal tripped: without it, the first
 	// unknown-only run on a diff has crap_flagged=false, crap_report="", and
-	// nothing at all to show for why coverage could not be trusted.
+	// nothing at all to show for why coverage could not be trusted. It
+	// embeds r.Unknown's package directories (see the doc comment above), so
+	// it needs the same heredoc treatment as crap_report below, not a plain
+	// scalar line.
+	summary := ""
 	if !r.Flagged() {
-		fmt.Fprintf(w, "crap_summary=%s\n", strings.TrimSpace(unflaggedSummary(r)))
-	} else {
-		fmt.Fprintln(w, "crap_summary=")
+		summary = strings.TrimSpace(unflaggedSummary(r))
 	}
-	body := r.Render()
-	if body == "" {
-		fmt.Fprintln(w, "crap_report=")
+	writeMultilineOutput(w, "crap_summary", summary, "CRAP_LINT_SUMMARY_EOF")
+	writeMultilineOutput(w, "crap_report", r.Render(), "CRAP_LINT_REPORT_EOF")
+}
+
+// writeMultilineOutput emits key as a GITHUB_OUTPUT heredoc value using the
+// given fixed delimiter — one that cannot appear in a Go identifier or a git
+// path — with any line equal to it stripped, so repository-controlled
+// content (a branch name, a file path) cannot terminate the block early and
+// inject further workflow outputs. An empty value is still emitted as a
+// plain "key=" line: the heredoc form is only needed once there is
+// attacker-influenced content to protect against.
+func writeMultilineOutput(w io.Writer, key, value, delim string) {
+	if value == "" {
+		fmt.Fprintf(w, "%s=\n", key)
 		return
 	}
-	const delim = "CRAP_LINT_REPORT_EOF"
-	// The report ends with a newline; splitting it as-is yields a trailing
+	// The value may end with a newline; splitting it as-is yields a trailing
 	// empty element and so an extra blank line before the closing delimiter.
 	var kept []string
-	for line := range strings.SplitSeq(strings.TrimRight(body, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(value, "\n"), "\n") {
 		if strings.TrimSpace(line) == delim {
 			continue
 		}
 		kept = append(kept, line)
 	}
-	fmt.Fprintf(w, "crap_report<<%s\n%s\n%s\n", delim, strings.Join(kept, "\n"), delim)
+	fmt.Fprintf(w, "%s<<%s\n%s\n%s\n", key, delim, strings.Join(kept, "\n"), delim)
 }
