@@ -83,6 +83,25 @@ still treat a flagged PR as needing a split before line-by-line review, but an
 oversized diff does not by itself force escalation the way the triggers above
 do.
 
+**Code health is flagged the same way, and is also advisory:** the same
+deterministic Action runs `tools/crap-lint`, which joins cyclomatic complexity
+with test coverage on the functions the diff changed
+(`complexity^2 * (1 - coverage)^3 + complexity`, the Crap4j formula) and folds
+its findings into the same comment. It names changed functions scoring over 30
+and touched packages measured at 0% coverage, and asks for tests or a split. It
+comments only, never forces `needs-human-review`, and never fails a check.
+
+That signal owns exactly one thing: complexity no test exercises. Discarded
+error returns are owned by `errcheck` and raw complexity by `gocyclo`, both
+already enabled in `.golangci.yml` with `new-from-merge-base` and therefore
+already diff-scoped and already hard-gating; packages that ship no test files
+are owned by the `zero-test` scan in `cmd/structural-health`. Reviewers should
+not ask `crap-lint` to cover those, and should not treat its silence as
+evidence about them. A package it reports as *unknown* rather than untested is
+one whose tests need infrastructure the job cannot provide (a live tmux socket,
+a Dolt server, a container runtime); that is a measurement gap, not a finding.
+`.claude/skills/code-health-budget/SKILL.md` is the author-side companion.
+
 **Stacked PRs and this protocol:** the five-dimension review workflow only
 triggers for `branches: [main]`, and additionally validates that
 `.base.ref == "main"`. A stacked PR (base ≠ `main`) does not get this review

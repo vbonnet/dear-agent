@@ -1,0 +1,257 @@
+package craplens
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os/exec"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// diffTimeout bounds the diff walk so a wedged repository cannot hold a CI job
+// open for its whole timeout budget.
+const diffTimeout = 60 * time.Second
+
+// lineRange is an inclusive span of head-side line numbers a hunk touched.
+type lineRange struct {
+	start int
+	end   int
+}
+
+// touchedFile is one changed Go source file and the head lines the diff wrote.
+type touchedFile struct {
+	// Path is repository-relative.
+	Path string
+	// Added reports whether the file is new in this diff, which is how a
+	// wholly-new package is distinguished from an edited one.
+	Added bool
+	// Ranges are the head-side line spans the diff touched. Empty for a pure
+	// deletion, which is filtered out before this point.
+	Ranges []lineRange
+}
+
+// touched is the set of changed Go files, keyed by path.
+type touchedSet map[string]*touchedFile
+
+// packageIsNew reports whether every changed file in the package was added by
+// this diff. That is the "new package shipping untested" case, as opposed to
+// an existing untested package that merely got edited.
+func (t touchedSet) packageIsNew(importPathSuffix string) bool {
+	sawOne := false
+	for _, f := range t {
+		if path.Dir(f.Path) != importPathSuffix {
+			continue
+		}
+		sawOne = true
+		if !f.Added {
+			return false
+		}
+	}
+	return sawOne
+}
+
+// changedGoFiles returns the non-test Go files the diff touched, with the
+// head-side line ranges it wrote in each.
+//
+// The range is base...head (three dots), matching pr-size-scope.yml: it diffs
+// head against the merge base, so commits landed on the base branch since the
+// PR opened are not attributed to this PR.
+//
+// Test files are excluded on purpose. A test's own complexity is not what this
+// signal is about, and including them would let a diff improve its score by
+// adding a branchy test.
+func changedGoFiles(ctx context.Context, repoDir, base, head string) (touchedSet, error) {
+	ctx, cancel := context.WithTimeout(ctx, diffTimeout)
+	defer cancel()
+
+	argv := []string{}
+	if repoDir != "" {
+		argv = append(argv, "-C", repoDir)
+	}
+	// -U0 so each hunk header names exactly the lines that changed rather than
+	// three lines of untouched context on either side, which would attribute a
+	// neighbouring function to this diff.
+	argv = append(argv, "diff", "-M", "-U0", "--diff-filter=ACMR", base+"..."+head, "--", "*.go")
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff %s...%s failed: %w: %s", base, head, err, strings.TrimSpace(stderr.String()))
+	}
+
+	return parseUnifiedDiff(string(out)), nil
+}
+
+// parseUnifiedDiff extracts changed files and their head-side line ranges from
+// `git diff -U0` output.
+//
+// Within one file's section git emits `diff --git`, then any mode lines
+// including `new file mode`, then `+++ b/<path>`, then the hunks. The
+// added-file marker therefore arrives before the path it describes, so it is
+// held in newFile until the path line names its file.
+func parseUnifiedDiff(out string) touchedSet {
+	files := touchedSet{}
+	var current *touchedFile
+	newFile := false
+
+	scanner := bufio.NewScanner(strings.NewReader(out))
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			current = nil
+			newFile = false
+		case strings.HasPrefix(line, "new file mode"):
+			newFile = true
+		case strings.HasPrefix(line, "+++ b/"):
+			p := strings.TrimPrefix(line, "+++ b/")
+			if !isScorableGoFile(p) {
+				current = nil
+				continue
+			}
+			if files[p] == nil {
+				files[p] = &touchedFile{Path: p}
+			}
+			current = files[p]
+			if newFile {
+				current.Added = true
+			}
+		case strings.HasPrefix(line, "@@"):
+			if current == nil {
+				continue
+			}
+			if r, ok := parseHunkHeader(line); ok {
+				current.Ranges = append(current.Ranges, r)
+			}
+		}
+	}
+
+	// A file whose every hunk was a pure deletion has no head-side lines left
+	// to score.
+	for p, f := range files {
+		if len(f.Ranges) == 0 {
+			delete(files, p)
+		}
+	}
+	return files
+}
+
+// isScorableGoFile reports whether a path is Go source this signal scores.
+// Tests, generated output, vendored code, and testdata fixtures are excluded.
+func isScorableGoFile(p string) bool {
+	if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+		return false
+	}
+	for part := range strings.SplitSeq(p, "/") {
+		switch part {
+		case "vendor", "testdata", "node_modules", ".worktrees":
+			return false
+		}
+	}
+	return !strings.HasSuffix(p, ".pb.go") && !strings.HasSuffix(p, "_generated.go")
+}
+
+// parseHunkHeader reads the head-side span from a unified-diff hunk header of
+// the form `@@ -a,b +c,d @@`. A hunk with a zero head-side count is a pure
+// deletion and touches no head line.
+func parseHunkHeader(line string) (lineRange, bool) {
+	_, rest, found := strings.Cut(line, "+")
+	if !found {
+		return lineRange{}, false
+	}
+	if end := strings.IndexAny(rest, " @"); end >= 0 {
+		rest = rest[:end]
+	}
+	startStr, countStr, hasCount := strings.Cut(rest, ",")
+	start, err := strconv.Atoi(startStr)
+	if err != nil {
+		return lineRange{}, false
+	}
+	count := 1
+	if hasCount {
+		count, err = strconv.Atoi(countStr)
+		if err != nil {
+			return lineRange{}, false
+		}
+	}
+	if count == 0 {
+		return lineRange{}, false
+	}
+	return lineRange{start: start, end: start + count - 1}, true
+}
+
+// packagesOf returns the distinct package directories the diff touched, as
+// repository-relative paths.
+func packagesOf(files touchedSet) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range files {
+		dir := path.Dir(f.Path)
+		if !seen[dir] {
+			seen[dir] = true
+			out = append(out, dir)
+		}
+	}
+	return out
+}
+
+// overlaps reports whether a function's line span intersects any changed range.
+func overlaps(ranges []lineRange, start, end int) bool {
+	for _, r := range ranges {
+		if r.start <= end && start <= r.end {
+			return true
+		}
+	}
+	return false
+}
+
+// fileAt returns a file's contents at a revision.
+func fileAt(ctx context.Context, repoDir, rev, rel string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, diffTimeout)
+	defer cancel()
+
+	argv := []string{}
+	if repoDir != "" {
+		argv = append(argv, "-C", repoDir)
+	}
+	// The pathspec is passed after `--` so a path that begins with a dash
+	// cannot be read as an option.
+	argv = append(argv, "show", rev+":"+rel)
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git show %s:%s failed: %w", rev, rel, err)
+	}
+	return out, nil
+}
+
+// headIsCheckedOut reports whether the working tree is at the head revision.
+//
+// Coverage is measured by running the package tests against the checkout, so
+// it is only meaningful when the checkout IS the head. When it is not, every
+// package is left unknown rather than scored against the wrong source.
+func headIsCheckedOut(ctx context.Context, repoDir, head string) bool {
+	resolve := func(rev string) (string, bool) {
+		argv := []string{}
+		if repoDir != "" {
+			argv = append(argv, "-C", repoDir)
+		}
+		argv = append(argv, "rev-parse", "--verify", rev+"^{commit}")
+		out, err := exec.CommandContext(ctx, "git", argv...).Output()
+		if err != nil {
+			return "", false
+		}
+		return strings.TrimSpace(string(out)), true
+	}
+	want, ok := resolve(head)
+	if !ok {
+		return false
+	}
+	got, ok := resolve("HEAD")
+	return ok && got == want
+}
