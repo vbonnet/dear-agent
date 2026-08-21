@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-20 -->
 
-**Version:** 2.2
+**Version:** 2.3
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -57,7 +57,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-21** When `reply-resolve` finds its requested reply is already the thread's most recent comment, the system shall skip posting and proceed to resolution.
 
-**RESOLVE-REVIEW-THREADS-22** When `reply-resolve` posts a reply but cannot resolve the thread, the system shall state that the reply is posted, warn against re-running the command, and name the resolution-only command to finish.
+**RESOLVE-REVIEW-THREADS-22** When `reply-resolve` posts a reply but a transient failure (the resolution itself, or the placement re-read that precedes it) prevents resolution, the system shall state that the reply is posted and direct the user to retry `reply-resolve`, which finds the posted reply by its text and resolves without reposting it.
 
 **RESOLVE-REVIEW-THREADS-23** When comparing an existing comment against a requested reply, the system shall compare the bodies without whitespace collapsing or truncation, ignoring only surrounding whitespace.
 
@@ -90,6 +90,12 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-37** When resolving on behalf of a reply, the system shall verify at the pre-mutation read that the named reply is still the last comment.
 
 **RESOLVE-REVIEW-THREADS-38** When the thread becomes resolved while its history is being paged, the system shall report it as skipped and post no reply.
+
+**RESOLVE-REVIEW-THREADS-39** When `reply-resolve`'s resolution is refused for access reasons, the system shall state that an immediate retry will be denied too and direct the user to fix credentials before finishing with `reply-resolve`, not an unguarded resolution-only command.
+
+**RESOLVE-REVIEW-THREADS-40** When a reply mutation succeeds but its response omits the new comment's ID, the system shall leave the thread unresolved, state that the reply may already be live, and direct the user to re-run the same command rather than reword and repost.
+
+**RESOLVE-REVIEW-THREADS-41** When resolving a thread whose resolution names a specific last comment, the system shall verify that comment against the resolution mutation's own response and, on a mismatch, reopen the thread rather than leave it resolved on stale evidence.
 
 ## BDD Traceability
 

@@ -354,12 +354,16 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 				"command once you have", rErr)
 		}
 		if isAccessDenied(rErr) {
-			// Prescribing the resolve-only retry here would just repeat the
-			// denied mutation. This needs a credential or permission fix.
+			// Retrying immediately would just repeat the denied mutation; the
+			// credential problem has to be fixed first. Once it is, prefer
+			// reply-resolve over bare resolve for the same reason as the
+			// generic case below: it preserves the anchor check.
 			return fail("your reply is posted, but GitHub refused the resolution: %v\n"+
-				"this is an access problem, not a transient one: retrying will be denied too.\n"+
-				"check `gh auth status` and that the token can resolve threads on this repo, "+
-				"then finish with: resolve-review-threads resolve %s", rErr, threadID)
+				"this is an access problem, not a transient one: retrying immediately "+
+				"will be denied too.\n"+
+				"check `gh auth status` and that the token can resolve threads on this "+
+				"repo, then finish with:\n"+
+				"  resolve-review-threads reply-resolve %s \"...\"", rErr, threadID)
 		}
 		return fail("the reply is posted but the thread is NOT resolved (likely "+
 			"transient): %v\n"+
@@ -476,9 +480,11 @@ func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID 
 	after, err := fetchThread(ctx, threadID)
 	if err != nil {
 		return fail("your reply is posted but the thread state could not be "+
-			"re-read, so it was NOT resolved: %v\n"+
-			"do NOT re-run reply-resolve (it would repost); check the thread, then:\n"+
-			"  resolve-review-threads resolve %s", err, threadID)
+			"re-read, so it was NOT resolved (likely transient): %v\n"+
+			"this is safe to retry: reply-resolve will see your reply is already "+
+			"last and resolve without reposting it. Bare resolve would work too, "+
+			"but it drops the anchor check this thread is relying on, so prefer:\n"+
+			"  resolve-review-threads reply-resolve %s \"...\"", err, threadID)
 	}
 	switch checkReplyPlacement(after.PrevID, after.LastID, wantPrevID, wantLastID) {
 	case replyBuried:
