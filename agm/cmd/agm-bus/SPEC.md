@@ -44,8 +44,6 @@ missing, and reports broker status without treating "not running" as an error.
 
 **AGMBUS-14** When `agm-bus discord-reset` is asked to act as an agent absent from the portal config, the system shall fail rather than fall back to another configured bot.
 
-**AGMBUS-15** When the serve command is assembled, the system shall separate flag parsing, broker construction, and adapter startup into independently callable seams so the daemon's setup is verifiable in-process rather than only by running the built binary.
-
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

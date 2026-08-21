@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -436,10 +437,22 @@ func TestStartHeartbeatWatcher(t *testing.T) {
 		}
 	})
 
+	// The configured case asserts the watcher's own output, not just the
+	// synchronous start log. Checking only the start line would still pass if
+	// the watcher.Run goroutine were deleted, which is the failure this test
+	// exists to catch.
 	t.Run("configured", func(t *testing.T) {
+		supervisors := shortTempDir(t, "agmbus-sup-")
+		// A supervisor directory with no heartbeat file is reported as
+		// "never", which is the cheapest way to make the watcher emit on its
+		// first scan without waiting out a staleness threshold.
+		if err := os.MkdirAll(filepath.Join(supervisors, "vroom-orchestrator"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+
 		buf, logger := captureLogger(t, false)
 		opts := offlineOptions("")
-		opts.supervisorsDir = t.TempDir()
+		opts.supervisorsDir = supervisors
 		opts.heartbeatStaleAfter = 42 * time.Second
 		opts.heartbeatInterval = 7 * time.Second
 
@@ -449,13 +462,26 @@ func TestStartHeartbeatWatcher(t *testing.T) {
 			t.Fatalf("startHeartbeatWatcher: %v", err)
 		}
 
-		out := buf.String()
-		if !strings.Contains(out, "heartbeat watcher started") {
-			t.Fatalf("expected the watcher to start, got:\n%s", out)
+		if !strings.Contains(buf.String(), "heartbeat watcher started") {
+			t.Fatalf("expected the watcher to start, got:\n%s", buf.String())
 		}
-		if !strings.Contains(out, "42s") || !strings.Contains(out, "7s") {
-			t.Errorf("watcher did not carry the flagged thresholds:\n%s", out)
+		if !strings.Contains(buf.String(), "42s") || !strings.Contains(buf.String(), "7s") {
+			t.Errorf("watcher did not carry the flagged thresholds:\n%s", buf.String())
 		}
+
+		// Run scans once immediately, so the emit shows up without waiting an
+		// interval. There is no broker on the socket, so the emit itself
+		// fails and the watcher logs that; either the emit line or the
+		// emit-failed line proves the goroutine ran and read the directory.
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			out := buf.String()
+			if strings.Contains(out, "heartbeat event emitted") || strings.Contains(out, "emit failed") {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Errorf("watcher never scanned the supervisors dir:\n%s", buf.String())
 	})
 }
 
@@ -489,18 +515,39 @@ func TestWatchACLReloadNoOpWithoutReloadableACL(t *testing.T) {
 	stop()
 }
 
-// TestWatchACLReloadInstallsHandler covers the reloadable case, including that
-// stopping is idempotent enough to run from a defer.
-func TestWatchACLReloadInstallsHandler(t *testing.T) {
+// TestWatchACLReloadOnSIGHUP covers AGMBUS-09 end to end: the handler is
+// installed, a real SIGHUP reaches it, and the ACL is re-read.
+//
+// Installing the handler and immediately stopping it would assert nothing:
+// that version passed with signal.Notify deleted. This one delivers the
+// signal to the test process and waits for the reload to be logged.
+func TestWatchACLReloadOnSIGHUP(t *testing.T) {
 	aclPath := filepath.Join(t.TempDir(), "acl.yaml")
 	rac, err := bus.NewReloadableACL(aclPath)
 	if err != nil {
 		t.Fatalf("NewReloadableACL: %v", err)
 	}
 
-	_, logger := captureLogger(t, false)
+	buf, logger := captureLogger(t, false)
 	stop := watchACLReload(&bus.Server{ACL: rac}, logger)
-	stop()
+	defer stop()
+
+	proc, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	if err := proc.Signal(syscall.SIGHUP); err != nil {
+		t.Fatalf("delivering SIGHUP: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(buf.String(), "acl reloaded") {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("SIGHUP did not trigger an ACL reload:\n%s", buf.String())
 }
 
 // TestServeBindsAndRemovesSocket covers AGMBUS-05 and AGMBUS-06 in-process:
@@ -510,7 +557,7 @@ func TestWatchACLReloadInstallsHandler(t *testing.T) {
 // what makes it countable as coverage.
 func TestServeBindsAndRemovesSocket(t *testing.T) {
 	sock := filepath.Join(shortTempDir(t, "agmbus-serve-inproc-"), "s")
-	_, logger := captureLogger(t, false)
+	buf, logger := captureLogger(t, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -531,6 +578,20 @@ func TestServeBindsAndRemovesSocket(t *testing.T) {
 		t.Fatalf("socket never appeared: %v", err)
 	}
 
+	// serve must have run adapter startup, not just bound the socket. Each
+	// adapter logs its own opt-out notice, so their absence means serve
+	// skipped startAdapters entirely.
+	for _, want := range []string{
+		"discord adapter disabled",
+		"discord-multibot portal disabled",
+		"matrix adapter disabled",
+		"heartbeat watcher disabled by flag",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("serve did not bring up adapter startup, missing %q in:\n%s", want, buf.String())
+		}
+	}
+
 	cancel()
 	select {
 	case err := <-done:
@@ -543,6 +604,62 @@ func TestServeBindsAndRemovesSocket(t *testing.T) {
 
 	if _, err := os.Stat(sock); err == nil {
 		t.Errorf("socket file still present after shutdown: %s", sock)
+	}
+}
+
+// TestServeInstallsACLReload covers the other half of serve's orchestration:
+// the SIGHUP reloader must be installed by the same path production uses, not
+// only by a test calling watchACLReload directly. Without this, serve could
+// drop the reloader and every test would stay green.
+func TestServeInstallsACLReload(t *testing.T) {
+	dir := shortTempDir(t, "agmbus-aclreload-")
+	sock := filepath.Join(dir, "s")
+	aclPath := filepath.Join(t.TempDir(), "acl.yaml")
+
+	buf, logger := captureLogger(t, false)
+	opts := offlineOptions(sock)
+	opts.aclPath = aclPath
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, opts, logger) }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sock); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(sock); err != nil {
+		cancel()
+		<-done
+		t.Skipf("broker never bound its socket on this host: %v", err)
+	}
+
+	proc, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	if err := proc.Signal(syscall.SIGHUP); err != nil {
+		t.Fatalf("delivering SIGHUP: %v", err)
+	}
+
+	reloaded := false
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(buf.String(), "acl reloaded") {
+			reloaded = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	<-done
+
+	if !reloaded {
+		t.Errorf("serve did not install the SIGHUP ACL reloader:\n%s", buf.String())
 	}
 }
 

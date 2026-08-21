@@ -432,14 +432,25 @@ func startAdapters(ctx context.Context, opts *serveOptions, srv *bus.Server, log
 	return startHeartbeatWatcher(ctx, opts, srv, logger)
 }
 
-// serve runs the broker for the lifetime of ctx. It owns no signal handling,
-// so a caller (a test, or cmdServe with its signal context) decides when the
-// daemon stops.
+// serve runs the broker for the lifetime of ctx: it builds the server, brings
+// up the optional adapters, installs the SIGHUP ACL reloader, and blocks in
+// Start until ctx is cancelled.
+//
+// This is the whole daemon orchestration and the only copy of it. cmdServe
+// supplies a signal-cancelled context and calls straight through, so a test
+// driving serve with its own context exercises the same ordering production
+// uses. An earlier revision had cmdServe repeat these steps independently,
+// which let the two drift and would have kept the in-process tests green
+// through a production reordering.
 func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 	srv, err := buildServer(opts, logger)
 	if err != nil {
 		return err
 	}
+
+	stopACLWatch := watchACLReload(srv, logger)
+	defer stopACLWatch()
+
 	if err := startAdapters(ctx, opts, srv, logger); err != nil {
 		return err
 	}
@@ -479,25 +490,13 @@ func cmdServe(args []string) error {
 	}
 	logger := newServeLogger(opts.verbose, os.Stderr)
 
-	srv, err := buildServer(opts, logger)
-	if err != nil {
-		return err
-	}
-
 	// Signal-driven shutdown: SIGINT/SIGTERM cancel the context so the
-	// server drains connections and removes the socket file. SIGHUP triggers
-	// an ACL reload without restarting — handy for policy updates.
+	// server drains connections and removes the socket file. SIGHUP is
+	// handled inside serve, which reloads the ACL without restarting.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	stopACLWatch := watchACLReload(srv, logger)
-	defer stopACLWatch()
-
-	if err := startAdapters(ctx, opts, srv, logger); err != nil {
-		return err
-	}
-
-	return srv.Start(ctx)
+	return serve(ctx, opts, logger)
 }
 
 // expandHome replicates bus.expandHome (unexported) so the CLI can resolve
