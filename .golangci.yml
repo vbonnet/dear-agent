@@ -75,7 +75,15 @@ linters:
         - (*os.File).Sync
 
     staticcheck:
-      checks: ["all", "-SA4010"]  # Disable unused append check
+      # All checks, no suppressions. SA4010 (result of append never used) was
+      # suppressed in 013ff3677 as part of trimming the linter set to a
+      # then-passing baseline, on the stated plan to re-enable incrementally.
+      # It never was, and the one violation it was hiding turned out to be a
+      # real bug: GeminiCLIAdapter.ImportConversation decoded its payload and
+      # dropped it, so an import produced a session with no history. The
+      # module is clean under SA4010 as of that fix, so the suppression is
+      # retired rather than baselined.
+      checks: ["all"]
 
     revive:
       severity: warning
