@@ -133,7 +133,7 @@ func TestRootArtifactInstallerPublishesSPECContentAddressWithoutClobber(t *testi
 		`elif /bin/ln "$staging" "$pinned_destination"; then :; else reuse_pinned; fi`,
 		`test "$(file_identity "$pinned_destination")" = "$staged_identity"`,
 		`test "$(file_identity "$destination")" = "$staged_identity"; then /bin/rm -f "$staging"`,
-		`elif /bin/mv -f "$staging" "$destination"; then test ! -e "$staging" && test ! -L "$staging" || /bin/rm -f "$staging"`,
+		`elif /bin/mv -f "$staging" "$destination"; then if test -e "$staging" || test -L "$staging"; then /bin/rm -f "$staging"; fi`,
 		`else trusted_file "$destination" || exit 2; test "$(file_identity "$destination")" = "$staged_identity" || exit 2; /bin/rm -f "$staging"; fi`,
 	} {
 		if !strings.Contains(script, required) {

@@ -464,6 +464,63 @@ if (logs.length !== logsBeforeLostLeader + 1 || prompts.length !== promptsBefore
 	}
 }
 
+func TestOpenCodeSPECContractPluginReadsNodeCompatStatusPipeUnderBun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("OpenCode source transport deliberately requires POSIX process groups")
+	}
+	bun := os.Getenv("OPENCODE_BUN")
+	if bun == "" {
+		resolved, lookupErr := exec.LookPath("bun")
+		if lookupErr != nil {
+			t.Skip("bun is required to exercise OpenCode's production JavaScript runtime")
+		}
+		bun = resolved
+	}
+	root := repoRoot(t)
+	fixtureDir, planFile, recordFile, fixtureEnv := writeAdapterFixture(t, bun)
+	if err := os.WriteFile(planFile, []byte(`{"stdout":"{}","exitCode":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
+	script := `
+import {pathToFileURL} from "node:url";
+const module = await import(pathToFileURL(process.argv[1]).href);
+const logs = [];
+const prompts = [];
+const hooks = await module.SpecContractGuard({
+  client: {
+    app: {log: async ({body}) => logs.push(body)},
+    session: {promptAsync: async (request) => prompts.push(request)},
+  },
+  worktree: process.argv[2],
+});
+await hooks.event({event: {type: "session.idle", properties: {sessionID: "bun-status-pipe"}}});
+console.log(JSON.stringify({logs, prompts}));
+`
+	output := runNodeFixtureScript(t, bun, plugin, root, script, fixtureDir, nil, fixtureEnv)
+	var result struct {
+		Logs    []json.RawMessage `json:"logs"`
+		Prompts []json.RawMessage `json:"prompts"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(output), &result); err != nil {
+		t.Fatalf("decode Bun fixture output: %v\n%s", err, output)
+	}
+	if len(result.Logs) != 0 || len(result.Prompts) != 0 {
+		t.Fatalf("noop adapter under Bun produced logs=%d prompts=%d", len(result.Logs), len(result.Prompts))
+	}
+	records, err := os.ReadFile(recordFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trimmedRecords := strings.TrimSpace(string(records))
+	if trimmedRecords == "" {
+		t.Fatal("Bun adapter invocation record is empty")
+	}
+	if lines := strings.Count(trimmedRecords, "\n") + 1; lines != 1 {
+		t.Fatalf("Bun adapter invocation count = %d, want 1\n%s", lines, records)
+	}
+}
+
 func TestOpenCodeSPECContractPluginUsesNativeDiscoveryExtension(t *testing.T) {
 	root := repoRoot(t)
 	want := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")

@@ -4,7 +4,6 @@ import {tmpdir} from "node:os";
 import {isAbsolute, join} from "node:path";
 import {setTimeout as delay} from "node:timers/promises";
 import {spawn} from "node:child_process";
-import {Readable} from "node:stream";
 
 // Repository-local OpenCode transport. Native before-tool hooks preserve the
 // repository guard decisions; session termination itself cannot be blocked,
@@ -171,13 +170,27 @@ done
 `;
 
 function boundedReader(stream, streamName, budget, terminate, maxBytes = maxAdapterOutputBytes) {
-  const reader = stream?.getReader?.();
-  if (!reader) throw new Error(`SPEC contract adapter ${streamName} stream is unavailable`);
+  const webReader = stream?.getReader?.();
+  // OpenCode's Bun runtime exposes node:child_process extra descriptors as
+  // Node streams, but Bun 1.3.14's Readable.toWeb wrapper never delivers or
+  // closes fd 3. The native async iterator preserves bounded backpressure in
+  // Bun and Node without a second runtime-specific spawn path.
+  const iterator = webReader ? undefined : stream?.[Symbol.asyncIterator]?.();
+  if (!webReader && !iterator) throw new Error(`SPEC contract adapter ${streamName} stream is unavailable`);
   let cancelPromise;
+  let cancelled = false;
   const cancel = () => {
     if (cancelPromise) return cancelPromise;
     cancelPromise = (async () => {
-      try { await reader.cancel(); } catch { /* Process termination is the authoritative boundary. */ }
+      cancelled = true;
+      try {
+        if (webReader) {
+          await webReader.cancel();
+        } else {
+          stream.destroy?.();
+          await iterator.return?.();
+        }
+      } catch { /* Process termination is the authoritative boundary. */ }
     })();
     return cancelPromise;
   };
@@ -186,7 +199,7 @@ function boundedReader(stream, streamName, budget, terminate, maxBytes = maxAdap
     let streamBytes = 0;
     try {
       for (;;) {
-        const {done, value} = await reader.read();
+        const {done, value} = webReader ? await webReader.read() : await iterator.next();
         if (done) break;
         const chunk = value instanceof Uint8Array ? value : new Uint8Array(value || []);
         if (budget.used + chunk.byteLength > maxBytes) {
@@ -198,10 +211,14 @@ function boundedReader(stream, streamName, budget, terminate, maxBytes = maxAdap
         chunks.push(chunk);
       }
     } catch (error) {
-      terminate({kind: "read", streamName, error});
-      return "";
+      if (!cancelled) {
+        terminate({kind: "read", streamName, error});
+        return "";
+      }
     } finally {
-      try { reader.releaseLock(); } catch { /* A cancelled reader may already be released. */ }
+      if (webReader) {
+        try { webReader.releaseLock(); } catch { /* A cancelled reader may already be released. */ }
+      }
     }
     const joined = new Uint8Array(streamBytes);
     let offset = 0;
@@ -298,18 +315,18 @@ async function runAdapter(worktree, invocation = {}) {
     let outputReaders;
     let statusReader;
     try {
-      if (!statusStream || typeof Readable.toWeb !== "function") {
+      if (!statusStream) {
         throw new Error("supervisor status pipe is unavailable");
       }
       outputReaders = [];
-      const stdoutReader = boundedReader(Readable.toWeb(proc.stdout), "stdout", budget, terminate);
+      const stdoutReader = boundedReader(proc.stdout, "stdout", budget, terminate);
       outputReaders.push(stdoutReader);
       readers.push(stdoutReader);
-      const stderrReader = boundedReader(Readable.toWeb(proc.stderr), "stderr", budget, terminate);
+      const stderrReader = boundedReader(proc.stderr, "stderr", budget, terminate);
       outputReaders.push(stderrReader);
       readers.push(stderrReader);
       statusReader = boundedReader(
-        Readable.toWeb(statusStream),
+        statusStream,
         "status",
         {used: 0},
         (cause) => terminate({kind: "status", error: cause.error || new Error("supervisor status exceeded its bounded frame")}),
