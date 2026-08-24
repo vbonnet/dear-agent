@@ -120,6 +120,12 @@ func TestUnflaggedSummaryDistinguishesUnmeasuredFromClean(t *testing.T) {
 			wantNotIn: "clean",
 		},
 		{
+			name:      "every changed function unmeasured",
+			report:    craplens.Report{Changed: 2, Unmeasured: 2},
+			wantHas:   "not measured",
+			wantNotIn: "clean",
+		},
+		{
 			name:      "genuinely clean",
 			report:    craplens.Report{Scored: 5, WithinAgentTarget: 5, Threshold: craplens.DefaultThreshold},
 			wantHas:   "clean",

@@ -67,13 +67,8 @@ func compareGocycloOutput(t *testing.T, root, out string) {
 		if loc == "" {
 			continue
 		}
-		path, rest, ok := strings.Cut(loc, ":")
+		path, declLine, declCol, ok := parseGocycloLocation(loc)
 		if !ok || strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		lineStr, _, _ := strings.Cut(rest, ":")
-		declLine, err := strconv.Atoi(lineStr)
-		if err != nil {
 			continue
 		}
 
@@ -81,7 +76,7 @@ func compareGocycloOutput(t *testing.T, root, out string) {
 		if err != nil {
 			rel = path
 		}
-		got, found := complexityAt(t, path, declLine)
+		got, found := complexityAt(t, path, declLine, declCol)
 		if !found {
 			t.Errorf("%s:%d: gocyclo reported %s but no declaration was found there", rel, declLine, fields[2])
 			continue
@@ -90,6 +85,23 @@ func compareGocycloOutput(t *testing.T, root, out string) {
 			t.Errorf("%s:%d %s: this package counted %d, gocyclo counted %d", rel, declLine, fields[2], got, want)
 		}
 	}
+}
+
+func parseGocycloLocation(loc string) (string, int, int, bool) {
+	last := strings.LastIndexByte(loc, ':')
+	if last < 0 {
+		return "", 0, 0, false
+	}
+	second := strings.LastIndexByte(loc[:last], ':')
+	if second < 0 {
+		return "", 0, 0, false
+	}
+	line, errLine := strconv.Atoi(loc[second+1 : last])
+	col, errCol := strconv.Atoi(loc[last+1:])
+	if errLine != nil || errCol != nil {
+		return "", 0, 0, false
+	}
+	return loc[:second], line, col, true
 }
 
 // skipFields returns line with its first n whitespace-delimited fields
@@ -110,7 +122,7 @@ func skipFields(line string, n int) string {
 
 // complexityAt parses a file and returns the complexity of the declaration
 // starting on the given line.
-func complexityAt(t *testing.T, path string, line int) (int, bool) {
+func complexityAt(t *testing.T, path string, line, col int) (int, bool) {
 	t.Helper()
 
 	src, err := os.ReadFile(path)
@@ -127,7 +139,8 @@ func complexityAt(t *testing.T, path string, line int) (int, bool) {
 			// gocyclo reports a package-level function literal at the line of
 			// its `var` declaration, which is where the GenDecl starts, while
 			// the literal itself starts on the same line here. Accept either.
-			if fset.Position(cand.node.Pos()).Line == line || fset.Position(decl.Pos()).Line == line {
+			candPos := fset.Position(cand.node.Pos())
+			if (candPos.Line == line || fset.Position(decl.Pos()).Line == line) && (col == 0 || candPos.Column == col) {
 				return complexity(cand.node), true
 			}
 		}
@@ -187,5 +200,24 @@ func TestSkipFieldsPreservesSpacesInTheRemainder(t *testing.T) {
 				t.Errorf("skipFields(%q, %d) = %q, want %q", tc.line, tc.n, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseGocycloLocationUsesTrailingLineAndColumn(t *testing.T) {
+	path, line, col, ok := parseGocycloLocation("internal/craplens/a:b.go:12:7")
+	if !ok || path != "internal/craplens/a:b.go" || line != 12 || col != 7 {
+		t.Fatalf("parse location = %q:%d:%d,%v", path, line, col, ok)
+	}
+}
+
+func TestComplexityAtUsesColumnForSameLineLiterals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "same.go")
+	src := []byte("package p\nvar a, b = func() { if true {} }, func() { if true {}; if true {} }\n")
+	if err := os.WriteFile(path, src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := complexityAt(t, path, 2, 35)
+	if !ok || got != 3 {
+		t.Fatalf("complexityAt = %d,%v; want 3,true", got, ok)
 	}
 }

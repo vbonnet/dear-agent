@@ -91,9 +91,12 @@ func unflaggedSummary(r craplens.Report) string {
 	if r.CheckoutMismatch {
 		return fmt.Sprintf("not measured: the working tree is not at the head revision or has uncommitted changes; %d changed function(s) were left unscored\n", r.Changed)
 	}
-	if r.Scored == 0 && len(r.Unknown) > 0 {
-		return fmt.Sprintf("not measured: coverage could not be collected for any of the %d touched package(s) (%s); %d changed function(s) were left unscored\n",
-			len(r.Unknown), strings.Join(r.Unknown, ", "), r.Changed)
+	if r.Scored == 0 && (len(r.Unknown) > 0 || r.Unmeasured > 0) {
+		if len(r.Unknown) > 0 {
+			return fmt.Sprintf("not measured: coverage could not be collected for any of the %d touched package(s) (%s); %d changed function(s) were left unscored\n",
+				len(r.Unknown), strings.Join(r.Unknown, ", "), r.Changed)
+		}
+		return fmt.Sprintf("not measured: %d changed function(s) could not be measured on this platform\n", r.Unmeasured)
 	}
 	summary := fmt.Sprintf("clean: %d scored changed function(s), %d at or under %.0f, none over %.0f",
 		r.Scored, r.WithinAgentTarget, craplens.AgentTarget, r.Threshold)

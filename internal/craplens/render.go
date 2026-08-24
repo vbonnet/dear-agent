@@ -38,8 +38,13 @@ func (r Report) Render() string {
 	b.WriteString("If the code is exercised by an integration suite this signal cannot run, say so and move on.\n")
 
 	if len(r.Unknown) > 0 {
-		fmt.Fprintf(&b, "\nCoverage could not be collected for %d touched package(s), which are excluded rather than scored as untested: `%s`",
-			len(r.Unknown), strings.Join(truncate(r.Unknown, maxListed), "`, `"))
+		unknown := truncate(r.Unknown, maxListed)
+		encoded := make([]string, len(unknown))
+		for i, path := range unknown {
+			encoded[i] = mdCode(path)
+		}
+		fmt.Fprintf(&b, "\nCoverage could not be collected for %d touched package(s), which are excluded rather than scored as untested: %s",
+			len(r.Unknown), strings.Join(encoded, ", "))
 		if len(r.Unknown) > maxListed {
 			fmt.Fprintf(&b, ", and %d more", len(r.Unknown)-maxListed)
 		}
@@ -50,7 +55,7 @@ func (r Report) Render() string {
 		fmt.Fprintf(&b, "\n%d changed function(s) could not be measured on this platform, typically build-tagged files excluded from the profile, and were not scored.\n", r.Unmeasured)
 	}
 
-	b.WriteString("\nThis is advisory. It posts a comment and never fails a check. ")
+	b.WriteString("\nThis verdict is advisory: it posts a comment and never fails a check. The separate gocyclo parity verification is a hard gate. ")
 	b.WriteString("Discarded error returns and raw complexity are already hard-gated by `errcheck` and `gocyclo` in `.golangci.yml`; this signal deliberately does not duplicate them.\n")
 
 	return b.String()
