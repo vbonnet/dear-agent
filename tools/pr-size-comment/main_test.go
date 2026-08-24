@@ -19,7 +19,11 @@ func TestDecide(t *testing.T) {
 		in   inputs
 		want action
 	}{
-		{name: "nothing tripped, crap succeeded clean", in: inputs{crapOutcome: "success"}, want: actionDelete},
+		{
+			name: "nothing tripped, all three detectors succeeded clean",
+			in:   inputs{crapOutcome: "success", scopeOutcome: "success", concernOutcome: "success"},
+			want: actionDelete,
+		},
 		{name: "should comment", in: inputs{shouldComment: true, crapOutcome: "success"}, want: actionUpsert},
 		{name: "mixed concern", in: inputs{mixedConcern: true, crapOutcome: "success"}, want: actionUpsert},
 		{name: "crap flagged", in: inputs{crapFlagged: true, crapOutcome: "success"}, want: actionUpsert},
@@ -32,6 +36,21 @@ func TestDecide(t *testing.T) {
 			name: "crap step failed outright: not a confirmed-clean delete, but refresh a stale comment if one exists",
 			in:   inputs{crapOutcome: "failure"},
 			want: actionRefreshIfExists,
+		},
+		{
+			name: "scope detector failed but crap succeeded: must not delete on an unconfirmed scope signal",
+			in:   inputs{crapOutcome: "success", scopeOutcome: "failure", concernOutcome: "success"},
+			want: actionRefreshIfExists,
+		},
+		{
+			name: "concern detector failed but crap and scope succeeded: must not delete on an unconfirmed concern signal",
+			in:   inputs{crapOutcome: "success", scopeOutcome: "success", concernOutcome: "failure"},
+			want: actionRefreshIfExists,
+		},
+		{
+			name: "crap succeeded but scope/concern outcomes were never supplied: not a confirmed-clean delete",
+			in:   inputs{crapOutcome: "success"},
+			want: actionNone,
 		},
 	}
 

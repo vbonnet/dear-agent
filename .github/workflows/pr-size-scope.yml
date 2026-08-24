@@ -271,6 +271,28 @@ jobs:
         # mixed-concern results and leaving the sticky comment unable to
         # recover or self-correct on the next push.
         if: (!cancelled()) && (!github.event.pull_request.head.repo.fork) && github.event.pull_request.user.login != 'dependabot[bot]'
+        # Every value below arrives via env, not interpolated directly into
+        # this script: several (CRAP_REPORT, REASONS, a diff-derived file
+        # path in TOP_LEVEL_AREAS) come from repository content a PR author
+        # controls, and splicing "${{ ... }}" straight into a run: block is
+        # the classic Actions script-injection shape. An env var's value is
+        # never re-parsed as shell syntax, no matter what it contains.
+        #
+        # Security: this step runs with a write-scoped GH_TOKEN (issues:
+        # write, pull-requests: write). The checkout above is the PR's own
+        # HEAD, so for a same-repository PR (not just a fork — the fork
+        # guard above does not cover this) the PR author can modify
+        # tools/pr-size-comment itself. `go run ./tools/pr-size-comment`
+        # would then compile and execute that candidate-controlled code
+        # with this job's write token in its environment, letting a
+        # crafted PR perform arbitrary GitHub API calls as this workflow.
+        # Build the binary from the PR's BASE revision instead — code
+        # already on the protected branch, never the candidate — so no
+        # PR-controlled code ever runs with GH_TOKEN present. A PR that
+        # introduces or changes this tool (like this one) has no trusted
+        # prior copy to build from yet; skip posting rather than fall back
+        # to the untrusted head in that case; the workflow behaves normally
+        # again on every PR after this one merges.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -287,14 +309,18 @@ jobs:
           CONCERN_REASON: ${{ steps.concern.outputs.reason }}
           CRAP_REPORT: ${{ steps.crap.outputs.crap_report }}
           CRAP_SUMMARY: ${{ steps.crap.outputs.crap_summary }}
-        # Every value below arrives via env, not interpolated directly into
-        # this script: several (CRAP_REPORT, REASONS, a diff-derived file
-        # path in TOP_LEVEL_AREAS) come from repository content a PR author
-        # controls, and splicing "${{ ... }}" straight into a run: block is
-        # the classic Actions script-injection shape. An env var's value is
-        # never re-parsed as shell syntax, no matter what it contains.
+          SCOPE_OUTCOME: ${{ steps.scope.outcome }}
+          CONCERN_OUTCOME: ${{ steps.concern.outcome }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          go run ./tools/pr-size-comment \
+          trusted_dir=$(mktemp -d)
+          git worktree add --detach --quiet "$trusted_dir" "$BASE_SHA"
+          if [ ! -f "$trusted_dir/tools/pr-size-comment/main.go" ]; then
+            echo "::notice::tools/pr-size-comment does not exist at this PR's base revision yet; skipping the comment update rather than building candidate-controlled code with a write-scoped token."
+            exit 0
+          fi
+          go build -C "$trusted_dir" -o /tmp/pr-size-comment ./tools/pr-size-comment
+          /tmp/pr-size-comment \
             -repo "$REPO" \
             -pr "$PR_NUMBER" \
             -should-comment="$SHOULD_COMMENT" \
@@ -308,7 +334,9 @@ jobs:
             -reasons="$REASONS" \
             -concern-reason="$CONCERN_REASON" \
             -crap-report="$CRAP_REPORT" \
-            -crap-summary="$CRAP_SUMMARY"
+            -crap-summary="$CRAP_SUMMARY" \
+            -scope-outcome="$SCOPE_OUTCOME" \
+            -concern-outcome="$CONCERN_OUTCOME"
 
   # ---------------------------------------------------------------------------
   # The deterministic job above states THAT a PR is too big. It cannot say what

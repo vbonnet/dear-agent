@@ -43,6 +43,41 @@ func TestFunctionCoverageUnknownForUnprofiledFile(t *testing.T) {
 	}
 }
 
+// TestFunctionCoverageTreatsEmptyFunctionInMeasuredPackageAsCovered covers a
+// changed, buildable file that contains an empty function and no other
+// countable statements at all: its successful coverage profile has no block
+// for that file, which the len(blocks)==0 early return alone cannot tell
+// apart from a build-tagged file absent on this platform. CRAPLENS-06
+// requires a statement-free function to be fully covered — check the
+// package's own coverage state (collectCoverage's zero-statement handling)
+// to make that distinction instead of calling every unprofiled file unknown.
+func TestFunctionCoverageTreatsEmptyFunctionInMeasuredPackageAsCovered(t *testing.T) {
+	data := coverageData{
+		packages: map[string]packageCoverage{"pkg/x": {coverage: 1}},
+		blocks:   map[string][]profileBlock{},
+	}
+	got := data.functionCoverage(Function{File: "pkg/x/empty.go", Line: 1, EndLine: 3})
+	if got != 1 {
+		t.Errorf("coverage of an empty function in a measured package = %v, want 1 (fully covered)", got)
+	}
+}
+
+// TestFunctionCoverageStaysUnknownWhenPackageItselfIsUnmeasured is that
+// test's counterpart: the same zero-blocks-for-this-file signal must still
+// mean "unmeasured", not "covered", when the package itself was never
+// confirmed measured (a build-tagged package absent on this platform, or one
+// this run simply never populated).
+func TestFunctionCoverageStaysUnknownWhenPackageItselfIsUnmeasured(t *testing.T) {
+	data := coverageData{
+		packages: map[string]packageCoverage{"pkg/x": {coverage: CoverageUnknown}},
+		blocks:   map[string][]profileBlock{},
+	}
+	got := data.functionCoverage(Function{File: "pkg/x/empty.go", Line: 1, EndLine: 3})
+	if got != CoverageUnknown {
+		t.Errorf("coverage in an unmeasured package = %v, want CoverageUnknown", got)
+	}
+}
+
 // TestFunctionCoverageSeparatesFunctionsSharingALine covers two package-level
 // function literals gofmt can leave on one line, such as
 // `var A, B = func() int { return 1 }, func() int { return 2 }`. A line-only

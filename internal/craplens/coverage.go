@@ -89,7 +89,22 @@ type coverageData struct {
 func (c coverageData) functionCoverage(f Function) float64 {
 	blocks := c.blocks[f.File]
 	if len(blocks) == 0 {
-		return CoverageUnknown
+		// A file with zero profile blocks is ambiguous on its own: either
+		// its package was never built (a build-tagged file absent on this
+		// platform, genuinely unmeasured), or the package built and tested
+		// fine but this particular file has no countable statements at all
+		// to instrument — the same zero-statement case collectCoverage
+		// already treats as measured at the package level. Consult that
+		// package-level state before calling this function unknown: a
+		// statement-free file in an otherwise-measured package must be
+		// fully covered, the same as a statement-free function whose file
+		// DOES have other blocks (the total==0 case below already handles
+		// that one).
+		pkgCov, known := c.packages[path.Dir(f.File)]
+		if !known || pkgCov.coverage == CoverageUnknown {
+			return CoverageUnknown
+		}
+		return 1
 	}
 
 	end := max(f.EndLine, f.Line)
