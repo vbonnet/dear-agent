@@ -790,7 +790,9 @@ func TestBoundsFailClosed(t *testing.T) {
 		executable := writeFakeGit(t, "#!/bin/sh\nprintf '%0256d' 0\n")
 		limits := defaultLimits()
 		limits.maxGitOutput = 128
-		limits.gitTime = 5 * time.Second
+		// Keep the timeout boundary well clear of this output-bound assertion.
+		// TestBoundsFailClosed/wall_time independently covers Git timeouts.
+		limits.gitTime = 30 * time.Second
 		result := evaluate(context.Background(), Request{Repository: t.TempDir(), Mode: ModeStaged}, limits, guardDependencies{gitExecutable: executable})
 		assertDecisionAndCode(t, result, DecisionBlock, "git-output-limit")
 		if !strings.Contains(result.Findings[0].Message, "output exceeded") {
