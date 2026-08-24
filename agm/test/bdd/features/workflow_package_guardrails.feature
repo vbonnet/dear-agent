@@ -1,6 +1,7 @@
 # SPEC: pkg/workflow/codemod/SPEC.md
 # RELATED-SPEC: pkg/workflow/dev/SPEC.md
 # RELATED-SPEC: pkg/workflow/roles/SPEC.md
+# RELATED-SPEC: pkg/workflow/SPEC.md
 # RELATED-SPEC: agm/internal/workflow/SPEC.md
 # RELATED-SPEC: agm/internal/workflow/deepresearch/SPEC.md
 Feature: Workflow package guardrails
@@ -20,3 +21,8 @@ Feature: Workflow package guardrails
       | pkg/workflow/codemod               |
       | pkg/workflow/dev                   |
       | pkg/workflow/roles                 |
+
+  Scenario: Enforced workflows must declare their constitutional invariants
+    Given a workflow enables constitutional enforcement without invariants
+    When AGM validates and attempts to run the workflow
+    Then workflow validation should fail before run recording, lifecycle hooks, or node execution

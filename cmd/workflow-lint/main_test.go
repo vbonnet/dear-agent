@@ -147,6 +147,24 @@ func TestLintFileBadYAMLBubblesUp(t *testing.T) {
 	}
 }
 
+func TestLintFileRejectsEnforcedWorkflowWithoutInvariants(t *testing.T) {
+	path := writeWorkflow(t, `
+name: constitutional-without-rules
+version: "1"
+constitutional:
+  enforce: true
+nodes:
+  - id: a
+    kind: bash
+    bash:
+      cmd: "true"
+`)
+	findings := lintFile(path, lintConfig{})
+	if len(findings) != 1 || !strings.Contains(findings[0], "constitutional mode is on but declares no invariants") {
+		t.Fatalf("lint findings = %v, want constitutional invariant error", findings)
+	}
+}
+
 func TestLintFileTouchesEveryAINode(t *testing.T) {
 	// Smoke test: sanity-check that all AI nodes are visited so a
 	// future test author sees the full surface walked.

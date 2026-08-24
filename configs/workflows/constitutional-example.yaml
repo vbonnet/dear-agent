@@ -1,8 +1,8 @@
 # Constitutional designer example (ROADMAP §6.4).
 #
 # Demonstrates the "humans declare invariants, agents implement" mode.
-# This workflow opts into constitutional enforcement: the Define hook
-# refuses to start the run unless the invariants block is non-empty,
+# This workflow opts into constitutional enforcement: workflow validation
+# refuses the definition unless the invariants block is non-empty,
 # and every invariant must validate against its declared kind's schema.
 #
 # Adversarial verification of these invariants is the job of §6.5
@@ -13,7 +13,7 @@ version: "1"
 description: |
   Tiny demonstration workflow showing the constitutional/invariants
   block. The single bash node is a stand-in — what matters here is
-  that the workflow shape parses and the Define hook accepts it.
+  that workflow validation accepts the complete human-authored contract.
 
 constitutional:
   enforce: true

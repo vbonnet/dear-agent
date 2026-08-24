@@ -3,6 +3,7 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Feature: `agm/test/bdd/features/workflow_package_guardrails.feature`
 
 <!-- Last audited at: 2026-07-03 -->
 
@@ -24,6 +25,8 @@ execution, resume, review, and cost controls.
 **WFLOW-04** When a node declares permissions, budgets, outputs, hooks, or HITL policy, the system shall apply the configured enforcer or default implementation before treating the node as complete.
 
 **WFLOW-05** When workflow execution emits audit events, the system shall write them to the audit sink and notify audit hooks without allowing hook failure to abort the run.
+
+**WFLOW-06** When a workflow enables constitutional enforcement without declaring any invariants, the system shall reject the workflow before recording a run, invoking lifecycle hooks, or executing a node.
 
 ## Permission contract
 

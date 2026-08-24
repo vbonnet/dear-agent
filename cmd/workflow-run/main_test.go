@@ -138,6 +138,37 @@ func TestRun_DryRunDoesNotCreateDB(t *testing.T) {
 	}
 }
 
+func TestRun_DryRunRejectsEnforcedWorkflowWithoutInvariants(t *testing.T) {
+	dir := t.TempDir()
+	wfPath := filepath.Join(dir, "wf.yaml")
+	invalid := `
+name: constitutional-without-rules
+version: "1"
+constitutional:
+  enforce: true
+nodes:
+  - id: a
+    kind: bash
+    bash:
+      cmd: "true"
+`
+	if err := os.WriteFile(wfPath, []byte(invalid), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	dbPath := filepath.Join(dir, "runs.db")
+	stderr := tmpFile(t)
+
+	if code := run([]string{"-file", wfPath, "-db", dbPath, "-dry-run"}, stderr); code != 1 {
+		t.Fatalf("run exit %d, want 1; stderr=%s", code, readFile(stderr))
+	}
+	if got := readFile(stderr); !strings.Contains(got, "constitutional mode is on but declares no invariants") {
+		t.Fatalf("stderr=%s, want constitutional invariant error", got)
+	}
+	if _, err := os.Stat(dbPath); err == nil {
+		t.Error("invalid dry-run created a runs.db")
+	}
+}
+
 func TestRun_MissingFileFlag(t *testing.T) {
 	stderr := tmpFile(t)
 	if code := run([]string{}, stderr); code != 2 {

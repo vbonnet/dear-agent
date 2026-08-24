@@ -1,15 +1,15 @@
 package workflow
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 )
 
 // Constitutional declares "humans set the rules; agents implement them"
-// mode for a workflow. When enabled, the Define phase fails the run
-// unless the workflow ships a non-empty Invariants block. The block is
+// mode for a workflow. When enabled, workflow validation fails unless
+// the workflow ships a non-empty Invariants block. The block is
 // declarative: each invariant names a target output and either a JSON
 // Schema the output must satisfy, a regex the output must match, or a
 // numeric floor the output's confidence must clear.
@@ -18,7 +18,7 @@ import (
 // conflate: a human author writes down the contract once (the invariants), and
 // downstream Audit / Enforce phases — eventually
 // adversarial review per ROADMAP §6.5 — verify the run-time artifact
-// against that contract. This file ships the schema + the Define-time
+// against that contract. This file ships the schema + the definition
 // validation; verification lives in pkg/audit.
 type Constitutional struct {
 	// Enforce flips the workflow into constitutional mode. When true,
@@ -160,11 +160,14 @@ func (inv *Invariant) validateKind() error {
 	return nil
 }
 
-// validateInvariants is called from Workflow.Validate. It enforces
-// uniqueness of IDs and per-entry shape; it does NOT enforce that the
-// workflow opted into constitutional mode — that decision belongs to
-// the Define hook (see ConstitutionalDefineHook).
-func validateInvariants(invs []Invariant) error {
+// validateConstitutional is the single validation seam for the workflow-level
+// constitutional contract. Presence and entry shape belong together here so
+// every caller of Workflow.Validate inherits the same fail-closed behavior.
+func validateConstitutional(c *Constitutional, invs []Invariant) error {
+	if err := validateConstitutionalPresence(c, invs); err != nil {
+		return err
+	}
+
 	seen := make(map[string]struct{}, len(invs))
 	for i := range invs {
 		inv := &invs[i]
@@ -179,31 +182,9 @@ func validateInvariants(invs []Invariant) error {
 	return nil
 }
 
-// ConstitutionalDefineHook returns an OnDefine function that fails the
-// run when the workflow opted into constitutional mode but ships no
-// invariants. Callers compose this onto Runner.Hooks alongside any
-// other Define-time policy they need:
-//
-//	r := NewRunner(nil)
-//	r.Hooks = &Hooks{OnDefine: ConstitutionalDefineHook()}
-//
-// The hook is intentionally minimal — its only job is to enforce the
-// human authorship contract. Schema validation of each invariant's
-// shape already happened in Workflow.Validate by the time OnDefine
-// fires; this just guards the "you said constitutional, where are the
-// rules?" failure mode.
-func ConstitutionalDefineHook() func(context.Context, DefinePayload) error {
-	return func(_ context.Context, p DefinePayload) error {
-		if p.Workflow == nil {
-			return nil
-		}
-		c := p.Workflow.Constitutional
-		if c == nil || !c.Enforce {
-			return nil
-		}
-		if len(p.Workflow.Invariants) == 0 {
-			return fmt.Errorf("constitutional mode is on but workflow %q declares no invariants", p.Workflow.Name)
-		}
-		return nil
+func validateConstitutionalPresence(c *Constitutional, invs []Invariant) error {
+	if c != nil && c.Enforce && len(invs) == 0 {
+		return errors.New("constitutional mode is on but declares no invariants")
 	}
+	return nil
 }
