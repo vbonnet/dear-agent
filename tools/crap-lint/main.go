@@ -94,19 +94,47 @@ func unflaggedSummary(r craplens.Report) string {
 	if r.Scored == 0 && (len(r.Unknown) > 0 || r.Unmeasured > 0) {
 		if len(r.Unknown) > 0 {
 			return fmt.Sprintf("not measured: coverage could not be collected for any of the %d touched package(s) (%s); %d changed function(s) were left unscored\n",
-				len(r.Unknown), strings.Join(r.Unknown, ", "), r.Changed)
+				len(r.Unknown), joinCodePaths(r.Unknown), r.Changed)
 		}
 		return fmt.Sprintf("not measured: %d changed function(s) could not be measured on this platform\n", r.Unmeasured)
 	}
 	summary := fmt.Sprintf("clean: %d scored changed function(s), %d at or under %.0f, none over %.0f",
 		r.Scored, r.WithinAgentTarget, craplens.AgentTarget, r.Threshold)
 	if len(r.Unknown) > 0 {
-		summary += fmt.Sprintf("; %d package(s) unmeasured (%s)", len(r.Unknown), strings.Join(r.Unknown, ", "))
+		summary += fmt.Sprintf("; %d package(s) unmeasured (%s)", len(r.Unknown), joinCodePaths(r.Unknown))
 	}
 	if r.Unmeasured > 0 {
 		summary += fmt.Sprintf("; %d function(s) unmeasured on this platform", r.Unmeasured)
 	}
 	return summary + "\n"
+}
+
+func joinCodePaths(paths []string) string {
+	encoded := make([]string, len(paths))
+	for i, p := range paths {
+		encoded[i] = mdCode(p)
+	}
+	return strings.Join(encoded, ", ")
+}
+
+func mdCode(text string) string {
+	longest, run := 0, 0
+	for _, r := range text {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+			continue
+		}
+		run = 0
+	}
+	fence := strings.Repeat("`", longest+1)
+	padded := text
+	if strings.HasPrefix(text, "`") || strings.HasSuffix(text, "`") {
+		padded = " " + text + " "
+	}
+	return fence + strings.ReplaceAll(padded, "|", "\\|") + fence
 }
 
 // writeGitHubOutput emits the values the workflow consumes. Every value that

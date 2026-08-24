@@ -325,9 +325,11 @@ func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists
 	// Collapse any duplicates left by earlier revisions of this workflow.
 	// Best effort: a leftover duplicate is cosmetic, not the audit record,
 	// so it does not itself flip the exit code.
-	for _, id := range ids[min(1, len(ids)):] {
-		if err := deleteComment(ctx, repo, id); err != nil {
-			fmt.Fprintf(stderr, "pr-size-comment: could not delete duplicate comment %s: %v\n", id, err)
+	if !failed {
+		for _, id := range ids[min(1, len(ids)):] {
+			if err := deleteComment(ctx, repo, id); err != nil {
+				fmt.Fprintf(stderr, "pr-size-comment: could not delete duplicate comment %s: %v\n", id, err)
+			}
 		}
 	}
 	if failed {

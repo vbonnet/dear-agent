@@ -155,6 +155,13 @@ func TestUnflaggedSummaryDistinguishesUnmeasuredFromClean(t *testing.T) {
 	}
 }
 
+func TestUnflaggedSummaryEscapesUnknownPackagePaths(t *testing.T) {
+	got := unflaggedSummary(craplens.Report{Changed: 1, Unknown: []string{"pkg|x`y"}})
+	if !strings.Contains(got, "`pkg\\|x`y`") {
+		t.Fatalf("unknown package path is not safely code-spanned: %q", got)
+	}
+}
+
 // TestWriteGitHubOutputMarksUnmeasuredFunctionsUnknown pins that a diff with
 // no over-threshold function and no unknown package, but a per-function
 // coverage gap (a build-tagged file excluded on this runner, say), still

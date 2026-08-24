@@ -48,6 +48,59 @@ func TestWorkingTreeIsCleanCatchesIgnoredQuotedPathInTouchedPackage(t *testing.T
 	}
 }
 
+func TestTreeHasGoFilesReadsNULDelimitedQuotedNames(t *testing.T) {
+	dir := t.TempDir()
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+	gittest.Run(t, dir, "config", "user.name", "Test")
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Join(dir, "pkg", "line\tquote\\\".go")
+	if err := os.WriteFile(name, []byte("package pkg\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "base")
+	if !treeHasGoFiles(t.Context(), dir, "HEAD", "pkg") {
+		t.Fatal("treeHasGoFiles must recognize a Go file whose name requires Git quoting")
+	}
+}
+
+func TestChangedGoFilesIncludesTypeChanges(t *testing.T) {
+	dir := t.TempDir()
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+	gittest.Run(t, dir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(dir, "target.go"), []byte("package target\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, dir, "add", "target.go")
+	gittest.Run(t, dir, "commit", "-q", "-m", "base")
+	gittest.Run(t, dir, "rm", "target.go")
+	if err := os.Symlink("missing", filepath.Join(dir, "target.go")); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "symlink")
+	base := "HEAD~1"
+	if err := os.Remove(filepath.Join(dir, "target.go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "target.go"), []byte("package target\n\nfunc Changed() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-q", "-m", "regular")
+	files, err := changedGoFiles(t.Context(), dir, base, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files["target.go"]; !ok {
+		t.Fatalf("type-changed Go file missing from touched set: %v", sortedKeys(files))
+	}
+}
+
 // TestParseHunkHeader pins the diff arithmetic the whole signal rests on. A
 // wrong head-side span attributes changes to the wrong function.
 func TestParseHunkHeader(t *testing.T) {

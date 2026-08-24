@@ -327,3 +327,24 @@ exit 1
 		t.Error("a failed recovery read must not fall through to patching the comment")
 	}
 }
+
+func TestUpsertCommentDoesNotDeleteDuplicatesAfterPrimaryFailure(t *testing.T) {
+	sentinel := filepath.Join(t.TempDir(), "duplicate-deleted")
+	installFakeGhScript(t, fmt.Sprintf(`#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+	--paginate) printf '%%s\n' 111 222; exit 0 ;;
+	--method) if [ "$3" = "PATCH" ]; then exit 1; fi; touch %q; exit 0 ;;
+  esac
+done
+exit 0
+`, sentinel))
+	var stderr bytes.Buffer
+	got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{shouldComment: true, crapOutcome: "success"}, false, &stderr)
+	if got != exitFailedOperation {
+		t.Fatalf("upsertComment() = %d, want %d; stderr=%q", got, exitFailedOperation, stderr.String())
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Fatal("duplicate was deleted after the primary update failed")
+	}
+}

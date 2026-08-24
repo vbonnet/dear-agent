@@ -35,7 +35,7 @@ merge. Only usage and operational failures exit non-zero.
 
 **CRAPLINT-08** When a rendered report is emitted in a heredoc block, the block shall contain no trailing blank line before its delimiter.
 
-**CRAPLINT-09** When GitHub output form is requested for an unflagged diff, the command shall emit the prose summary as a single-line output value, so a consumer can disclose why nothing is flagged even when the diff is not measured.
+**CRAPLINT-09** When GitHub output form is requested for an unflagged diff, the command shall emit the prose summary as an empty value or a terminated heredoc/multiline-safe output value, so repository-controlled package paths cannot inject additional GitHub outputs while a consumer discloses why nothing is flagged.
 
 ## BDD Traceability
 

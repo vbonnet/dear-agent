@@ -218,6 +218,7 @@ jobs:
 
       - name: Score changed functions for complexity against coverage
         id: crap
+        if: '!cancelled()'
         continue-on-error: true
         env:
           CI: "true"
