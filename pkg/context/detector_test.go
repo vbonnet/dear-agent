@@ -289,6 +289,9 @@ func TestDetectFromPiUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	for _, key := range []string{"CLAUDE_SESSION_ID", "GEMINI_SESSION_ID", "OPENCODE_SESSION_ID", "CODEX_SESSION_ID"} {
+		t.Setenv(key, "")
+	}
 	t.Setenv("PI_SESSION_ID", "test-pi-session")
 	usage, err := detector.Detect()
 	require.NoError(t, err)

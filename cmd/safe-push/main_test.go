@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestRun_Help(t *testing.T) {
@@ -48,12 +50,12 @@ func TestUsageContainsBinaryName(t *testing.T) {
 	}
 }
 
-// TestRun_RejectsForcePush drives the guard through the actual CLI entry point,
+// TestRun_RejectsProtectedForcePush drives the guard through the actual CLI entry point,
 // which is where the bug was reported: `safe-push -uf origin main` reached git
 // as a force push because the classifier compared whole argv tokens against
 // "-f" and never expanded bundled short-option clusters. The force check runs
 // before gh resolution, so these cases need no git, no gh, and no network.
-func TestRun_RejectsForcePush(t *testing.T) {
+func TestRun_RejectsProtectedForcePush(t *testing.T) {
 	cases := []struct {
 		name string
 		argv []string
@@ -65,7 +67,7 @@ func TestRun_RejectsForcePush(t *testing.T) {
 		{"clustered -vfq", []string{"-vfq", "origin", "main"}},
 		{"cluster after -C", []string{"-C", "/repo", "-uf", "origin", "main"}},
 		{"force-with-lease", []string{"--force-with-lease", "origin", "main"}},
-		{"force-with-lease with ref", []string{"--force-with-lease=refs/heads/x", "origin"}},
+		{"force-with-lease with protected ref", []string{"--force-with-lease=refs/heads/main", "origin"}},
 		{"force-if-includes", []string{"--force-if-includes", "origin", "main"}},
 		{"mirror", []string{"--mirror", "origin"}},
 		{"force refspec", []string{"origin", "+main"}},
@@ -80,5 +82,18 @@ func TestRun_RejectsForcePush(t *testing.T) {
 				t.Fatalf("run(%q) error %q should name the force-push policy", tc.argv, err)
 			}
 		})
+	}
+}
+
+func TestRun_CheckAllowsForceWithLeaseForNonProtectedBranch(t *testing.T) {
+	repo := gittest.NewRepo(t)
+	gittest.Run(t, repo, "remote", "add", "origin", t.TempDir())
+	gittest.Run(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+	gittest.Run(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	gittest.Run(t, repo, "checkout", "-b", "feature")
+
+	err := run([]string{"--check", "-C", repo, "--force-with-lease=refs/heads/x", "origin"})
+	if err != nil {
+		t.Fatalf("run(non-protected force-with-lease check) = %v, want nil", err)
 	}
 }
