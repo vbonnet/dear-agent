@@ -89,7 +89,9 @@ with test coverage on the functions the diff changed
 (`complexity^2 * (1 - coverage)^3 + complexity`, the Crap4j formula) and folds
 its findings into the same comment. It names changed functions scoring over 30
 and touched packages measured at 0% coverage, and asks for tests or a split. It
-comments only, never forces `needs-human-review`, and never fails a check.
+comments only and never forces `needs-human-review`; its advisory verdict does
+not fail a check, although the separate gocyclo parity verification underneath
+the workflow is a hard gate and fails when installation or verification fails.
 
 That signal owns exactly one thing: complexity no test exercises. Discarded
 error returns are owned by `errcheck` and raw complexity by `gocyclo`, both

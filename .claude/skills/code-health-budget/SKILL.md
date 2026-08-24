@@ -43,7 +43,7 @@ Do not hand-roll a check that already has an owner. One rule, one home.
 |---|---|---|
 | Discarded error returns | `errcheck` in `.golangci.yml`, `check-blank: true` | Hard fail on new occurrences |
 | Raw cyclomatic complexity over 15 | `gocyclo` in `.golangci.yml` | Hard fail on new occurrences |
-| Result of `append` never used | `staticcheck` SA4010 | Hard fail once #1350 lands; the suppression is still in `.golangci.yml` until then |
+| Result of `append` never used | `staticcheck` SA4010 | Hard fail; enabled in the active `.golangci.yml` configuration |
 | Packages shipping no `_test.go` at all | `zero-test` scan in `cmd/structural-health` | Baselined ratchet |
 | Complexity that no test exercises | `tools/crap-lint` | Advisory comment only |
 
@@ -66,17 +66,18 @@ the zero-test scan saw test files and stayed quiet. Nothing in CI could see it.
 
 The same audit found `staticcheck` SA4010 disabled in `.golangci.yml` behind the
 comment "Disable unused append check", suppressed years earlier while trimming
-the linter set "to a passing baseline" with a stated plan to re-enable
-incrementally. The one violation it was hiding was a real bug: an adapter parsed
-an imported conversation and dropped it.
+the linter set "to a passing baseline". That suppression has since been removed
+and SA4010 is an active gate. The violation it was hiding was a real bug: an
+adapter parsed an imported conversation and dropped it.
 
 Both are the same failure. A gate that cannot see a thing reports safety that
 does not exist, and that reads exactly like safety that does.
 
 ## Reading the CI comment
 
-The signal posts into the existing size-and-scope comment. It is **advisory**:
-it never fails a check and never blocks a merge.
+The signal posts into the existing size-and-scope comment. Its CRAP verdict is
+**advisory**: it never fails a check and never blocks a merge. The workflow's
+separate gocyclo parity verification is a hard gate.
 
 When it names a function, you have three honest answers:
 

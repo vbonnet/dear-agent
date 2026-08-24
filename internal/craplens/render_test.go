@@ -25,7 +25,7 @@ func TestRenderNamesTheProblem(t *testing.T) {
 		Untested: []Package{{ImportPath: "agm/cmd/agm-bus", New: true}},
 	}.Render()
 
-	for _, want := range []string{"cmdServe", "agm/cmd/agm-bus/main.go:99", "2162", "new package", "advisory", "never fails a check"} {
+	for _, want := range []string{"cmdServe", "agm/cmd/agm-bus/main.go:99", "2162", "new package", "advisory", "never fails a check", "parity verification", "hard gate"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered body is missing %q:\n%s", want, body)
 		}
@@ -102,5 +102,12 @@ func TestMdCodeSurvivesMarkdownMetacharacters(t *testing.T) {
 				t.Errorf("fence of %d backticks does not clear a run of %d in %q", fence, longest, got)
 			}
 		})
+	}
+}
+
+func TestRenderEscapesUnknownPackagePaths(t *testing.T) {
+	body := Report{Threshold: 30, Over: []Function{{File: "x.go", Name: "f", Complexity: 40}}, Unknown: []string{"pkg/a`b\n**injected**"}}.Render()
+	if !strings.Contains(body, "``pkg/a`b\n**injected**``") {
+		t.Fatalf("unknown path was not safely code-spanned: %q", body)
 	}
 }
