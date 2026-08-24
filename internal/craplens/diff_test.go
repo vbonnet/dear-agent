@@ -296,7 +296,7 @@ func TestInTouchedPackage(t *testing.T) {
 		{name: "inside a touched package", path: "internal/craplens/coverage_test.go", want: true},
 		{name: "inside the root package", path: "main.go", want: true},
 		{name: "untouched package", path: "internal/other/x.go", want: false},
-		{name: "nested nonexistent package below a touched one", path: "internal/craplens/sub/x.go", want: false},
+		{name: "nested ignored asset below a touched one", path: "internal/craplens/assets/local.json", want: true},
 		{name: "build artifact outside every touched package", path: "build/agm", want: false},
 	}
 

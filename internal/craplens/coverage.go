@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -76,7 +78,8 @@ type coverageData struct {
 	// packages maps a repository-relative package directory to its coverage.
 	packages map[string]packageCoverage
 	// blocks maps a repository-relative file path to its profile blocks.
-	blocks map[string][]profileBlock
+	blocks        map[string][]profileBlock
+	compiledFiles map[string]bool
 }
 
 // functionCoverage returns the fraction of a function's statements that the
@@ -100,8 +103,7 @@ func (c coverageData) functionCoverage(f Function) float64 {
 		// fully covered, the same as a statement-free function whose file
 		// DOES have other blocks (the total==0 case below already handles
 		// that one).
-		pkgCov, known := c.packages[path.Dir(f.File)]
-		if !known || pkgCov.coverage == CoverageUnknown {
+		if !c.compiledFiles[f.File] {
 			return CoverageUnknown
 		}
 		return 1
@@ -206,6 +208,9 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	}
 
 	modPath := modulePath(ctx, repoDir)
+	if !populateCompiledFiles(ctx, repoDir, pkgDirs, data) {
+		return data
+	}
 
 	raw, err := os.ReadFile(profilePath)
 	if err != nil {
@@ -241,6 +246,42 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	}
 
 	return data
+}
+
+type goListPackage struct {
+	Dir                                          string
+	GoFiles, CgoFiles, TestGoFiles, XTestGoFiles []string
+}
+
+func populateCompiledFiles(ctx context.Context, repoDir string, pkgDirs []string, data coverageData) bool {
+	argv := []string{"list", "-json"}
+	for _, dir := range pkgDirs {
+		argv = append(argv, "./"+dir)
+	}
+	cmd := exec.CommandContext(ctx, "go", argv...)
+	cmd.Dir, cmd.Env = repoDir, withGoWorkspaceDisabled(os.Environ())
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var pkg goListPackage
+		if err := dec.Decode(&pkg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return false
+		}
+		names := append(append(append(append([]string{}, pkg.GoFiles...), pkg.CgoFiles...), pkg.TestGoFiles...), pkg.XTestGoFiles...)
+		for _, name := range names {
+			rel, err := filepath.Rel(repoDir, filepath.Join(pkg.Dir, name))
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				data.compiledFiles[filepath.ToSlash(rel)] = true
+			}
+		}
+	}
+	return true
 }
 
 // protectGoTestProcessTree bounds how long a cancelled coverage run can keep
@@ -599,8 +640,9 @@ func parsePos(s string) (line, col int, ok bool) {
 // collected at all.
 func unmeasured(pkgDirs []string) coverageData {
 	data := coverageData{
-		packages: map[string]packageCoverage{},
-		blocks:   map[string][]profileBlock{},
+		packages:      map[string]packageCoverage{},
+		blocks:        map[string][]profileBlock{},
+		compiledFiles: map[string]bool{},
 	}
 	for _, dir := range pkgDirs {
 		data.packages[dir] = packageCoverage{coverage: CoverageUnknown}

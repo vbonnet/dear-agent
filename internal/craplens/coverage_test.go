@@ -53,12 +53,24 @@ func TestFunctionCoverageUnknownForUnprofiledFile(t *testing.T) {
 // to make that distinction instead of calling every unprofiled file unknown.
 func TestFunctionCoverageTreatsEmptyFunctionInMeasuredPackageAsCovered(t *testing.T) {
 	data := coverageData{
-		packages: map[string]packageCoverage{"pkg/x": {coverage: 1}},
-		blocks:   map[string][]profileBlock{},
+		packages:      map[string]packageCoverage{"pkg/x": {coverage: 1}},
+		blocks:        map[string][]profileBlock{},
+		compiledFiles: map[string]bool{"pkg/x/empty.go": true},
 	}
 	got := data.functionCoverage(Function{File: "pkg/x/empty.go", Line: 1, EndLine: 3})
 	if got != 1 {
 		t.Errorf("coverage of an empty function in a measured package = %v, want 1 (fully covered)", got)
+	}
+}
+
+func TestFunctionCoverageUnknownForExcludedSibling(t *testing.T) {
+	data := coverageData{
+		packages:      map[string]packageCoverage{"pkg/x": {coverage: 1}},
+		blocks:        map[string][]profileBlock{"pkg/x/used.go": {{numStmt: 1, count: 1}}},
+		compiledFiles: map[string]bool{"pkg/x/used.go": true},
+	}
+	if got := data.functionCoverage(Function{File: "pkg/x/excluded.go", Line: 1, EndLine: 3}); got != CoverageUnknown {
+		t.Fatalf("excluded sibling coverage = %v, want CoverageUnknown", got)
 	}
 }
 
