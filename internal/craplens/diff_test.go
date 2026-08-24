@@ -9,42 +9,63 @@ import (
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
-// TestWorkingTreeIsCleanCatchesIgnoredQuotedPathInTouchedPackage guards
-// against a real regression: text-mode `git status --porcelain` C-quotes a
-// path containing a space (confirmed: it renders as `!! "pkg/a
-// name_test.go"`), and the retained closing quote made the .go suffix check
-// false, so an ignored test file with a space in its name was silently
-// accepted as a clean checkout instead of correctly forcing the package to
-// unmeasured.
-func TestWorkingTreeIsCleanCatchesIgnoredQuotedPathInTouchedPackage(t *testing.T) {
-	dir := t.TempDir()
-	gittest.Run(t, dir, "init", "-q", "-b", "main")
-	gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
-	gittest.Run(t, dir, "config", "user.name", "Test")
-	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "pkg", "keep.go"), []byte("package pkg\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gittest.Run(t, dir, "add", "-A")
-	gittest.Run(t, dir, "commit", "-q", "-m", "base")
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("pkg/a name_test.go\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gittest.Run(t, dir, "add", ".gitignore")
-	gittest.Run(t, dir, "commit", "-q", "-m", "ignore")
-	if err := os.WriteFile(filepath.Join(dir, "pkg", "a name_test.go"), []byte("package pkg\n"), 0o600); err != nil {
-		t.Fatal(err)
+// TestWorkingTreeIsCleanRejectsIgnoredFilesInTouchedPackages guards two real
+// gaps in one shared fixture shape:
+//
+//   - "quoted .go path": text-mode `git status --porcelain` C-quotes a path
+//     containing a space (confirmed: it renders as `!! "pkg/a
+//     name_test.go"`), and the retained closing quote made the .go suffix
+//     check false, so an ignored test file with a space in its name was
+//     silently accepted as clean.
+//   - "non-.go asset": an ignored non-.go file inside a touched package (a
+//     //go:embed target, or a fixture a test reads by path) can reach
+//     `go test`'s build or test run just as surely as an ignored .go file
+//     compiles in; the prior fix only caught the .go case.
+//
+// Both must be treated as dirty inside a touched package, and both must stay
+// harmless outside every touched package.
+func TestWorkingTreeIsCleanRejectsIgnoredFilesInTouchedPackages(t *testing.T) {
+	tests := []struct {
+		name           string
+		ignorePattern  string
+		ignoredRelPath string
+	}{
+		{name: "quoted .go path", ignorePattern: "pkg/a name_test.go", ignoredRelPath: "pkg/a name_test.go"},
+		{name: "non-.go asset", ignorePattern: "pkg/asset.txt", ignoredRelPath: "pkg/asset.txt"},
 	}
 
-	if workingTreeIsClean(t.Context(), dir, []string{"pkg"}) {
-		t.Fatal("an ignored .go file with a space in its name, inside a touched package, must not be treated as a clean checkout")
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			gittest.Run(t, dir, "init", "-q", "-b", "main")
+			gittest.Run(t, dir, "config", "user.email", "test@example.invalid")
+			gittest.Run(t, dir, "config", "user.name", "Test")
+			if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "pkg", "keep.go"), []byte("package pkg\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, dir, "add", "-A")
+			gittest.Run(t, dir, "commit", "-q", "-m", "base")
+			if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(tc.ignorePattern+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, dir, "add", ".gitignore")
+			gittest.Run(t, dir, "commit", "-q", "-m", "ignore")
+			if err := os.WriteFile(filepath.Join(dir, tc.ignoredRelPath), []byte("local content\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
 
-	// The same ignored file outside any touched package is still harmless.
-	if !workingTreeIsClean(t.Context(), dir, []string{"other"}) {
-		t.Fatal("an ignored file outside every touched package must not force a dirty checkout")
+			if workingTreeIsClean(t.Context(), dir, []string{"pkg"}) {
+				t.Fatal("an ignored file inside a touched package must not be treated as a clean checkout")
+			}
+
+			// The same ignored file outside any touched package is still harmless.
+			if !workingTreeIsClean(t.Context(), dir, []string{"other"}) {
+				t.Fatal("an ignored file outside every touched package must not force a dirty checkout")
+			}
+		})
 	}
 }
 

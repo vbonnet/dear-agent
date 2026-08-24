@@ -71,6 +71,8 @@ func run(ctx context.Context, args []string, _, stderr io.Writer) int {
 	fs.StringVar(&in.crapReport, "crap-report", "", "")
 	fs.StringVar(&in.crapSummary, "crap-summary", "", "")
 	fs.StringVar(&in.crapOutcome, "crap-outcome", "", "the crap-lint step's own outcome (success, failure, skipped, ...)")
+	fs.StringVar(&in.scopeOutcome, "scope-outcome", "", "the scope-detector step's own outcome")
+	fs.StringVar(&in.concernOutcome, "concern-outcome", "", "the mixed-concern-detector step's own outcome")
 	fs.StringVar(&shouldComment, "should-comment", "", "")
 	fs.StringVar(&mixedConcern, "mixed-concern", "", "")
 	fs.StringVar(&crapFlagged, "crap-flagged", "", "")
@@ -106,6 +108,7 @@ type inputs struct {
 	changedLines, changedFiles, topLevelAreas string
 	reasons, concernReason                    string
 	crapReport, crapSummary, crapOutcome      string
+	scopeOutcome, concernOutcome              string
 	shouldComment, mixedConcern               bool
 	crapFlagged, crapUnknown                  bool
 }
@@ -129,22 +132,29 @@ func decide(in inputs) action {
 	if in.shouldComment || in.mixedConcern || in.crapFlagged || in.crapUnknown {
 		return actionUpsert
 	}
-	if in.crapOutcome == "success" {
+	// A clean delete requires every detector to have actually run and
+	// confirmed clean, not just the absence of a flag. shouldComment and
+	// mixedConcern come from the scope/concern steps' own GITHUB_OUTPUT;
+	// if either step failed outright, its output is simply never written,
+	// which reads identically to "false" here. Without checking these
+	// steps' own outcomes too, a scope-detector crash on an otherwise
+	// clean-looking revision would delete a standing "this PR is oversized"
+	// comment on the strength of a signal that was never actually computed.
+	if in.crapOutcome == "success" && in.scopeOutcome == "success" && in.concernOutcome == "success" {
 		return actionDelete
 	}
-	if in.crapOutcome == "failure" {
+	if in.crapOutcome == "failure" || in.scopeOutcome == "failure" || in.concernOutcome == "failure" {
 		// Nothing about this revision currently flags size, mixed concern,
-		// or code health, but the code-health step ran and operationally
+		// or code health, but at least one detector ran and operationally
 		// failed (continue-on-error swallows it into the workflow's own
 		// exit code, not this one). We cannot safely delete on an
-		// unconfirmed result, but doing nothing is wrong too: shouldComment
-		// and mixedConcern are computed fresh regardless of the CRAP step's
-		// outcome, so if an earlier, larger revision left a comment claiming
-		// this PR is oversized, that comment is now stale and must be
-		// refreshed to the current, accurate scope check. Refresh only if a
-		// marker comment already exists — there is nothing worth posting
-		// for the first time over a mere CRAP hiccup on an otherwise
-		// unremarkable PR.
+		// unconfirmed result, but doing nothing is wrong too: whichever
+		// detectors DID succeed are still fresh, so if an earlier, larger
+		// revision left a comment claiming this PR is oversized, that
+		// comment may now be stale and must be refreshed to the current,
+		// accurate scope check. Refresh only if a marker comment already
+		// exists — there is nothing worth posting for the first time over
+		// a mere detector hiccup on an otherwise unremarkable PR.
 		return actionRefreshIfExists
 	}
 	// Any other outcome (cancelled, skipped, or genuinely absent — the

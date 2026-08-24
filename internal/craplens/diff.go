@@ -388,13 +388,23 @@ func treeHasGoFiles(ctx context.Context, repoDir, rev, dir string) bool {
 }
 
 // workingTreeIsClean reports whether the checkout has no staged, unstaged, or
-// untracked changes, and no ignored Go source sitting inside a touched
-// package that `go test` would still compile into it.
+// untracked changes, and no ignored file sitting inside a touched package
+// that `go test` could still pull into its build or its test run.
 //
 // Coverage is measured by running tests against the checkout while function
 // spans and complexity come from the committed head tree. With a dirty tree
 // those two disagree: an untracked test can make an uncovered function look
 // covered, and an uncommitted edit can shift the lines a profile block maps to.
+//
+// Any ignored file inside a touched package is treated as dirty, not just an
+// ignored .go source: a `//go:embed` directive or a fixture read by path can
+// pull in an ignored non-Go asset just as surely as an ignored .go file
+// compiles in, and there is no cheap way to tell "this ignored file happens
+// to be irrelevant" from "this ignored file is embedded" without parsing
+// every touched package's embed directives. Refusing to measure is the safe
+// default; a false "cannot measure" costs nothing more than an unflagged
+// diff, while a false "clean" scores a function against local-filesystem
+// content the head tree does not actually contain.
 //
 // An ignored path outside every touched package — `make preflight`'s
 // `build/` directory, for one — cannot affect either tree and is not treated
@@ -438,10 +448,10 @@ func workingTreeIsClean(ctx context.Context, repoDir string, pkgs []string) bool
 		if status != "!!" {
 			return false // a real staged, unstaged, or untracked change
 		}
-		if !strings.HasSuffix(p, ".go") || !inTouchedPackage(p, pkgs) {
-			continue // ignored, and cannot affect a touched package's tests
+		if !inTouchedPackage(p, pkgs) {
+			continue // ignored, and outside every touched package
 		}
-		return false
+		return false // an ignored file inside a touched package can still reach its build via //go:embed or a fixture read
 	}
 	return true
 }
