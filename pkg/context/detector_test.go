@@ -219,16 +219,7 @@ func TestDetect(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
-	// Clear all CLI env vars to get unknown/heuristic fallback
-	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CLAUDE_SESSION_ID")
-	t.Setenv("GEMINI_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("GEMINI_SESSION_ID")
-	t.Setenv("OPENCODE_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("OPENCODE_SESSION_ID")
-	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
-	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CODEX_SESSION_ID")
+	clearHarnessSessionIDs(t)
 
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -252,6 +243,7 @@ func TestDetectFromGeminiUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	clearHarnessSessionIDs(t)
 	t.Setenv("GEMINI_SESSION_ID", "test-session-123")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -265,6 +257,7 @@ func TestDetectFromOpenCodeUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	clearHarnessSessionIDs(t)
 	t.Setenv("OPENCODE_SESSION_ID", "test-session-456")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -277,6 +270,7 @@ func TestDetectFromCodexUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	clearHarnessSessionIDs(t)
 	t.Setenv("CODEX_SESSION_ID", "test-session-789")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -289,9 +283,7 @@ func TestDetectFromPiUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
-	for _, key := range []string{"CLAUDE_SESSION_ID", "GEMINI_SESSION_ID", "OPENCODE_SESSION_ID", "CODEX_SESSION_ID"} {
-		t.Setenv(key, "")
-	}
+	clearHarnessSessionIDs(t)
 	t.Setenv("PI_SESSION_ID", "test-pi-session")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -299,6 +291,22 @@ func TestDetectFromPiUsesMarkedHeuristic(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4.6", usage.ModelID)
 	assert.Equal(t, "test-pi-session", usage.SessionID)
 	assert.True(t, usage.Estimated)
+}
+
+func clearHarnessSessionIDs(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"CLAUDE_SESSION_ID",
+		"GEMINI_SESSION_ID",
+		"OPENCODE_SESSION_ID",
+		"CODEX_SESSION_ID",
+		"PI_SESSION_ID",
+		"AGY_CONVERSATION_ID",
+		"AGY_SESSION_ID",
+		"ANTIGRAVITY_SESSION_ID",
+	} {
+		t.Setenv(key, "")
+	}
 }
 
 func TestDetectFromSessionUnsupportedCLI(t *testing.T) {
