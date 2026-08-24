@@ -122,7 +122,6 @@
       "cmd/vroom-dispatch/main_test.go (1240 lines)",
       "engram/hooks-bin/internal/validator/validator_bdd_test.go (1009 lines)",
       "engram/internal/health/checks.go (1461 lines)",
-      "internal/hookparity/opencode_plugin_test.go (1050 lines)",
       "internal/safegit/merge.go (1141 lines)",
       "pkg/headerlint/headerlint_test.go (1334 lines)",
       "pkg/instructionlint/instructionlint_test.go (1817 lines)",
@@ -130,7 +129,7 @@
       "pkg/llm/provider/provider_test.go (1307 lines)",
       "pkg/override/override.go (1036 lines)",
       "pkg/workflow/runner.go (1296 lines)",
-      "tests/githooks/post_merge_test.go (1441 lines)",
+      "tests/githooks/post_merge_test.go (1452 lines)",
       "tools/specaudit/main.go (6093 lines)",
       "tools/specaudit/main_test.go (3756 lines)",
       "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
@@ -1024,34 +1023,6 @@
       },
       "reason": "The ACL-reloader goroutine moved again, from line 460 to 471, when watchACLReload was folded into serve to give cmdServe and the tests one shared orchestration. Still five go func sites in the file, still the same four without recover(), and the goroutine-recover total is unchanged at 29. Relocation, not a new finding.",
       "reference": "https://github.com/vbonnet/dear-agent/pull/1352"
-    },
-    {
-      "previous_baseline_sha256": "5d8fec39706f2a71b79fd298e8e370bdec834f6705e2514b537bb4c136e774dc",
-      "previous_scanner_version": 2,
-      "scanner_version": 2,
-      "added": {
-        "dead-package": [],
-        "doc-path": [],
-        "file-size": [
-          "internal/hookparity/opencode_plugin_test.go (1050 lines)",
-          "tests/githooks/post_merge_test.go (1441 lines)"
-        ],
-        "goroutine-recover": [],
-        "raw-mem-gate": [],
-        "zero-test": []
-      },
-      "removed": {
-        "dead-package": [],
-        "doc-path": [],
-        "file-size": [
-          "tests/githooks/post_merge_test.go (1452 lines)"
-        ],
-        "goroutine-recover": [],
-        "raw-mem-gate": [],
-        "zero-test": []
-      },
-      "reason": "opencode_plugin_test.go grew to cover the Readable.toWeb removal (native async-iterator fallback under real Bun 1.3.14)",
-      "reference": "https://github.com/vbonnet/dear-agent/pull/1345"
     }
   ]
 }

@@ -77,6 +77,7 @@ extension events projected through `.pi/hooks.json`.
 
 - `internal/hookparity/hookparity_test.go`
 - `internal/hookparity/opencode_plugin_test.go`
+- `internal/hookparity/opencode_plugin_supervisor_test.go`
 - `cmd/spec-contract-hook/main_test.go`
 - `cmd/spec-contract-hook/reminder_state_test.go`
 - `cmd/spec-contract-hook-status/main_test.go`
