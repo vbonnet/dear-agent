@@ -288,7 +288,15 @@ func extractSizeScopeSection(body string) string {
 	if !found {
 		return ""
 	}
-	return strings.TrimSpace(section) + "\n\n"
+	// A run with nothing to say left this section empty; TrimSpace alone
+	// would still turn that back into "\n\n" below, which composeBody's
+	// non-empty check would treat as real content to restore, adding two
+	// stray blank lines above the crap-section marker on the next render.
+	trimmed := strings.TrimSpace(section)
+	if trimmed == "" {
+		return ""
+	}
+	return trimmed + "\n\n"
 }
 
 // upsertComment recovers a prior code-health section if needed, composes the

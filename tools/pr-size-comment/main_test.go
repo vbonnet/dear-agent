@@ -118,6 +118,25 @@ func TestExtractCrapSection(t *testing.T) {
 	}
 }
 
+// TestExtractSizeScopeSectionReturnsEmptyNotBlankLines guards a real gap: a
+// comment rendered from a genuinely clean revision (no split-suggestion
+// text) has nothing between the heading and the crap-section marker but a
+// blank line, and TrimSpace-then-append-"\n\n" alone turns that back into
+// "\n\n" instead of "" — composeBody's non-empty check would then treat
+// those two stray newlines as real content to restore, adding two blank
+// lines above the crap-section marker on every subsequent render.
+func TestExtractSizeScopeSectionReturnsEmptyNotBlankLines(t *testing.T) {
+	clean := composeBody(inputs{}, "")
+	if got := extractSizeScopeSection(clean); got != "" {
+		t.Errorf("extractSizeScopeSection(clean body) = %q, want \"\"", got)
+	}
+
+	withFinding := composeBody(inputs{shouldComment: true, reasons: "- too big"}, "")
+	if got := extractSizeScopeSection(withFinding); !strings.Contains(got, "too big") {
+		t.Errorf("extractSizeScopeSection(body with a finding) = %q, want it to contain the finding", got)
+	}
+}
+
 // TestComposeBodyRecoversPriorSectionOnlyWhenNothingFresher pins the
 // precedence a stale CRAP_REPORT must not violate: a fresh report always
 // wins, a recovered prior section is next, and the unknown-diagnostic

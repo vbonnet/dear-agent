@@ -455,8 +455,10 @@ func workingTreeIsClean(ctx context.Context, repoDir string, pkgs []string) bool
 	return true
 }
 
-// inTouchedPackage reports whether a repo-relative path sits directly inside
-// one of the given package directories.
+// inTouchedPackage reports whether a repo-relative path sits inside one of
+// the given package directories, or any of their subdirectories: a
+// //go:embed directive or a fixture read by path can reach a nested asset
+// just as surely as a direct child.
 func inTouchedPackage(p string, pkgs []string) bool {
 	for _, pkg := range pkgs {
 		if (pkg == "." && path.Dir(p) == ".") || (pkg != "." && (p == pkg || strings.HasPrefix(p, pkg+"/"))) {
