@@ -82,6 +82,22 @@ four of them P1 correctness findings on a live production reconciler, releasing
 auto-merge one second later, because it matched on author login and never
 fetched the body. That is the defect this rule exists to prevent.
 
+**Review-round cap, hard rule.** Track a review-round counter per PR,
+independent of the attempt budget above and the no-progress detector below —
+both miss the case a real automated-reviewer bot produces: each round's fix
+lands cleanly (real progress, a changed blocker set, a fresh head_sha), so
+neither the attempt budget (same-key retries) nor the no-progress detector
+(identical blocker set) ever fires, yet the bot never runs out of new P2
+findings to raise. **Stop after 5 review rounds on the same PR**, or after 2
+consecutive rounds that raise only P2-or-lower findings with no new attack
+surface, whichever comes first — merge if genuinely READY and non-carve-out,
+otherwise escalate to a human with the remaining findings named. Never
+grind past the cap alone.
+
+Bead `ce-0wdjc` (P2, open): PR #1355 ran 16 review rounds and accumulated 106
+review threads in one session before being manually stopped on a fresh P1 —
+this rule is the fix, not yet enforced anywhere before this stub.
+
 ### 4. Re-diagnose and loop
 
 Re-run step 1 after every action. **Act only on a fresh diagnosis**, never on one
@@ -118,8 +134,10 @@ against a concurrent human push.
 3. `UNKNOWN_BLOCK` from `pr-blockers`.
 4. An unfixed P1 review thread.
 5. Attempt budget exhausted, or the no-progress detector fired.
-6. `agm quota --check` halted or unreadable.
-7. An opt-out label (`no-autodrive`) is present.
+6. Review-round cap reached (5 rounds, or 2 consecutive P2-or-lower-only
+   rounds).
+7. `agm quota --check` halted or unreadable.
+8. An opt-out label (`no-autodrive`) is present.
 
 ## NEVER
 
@@ -154,3 +172,5 @@ Skills: `pr-merge-blockers` (diagnosis discipline), `github-thread-resolver`
 - Flake allowlist: `.safe-merge.yml` (`flaky_checks`), enforced by
   `internal/safegit/flakevalve.go`.
 - Incident this rule prevents: bead `ce-lr7j`.
+- Review-round cap incident and retro: bead `ce-n6g3y` (parent), `ce-0wdjc`
+  (this rule).
