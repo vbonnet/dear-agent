@@ -107,7 +107,23 @@ func TestMdCodeSurvivesMarkdownMetacharacters(t *testing.T) {
 
 func TestRenderEscapesUnknownPackagePaths(t *testing.T) {
 	body := Report{Threshold: 30, Over: []Function{{File: "x.go", Name: "f", Complexity: 40}}, Unknown: []string{"pkg/a`b\n**injected**"}}.Render()
-	if !strings.Contains(body, "``pkg/a`b\n**injected**``") {
+	if !strings.Contains(body, "``pkg/a`b **injected**``") {
 		t.Fatalf("unknown path was not safely code-spanned: %q", body)
+	}
+}
+
+// TestMdCodeCollapsesNewlines guards against a real gap: a widened backtick
+// fence alone does not make a literal newline safe, because Markdown's
+// block-level parsing (a heading, a list) can still trigger on content after
+// a line break even inside what reads as one inline code span. A path
+// containing a newline followed by heading syntax must not let that syntax
+// survive into the rendered comment.
+func TestMdCodeCollapsesNewlines(t *testing.T) {
+	got := mdCode("before\n## injected")
+	if strings.Contains(got, "\n") {
+		t.Fatalf("mdCode contains a raw newline: %q", got)
+	}
+	if !strings.Contains(got, "before ## injected") {
+		t.Fatalf("mdCode lost content: %q", got)
 	}
 }

@@ -254,15 +254,44 @@ type goListPackage struct {
 }
 
 func populateCompiledFiles(ctx context.Context, repoDir string, pkgDirs []string, data coverageData) bool {
-	argv := []string{"list", "-json"}
+	// -e: without it, a package go list can't fully resolve (an unresolved
+	// import in a DIFFERENT touched package, say) can still make the whole
+	// invocation exit non-zero; -e makes list report that package's problem
+	// via its own Error field instead of destabilizing the run.
+	argv := []string{"list", "-e", "-json"}
 	for _, dir := range pkgDirs {
 		argv = append(argv, "./"+dir)
 	}
 	cmd := exec.CommandContext(ctx, "go", argv...)
 	cmd.Dir, cmd.Env = repoDir, withGoWorkspaceDisabled(os.Environ())
 	out, err := cmd.Output()
-	if err != nil {
+	// A per-package problem (one touched package fails to resolve while
+	// another builds fine) still exits non-zero but leaves complete, valid
+	// JSON on stdout for every package that DID list successfully.
+	// Discarding all of it here would wrongly downgrade a healthy touched
+	// package to unmeasured just because a different touched package in the
+	// same run has trouble. Only a genuine start failure — the go binary
+	// itself never producing output — is fatal, mirroring how the go test
+	// call above already tolerates its own non-zero exit for the same
+	// reason.
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
 		return false
+	}
+	if len(out) == 0 {
+		return false
+	}
+	// go list reports each package's Dir as an absolute path with symlinks
+	// resolved (the toolchain resolves the module root's real path
+	// internally), while repoDir here may still be the caller's original,
+	// possibly-symlinked path — macOS's t.TempDir() fixtures hit this
+	// directly, since /var/folders is itself a symlink to
+	// /private/var/folders. Without resolving repoDir the same way,
+	// filepath.Rel below produces a "../.." path for every file below and
+	// the whole inventory silently comes back empty.
+	resolvedRepoDir, rerr := filepath.EvalSymlinks(repoDir)
+	if rerr != nil {
+		resolvedRepoDir = repoDir
 	}
 	dec := json.NewDecoder(bytes.NewReader(out))
 	for {
@@ -275,7 +304,7 @@ func populateCompiledFiles(ctx context.Context, repoDir string, pkgDirs []string
 		}
 		names := append(append(append(append([]string{}, pkg.GoFiles...), pkg.CgoFiles...), pkg.TestGoFiles...), pkg.XTestGoFiles...)
 		for _, name := range names {
-			rel, err := filepath.Rel(repoDir, filepath.Join(pkg.Dir, name))
+			rel, err := filepath.Rel(resolvedRepoDir, filepath.Join(pkg.Dir, name))
 			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				data.compiledFiles[filepath.ToSlash(rel)] = true
 			}

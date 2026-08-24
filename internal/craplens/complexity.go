@@ -81,10 +81,21 @@ type candidate struct {
 // introduces.
 //
 // Ordinary declarations are one function each. A package-level variable
-// holding a function literal is also one: those are this repository's
-// injection seams, and a seam that grows a branchy body would otherwise be
-// invisible to this signal while gocyclo reports it. Counting them is also
-// what keeps the two tools agreeing about the same file.
+// holding a function literal is also scored, including one nested inside a
+// composite or wrapper expression (`var Composite = &cmd{RunE: func() {...
+// }}`, the cobra RunE shape) — those are this repository's injection seams,
+// and a seam that grows a branchy body would otherwise be invisible to this
+// advisory signal.
+//
+// This is a deliberate, verified divergence from gocyclo, not an oversight:
+// gocyclo itself does not report a composite-literal-nested function literal
+// (confirmed against the real binary), so CRAPLENS-05's "matching the
+// counting the ... gocyclo linter performs" promise applies to how each
+// scored function's complexity number is computed, not to which
+// declarations get scored at all. TestComplexityParityWithGocycloBinary only
+// checks agreement in the direction "does our count match gocyclo's for
+// something gocyclo itself reports" — it cannot see, and does not need to
+// see, a function this signal scores that gocyclo silently skips.
 func declaredFuncs(decl ast.Decl) []candidate {
 	switch d := decl.(type) {
 	case *ast.FuncDecl:
@@ -107,10 +118,18 @@ func declaredFuncs(decl ast.Decl) []candidate {
 					continue
 				}
 				ast.Inspect(value, func(node ast.Node) bool {
-					if lit, ok := node.(*ast.FuncLit); ok {
-						out = append(out, candidate{name: vs.Names[i].Name, node: lit})
+					lit, ok := node.(*ast.FuncLit)
+					if !ok {
+						return true
 					}
-					return true
+					out = append(out, candidate{name: vs.Names[i].Name, node: lit})
+					// Do not also descend into this literal's own body: a
+					// closure it defines internally is already part of ITS
+					// complexity count (complexity() walks a function's
+					// whole body), so surfacing it too would duplicate that
+					// branch complexity under the same variable name as a
+					// second, overlapping candidate.
+					return false
 				})
 			}
 		}

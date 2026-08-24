@@ -112,6 +112,13 @@ func (r Report) renderOver(b *strings.Builder) {
 // longest backtick run in the text, per CommonMark, and a pipe is escaped
 // because a table cell needs that even inside code.
 func mdCode(text string) string {
+	// A literal newline survives a widened backtick fence: Markdown's
+	// block-level parsing (a heading, a list) can still trigger on content
+	// after a line break even inside what reads as one inline code span,
+	// so a repository-controlled path with an embedded newline followed by
+	// e.g. "## " could inject a heading into the rendered comment. Collapse
+	// line breaks before fencing rather than relying on the fence alone.
+	text = strings.ReplaceAll(text, "\n", " ")
 	longest, run := 0, 0
 	for _, r := range text {
 		if r == '`' {

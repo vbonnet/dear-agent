@@ -2,6 +2,9 @@ package craplens
 
 import (
 	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -492,5 +495,46 @@ func TestWithGoWorkspaceDisabledForcesModuleMode(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestPopulateCompiledFilesToleratesOnePackageFailingToResolve guards a real
+// regression risk in the compiled-files inventory this package relies on to
+// tell "buildable but statement-free" apart from "excluded by a build tag":
+// `go list -json` over several touched packages exits non-zero when even ONE
+// of them has an unresolved import, but still writes complete, valid JSON to
+// stdout for every package that DID resolve. Discarding all of it on any
+// non-zero exit would wrongly downgrade a healthy touched package's
+// functions to CoverageUnknown just because a different touched package in
+// the same PR has an unrelated problem — exactly the kind of diff a
+// code-health signal is most likely to see.
+func TestPopulateCompiledFilesToleratesOnePackageFailingToResolve(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain unavailable")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "good"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "good", "good.go"), []byte("package good\n\nfunc Ok() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "bad"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	badSrc := "package bad\n\nimport \"example.test/nonexistent\"\n\nfunc Broken() { nonexistent.Foo() }\n"
+	if err := os.WriteFile(filepath.Join(dir, "bad", "bad.go"), []byte(badSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	data := unmeasured([]string{"good", "bad"})
+	if ok := populateCompiledFiles(t.Context(), dir, []string{"good", "bad"}, data); !ok {
+		t.Fatal("populateCompiledFiles must tolerate one package failing to resolve, as long as go list produced output for the others")
+	}
+	if !data.compiledFiles["good/good.go"] {
+		t.Error("the healthy package's file must still be recorded as compiled despite the sibling package's unresolved import")
 	}
 }

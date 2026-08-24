@@ -106,3 +106,41 @@ var Composite = &cmd{RunE: func(n int) error { return nil }}
 		}
 	}
 }
+
+// TestDeclaredFuncsDoesNotDoubleCountNestedClosures guards against a real
+// regression in the composite-literal walk above: ast.Inspect keeps
+// descending into a matched *ast.FuncLit's own body unless told to stop, so
+// a closure DEFINED INSIDE a package-level func literal (not merely wrapped
+// by a non-function expression) was being surfaced a second time under the
+// same variable name — complexity() already walks a function's whole body,
+// so its inner closures' branches are counted once as part of it; listing
+// the inner closure again as its own same-named candidate would both
+// duplicate that branch complexity and render the same name twice in a
+// report.
+func TestDeclaredFuncsDoesNotDoubleCountNestedClosures(t *testing.T) {
+	src := `package p
+
+var Bare = func() {
+	inner := func() {
+		if true {
+		}
+	}
+	inner()
+}
+`
+	file, err := parser.ParseFile(token.NewFileSet(), "p.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+
+	var candidates []candidate
+	for _, decl := range file.Decls {
+		candidates = append(candidates, declaredFuncs(decl)...)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("declaredFuncs returned %d candidates, want exactly 1 (the outer closure only): %+v", len(candidates), candidates)
+	}
+	if got := complexity(candidates[0].node); got != 2 {
+		t.Errorf("complexity(Bare) = %d, want 2 (1 base + 1 for the inner closure's if, already absorbed)", got)
+	}
+}
