@@ -182,6 +182,16 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	for _, dir := range pkgDirs {
 		argv = append(argv, "./"+dir)
 	}
+	// Snapshot which files the toolchain actually compiles BEFORE running
+	// the tests, not after: a test is free to rewrite its own package's
+	// source during execution (a codegen test, say, or one that flips a
+	// build-tag comment), and reading the compiled-file inventory afterward
+	// would then reflect source content the coverage binary below was never
+	// actually built from.
+	if !populateCompiledFiles(ctx, repoDir, pkgDirs, data) {
+		return data
+	}
+
 	cmd := exec.CommandContext(ctx, "go", argv...)
 	cmd.Dir = repoDir
 	cmd.Env = withGoWorkspaceDisabled(os.Environ())
@@ -208,9 +218,6 @@ func collectCoverage(ctx context.Context, repoDir string, pkgDirs []string) cove
 	}
 
 	modPath := modulePath(ctx, repoDir)
-	if !populateCompiledFiles(ctx, repoDir, pkgDirs, data) {
-		return data
-	}
 
 	raw, err := os.ReadFile(profilePath)
 	if err != nil {
@@ -283,15 +290,25 @@ func populateCompiledFiles(ctx context.Context, repoDir string, pkgDirs []string
 	}
 	// go list reports each package's Dir as an absolute path with symlinks
 	// resolved (the toolchain resolves the module root's real path
-	// internally), while repoDir here may still be the caller's original,
-	// possibly-symlinked path — macOS's t.TempDir() fixtures hit this
-	// directly, since /var/folders is itself a symlink to
-	// /private/var/folders. Without resolving repoDir the same way,
-	// filepath.Rel below produces a "../.." path for every file below and
-	// the whole inventory silently comes back empty.
-	resolvedRepoDir, rerr := filepath.EvalSymlinks(repoDir)
-	if rerr != nil {
-		resolvedRepoDir = repoDir
+	// internally), while repoDir here may be relative, empty, or still the
+	// caller's original, possibly-symlinked path. filepath.Abs first: the
+	// real workflow invokes crap-lint without -repo at all (repoDir == ""),
+	// which EvalSymlinks alone resolves to "." rather than the actual
+	// working directory, and filepath.Rel between that and an absolute
+	// package Dir fails outright, silently emptying the whole inventory in
+	// production. filepath.Abs("") correctly resolves to the process's
+	// actual cwd (it calls Getwd internally), matching how this package's
+	// exec.Cmd.Dir == "" already means "inherit the caller's cwd" elsewhere.
+	// EvalSymlinks second: macOS's t.TempDir() fixtures hit the same class
+	// of mismatch directly, since /var/folders is itself a symlink to
+	// /private/var/folders. Skipping either step produces a "../.." path
+	// for every file below and the whole inventory comes back empty.
+	resolvedRepoDir := repoDir
+	if abs, aerr := filepath.Abs(resolvedRepoDir); aerr == nil {
+		resolvedRepoDir = abs
+	}
+	if resolved, rerr := filepath.EvalSymlinks(resolvedRepoDir); rerr == nil {
+		resolvedRepoDir = resolved
 	}
 	dec := json.NewDecoder(bytes.NewReader(out))
 	for {
@@ -302,9 +319,20 @@ func populateCompiledFiles(ctx context.Context, repoDir string, pkgDirs []string
 			}
 			return false
 		}
+		// go list's own Dir may or may not already be symlink-resolved,
+		// depending on how the go subprocess's working directory was
+		// established (an inherited cwd from an empty cmd.Dir behaves
+		// differently here than an explicit one) — resolving it the same
+		// way as resolvedRepoDir keeps both sides in the same space
+		// regardless, rather than assuming go list's behavior is
+		// consistent.
+		pkgDir := pkg.Dir
+		if resolved, rerr := filepath.EvalSymlinks(pkgDir); rerr == nil {
+			pkgDir = resolved
+		}
 		names := append(append(append(append([]string{}, pkg.GoFiles...), pkg.CgoFiles...), pkg.TestGoFiles...), pkg.XTestGoFiles...)
 		for _, name := range names {
-			rel, err := filepath.Rel(resolvedRepoDir, filepath.Join(pkg.Dir, name))
+			rel, err := filepath.Rel(resolvedRepoDir, filepath.Join(pkgDir, name))
 			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				data.compiledFiles[filepath.ToSlash(rel)] = true
 			}

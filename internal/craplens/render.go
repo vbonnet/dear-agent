@@ -111,14 +111,21 @@ func (r Report) renderOver(b *strings.Builder) {
 // would add a column and break the table. The fence is widened past the
 // longest backtick run in the text, per CommonMark, and a pipe is escaped
 // because a table cell needs that even inside code.
+// lineBreakReplacer collapses every CommonMark line-ending form to a single
+// space: "\r\n" is checked before the lone "\r" and "\n" cases so a CRLF
+// pair collapses to one space, not two.
+var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
+
 func mdCode(text string) string {
-	// A literal newline survives a widened backtick fence: Markdown's
+	// A literal line break survives a widened backtick fence: Markdown's
 	// block-level parsing (a heading, a list) can still trigger on content
-	// after a line break even inside what reads as one inline code span,
-	// so a repository-controlled path with an embedded newline followed by
-	// e.g. "## " could inject a heading into the rendered comment. Collapse
-	// line breaks before fencing rather than relying on the fence alone.
-	text = strings.ReplaceAll(text, "\n", " ")
+	// after a line ending even inside what reads as one inline code span,
+	// so a repository-controlled path with an embedded line break followed
+	// by e.g. "## " could inject a heading into the rendered comment.
+	// CommonMark treats a lone "\r" as a line ending too, not just "\n", so
+	// both must be collapsed before fencing rather than relying on the
+	// fence alone.
+	text = lineBreakReplacer.Replace(text)
 	longest, run := 0, 0
 	for _, r := range text {
 		if r == '`' {
