@@ -196,7 +196,7 @@ func unwrapRecoveredSection(s string) string {
 // composeBody renders the comment. priorCrapSection is whatever the comment
 // being overwritten already said about code health; it is used only when
 // this run has nothing fresher to report.
-func composeBody(in inputs, priorCrapSection string) string {
+func composeBody(in inputs, priorCrapSection string, priorSizeScope ...string) string { //nolint:gocyclo // renders four independently recoverable signal states
 	priorCrapSection = unwrapRecoveredSection(priorCrapSection)
 
 	var b strings.Builder
@@ -217,6 +217,11 @@ func composeBody(in inputs, priorCrapSection string) string {
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands.")
 		fmt.Fprintln(&b)
+	} else if len(priorSizeScope) > 0 && priorSizeScope[0] != "" {
+		fmt.Fprint(&b, priorSizeScope[0])
+		if !strings.HasSuffix(priorSizeScope[0], "\n") {
+			fmt.Fprintln(&b)
+		}
 	}
 
 	fmt.Fprintln(&b, crapSectionMarker)
@@ -274,6 +279,18 @@ func extractCrapSection(body string) string {
 	return strings.TrimPrefix(after, "\n")
 }
 
+func extractSizeScopeSection(body string) string {
+	_, after, found := strings.Cut(body, "## PR size, scope, and code health signals\n\n")
+	if !found {
+		return ""
+	}
+	section, _, found := strings.Cut(after, crapSectionMarker)
+	if !found {
+		return ""
+	}
+	return strings.TrimSpace(section) + "\n\n"
+}
+
 // upsertComment recovers a prior code-health section if needed, composes the
 // body, and edits the existing marker comment in place or posts a new one.
 // Best effort throughout: a comment-update failure must never fail the job
@@ -292,7 +309,7 @@ func extractCrapSection(body string) string {
 // signal reviewers rely on silently went stale or missing.
 const exitFailedOperation = 1
 
-func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists bool, stderr io.Writer) int {
+func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists bool, stderr io.Writer) int { //nolint:gocyclo // preserves independent detector and cleanup failure states
 	ids, err := markerCommentIDs(ctx, repo, pr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr-size-comment: could not list existing comments: %v\n", err)
@@ -302,8 +319,8 @@ func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists
 		return 0
 	}
 
-	prior := ""
-	if needsCrapRecovery(in) && len(ids) > 0 {
+	prior, priorSize := "", ""
+	if (needsCrapRecovery(in) || in.scopeOutcome != "success" || in.concernOutcome != "success") && len(ids) > 0 {
 		body, err := commentBody(ctx, repo, ids[0])
 		if err != nil {
 			// Do not fall through to patching with prior == "": recovery
@@ -317,10 +334,13 @@ func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists
 			return exitFailedOperation
 		}
 		prior = extractCrapSection(body)
+		if in.scopeOutcome != "success" || in.concernOutcome != "success" {
+			priorSize = extractSizeScopeSection(body)
+		}
 	}
 
 	failed := false
-	body := composeBody(in, prior)
+	body := composeBody(in, prior, priorSize)
 
 	if len(ids) > 0 {
 		if err := patchComment(ctx, repo, ids[0], body); err != nil {
@@ -333,12 +353,13 @@ func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists
 	}
 
 	// Collapse any duplicates left by earlier revisions of this workflow.
-	// Best effort: a leftover duplicate is cosmetic, not the audit record,
-	// so it does not itself flip the exit code.
+	// A duplicate deletion is part of the requested update and must be
+	// reported if it fails, even when the primary update succeeded.
 	if !failed {
 		for _, id := range ids[min(1, len(ids)):] {
 			if err := deleteComment(ctx, repo, id); err != nil {
 				fmt.Fprintf(stderr, "pr-size-comment: could not delete duplicate comment %s: %v\n", id, err)
+				failed = true
 			}
 		}
 	}

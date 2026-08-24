@@ -118,6 +118,7 @@ func joinCodePaths(paths []string) string {
 }
 
 func mdCode(text string) string {
+	text = strings.ReplaceAll(text, "\n", " ")
 	longest, run := 0, 0
 	for _, r := range text {
 		if r == '`' {

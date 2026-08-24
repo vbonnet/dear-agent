@@ -8,6 +8,16 @@ import (
 	"github.com/vbonnet/dear-agent/internal/craplens"
 )
 
+func TestMdCodeCollapsesNewlines(t *testing.T) {
+	got := mdCode("before\n## injected")
+	if strings.Contains(got, "\n") {
+		t.Fatalf("mdCode contains a raw newline: %q", got)
+	}
+	if !strings.Contains(got, "before ## injected") {
+		t.Fatalf("mdCode lost content: %q", got)
+	}
+}
+
 // TestRunRequiresRevisions pins the usage contract: a missing revision is the
 // one thing that exits non-zero.
 func TestRunRequiresRevisions(t *testing.T) {

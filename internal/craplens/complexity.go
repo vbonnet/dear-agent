@@ -103,11 +103,15 @@ func declaredFuncs(decl ast.Decl) []candidate {
 				continue
 			}
 			for i, value := range vs.Values {
-				lit, ok := value.(*ast.FuncLit)
-				if !ok || i >= len(vs.Names) {
+				if i >= len(vs.Names) {
 					continue
 				}
-				out = append(out, candidate{name: vs.Names[i].Name, node: lit})
+				ast.Inspect(value, func(node ast.Node) bool {
+					if lit, ok := node.(*ast.FuncLit); ok {
+						out = append(out, candidate{name: vs.Names[i].Name, node: lit})
+					}
+					return true
+				})
 			}
 		}
 		return out

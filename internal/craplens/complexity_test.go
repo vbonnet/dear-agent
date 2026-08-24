@@ -66,11 +66,8 @@ func TestFuncNameQualifiesMethods(t *testing.T) {
 // TestDeclaredFuncsMatchesGocycloScope pins WHICH declarations are scored,
 // which is a separate question from how each one is counted.
 //
-// Both answers below were taken from the gocyclo binary rather than assumed:
-// it reports a directly-assigned package-level function literal, and it does
-// not report one nested inside a composite literal (the cobra RunE shape).
-// Scoring the composite-literal case here would diverge from the linter this
-// package promises parity with, so the blind spot is shared deliberately.
+// Package-level initializer literals are scored even when nested in a
+// composite expression, so injected handlers cannot evade the signal.
 func TestDeclaredFuncsMatchesGocycloScope(t *testing.T) {
 	src := `package p
 
@@ -99,7 +96,7 @@ var Composite = &cmd{RunE: func(n int) error { return nil }}
 		}
 	}
 
-	want := []string{"Plain", "Bare"}
+	want := []string{"Plain", "Bare", "Composite"}
 	if len(names) != len(want) {
 		t.Fatalf("scored %v, want %v", names, want)
 	}

@@ -367,3 +367,28 @@ exit 0
 		t.Fatal("duplicate was deleted after the primary update failed")
 	}
 }
+
+func TestUpsertCommentReturnsFailureWhenDuplicateDeleteFails(t *testing.T) {
+	installFakeGhScript(t, `#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    --paginate) printf '%s\n' 111 222; exit 0 ;;
+    --method) if [ "$3" = "DELETE" ]; then exit 1; fi; exit 0 ;;
+  esac
+done
+exit 0
+`)
+	var stderr bytes.Buffer
+	if got := upsertComment(t.Context(), "vbonnet/dear-agent", "1", inputs{shouldComment: true, scopeOutcome: "success", concernOutcome: "success", crapOutcome: "success"}, false, &stderr); got != exitFailedOperation {
+		t.Fatalf("upsertComment() = %d, want %d", got, exitFailedOperation)
+	}
+}
+
+func TestComposeBodyPreservesSizeScopeWhenDetectorFailed(t *testing.T) {
+	prior := "This PR tripped a deterministic split-suggestion signal:\n\nold oversized finding\n\nCurrent scope: 99 changed lines, 9 changed files, 3 top-level areas.\n\n"
+	in := inputs{scopeOutcome: "failure", concernOutcome: "success", crapOutcome: "success", crapReport: "fresh"}
+	got := composeBody(in, "", prior)
+	if !strings.Contains(got, "old oversized finding") || !strings.Contains(got, "99 changed lines") {
+		t.Fatalf("failed detector erased prior size/scope section: %q", got)
+	}
+}

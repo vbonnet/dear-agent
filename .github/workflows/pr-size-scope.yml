@@ -358,6 +358,7 @@ jobs:
     name: Split request
     needs: size-scope
     if: |
+      always() && needs.size-scope.result != 'cancelled' &&
       (needs.size-scope.outputs.should_comment == 'true' ||
        needs.size-scope.outputs.mixed_concern == 'true') &&
       github.event.pull_request.draft == false &&

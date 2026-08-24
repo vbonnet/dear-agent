@@ -9,7 +9,6 @@ import (
 	"go/token"
 	"os/exec"
 	"path"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -459,7 +458,12 @@ func workingTreeIsClean(ctx context.Context, repoDir string, pkgs []string) bool
 // inTouchedPackage reports whether a repo-relative path sits directly inside
 // one of the given package directories.
 func inTouchedPackage(p string, pkgs []string) bool {
-	return slices.Contains(pkgs, path.Dir(p))
+	for _, pkg := range pkgs {
+		if (pkg == "." && path.Dir(p) == ".") || (pkg != "." && (p == pkg || strings.HasPrefix(p, pkg+"/"))) {
+			return true
+		}
+	}
+	return false
 }
 
 // headIsCheckedOut reports whether the working tree is at the head revision.
