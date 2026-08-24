@@ -14,11 +14,13 @@ import (
 )
 
 type hookParityState struct {
-	harness             string
-	hooks               map[string][]bddHookGroup
-	postMergeHook       string
-	companionOutput     string
-	companionRegression error
+	harness                  string
+	hooks                    map[string][]bddHookGroup
+	sharedReminderOutput     string
+	sharedReminderRegression error
+	postMergeHook            string
+	companionOutput          string
+	companionRegression      error
 }
 
 type bddHookGroup struct {
@@ -45,6 +47,9 @@ func RegisterHookParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates hook parity for that harness$`, agmValidatesHookParityForThatHarness)
 	ctx.Step(`^hook harness "([^"]*)" should include guardrail hook "([^"]*)"$`, hookHarnessShouldIncludeGuardrailHook)
 	ctx.Step(`^hook harness "([^"]*)" should include Beads lifecycle hook "([^"]*)"$`, hookHarnessShouldIncludeBeadsLifecycleHook)
+	ctx.Step(`^staged SPEC contract feedback is configured$`, stagedSPECContractFeedbackIsConfigured)
+	ctx.Step(`^AGM exercises the shared reminder across all projected harness adapters$`, agmExercisesSharedSPECReminder)
+	ctx.Step(`^every reminder should route to the canonical authoring page and single-source skill$`, sharedSPECReminderUsesCanonicalAuthoringRoute)
 	ctx.Step(`^the repository post-merge hook is configured$`, repositoryPostMergeHookIsConfigured)
 	ctx.Step(`^AGM validates repository post-merge hook coverage$`, agmValidatesRepositoryPostMergeHookCoverage)
 	ctx.Step(`^the repository post-merge hook should include lifecycle safeguard "([^"]*)"$`, repositoryPostMergeHookShouldIncludeLifecycleSafeguard)
@@ -130,6 +135,37 @@ func hookHarnessShouldIncludeBeadsLifecycleHook(ctx context.Context, harness, ev
 		}
 	}
 	return fmt.Errorf("harness %q missing Beads lifecycle hook %q", state.harness, want)
+}
+
+func stagedSPECContractFeedbackIsConfigured(ctx context.Context) error {
+	_, err := getHookParityState(ctx)
+	return err
+}
+
+func agmExercisesSharedSPECReminder(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.sharedReminderOutput, state.sharedReminderRegression = runLocalGuardrailGoTest(ctx,
+		`^TestRunProvidesCooperativeTerminalReminderForValidStagedContract$`,
+		"./cmd/spec-contract-hook",
+	)
+	return nil
+}
+
+func sharedSPECReminderUsesCanonicalAuthoringRoute(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.sharedReminderRegression != nil {
+		return fmt.Errorf("shared staged-SPEC reminder regression: %w: %s", state.sharedReminderRegression, state.sharedReminderOutput)
+	}
+	if !strings.Contains(state.sharedReminderOutput, "--- PASS: TestRunProvidesCooperativeTerminalReminderForValidStagedContract") {
+		return fmt.Errorf("shared staged-SPEC reminder output omitted its passing regression: %s", state.sharedReminderOutput)
+	}
+	return nil
 }
 
 func hookCommandsContain(hooks map[string][]bddHookGroup, substr string) bool {

@@ -82,6 +82,11 @@ Feature: Hook harness parity
       | pi-cli       | PreCompact       |
       | pi-cli       | PostCompact      |
 
+  Scenario: Provider projections share the canonical SPEC authoring route
+    Given staged SPEC contract feedback is configured
+    When AGM exercises the shared reminder across all projected harness adapters
+    Then every reminder should route to the canonical authoring page and single-source skill
+
   Scenario Outline: Repository post-merge hook exposes lifecycle safeguards
     Given the repository post-merge hook is configured
     When AGM validates repository post-merge hook coverage
