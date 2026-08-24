@@ -117,8 +117,17 @@ func joinCodePaths(paths []string) string {
 	return strings.Join(encoded, ", ")
 }
 
+// lineBreakReplacer collapses every CommonMark line-ending form to a single
+// space: "\r\n" is checked before the lone "\r" and "\n" cases so a CRLF
+// pair collapses to one space, not two.
+var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
+
 func mdCode(text string) string {
-	text = strings.ReplaceAll(text, "\n", " ")
+	// CommonMark treats a lone "\r" as a line ending too, not just "\n" —
+	// both must be collapsed before fencing, or a widened backtick fence
+	// alone does not stop a repository-controlled path from injecting
+	// block-level Markdown (a heading, a list) after the line break.
+	text = lineBreakReplacer.Replace(text)
 	longest, run := 0, 0
 	for _, r := range text {
 		if r == '`' {

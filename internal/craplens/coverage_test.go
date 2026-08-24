@@ -538,3 +538,36 @@ func TestPopulateCompiledFilesToleratesOnePackageFailingToResolve(t *testing.T) 
 		t.Error("the healthy package's file must still be recorded as compiled despite the sibling package's unresolved import")
 	}
 }
+
+// TestPopulateCompiledFilesResolvesDefaultRepoDir guards a real production
+// bug: the actual workflow invokes crap-lint without -repo at all, so
+// repoDir arrives here as "". filepath.EvalSymlinks("") alone resolves to
+// "." rather than the process's actual working directory, and
+// filepath.Rel between "." and an absolute go-list-reported package Dir
+// fails outright — silently emptying the whole compiled-files inventory in
+// production, not just in a symlink-heavy local fixture. filepath.Abs must
+// run first so an empty repoDir resolves to the real cwd.
+func TestPopulateCompiledFilesResolvesDefaultRepoDir(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain unavailable")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "good"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "good", "good.go"), []byte("package good\n\nfunc Ok() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	data := unmeasured([]string{"good"})
+	if ok := populateCompiledFiles(t.Context(), "", []string{"good"}, data); !ok {
+		t.Fatal("populateCompiledFiles must succeed with an empty repoDir, matching the real workflow's crap-lint invocation")
+	}
+	if !data.compiledFiles["good/good.go"] {
+		t.Errorf("good/good.go must be recorded as compiled when repoDir is empty (defaults to cwd): compiledFiles=%v", data.compiledFiles)
+	}
+}
