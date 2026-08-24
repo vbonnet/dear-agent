@@ -31,6 +31,14 @@ record it as an applicability-scoped requirement in the harness-neutral owner.
 Do not create a `SPEC.md` beside a harness or implementation merely because it
 translates or exposes the behavior.
 
+When repository coverage requires an implementation directory to declare its
+contract owner, use `SPEC.owner` with one canonical repository-relative path
+to the neutral product or domain `SPEC.md`. The pointer is traceability, not a
+second normative contract: it cannot target a dotted or bare harness
+configuration, registration, plugin, or grouped harness root, cannot coexist
+with a local `SPEC.md`, and its target must retain strict reciprocal BDD
+coverage.
+
 ## Shared contract pattern
 
 State the outcome once, then make implementations examples:
@@ -71,6 +79,18 @@ domain owner, preserve or deliberately migrate stable requirement IDs, update
 reciprocal BDD links, record every active member's applicability, and retain
 the source or test evidence for native conformance. Stop for maintainer review
 when ownership or observable semantics are uncertain.
+
+The deterministic source guard admits a same-change relocation or complete
+retirement to that review only when the selected immutable snapshot has no
+surviving reciprocal BDD or implementation ownership edge to the deleted path
+and every replacement passes the ordinary strict checks. That is structural
+graph evidence, not semantic deletion authority; the changed paths and reviewed
+diff must still demonstrate the stable-ID preservation or deliberate retirement
+decision.
+
+If implementation source survives, deleting its `SPEC.owner` is blocked unless
+the same directory gains a permitted local `SPEC.md` replacement that passes
+strict neutrality and contract validation.
 
 ## Capability variation pattern
 
