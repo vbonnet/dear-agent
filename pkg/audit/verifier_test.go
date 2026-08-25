@@ -164,6 +164,83 @@ func TestRunnerVerifierErrorTransitionsPartial(t *testing.T) {
 	}
 }
 
+func TestRunnerInvalidVerifierFindingTransitionsPartial(t *testing.T) {
+	r, store, reg := newTestRunner(t)
+	if err := reg.RegisterVerifier(fakeVerifier{
+		name: "invalid-suggestion",
+		findings: []Finding{{
+			Fingerprint: "vf-invalid",
+			Severity:    SeverityP2,
+			Title:       "invalid verifier suggestion",
+			Suggested:   Remediation{Strategy: Strategy("future")},
+		}},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	plan := Plan{
+		Repo: "demo", RepoRoot: "/tmp/demo", Cadence: CadenceOnDemand,
+		Trees: []TreePlan{{WorkingDir: "/tmp/demo"}},
+	}
+
+	report, err := r.Run(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.AuditRun.State != AuditRunPartial {
+		t.Fatalf("state = %q, want partial", report.AuditRun.State)
+	}
+	if len(report.VerifierOutcomes) != 1 || report.VerifierOutcomes[0].Err == nil {
+		t.Fatalf("expected one verifier outcome with error, got %+v", report.VerifierOutcomes)
+	}
+	if len(report.VerifierOutcomes[0].Findings) != 0 {
+		t.Fatalf("findings = %+v, want invalid verifier finding dropped", report.VerifierOutcomes[0].Findings)
+	}
+	stored, err := store.ListFindings(context.Background(), FindingFilter{Repo: "demo"})
+	if err != nil {
+		t.Fatalf("ListFindings: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("stored findings = %+v, want none", stored)
+	}
+}
+
+func TestRunnerVerifierStoreFailureTransitionsPartial(t *testing.T) {
+	r, memory, reg := newTestRunner(t)
+	store := &observingFindingStore{Store: memory, upsertFindingErr: errors.New("write failed")}
+	r.Store = store
+	if err := reg.RegisterVerifier(fakeVerifier{
+		name: "store-failure",
+		findings: []Finding{{
+			Fingerprint: "vf-store-failure",
+			Severity:    SeverityP1,
+			Title:       "cannot persist verifier finding",
+		}},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	plan := Plan{
+		Repo: "demo", RepoRoot: "/tmp/demo", Cadence: CadenceOnDemand,
+		Trees: []TreePlan{{WorkingDir: "/tmp/demo"}},
+	}
+
+	report, err := r.Run(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.AuditRun.State != AuditRunPartial {
+		t.Fatalf("state = %q, want partial", report.AuditRun.State)
+	}
+	if len(report.VerifierOutcomes) != 1 || report.VerifierOutcomes[0].Err == nil {
+		t.Fatalf("expected one verifier outcome with error, got %+v", report.VerifierOutcomes)
+	}
+	if len(report.VerifierOutcomes[0].Findings) != 0 {
+		t.Fatalf("findings = %+v, want unpersisted verifier finding omitted", report.VerifierOutcomes[0].Findings)
+	}
+	if store.upsertFindingCalls != 1 {
+		t.Fatalf("UpsertFinding calls = %d, want one", store.upsertFindingCalls)
+	}
+}
+
 func TestRunnerVerifierPreservesCallerSetEvidence(t *testing.T) {
 	// A Verifier that sets verifier_role / review_depth explicitly on a
 	// Finding (e.g. forwarding a Mythos finding with its native depth)
@@ -224,6 +301,9 @@ func TestRunnerVerifierMissingSeverityDefaultsToP2(t *testing.T) {
 	if report.VerifierOutcomes[0].Findings[0].Severity != SeverityP2 {
 		t.Errorf("default severity = %s, want P2", report.VerifierOutcomes[0].Findings[0].Severity)
 	}
+	if report.VerifierOutcomes[0].Findings[0].Suggested != (Remediation{Strategy: StrategyIssue}) {
+		t.Errorf("default suggestion = %+v, want payloadless issue", report.VerifierOutcomes[0].Findings[0].Suggested)
+	}
 }
 
 func TestRunnerVerifiersRunPerTree(t *testing.T) {
@@ -262,9 +342,9 @@ func TestRunnerVerifiersRunPerTree(t *testing.T) {
 // hitting the (repo, fingerprint) UNIQUE constraint.
 type treeAwareVerifier struct{ name string }
 
-func (t treeAwareVerifier) Name() string        { return t.name }
-func (treeAwareVerifier) Description() string   { return "" }
-func (treeAwareVerifier) ReviewDepth() string   { return ReviewDepthAdversarial }
+func (t treeAwareVerifier) Name() string      { return t.name }
+func (treeAwareVerifier) Description() string { return "" }
+func (treeAwareVerifier) ReviewDepth() string { return ReviewDepthAdversarial }
 func (treeAwareVerifier) Verify(_ context.Context, target VerifyTarget) ([]Finding, error) {
 	return []Finding{{
 		Fingerprint: "tw-" + strings.ReplaceAll(target.WorkingDir, "/", "_"),
