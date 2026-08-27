@@ -22,9 +22,10 @@ discovers or invokes the skill.
 
 ## Workflow
 
-1. Read the nearest `AGENTS.md`, `ARCHITECTURE.md`, affected specifications,
-   linked BDD features, and the source that owns the active implementation or
-   harness inventory. Do not infer current behavior from a stale plan or PR.
+1. Read the target repository's nearest `AGENTS.md`, `ARCHITECTURE.md`,
+   affected specifications, linked BDD features, and the source that owns the
+   active implementation or harness inventory when those capabilities exist.
+   Do not infer current behavior from a stale plan or PR.
 2. State the proposed observable behavior: actor, trigger or state, successful
    outcome, failure outcome, and applicability. Separate product choices from
    facts already established by source or tests.
@@ -51,10 +52,11 @@ discovers or invokes the skill.
    applicability-only justification and must not create another normative
    owner.
    Cover failure behavior when the outcome can fail.
-9. Run the narrowest relevant deterministic checks, including
-   `make lint-specs STRICT=1` (optionally with `PATHS=...`) and affected
-   reciprocal SPEC/BDD coverage or feature tests. Lint success proves syntax
-   and links, not semantic ownership.
+9. Discover the target repository's declared specification checks. When it
+   provides strict lint, reciprocal SPEC/BDD coverage, or feature tests, run
+   the narrowest relevant checks. If a capability is absent, record that
+   evidence layer as unavailable rather than assuming a dear-agent checkout or
+   tool. Lint success proves syntax and links, not semantic ownership.
 10. Report one outcome: `spec updated`, `no normative behavior changed`, or
     `needs product decision`. Separate source, local test, CI, review, merge,
     and runtime evidence. Keep runtime behavior `UNVERIFIED` until current live
@@ -90,5 +92,6 @@ Confirm all of the following before presenting a proposed change:
 
 - [Contract model](references/contract-model.md)
 - [EARS and BDD traceability](references/ears-and-bdd.md)
-- Repository `AGENTS.md` and `docs/policies/harness-hygiene.ai.md`
-- Repository `cmd/ears-lint` and `internal/speccoverage`
+- Target-repository capabilities, when declared: `AGENTS.md`, architecture and
+  harness-hygiene policies, strict EARS lint, reciprocal SPEC/BDD coverage, and
+  BDD execution

@@ -510,10 +510,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func usage(out io.Writer) {
 	fmt.Fprintln(out, "Usage:")
-	fmt.Fprintln(out, "  go run ./tools/specaudit guard (-staged | -base <revision>) [-repo <path>]")
-	fmt.Fprintln(out, "  go run ./tools/specaudit inventory -repo <path> -repository <owner/name> -revision <commit>")
-	fmt.Fprintln(out, "  go run ./tools/specaudit validate -input <report.json> -inventory <inventory.json> -repo <path>")
-	fmt.Fprintln(out, "  go run ./tools/specaudit render -input <report.json> -inventory <inventory.json> -repo <path>")
+	fmt.Fprintln(out, "  specaudit guard (-staged | -base <revision>) [-repo <path>]")
+	fmt.Fprintln(out, "  specaudit inventory -repo <path> -repository <owner/name> -revision <commit>")
+	fmt.Fprintln(out, "  specaudit validate -input <report.json> -inventory <inventory.json> -repo <path>")
+	fmt.Fprintln(out, "  specaudit render -input <report.json> -inventory <inventory.json> -repo <path>")
 	fmt.Fprintln(out, "Inventory JSON and rendered HTML are emitted only to stdout; use an authorized shell redirection to store them.")
 }
 
@@ -816,13 +816,13 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 		Scope:         scope{Roots: []string{"."}, Excluded: []exclusion{}, ActiveMembers: active, AdapterScopes: adapterScopes},
 		Summary:       summary{SpecFiles: len(files), Requirements: requirementCount, Diagnostics: diagnosticCount, CandidateCount: 0, ByVerdict: map[string]int{}},
 		Methodology: methodology{
-			Collector:        "go run ./tools/specaudit inventory",
+			Collector:        "specaudit inventory",
 			SeedKinds:        []string{"exact-body", "duplicate-id", "shared-bdd", "identical-file", "harness-terminology"},
 			SemanticReview:   "Seeds are bounded lexical leads; harness terminology records at most one matching requirement per SPEC path, and source plus BDD review determines every finding verdict.",
 			RuntimeStatus:    runtimeStatusUnverified,
 			GitEvidenceTrust: gitEvidenceTrustDisclosure,
 			GitTrustInputs:   gitTrustInputs,
-			Reproduce:        []string{fmt.Sprintf("go run ./tools/specaudit inventory -repo . -repository %s -revision %s", strings.TrimSpace(repository), commit)},
+			Reproduce:        []string{fmt.Sprintf("specaudit inventory -repo . -repository %s -revision %s", strings.TrimSpace(repository), commit)},
 		},
 		Inventory:     files,
 		Features:      features,

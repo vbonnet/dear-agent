@@ -21,6 +21,8 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 		specGovernanceOfflineRenderingStep,
 		specGovernanceFindingFilterStep,
 		specGovernanceReadOnlyBoundaryStep,
+		specGovernancePortablePackageStep,
+		specGovernanceOverlappingPackageStep,
 		specGovernanceResultStep,
 	} {
 		ctx.Step(expression, unsupportedSpecGovernanceToolingStep)

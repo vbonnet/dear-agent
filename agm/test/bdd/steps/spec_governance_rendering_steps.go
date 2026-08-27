@@ -8,12 +8,14 @@ import (
 	"github.com/cucumber/godog"
 )
 
-// registerSpecGovernanceRenderingSteps keeps the cohesive HTML-rendering
-// checks out of the general spec-governance step module.
+// registerSpecGovernanceRenderingSteps keeps the focused supplemental checks
+// out of the general spec-governance step module.
 func registerSpecGovernanceRenderingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(specGovernanceOfflineRenderingStep, exerciseBoundedOfflineSPECAuditRendering)
 	ctx.Step(specGovernanceFindingFilterStep, exerciseSPECAuditFindingCardFiltering)
 	ctx.Step(specGovernanceReadOnlyBoundaryStep, exerciseReadOnlySPECAuditBoundary)
+	ctx.Step(specGovernancePortablePackageStep, exercisePortableSpecGovernancePackage)
+	ctx.Step(specGovernanceOverlappingPackageStep, exerciseOverlappingSpecGovernancePackage)
 }
 
 func exerciseBoundedOfflineSPECAuditRendering(ctx context.Context) error {
@@ -30,4 +32,12 @@ func exerciseSPECAuditFindingCardFiltering(ctx context.Context) error {
 
 func exerciseReadOnlySPECAuditBoundary(ctx context.Context) error {
 	return runSpecAuditGoTests(ctx, "TestInventoryValidateRenderPreserveTargetRepositoryState")
+}
+
+func exercisePortableSpecGovernancePackage(ctx context.Context) error {
+	return runSpecAuditGoTests(ctx, "TestPortableSpecGovernancePackageRunsFromUnrelatedWorkingDirectory")
+}
+
+func exerciseOverlappingSpecGovernancePackage(ctx context.Context) error {
+	return runSpecAuditGoTests(ctx, "TestPortableSpecGovernancePackageRejectsSourceOverlapBeforeAllocation")
 }

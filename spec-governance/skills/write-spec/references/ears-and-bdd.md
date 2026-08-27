@@ -90,7 +90,9 @@ Follow the repository's current convention:
 4. When ownership moves, update both directions and preserve migration evidence
    in the focused consolidation change.
 
-Run `make lint-specs STRICT=1` (optionally with `PATHS=...`) and the affected
-`internal/speccoverage` or BDD tests. Those checks validate syntax and declared
-links; review must still prove that the scenario actually observes the
-requirement.
+When the target repository declares them, run its strict specification lint
+and affected reciprocal SPEC/BDD coverage or BDD tests. Treat these as target
+capabilities, not dependencies bundled with this skill. If one is unavailable,
+record that evidence layer explicitly. Those checks validate syntax and
+declared links; review must still prove that the scenario actually observes
+the requirement.
