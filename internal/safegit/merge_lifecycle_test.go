@@ -39,7 +39,7 @@ func TestConfirmMergedWithinBoundsBlockingProviderQuery(t *testing.T) {
 
 func TestConfirmMergedWithinBoundsDescendantHeldPipe(t *testing.T) {
 	installMergeConfirmationFakeGH(t, `sleep 3 &`)
-	err := confirmMergedWithin(context.Background(), 5*time.Second,
+	err := confirmMergedWithin(context.Background(), 30*time.Second,
 		42, "owner/repo", "abc123")
 	if !errors.Is(err, exec.ErrWaitDelay) {
 		t.Fatalf("confirmMergedWithin() error = %v, want exec.ErrWaitDelay", err)

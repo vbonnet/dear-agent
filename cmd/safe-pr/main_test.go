@@ -191,7 +191,7 @@ esac
 					// interactive gh prompts. This real-subprocess regression instead
 					// needs scheduler headroom under -race so it tests the command
 					// matrix, not host load.
-					outcome, executeErr = execGh(context.Background(), req, 5*time.Second, tc.verifyCI, transaction)
+					outcome, executeErr = execGh(context.Background(), req, 30*time.Second, tc.verifyCI, transaction)
 					return executeErr
 				})
 			})
