@@ -1,7 +1,7 @@
 name: Monthly Audit
 
-# Monthly deeper audit of codebase health: doc staleness, license headers,
-# and cyclomatic complexity. These are too slow/noisy for weekly runs but
+# Monthly deeper audit of codebase health: doc staleness and cognitive
+# complexity. These are too slow/noisy for weekly runs but
 # too important to skip entirely. Opens a GitHub issue on findings.
 #
 # Mirrors the tiered cadence:
@@ -39,7 +39,7 @@ jobs:
           cache: true
 
       - name: Install gocognit
-        run: go install github.com/uudashr/gocognit/cmd/gocognit@latest
+        run: go install github.com/uudashr/gocognit/cmd/gocognit@v1.2.1
 
       - name: "Check doc staleness (Last audited at: > 90 days)"
         id: doc_staleness
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           # Emit functions with cognitive complexity > 15 (high, not critical).
-          findings=$(gocognit -over 15 ./... 2>/dev/null | head -50 || true)
+          findings=$(./scripts/monthly-audit-complexity.sh .)
           {
             echo "complex_funcs<<__EOF__"
             echo "$findings"

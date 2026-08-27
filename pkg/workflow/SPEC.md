@@ -28,6 +28,8 @@ execution, resume, review, and cost controls.
 
 **WFLOW-06** When a workflow enables constitutional enforcement without declaring any invariants, the system shall reject the workflow before recording a run, invoking lifecycle hooks, or executing a node.
 
+**WFLOW-07** When a configured definition hook rejects a validated workflow, the system shall finish the run as failed and return the contextual rejection before enforcing or executing any node.
+
 ## Permission contract
 
 `DefaultPermissionEnforcer` is permissive when a policy section is absent. When

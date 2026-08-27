@@ -281,7 +281,7 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 		Workflow: w,
 		Inputs:   merged,
 	}); err != nil {
-		r.Logger.Warn("hook OnDefine returned error", "run_id", runID, "err", err)
+		return r.failDefinition(ctx, rep, runID, err)
 	}
 
 	order, err := topoOrder(w.Nodes)

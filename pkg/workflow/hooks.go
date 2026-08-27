@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const definitionFailureRecordTimeout = 10 * time.Second
+
 // Hooks is the workflow lifecycle extension surface for the workflow runner:
 // Define, Enforce, Audit, and Resolve. The four hooks line up with the substrate
 // properties from ADR-010: callers plug in their own logic to participate in
@@ -14,7 +16,8 @@ import (
 //
 //   - OnDefine fires once per run, after Validate has accepted the workflow
 //     and before any node executes. Use it to inspect or annotate the
-//     definition (custom lint rules, schema policies).
+//     definition (custom lint rules, schema policies). Returning a non-nil
+//     error fails and terminally records the run before node dispatch.
 //   - OnEnforce fires before a node body runs, after permissions and budget
 //     pre-flight checks. The hook can short-circuit the node with a
 //     non-nil error which is recorded as an enforcement denial in the
@@ -26,8 +29,9 @@ import (
 //     an error is informational — the run is already failing — but lets the
 //     hook record its own follow-up actions.
 //
-// All four are optional. A nil hook is skipped silently. Hook errors are
-// audit-logged but never panic the runner.
+// All four are optional. A nil hook is skipped silently. OnDefine and
+// OnEnforce errors block their respective stage; OnAudit and OnResolve errors
+// remain observational. Hook errors never panic the runner.
 type Hooks struct {
 	OnDefine  func(ctx context.Context, p DefinePayload) error
 	OnEnforce func(ctx context.Context, p EnforcePayload) error
@@ -85,6 +89,14 @@ func (h *Hooks) callDefine(ctx context.Context, p DefinePayload) error {
 		return fmt.Errorf("hook OnDefine: %w", err)
 	}
 	return nil
+}
+
+func (r *Runner) failDefinition(ctx context.Context, report *RunReport, runID string, err error) (*RunReport, error) {
+	report.Finished = time.Now()
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), definitionFailureRecordTimeout)
+	defer cancel()
+	r.finishRunRecord(recordCtx, runID, RunStateFailed, err.Error())
+	return report, err
 }
 
 // callEnforce invokes OnEnforce if set. A non-nil return propagates back to

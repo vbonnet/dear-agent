@@ -1,6 +1,6 @@
 # GitHub Workflow Configuration Specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-08-27 -->
 
 ## EARS Requirements
 
@@ -18,7 +18,18 @@
 
 **DECL-WORKFLOW-07** When an eligible same-repository pull request targeting `main` and carrying `full-ci` is opened, synchronized, or reopened, the system shall admit the Deepsec credential probe for the exact current pull-request head.
 
+**DECL-WORKFLOW-08** When the monthly cognitive-complexity audit evaluates the repository, the system shall report bounded findings from a complete trustworthy scan and shall fail without reporting clean whenever the scan is unavailable, invalid, incomplete, or violates its expected result protocol.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/declarative_runtime_guardrails.feature`
 - Package test: `agm/test/bdd/steps/deepsec_workflow_contract_test.go`
+
+## Test Traceability
+
+- Monthly cognitive-complexity scanner and workflow contract:
+  `tests/bats/monthly-audit-complexity.bats`.
+- BDD consequence: No new BDD feature is required because the scheduled GitHub
+  Actions runner and external scanner are not exposed by the repository BDD
+  harness; deterministic Bats fixtures and workflow-source checks exercise the
+  observable result protocol.
