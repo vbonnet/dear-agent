@@ -16,6 +16,7 @@ const workflowPackageFeaturePath = "agm/test/bdd/features/workflow_package_guard
 
 type workflowPackageGuardrailStateKey struct{}
 type workflowConstitutionalStateKey struct{}
+type workflowDefineFailureStateKey struct{}
 
 type workflowConstitutionalState struct {
 	workflow      *workflowpkg.Workflow
@@ -23,6 +24,19 @@ type workflowConstitutionalState struct {
 	runErr        error
 	recorderCalls int
 	defineCalls   int
+	executorCalls int
+}
+
+type workflowDefineFailureState struct {
+	workflow      *workflowpkg.Workflow
+	runErr        error
+	beginCalls    int
+	finishCalls   int
+	finishState   workflowpkg.RunState
+	finishError   string
+	nodeCalls     int
+	attemptCalls  int
+	enforceCalls  int
 	executorCalls int
 }
 
@@ -37,11 +51,75 @@ func RegisterWorkflowPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 		colocatedPattern:  `^workflow package "([^"]*)" should have a co-located SPEC$`,
 	})
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		return context.WithValue(ctx, workflowConstitutionalStateKey{}, &workflowConstitutionalState{}), nil
+		ctx = context.WithValue(ctx, workflowConstitutionalStateKey{}, &workflowConstitutionalState{})
+		return context.WithValue(ctx, workflowDefineFailureStateKey{}, &workflowDefineFailureState{}), nil
 	})
 	ctx.Step(`^a workflow enables constitutional enforcement without invariants$`, enforcedWorkflowOmitsInvariants)
 	ctx.Step(`^AGM validates and attempts to run the workflow$`, validateAndRunEnforcedWorkflow)
 	ctx.Step(`^workflow validation should fail before run recording, lifecycle hooks, or node execution$`, workflowValidationFailsBeforeExecution)
+	ctx.Step(`^a valid workflow whose definition policy rejects it$`, validWorkflowWithRejectingDefinitionPolicy)
+	ctx.Step(`^AGM attempts to run the definition-rejected workflow$`, runDefinitionRejectedWorkflow)
+	ctx.Step(`^the run should fail before node execution with a terminal definition error$`, definitionFailureStopsExecution)
+}
+
+func validWorkflowWithRejectingDefinitionPolicy(ctx context.Context) error {
+	state, err := getWorkflowDefineFailureState(ctx)
+	if err != nil {
+		return err
+	}
+	state.workflow = &workflowpkg.Workflow{
+		Name: "bdd-define-failure", Version: "1",
+		Nodes: []workflowpkg.Node{{
+			ID: "execute", Kind: workflowpkg.KindAI, AI: &workflowpkg.AINode{Prompt: "must not execute"},
+		}},
+	}
+	return nil
+}
+
+func runDefinitionRejectedWorkflow(ctx context.Context) error {
+	state, err := getWorkflowDefineFailureState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.workflow == nil {
+		return fmt.Errorf("definition-rejected workflow not configured")
+	}
+	runner := workflowpkg.NewRunner(workflowDefineFailureExecutor{state: state})
+	runner.Recorder = workflowDefineFailureRecorder{state: state}
+	runner.Hooks = &workflowpkg.Hooks{
+		OnDefine: func(context.Context, workflowpkg.DefinePayload) error {
+			return errors.New("policy rejected definition")
+		},
+		OnEnforce: func(context.Context, workflowpkg.EnforcePayload) error {
+			state.enforceCalls++
+			return nil
+		},
+	}
+	_, state.runErr = runner.Run(ctx, state.workflow, nil)
+	return nil
+}
+
+func definitionFailureStopsExecution(ctx context.Context) error {
+	state, err := getWorkflowDefineFailureState(ctx)
+	if err != nil {
+		return err
+	}
+	const want = "hook OnDefine: policy rejected definition"
+	if state.runErr == nil || !strings.Contains(state.runErr.Error(), want) {
+		return fmt.Errorf("Runner.Run error: %w; want %q", state.runErr, want)
+	}
+	if state.beginCalls != 1 || state.finishCalls != 1 || state.finishState != workflowpkg.RunStateFailed {
+		return fmt.Errorf("run record begin=%d finish=%d state=%q, want 1/1/failed",
+			state.beginCalls, state.finishCalls, state.finishState)
+	}
+	if state.finishError != state.runErr.Error() {
+		return fmt.Errorf("terminal error = %q, run error: %w", state.finishError, state.runErr)
+	}
+	if state.nodeCalls != 0 || state.attemptCalls != 0 || state.enforceCalls != 0 || state.executorCalls != 0 {
+		return fmt.Errorf("definition failure reached execution: nodes=%d attempts=%d enforce=%d executor=%d",
+			state.nodeCalls, state.attemptCalls, state.enforceCalls, state.executorCalls)
+	}
+	return nil
 }
 
 func enforcedWorkflowOmitsInvariants(ctx context.Context) error {
@@ -118,6 +196,52 @@ type workflowConstitutionalExecutor struct {
 	state *workflowConstitutionalState
 }
 
+type workflowDefineFailureExecutor struct {
+	state *workflowDefineFailureState
+}
+
+type workflowDefineFailureRecorder struct {
+	state *workflowDefineFailureState
+}
+
+func (r workflowDefineFailureRecorder) BeginRun(context.Context, workflowpkg.RunRecord) error {
+	r.state.beginCalls++
+	return nil
+}
+
+func (r workflowDefineFailureRecorder) UpsertNode(context.Context, workflowpkg.NodeRecord) error {
+	r.state.nodeCalls++
+	return nil
+}
+
+func (r workflowDefineFailureRecorder) RecordAttempt(context.Context, workflowpkg.AttemptRecord) error {
+	r.state.attemptCalls++
+	return nil
+}
+
+func (r workflowDefineFailureRecorder) FinishRun(
+	_ context.Context,
+	_ string,
+	state workflowpkg.RunState,
+	_ time.Time,
+	errMsg string,
+) error {
+	r.state.finishCalls++
+	r.state.finishState = state
+	r.state.finishError = errMsg
+	return nil
+}
+
+func (e workflowDefineFailureExecutor) Generate(
+	context.Context,
+	*workflowpkg.AINode,
+	map[string]string,
+	map[string]string,
+) (string, error) {
+	e.state.executorCalls++
+	return "unexpected", nil
+}
+
 type workflowConstitutionalRecorder struct {
 	state *workflowConstitutionalState
 }
@@ -162,6 +286,14 @@ func getWorkflowConstitutionalState(ctx context.Context) (*workflowConstitutiona
 	state, ok := ctx.Value(workflowConstitutionalStateKey{}).(*workflowConstitutionalState)
 	if !ok || state == nil {
 		return nil, fmt.Errorf("workflow constitutional guardrail state not initialized")
+	}
+	return state, nil
+}
+
+func getWorkflowDefineFailureState(ctx context.Context) (*workflowDefineFailureState, error) {
+	state, ok := ctx.Value(workflowDefineFailureStateKey{}).(*workflowDefineFailureState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("workflow definition-failure guardrail state not initialized")
 	}
 	return state, nil
 }
