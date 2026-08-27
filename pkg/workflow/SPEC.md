@@ -5,7 +5,7 @@
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 - Feature: `agm/test/bdd/features/workflow_package_guardrails.feature`
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-08-27 -->
 
 ## Purpose
 
@@ -29,6 +29,16 @@ execution, resume, review, and cost controls.
 **WFLOW-06** When a workflow enables constitutional enforcement without declaring any invariants, the system shall reject the workflow before recording a run, invoking lifecycle hooks, or executing a node.
 
 **WFLOW-07** When a configured definition hook rejects a validated workflow, the system shall finish the run as failed and return the contextual rejection before enforcing or executing any node.
+
+**WFLOW-08** When caller cancellation is observed after a durable run begins, the system shall stop before the next executor dispatch, classify the run as cancelled, and persist required run-terminal and unexecuted-node evidence under a finite cleanup deadline.
+
+**WFLOW-09** When required terminal recorder or audit persistence fails, the system shall return that failure alongside the causal cancellation or execution error.
+
+**WFLOW-10** When terminal persistence uses detached cleanup authority, the system shall preserve caller context values while notifying observational audit sinks and hooks only with the original execution context.
+
+**WFLOW-11** When cancellation stops a resumed run, the system shall retain the original run identity, preserve completed nodes, and record only uncompleted nodes as skipped.
+
+**WFLOW-12** When an existing SQLite run resumes, the system shall atomically reopen the run and record an explicit prior-state-to-running transition before notifying observational sinks or hooks.
 
 ## Permission contract
 

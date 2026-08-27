@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ const workflowPackageFeaturePath = "agm/test/bdd/features/workflow_package_guard
 type workflowPackageGuardrailStateKey struct{}
 type workflowConstitutionalStateKey struct{}
 type workflowDefineFailureStateKey struct{}
+type workflowCancellationStateKey struct{}
 
 type workflowConstitutionalState struct {
 	workflow      *workflowpkg.Workflow
@@ -40,6 +43,15 @@ type workflowDefineFailureState struct {
 	executorCalls int
 }
 
+type workflowCancellationState struct {
+	workflow      *workflowpkg.Workflow
+	tempDir       string
+	sqlite        *workflowpkg.SQLiteState
+	report        *workflowpkg.RunReport
+	runErr        error
+	executorCalls int
+}
+
 // RegisterWorkflowPackageGuardrailSteps registers BDD steps for workflow implementation packages.
 func RegisterWorkflowPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	registerPackageSpecGuardrailSteps(ctx, packageSpecGuardrailConfig{
@@ -52,7 +64,22 @@ func RegisterWorkflowPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	})
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		ctx = context.WithValue(ctx, workflowConstitutionalStateKey{}, &workflowConstitutionalState{})
-		return context.WithValue(ctx, workflowDefineFailureStateKey{}, &workflowDefineFailureState{}), nil
+		ctx = context.WithValue(ctx, workflowDefineFailureStateKey{}, &workflowDefineFailureState{})
+		return context.WithValue(ctx, workflowCancellationStateKey{}, &workflowCancellationState{}), nil
+	})
+	ctx.After(func(ctx context.Context, _ *godog.Scenario, scenarioErr error) (context.Context, error) {
+		state, _ := ctx.Value(workflowCancellationStateKey{}).(*workflowCancellationState)
+		if state == nil {
+			return ctx, nil
+		}
+		var cleanupErrs []error
+		if state.sqlite != nil {
+			cleanupErrs = append(cleanupErrs, state.sqlite.Close())
+		}
+		if state.tempDir != "" {
+			cleanupErrs = append(cleanupErrs, os.RemoveAll(state.tempDir))
+		}
+		return ctx, errors.Join(scenarioErr, errors.Join(cleanupErrs...))
 	})
 	ctx.Step(`^a workflow enables constitutional enforcement without invariants$`, enforcedWorkflowOmitsInvariants)
 	ctx.Step(`^AGM validates and attempts to run the workflow$`, validateAndRunEnforcedWorkflow)
@@ -60,6 +87,118 @@ func RegisterWorkflowPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a valid workflow whose definition policy rejects it$`, validWorkflowWithRejectingDefinitionPolicy)
 	ctx.Step(`^AGM attempts to run the definition-rejected workflow$`, runDefinitionRejectedWorkflow)
 	ctx.Step(`^the run should fail before node execution with a terminal definition error$`, definitionFailureStopsExecution)
+	ctx.Step(`^a durable workflow run whose context cancels before node dispatch$`, durableWorkflowCancelsBeforeNodeDispatch)
+	ctx.Step(`^AGM runs the cancellation-sensitive workflow$`, runCancellationSensitiveWorkflow)
+	ctx.Step(`^the cancelled run and every unexecuted node should have terminal SQLite evidence$`, cancellationHasTerminalSQLiteEvidence)
+}
+
+func durableWorkflowCancelsBeforeNodeDispatch(ctx context.Context) error {
+	state, err := getWorkflowCancellationState(ctx)
+	if err != nil {
+		return err
+	}
+	state.tempDir, err = os.MkdirTemp("", "agm-workflow-cancellation-bdd-")
+	if err != nil {
+		return fmt.Errorf("create cancellation fixture: %w", err)
+	}
+	state.sqlite, err = workflowpkg.OpenSQLiteState(filepath.Join(state.tempDir, "runs.db"))
+	if err != nil {
+		return fmt.Errorf("open cancellation SQLite state: %w", err)
+	}
+	state.workflow = &workflowpkg.Workflow{
+		Name: "bdd-cancel-terminal", Version: "1",
+		Nodes: []workflowpkg.Node{
+			{ID: "first", Kind: workflowpkg.KindAI, AI: &workflowpkg.AINode{Prompt: "must not execute"}},
+			{ID: "second", Kind: workflowpkg.KindAI, Depends: []string{"first"}, AI: &workflowpkg.AINode{Prompt: "must not execute"}},
+		},
+	}
+	return nil
+}
+
+func runCancellationSensitiveWorkflow(ctx context.Context) error {
+	state, err := getWorkflowCancellationState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.workflow == nil || state.sqlite == nil {
+		return errors.New("cancellation workflow fixture is not configured")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	runner := workflowpkg.NewRunner(workflowCancellationExecutor{state: state})
+	runner.UseSQLiteState(state.sqlite)
+	runner.Hooks = &workflowpkg.Hooks{OnDefine: func(context.Context, workflowpkg.DefinePayload) error {
+		cancel()
+		return nil
+	}}
+	state.report, state.runErr = runner.Run(runCtx, state.workflow, nil)
+	return nil
+}
+
+func cancellationHasTerminalSQLiteEvidence(ctx context.Context) error {
+	state, err := getWorkflowCancellationState(ctx)
+	if err != nil {
+		return err
+	}
+	if err := cancellationRunResultIsTerminal(state); err != nil {
+		return err
+	}
+	if err := cancellationSQLiteStatusIsTerminal(ctx, state); err != nil {
+		return err
+	}
+	return cancellationSQLiteAuditIsTerminal(ctx, state)
+}
+
+func cancellationRunResultIsTerminal(state *workflowCancellationState) error {
+	if !errors.Is(state.runErr, context.Canceled) {
+		return fmt.Errorf("Runner.Run error: %w; want context cancellation", state.runErr)
+	}
+	if state.report == nil || state.report.Finished.IsZero() || state.report.Succeeded || len(state.report.Results) != 0 {
+		return fmt.Errorf("run report = %#v, want finished cancellation before execution", state.report)
+	}
+	if state.executorCalls != 0 {
+		return fmt.Errorf("executor calls = %d, want 0", state.executorCalls)
+	}
+	return nil
+}
+
+func cancellationSQLiteStatusIsTerminal(ctx context.Context, state *workflowCancellationState) error {
+	status, err := workflowpkg.Status(ctx, state.sqlite.DB(), state.sqlite.RunID())
+	if err != nil {
+		return fmt.Errorf("read cancellation status: %w", err)
+	}
+	if status.State != workflowpkg.RunStateCancelled || status.FinishedAt == nil || !strings.Contains(status.Error, context.Canceled.Error()) {
+		return fmt.Errorf("run status = %#v, want finished cancelled context error", status)
+	}
+	if len(status.Nodes) != 2 {
+		return fmt.Errorf("node status count = %d, want 2", len(status.Nodes))
+	}
+	for _, node := range status.Nodes {
+		if node.State != workflowpkg.NodeStateSkipped || node.FinishedAt == nil || node.Error != "context-cancelled" {
+			return fmt.Errorf("node %q = %#v, want finished skipped/context-cancelled", node.NodeID, node)
+		}
+	}
+	return nil
+}
+
+func cancellationSQLiteAuditIsTerminal(ctx context.Context, state *workflowCancellationState) error {
+	events, err := workflowpkg.Logs(ctx, state.sqlite.DB(), state.sqlite.RunID(), workflowpkg.LogsOptions{})
+	if err != nil {
+		return fmt.Errorf("read cancellation audit log: %w", err)
+	}
+	terminalRuns := 0
+	skippedNodes := 0
+	for _, event := range events {
+		if event.NodeID == "" && event.FromState == string(workflowpkg.RunStateRunning) && event.ToState == string(workflowpkg.RunStateCancelled) {
+			terminalRuns++
+		}
+		if event.NodeID != "" && event.FromState == string(workflowpkg.NodeStatePending) && event.ToState == string(workflowpkg.NodeStateSkipped) {
+			skippedNodes++
+		}
+	}
+	if terminalRuns != 1 || skippedNodes != 2 {
+		return fmt.Errorf("terminal audit runs=%d skipped=%d, want 1 and 2", terminalRuns, skippedNodes)
+	}
+	return nil
 }
 
 func validWorkflowWithRejectingDefinitionPolicy(ctx context.Context) error {
@@ -200,6 +339,10 @@ type workflowDefineFailureExecutor struct {
 	state *workflowDefineFailureState
 }
 
+type workflowCancellationExecutor struct {
+	state *workflowCancellationState
+}
+
 type workflowDefineFailureRecorder struct {
 	state *workflowDefineFailureState
 }
@@ -233,6 +376,16 @@ func (r workflowDefineFailureRecorder) FinishRun(
 }
 
 func (e workflowDefineFailureExecutor) Generate(
+	context.Context,
+	*workflowpkg.AINode,
+	map[string]string,
+	map[string]string,
+) (string, error) {
+	e.state.executorCalls++
+	return "unexpected", nil
+}
+
+func (e workflowCancellationExecutor) Generate(
 	context.Context,
 	*workflowpkg.AINode,
 	map[string]string,
@@ -294,6 +447,14 @@ func getWorkflowDefineFailureState(ctx context.Context) (*workflowDefineFailureS
 	state, ok := ctx.Value(workflowDefineFailureStateKey{}).(*workflowDefineFailureState)
 	if !ok || state == nil {
 		return nil, fmt.Errorf("workflow definition-failure guardrail state not initialized")
+	}
+	return state, nil
+}
+
+func getWorkflowCancellationState(ctx context.Context) (*workflowCancellationState, error) {
+	state, ok := ctx.Value(workflowCancellationStateKey{}).(*workflowCancellationState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("workflow cancellation state not initialized")
 	}
 	return state, nil
 }
