@@ -26,3 +26,8 @@ Feature: Workflow package guardrails
     Given a workflow enables constitutional enforcement without invariants
     When AGM validates and attempts to run the workflow
     Then workflow validation should fail before run recording, lifecycle hooks, or node execution
+
+  Scenario: Definition policy failures stop workflow execution
+    Given a valid workflow whose definition policy rejects it
+    When AGM attempts to run the definition-rejected workflow
+    Then the run should fail before node execution with a terminal definition error
