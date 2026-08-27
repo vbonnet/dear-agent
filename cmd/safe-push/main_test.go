@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -86,6 +87,10 @@ func TestRun_RejectsProtectedForcePush(t *testing.T) {
 }
 
 func TestRun_CheckAllowsForceWithLeaseForNonProtectedBranch(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
 	repo := gittest.NewRepo(t)
 	gittest.Run(t, repo, "remote", "add", "origin", t.TempDir())
 	gittest.Run(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")

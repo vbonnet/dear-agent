@@ -63,7 +63,7 @@ func TestLiveGitProcessGroupTerminationKillsDescendants(t *testing.T) {
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		_, err := os.Stat(ready)
 		if err == nil {
@@ -96,7 +96,9 @@ func TestGitRunOutputOverflowTerminatesLiveDescendants(t *testing.T) {
 	quotedMarker := strings.ReplaceAll(marker, "'", "'\"'\"'")
 	executable := writeFakeGit(t, fmt.Sprintf("#!/bin/sh\n(sleep 0.5; : > '%s') &\nprintf '%%0256d' 0\nexec sleep 30\n", quotedMarker))
 	limits := defaultLimits()
-	limits.gitTime = 3 * time.Second
+	// Keep the timeout boundary well clear of this output-bound assertion.
+	// TestBoundsFailClosed/wall_time independently covers Git timeouts.
+	limits.gitTime = 30 * time.Second
 	git := gitClient{executable: executable, limits: limits}
 	started := time.Now()
 	_, failure := git.run(context.Background(), "", nil, 128, "version")
