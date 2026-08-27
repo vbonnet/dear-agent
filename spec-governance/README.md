@@ -86,24 +86,29 @@ paths.
 ## Staged distribution
 
 The root-module [`spec-governance-package`](../cmd/spec-governance-package)
-command accepts a prebuilt `specaudit` artifact and either stages one unique
-private distribution or validates an existing staged root. It writes
-`package-manifest.json` last, writes through retained directory handles, and
-returns a deterministic manifest digest only after opened and visible identities
-are reverified. Before allocation, it walks the opened staging-parent ancestry
-and rejects the source root or any source descendant, including paths reached
-through an intermediate symlink. If staging fails after allocation, the command leaves every
-surviving tree untouched and reports the originally allocated path as diagnostic
-state, including whether its original identity was still verified at return.
-A separately authorized, liveness-aware lifecycle reaper may handle it later;
-an unverified diagnostic path must never be removed automatically. This avoids
-unlinking a concurrent pathname replacement. A retained failed root is not a
-package receipt. If staging succeeds but JSON receipt delivery fails, the CLI
-exits nonzero and reports the exact valid staged root on standard error rather
-than orphaning it silently. A successful receipt proves structural closure at validation
-time; it does not prove trusted installation, loader discovery, provider
-invocation, or running-image identity. Those later layers must pin the returned
-digest independently.
+command accepts a prebuilt `specaudit` artifact and provides this lifecycle:
+
+- It either stages one unique private distribution or validates an existing
+  staged root. During staging, it writes through retained directory handles and
+  writes `package-manifest.json` last.
+- Before allocation, it walks the opened staging-parent ancestry and rejects
+  the source root or any source descendant, including paths reached through an
+  intermediate symlink.
+- If staging fails after allocation, it leaves every surviving tree untouched
+  and reports the originally allocated path as diagnostic state, including
+  whether its original identity was still verified at return. A separately
+  authorized, liveness-aware lifecycle reaper may handle it later; an
+  unverified diagnostic path must never be removed automatically. This avoids
+  unlinking a concurrent pathname replacement. A retained failed root is not a
+  package receipt.
+- If staging succeeds but JSON receipt delivery fails, the CLI exits nonzero
+  and reports the exact valid staged root on standard error rather than
+  orphaning it silently.
+- It returns a deterministic manifest digest only after opened and visible
+  identities are reverified. A successful receipt proves structural closure at
+  validation time; it does not prove trusted installation, loader discovery,
+  provider invocation, or running-image identity. Those later layers must pin
+  the returned digest independently.
 
 The stager is race-detecting, not a same-UID sandbox. On portable POSIX
 filesystems, `mkdirat` does not atomically return a directory handle. The
