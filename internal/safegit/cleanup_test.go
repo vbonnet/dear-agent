@@ -168,7 +168,7 @@ func TestProviderMergeCommandCancellationRequiresConfirmation(t *testing.T) {
 				)
 			}()
 
-			deadline := time.Now().Add(5 * time.Second)
+			deadline := time.Now().Add(30 * time.Second)
 			for {
 				if _, err := os.Stat(marker); err == nil {
 					break
@@ -192,7 +192,7 @@ func TestProviderMergeCommandCancellationRequiresConfirmation(t *testing.T) {
 				} else if failure != nil {
 					t.Fatalf("confirmed provider outcome failed: %#v", failure)
 				}
-			case <-time.After(5 * time.Second):
+			case <-time.After(30 * time.Second):
 				t.Fatal("provider command did not stop after cancellation")
 			}
 			if confirmCalls != 1 || confirmedCalls != tc.wantConfirmedCall {

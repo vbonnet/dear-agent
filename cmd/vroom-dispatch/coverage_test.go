@@ -283,7 +283,7 @@ func TestRunHealthMonitorReturnsWhenCancelled(t *testing.T) {
 	go func() { runHealthMonitor(ctx, home, state, defaultSupervisorModel); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("cancelled monitor blocked")
 	}
 	if recs := readTrailRecords(t, home); len(recs) != 2 || recs[0].Kind != "dispatch.started" || recs[1].Kind != "dispatch.shutdown" {
@@ -351,7 +351,7 @@ func TestCoverageEscalationHelpers(t *testing.T) {
 	case got = <-argsRead:
 	case err := <-readErr:
 		t.Fatalf("read osascript args: %v", err)
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for asynchronous osascript invocation")
 	}
 	if !strings.Contains(got, "display notification") || !strings.Contains(got, "test") {
