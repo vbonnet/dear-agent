@@ -44,6 +44,8 @@ used to obtain those outcomes.
 
 **SPECAUDIT-17** When a user applies a search or verdict filter in a rendered audit artifact, the artifact shall evaluate any non-empty search query against complete card text independently of the card's current hidden state and hide every candidate and keep-separate finding card that does not match the active search and verdict criteria.
 
+**SPECAUDIT-18** When help or inventory emits its own usage, collector, or reproduction command identity, the output shall use the logical `specaudit` command identity without requiring a source checkout path, a Go toolchain invocation, `PATH` lookup, or the caller's working directory.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_governance_tooling.feature`

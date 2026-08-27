@@ -1434,9 +1434,11 @@ retains its original line position.
 **File:** [`spec_governance_tooling.feature`](../test/bdd/features/spec_governance_tooling.feature)
 
 **Drives:** focused `tools/specaudit` unit tests for the root-module command's
-pinned inventory, validation, and offline HTML rendering behavior. It does not
-exercise skill discovery, skill invocation, provider behavior, or maintainer
-decisions.
+pinned inventory, validation, offline HTML rendering, and closed staged-package
+behavior. The portable-package scenario proves real inventory from a private
+distribution while running outside the source, package, and target roots. It
+does not prove native discovery, trusted installation, provider invocation,
+running-image identity, or maintainer approval.
 
 The runner compares only build-selected `TestGoFiles` and `XTestGoFiles` at its
 pre-test and post-test observation points to validate exact selected test
@@ -1490,6 +1492,12 @@ root. None of these controls sandbox trusted test code.
 - Successful inventory, validation, and rendering emit their expected stdout
   while preserving tracked bytes and status, index identity and content,
   `HEAD`, refs, and relevant SPEC and feature bytes in the target repository.
+- The staged package runs the exact
+  `TestPortableSpecGovernancePackageRunsFromUnrelatedWorkingDirectory`
+  integration test, which exercises real pinned inventory without a dear-agent
+  checkout or Go toolchain in its unrelated working directory and preserves
+  runtime status `UNVERIFIED` rather than treating staged-package evidence as
+  installation, discovery, invocation, or provider-visible evidence.
 
 **Why this matters:** The audit command cannot credibly supply review evidence
 if dirty bytes can alter pinned evidence, lexical similarity becomes a merge

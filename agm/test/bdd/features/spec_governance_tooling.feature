@@ -1,7 +1,9 @@
 # SPEC: tools/specaudit/SPEC.md
+# RELATED-SPEC: spec-governance/SPEC.md
 Feature: SPEC audit tooling evidence boundary
   The focused unit checks below exercise pinned, read-only audit-tool outcomes.
-  They do not execute skill discovery, invocation, or maintainer decisions.
+  The portable-package check exercises a private staged distribution without
+  claiming native discovery, trusted installation, or maintainer approval.
 
   Scenario: Pinned inventory ignores dirty worktree content
     When AGM runs the focused pinned SPEC inventory unit check
@@ -29,4 +31,12 @@ Feature: SPEC audit tooling evidence boundary
 
   Scenario: Successful audit commands preserve the target repository
     When AGM runs the focused read-only audit boundary unit check
+    Then the focused SPEC audit unit check should pass
+
+  Scenario: A staged SPEC governance package runs from an unrelated working directory
+    When AGM runs the focused portable SPEC governance package unit check
+    Then the focused SPEC audit unit check should pass
+
+  Scenario: A staging parent inside the source is rejected before allocation
+    When AGM runs the focused overlapping SPEC governance package unit check
     Then the focused SPEC audit unit check should pass

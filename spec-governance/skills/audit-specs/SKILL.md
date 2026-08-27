@@ -40,10 +40,14 @@ report.
    as a separate inventory, not as evidence for the main snapshot.
 3. Confirm the Git trust boundary above. Record the limitation if provenance
    cannot be established, then stop with `insufficient-evidence`.
-4. From the dear-agent checkout that owns this skill and the root command, run:
+4. Resolve the authenticated distribution root for the installed package that
+   supplied this skill. The installer or activation layer must authenticate
+   that exact package tree before use; do not infer it from the current working
+   directory, a source checkout, or `PATH`. Invoke its bundled executable by
+   absolute path:
 
    ```sh
-   go run ./tools/specaudit inventory \
+   "<distribution-root>/bin/specaudit" inventory \
      -repo <repository-path> \
      -repository <owner/name> \
      -revision <40-hex-sha> > inventory.json
@@ -87,12 +91,12 @@ report.
    then render it:
 
    ```sh
-   go run ./tools/specaudit validate \
+   "<distribution-root>/bin/specaudit" validate \
      -input findings.json \
      -inventory inventory.json \
      -repo <repository-path>
 
-   go run ./tools/specaudit render \
+   "<distribution-root>/bin/specaudit" render \
      -input findings.json \
      -inventory inventory.json \
      -repo <repository-path> > report.html
@@ -149,4 +153,5 @@ Before delivery, confirm:
 - [Contract model](../write-spec/references/contract-model.md)
 - [Audit verdicts](references/audit-verdicts.md)
 - [Report schema and HTML contract](references/report-schema.md)
-- Repository `internal/speccoverage` and active harness inventory
+- Target-repository capabilities, when declared: reciprocal SPEC/BDD coverage
+  checks and an active harness inventory
