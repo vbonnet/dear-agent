@@ -184,6 +184,9 @@ jobs:
       - name: Install bats
         run: sudo apt-get update && sudo apt-get install -y bats
 
+      - name: Install gocognit
+        run: go install github.com/uudashr/gocognit/cmd/gocognit@v1.2.1
+
       - name: Install bats helpers
         # Same set shell-matrix.yml clones; several existing test files source
         # them from tests/test_helper.
@@ -206,9 +209,12 @@ jobs:
         # to touch shell next.
         #
         # This job exists for one thing: the cases that call `skip` in the
-        # matrix because they need a repository binary. List those files
+        # matrix because they need Go or a Go-built binary. List those files
         # explicitly, so adding one is a visible decision.
-        run: bats tests/bats/infra-import.bats
+        run: >-
+          bats
+          tests/bats/infra-import.bats
+          tests/bats/monthly-audit-complexity.bats
 
   gate:
     name: Shell lint
