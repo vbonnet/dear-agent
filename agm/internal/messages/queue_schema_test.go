@@ -426,7 +426,8 @@ func TestMessageQueueImmediateTransactionBusyTimeoutIsBoundedAndRetryable(t *tes
 	blockingTx, err := db.BeginTx(context.Background(), nil)
 	require.NoError(t, err)
 
-	blockedContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	const portableBusyWatchdog = 4 * queueBusyTimeout
+	blockedContext, cancel := context.WithTimeout(context.Background(), portableBusyWatchdog+queueBusyTimeout)
 	defer cancel()
 	started := time.Now()
 	blockedDB, blockedErr := openMessageQueueDB(blockedContext, dbPath)
@@ -436,8 +437,10 @@ func TestMessageQueueImmediateTransactionBusyTimeoutIsBoundedAndRetryable(t *tes
 	require.Error(t, blockedErr)
 	assert.ErrorIs(t, blockedErr, errQueueDatabaseOperation)
 	elapsed := time.Since(started)
-	assert.GreaterOrEqual(t, elapsed, 4*time.Second, "busy handler should honor the configured wait budget")
-	assert.Less(t, elapsed, 9*time.Second, "busy handler must bound lock acquisition before the outer deadline")
+	assert.GreaterOrEqual(t, elapsed, queueBusyTimeout-time.Second,
+		"busy handler should honor the configured wait budget")
+	assert.Less(t, elapsed, portableBusyWatchdog,
+		"retry scheduling plus an in-flight lazy connection setup and BEGIN must remain within the portable watchdog")
 
 	require.NoError(t, blockingTx.Rollback())
 	require.NoError(t, db.Close())

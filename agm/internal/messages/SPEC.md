@@ -47,7 +47,7 @@ retry state, and acknowledgement timeouts.
 
 **MSG-18** When standard SQLite analysis has created exact engine-owned statistics tables, the system shall treat those objects as advisory metadata rather than user schema; a current-schema open shall retain them, while a legacy rebuild may invalidate queue statistics for later analysis.
 
-**MSG-19** When simultaneous constructors receive a transient typed SQLite busy result before immediate transaction ownership, the system shall retry only that result within the same 5000 ms contention budget, honor caller cancellation between retries, and return a bounded error if ownership is not acquired.
+**MSG-19** When simultaneous constructors receive a transient typed SQLite busy result before immediate transaction ownership, the system shall schedule retries only for that result while the shared 5000 ms retry deadline remains, honor caller cancellation between retries, and return a bounded error if ownership is not acquired; an in-flight driver connection or busy-handler call is outside the retry scheduler's interruption boundary.
 
 ## BDD Traceability
 

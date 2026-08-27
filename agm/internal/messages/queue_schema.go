@@ -77,6 +77,10 @@ func messageQueueDSN(dbPath string) string {
 }
 
 func beginImmediateQueueTransaction(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
+	// The deadline bounds retry scheduling. A single modernc BeginTx call may
+	// lazily apply connection pragmas and then run BEGIN IMMEDIATE; those driver
+	// operations can each use the configured busy handler and are not
+	// interruptible from this loop.
 	deadline := time.Now().Add(queueBusyTimeout)
 	var lastBusy error
 	for {
