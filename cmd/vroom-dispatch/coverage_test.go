@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // TestCoveragePureHelpers pins duration parsing, minimum selection, API-key scrubbing, and retry classification.
@@ -318,20 +320,39 @@ func TestCoverageEscalationHelpers(t *testing.T) {
 	if sent, err := pushViaActiveSession(t.TempDir(), "hello"); sent || err != nil {
 		t.Errorf("push fallback = %v, %v", sent, err)
 	}
-	argsLog := filepath.Join(bin, "osascript-args")
-	if err := os.WriteFile(filepath.Join(bin, "osascript"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > \""+argsLog+"\"\n"), 0o700); err != nil {
+	argsPipe := filepath.Join(bin, "osascript-args")
+	if err := unix.Mkfifo(argsPipe, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	pipeReader, err := os.OpenFile(argsPipe, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pipeReader.Close() })
+	t.Setenv("OSASCRIPT_ARGS_PIPE", argsPipe)
+	if err := os.WriteFile(filepath.Join(bin, "osascript"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$OSASCRIPT_ARGS_PIPE\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	argsRead := make(chan string, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		got, err := bufio.NewReader(pipeReader).ReadString('\n')
+		if err != nil {
+			readErr <- err
+			return
+		}
+		argsRead <- strings.TrimSpace(got)
+	}()
 	if err := osascriptNotify("test"); err != nil {
 		t.Fatal(err)
 	}
 	var got string
-	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
-		if data, err := os.ReadFile(argsLog); err == nil {
-			got = strings.TrimSpace(string(data))
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case got = <-argsRead:
+	case err := <-readErr:
+		t.Fatalf("read osascript args: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for asynchronous osascript invocation")
 	}
 	if !strings.Contains(got, "display notification") || !strings.Contains(got, "test") {
 		t.Fatalf("osascript args = %q", got)

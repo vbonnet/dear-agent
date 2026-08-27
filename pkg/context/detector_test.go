@@ -32,17 +32,7 @@ func TestDetectCLI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clear all env vars
-			t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
-			os.Unsetenv("CLAUDE_SESSION_ID")
-			t.Setenv("GEMINI_SESSION_ID", "") // restored on test cleanup
-			os.Unsetenv("GEMINI_SESSION_ID")
-			t.Setenv("OPENCODE_SESSION_ID", "") // restored on test cleanup
-			os.Unsetenv("OPENCODE_SESSION_ID")
-			t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
-			os.Unsetenv("CODEX_SESSION_ID")
-			t.Setenv("PI_SESSION_ID", "")
-			os.Unsetenv("PI_SESSION_ID")
+			clearHarnessDetectionEnvironment(t)
 
 			// Set test env var
 			if tt.envVar != "" {
@@ -219,16 +209,7 @@ func TestDetect(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
-	// Clear all CLI env vars to get unknown/heuristic fallback
-	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CLAUDE_SESSION_ID")
-	t.Setenv("GEMINI_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("GEMINI_SESSION_ID")
-	t.Setenv("OPENCODE_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("OPENCODE_SESSION_ID")
-	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
-	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CODEX_SESSION_ID")
+	clearHarnessDetectionEnvironment(t)
 
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -252,6 +233,7 @@ func TestDetectFromGeminiUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	clearHarnessDetectionEnvironment(t)
 	t.Setenv("GEMINI_SESSION_ID", "test-session-123")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -265,6 +247,7 @@ func TestDetectFromOpenCodeUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	clearHarnessDetectionEnvironment(t)
 	t.Setenv("OPENCODE_SESSION_ID", "test-session-456")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -277,6 +260,7 @@ func TestDetectFromCodexUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	clearHarnessDetectionEnvironment(t)
 	t.Setenv("CODEX_SESSION_ID", "test-session-789")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -289,6 +273,7 @@ func TestDetectFromPiUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	clearHarnessDetectionEnvironment(t)
 	t.Setenv("PI_SESSION_ID", "test-pi-session")
 	usage, err := detector.Detect()
 	require.NoError(t, err)
@@ -296,6 +281,26 @@ func TestDetectFromPiUsesMarkedHeuristic(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4.6", usage.ModelID)
 	assert.Equal(t, "test-pi-session", usage.SessionID)
 	assert.True(t, usage.Estimated)
+}
+
+func clearHarnessDetectionEnvironment(t *testing.T) {
+	t.Helper()
+	keys := make(map[string]struct{})
+	for _, route := range cliContextRoutes {
+		for _, names := range [][]string{
+			route.sessionEnv,
+			route.usageEnv,
+			route.modelEnv,
+			route.messageCountEnv,
+		} {
+			for _, key := range names {
+				keys[key] = struct{}{}
+			}
+		}
+	}
+	for key := range keys {
+		t.Setenv(key, "")
+	}
 }
 
 func TestDetectFromSessionUnsupportedCLI(t *testing.T) {
@@ -339,15 +344,7 @@ func TestDetectWithModel(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
-	// Clear all CLI env vars to get heuristic fallback
-	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CLAUDE_SESSION_ID")
-	t.Setenv("GEMINI_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("GEMINI_SESSION_ID")
-	t.Setenv("OPENCODE_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("OPENCODE_SESSION_ID")
-	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CODEX_SESSION_ID")
+	clearHarnessDetectionEnvironment(t)
 
 	usage, err := detector.DetectWithModel("test-model")
 	require.NoError(t, err)
@@ -358,6 +355,7 @@ func TestDetectWithModel(t *testing.T) {
 func TestDetectFromSession(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
+	clearHarnessDetectionEnvironment(t)
 
 	for _, tt := range []struct {
 		cli    CLI
@@ -431,14 +429,7 @@ func TestExtractFromConversationFileWithRealFile(t *testing.T) {
 func TestDetectDispatchesByCLI(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
-
-	// Clear all env vars first
-	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CLAUDE_SESSION_ID")
-	os.Unsetenv("GEMINI_SESSION_ID")
-	os.Unsetenv("OPENCODE_SESSION_ID")
-	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
-	os.Unsetenv("CODEX_SESSION_ID")
+	clearHarnessDetectionEnvironment(t)
 
 	t.Run("dispatches to gemini", func(t *testing.T) {
 		t.Setenv("GEMINI_SESSION_ID", "g-session")
