@@ -3,10 +3,8 @@ set -euo pipefail
 scan_root="${1:-.}"
 capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/monthly-audit-complexity.XXXXXX")
 trap 'rm -rf "$capture_dir"' EXIT
-set +e
-gocognit -over 15 "$scan_root" >"$capture_dir/stdout" 2>"$capture_dir/stderr"
-status=$?
-set -e
+status=0
+gocognit -over 15 "$scan_root" >"$capture_dir/stdout" 2>"$capture_dir/stderr" || status=$?
 if [ "$status" -eq 0 ] && [ ! -s "$capture_dir/stdout" ] && [ ! -s "$capture_dir/stderr" ]; then
   exit 0
 fi
