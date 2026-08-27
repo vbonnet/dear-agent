@@ -44,6 +44,18 @@ func (t *createFailingKillTmux) KillSession(string) error {
 	return t.err
 }
 
+func (t *createFailingKillTmux) CreateSessionBound(name, workdir, stableSessionID string) error {
+	return t.TmuxInterface.(session.StableSessionIdentityManager).CreateSessionBound(name, workdir, stableSessionID)
+}
+
+func (t *createFailingKillTmux) BindSessionStableID(ctx context.Context, name, stableSessionID string) (bool, error) {
+	return t.TmuxInterface.(session.StableSessionIdentityManager).BindSessionStableID(ctx, name, stableSessionID)
+}
+
+func (t *createFailingKillTmux) ClearSessionStableID(ctx context.Context, name, stableSessionID string) error {
+	return t.TmuxInterface.(session.StableSessionIdentityManager).ClearSessionStableID(ctx, name, stableSessionID)
+}
+
 type createNoReadinessTmux struct {
 	session.TmuxInterface
 	kill func(string) error
@@ -51,6 +63,18 @@ type createNoReadinessTmux struct {
 
 func (t *createNoReadinessTmux) KillSession(name string) error {
 	return t.kill(name)
+}
+
+func (t *createNoReadinessTmux) CreateSessionBound(name, workdir, stableSessionID string) error {
+	return t.TmuxInterface.(session.StableSessionIdentityManager).CreateSessionBound(name, workdir, stableSessionID)
+}
+
+func (t *createNoReadinessTmux) BindSessionStableID(ctx context.Context, name, stableSessionID string) (bool, error) {
+	return t.TmuxInterface.(session.StableSessionIdentityManager).BindSessionStableID(ctx, name, stableSessionID)
+}
+
+func (t *createNoReadinessTmux) ClearSessionStableID(ctx context.Context, name, stableSessionID string) error {
+	return t.TmuxInterface.(session.StableSessionIdentityManager).ClearSessionStableID(ctx, name, stableSessionID)
 }
 
 type createReadinessTmux struct {
@@ -257,6 +281,9 @@ func TestCreateSession_HappyPath(t *testing.T) {
 	// Verify tmux was called correctly
 	if len(tmuxMock.CreatedSessions) != 1 || tmuxMock.CreatedSessions[0] != "test-session" {
 		t.Errorf("tmux sessions created: %v", tmuxMock.CreatedSessions)
+	}
+	if tmuxMock.StableSessionIDs["test-session"] != result.SessionID {
+		t.Errorf("tmux stable binding = %q, want %q", tmuxMock.StableSessionIDs["test-session"], result.SessionID)
 	}
 	// 2 send-keys calls: harness command + prompt
 	if len(tmuxMock.SentCommands) != 2 {
@@ -1525,6 +1552,9 @@ func TestCreateSession_FailedReusePreservesExistingArtifacts(t *testing.T) {
 	}
 	if !tmuxMock.Sessions["existing"] {
 		t.Fatal("rollback killed a reused tmux session")
+	}
+	if binding := tmuxMock.StableSessionIDs["existing"]; binding != "" {
+		t.Fatalf("failed reused-session creation left stale binding %q", binding)
 	}
 	if _, statErr := os.Stat(marker); statErr != nil {
 		t.Fatalf("rollback removed pre-existing manifest data: %v", statErr)
