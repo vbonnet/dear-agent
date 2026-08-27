@@ -18,15 +18,21 @@ import (
 
 func newDaemonDeliveryQueue(t *testing.T, entry messages.QueueEntry) *messages.MessageQueue {
 	t.Helper()
+	queue := newEmptyDaemonQueue(t)
+	if err := queue.Enqueue(&entry); err != nil {
+		t.Fatalf("Enqueue() error: %v", err)
+	}
+	return queue
+}
+
+func newEmptyDaemonQueue(t *testing.T) *messages.MessageQueue {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	queue, err := messages.NewMessageQueue()
 	if err != nil {
 		t.Fatalf("NewMessageQueue() error: %v", err)
 	}
 	t.Cleanup(func() { _ = queue.Close() })
-	if err := queue.Enqueue(&entry); err != nil {
-		t.Fatalf("Enqueue() error: %v", err)
-	}
 	return queue
 }
 
@@ -235,11 +241,7 @@ func TestNewDaemon(t *testing.T) {
 
 	logger := logging.NewTextLogger(logFile)
 
-	queue, err := messages.NewMessageQueue()
-	if err != nil {
-		t.Fatalf("Failed to create message queue: %v", err)
-	}
-	defer func() { _ = queue.Close() }()
+	queue := newEmptyDaemonQueue(t)
 
 	cfg := Config{
 		BaseDir: tmpDir,
@@ -281,11 +283,7 @@ func TestDaemon_WritePIDFile(t *testing.T) {
 
 	logger := logging.NewTextLogger(logFile)
 
-	queue, err := messages.NewMessageQueue()
-	if err != nil {
-		t.Fatalf("Failed to create message queue: %v", err)
-	}
-	defer func() { _ = queue.Close() }()
+	queue := newEmptyDaemonQueue(t)
 
 	cfg := Config{
 		BaseDir: tmpDir,
@@ -340,11 +338,7 @@ func TestDaemon_StopCancelsContext(t *testing.T) {
 
 	logger := logging.NewTextLogger(logFile)
 
-	queue, err := messages.NewMessageQueue()
-	if err != nil {
-		t.Fatalf("Failed to create message queue: %v", err)
-	}
-	defer func() { _ = queue.Close() }()
+	queue := newEmptyDaemonQueue(t)
 
 	cfg := Config{
 		BaseDir: tmpDir,
@@ -422,11 +416,7 @@ func TestDaemon_DeliverPending_EmptyQueue(t *testing.T) {
 
 	logger := logging.NewTextLogger(logFile)
 
-	queue, err := messages.NewMessageQueue()
-	if err != nil {
-		t.Fatalf("Failed to create message queue: %v", err)
-	}
-	defer func() { _ = queue.Close() }()
+	queue := newEmptyDaemonQueue(t)
 
 	cfg := Config{
 		BaseDir: tmpDir,

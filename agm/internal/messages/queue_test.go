@@ -1,7 +1,9 @@
 package messages
 
 import (
+	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,14 +184,17 @@ func TestScannedQueueEntriesRejectMalformedDomains(t *testing.T) {
 
 			const messageID = "invalid-domain-entry"
 			const body = "persisted body that must not appear in errors"
-			_, err := queue.db.Exec(`
-				INSERT INTO message_queue
-					(message_id, from_session, to_session, message, priority, queued_at, status)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
-			`, messageID, "session-a", "session-b", body, tt.priority, time.Now(), tt.state)
-			require.NoError(t, err)
+			seedMalformedQueueRow(
+				t,
+				queue,
+				messageID,
+				"session-b",
+				body,
+				tt.priority,
+				tt.state,
+			)
 
-			_, err = tt.read(queue)
+			_, err := tt.read(queue)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), messageID)
 			assert.Contains(t, err.Error(), tt.domain)
@@ -224,14 +229,17 @@ func TestPendingQueriesRejectUnknownState(t *testing.T) {
 
 			const messageID = "unknown-pending-state"
 			const body = "persisted body that must not appear in errors"
-			_, err := queue.db.Exec(`
-				INSERT INTO message_queue
-					(message_id, from_session, to_session, message, priority, queued_at, status)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
-			`, messageID, "session-a", "target-session", body, PriorityMedium, time.Now(), "waiting")
-			require.NoError(t, err)
+			seedMalformedQueueRow(
+				t,
+				queue,
+				messageID,
+				"target-session",
+				body,
+				string(PriorityMedium),
+				"waiting",
+			)
 
-			_, err = tt.read(queue)
+			_, err := tt.read(queue)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), messageID)
 			assert.Contains(t, err.Error(), "state domain")
@@ -590,4 +598,43 @@ func setupTestQueue(t *testing.T) *MessageQueue {
 	require.NotNil(t, queue)
 
 	return queue
+}
+
+// seedMalformedQueueRow bypasses the new storage constraints through a
+// separate, explicitly corrupted connection. Runtime decoders must remain
+// defensive against databases written by older or external processes, while
+// the queue's normal connection must never disable CHECK enforcement.
+func seedMalformedQueueRow(
+	t *testing.T,
+	queue *MessageQueue,
+	messageID string,
+	toSession string,
+	body string,
+	priority string,
+	state string,
+) {
+	t.Helper()
+
+	var dbPath string
+	require.NoError(t, queue.db.QueryRow(`
+		SELECT file FROM pragma_database_list WHERE name = 'main'
+	`).Scan(&dbPath))
+
+	databaseURL, err := url.Parse(messageQueueDSN(dbPath))
+	require.NoError(t, err)
+	query := databaseURL.Query()
+	query.Set("_pragma", "ignore_check_constraints(ON)")
+	databaseURL.RawQuery = query.Encode()
+
+	corruptDB, err := sql.Open("sqlite", databaseURL.String())
+	require.NoError(t, err)
+	corruptDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, corruptDB.Close()) })
+
+	_, err = corruptDB.Exec(`
+		INSERT INTO message_queue
+			(message_id, from_session, to_session, message, priority, queued_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, messageID, "session-a", toSession, body, priority, time.Now(), state)
+	require.NoError(t, err)
 }
