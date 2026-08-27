@@ -34,5 +34,5 @@ func emitConfirmationEnvelope(env ConfirmationEnvelope) error {
 	if err := printJSON(env); err != nil {
 		return err
 	}
-	return &exitError{code: env.ExitCode, msg: env.Error}
+	return &exitError{code: env.ExitCode, msg: env.Error, rendered: true}
 }

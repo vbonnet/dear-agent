@@ -28,13 +28,14 @@ const (
 )
 
 // exitError carries an explicit process exit code alongside an error message.
-// handleError wraps OpErrors in this so the top-level run() can recover the
-// exit code even though the original OpError type has been consumed for
-// printing. Its Error() preserves the OpError Code string so cobra's own
-// error rendering is unchanged.
+// The rendered marker distinguishes errors returned after an envelope was
+// emitted from early root errors that still need an output owner. handleError
+// wraps OpErrors in this so the top-level run() can recover the exit code even
+// though the original OpError type has been consumed for printing.
 type exitError struct {
-	code int
-	msg  string
+	code     int
+	msg      string
+	rendered bool
 }
 
 func (e *exitError) Error() string { return e.msg }

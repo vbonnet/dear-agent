@@ -151,6 +151,14 @@ Provide a production-ready CLI that:
 
 **CLI-61** When any command path reactivates a session, including `agm session unarchive` and `agm admin reconcile --fix`, the command shall acquire the same stable session-ID lifecycle lock held by archive and reload the current lifecycle under that lock. Unarchive shall keep the lock through durable reactivation and legacy manifest relocation. Reconcile shall also revalidate the corresponding tmux fact under the lock and skip a mismatch that changed while it waited. No reactivation path may make a session active while archive still owns destructive cleanup.
 
+**CLI-62** When either registered compaction command runs with JSON output and flag parsing, argument validation, root setup, or its command body fails, the system shall emit exactly one RFC 7807 problem to stderr, suppress Cobra error and usage prose, classify flag and argument errors as stable `AGM-005`, preserve an already-rendered typed problem without duplication, classify an otherwise raw failure as `AGM-022` with type `command/compaction_failed`, and keep that command-local code distinct from every shared operations error code. Root header and best-effort workspace, storage-bootstrap, freshness, usage, and audit diagnostics shall not append prose to compaction JSON stderr.
+
+**CLI-63** When either registered compaction command resolves an exact non-active session identity or a pure API session, the command shall return its archived, reaping, or `PURE_API_SESSION` outcome before tmux observation, force-override logging, prompt composition, dry-run audit allocation, or output; when initial tmux readiness observation fails, is unavailable, or is not positively ready, the command shall return stable `AGM-016` status 409 and exit 4 instead of a generic command failure.
+
+**CLI-64** When `agm session compact` monitoring is enabled, the command shall reject a nonpositive `--timeout` as stable invalid input before storage resolution, tmux observation, audit allocation, or delivery; when monitoring is disabled, the timeout value shall not gate fire-and-forget delivery.
+
+**CLI-65** When `agm send compact --force` is requested, the command shall reject its combination with `--dry-run` before storage resolution, readiness observation, override judging, or audit, require positive readiness before consulting the judge, and prohibit delivery unless the complete override verdict has been durably audited.
+
 ## Requirements
 
 ### Functional Requirements
