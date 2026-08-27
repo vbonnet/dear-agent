@@ -7,6 +7,7 @@
 # RELATED-SPEC: agm/internal/lock/SPEC.md
 # RELATED-SPEC: agm/internal/monitoring/SPEC.md
 # RELATED-SPEC: agm/internal/reservation/SPEC.md
+# RELATED-SPEC: agm/internal/session/SPEC.md
 # RELATED-SPEC: agm/internal/state/SPEC.md
 # RELATED-SPEC: agm/internal/tracking/SPEC.md
 # RELATED-SPEC: agm/internal/tmux/SPEC.md

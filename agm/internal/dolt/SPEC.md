@@ -30,6 +30,8 @@
 
 **DOLTR-14** When AGM creates or updates a session, the Dolt adapter shall reject lifecycle and outcome values outside the manifest-owned closed vocabulary. When it decodes a persisted session status or metadata outcome, it shall accept legacy empty status and `active` as the empty lifecycle, but shall return an error for every other unknown nonempty status or outcome instead of coercing or erasing it.
 
+**DOLTR-15** When an exact `GetSession` lookup has no matching row, the storage adapter shall return an error matching `dolt.ErrSessionNotFound`; every other backend failure shall remain distinguishable from absence so callers cannot redirect it through name or UUID resolution.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
