@@ -971,11 +971,14 @@ output before parity work can rely on them.
 
 **Drives:** workflow implementation package SPEC coverage for
 `agm/internal/workflow`, `agm/internal/workflow/deepresearch`,
-`pkg/workflow/codemod`, `pkg/workflow/dev`, and `pkg/workflow/roles`.
+`pkg/workflow/codemod`, `pkg/workflow/dev`, and `pkg/workflow/roles`, plus the
+constitutional validation contract in `pkg/workflow`.
 
 **Key scenarios:**
 - Workflow implementation packages keep co-located SPEC coverage.
 - Workflow implementation package SPECs point back to their executable BDD feature.
+- Enforced workflows without invariants fail validation before run recording,
+  hooks, or nodes run.
 
 **Why this matters:** Workflow command parity is only enforceable if the
 registry, role resolver, codemods, dev loop, and specialized workflow adapters

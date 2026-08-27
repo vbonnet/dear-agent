@@ -76,7 +76,7 @@ type Workflow struct {
 	// Constitutional opts the workflow into "humans declare invariants,
 	// agents implement" mode. Nil means "off" — the
 	// workflow runs without the contract. When non-nil and Enforce is
-	// true, the Define hook fails the run unless Invariants is
+	// true, workflow validation fails unless Invariants is
 	// non-empty. The block plays into adversarial review (§6.5):
 	// invariants are what the cross-model verifier checks against.
 	Constitutional *Constitutional `yaml:"constitutional,omitempty"`
@@ -376,7 +376,7 @@ func (w *Workflow) Validate() error {
 	if err := detectCycle(w.Nodes); err != nil {
 		return fmt.Errorf("workflow %q: %w", w.Name, err)
 	}
-	if err := validateInvariants(w.Invariants); err != nil {
+	if err := validateConstitutional(w.Constitutional, w.Invariants); err != nil {
 		return fmt.Errorf("workflow %q: %w", w.Name, err)
 	}
 	return nil
