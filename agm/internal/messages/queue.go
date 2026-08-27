@@ -2,6 +2,7 @@
 package messages
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -141,52 +142,10 @@ func NewMessageQueue() (*MessageQueue, error) {
 	}
 
 	dbPath := filepath.Join(configDir, "message_queue.db")
-
-	// Open database with WAL mode for concurrent access
-	db, err := sql.Open(
-		"sqlite",
-		fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dbPath),
-	)
+	db, err := openMessageQueueDB(context.Background(), dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, err
 	}
-
-	// Create base table schema (without ack columns for backwards compatibility)
-	schema := `
-	CREATE TABLE IF NOT EXISTS message_queue (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		message_id TEXT UNIQUE NOT NULL,
-		from_session TEXT NOT NULL,
-		to_session TEXT NOT NULL,
-		message TEXT NOT NULL,
-		priority TEXT NOT NULL DEFAULT 'MEDIUM',
-		queued_at TIMESTAMP NOT NULL,
-		attempt_count INTEGER NOT NULL DEFAULT 0,
-		last_attempt TIMESTAMP,
-		status TEXT NOT NULL DEFAULT 'queued',
-		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_to_session_status ON message_queue(to_session, status);
-	CREATE INDEX IF NOT EXISTS idx_status ON message_queue(status);
-	CREATE INDEX IF NOT EXISTS idx_priority ON message_queue(priority);
-	CREATE INDEX IF NOT EXISTS idx_queued_at ON message_queue(queued_at);
-	`
-
-	if _, err := db.Exec(schema); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
-		return nil, fmt.Errorf("failed to create schema: %w", err)
-	}
-
-	// Migrate existing databases to add ack columns if they don't exist
-	// This is safe because we're only adding columns with default values
-	// We ignore errors since the column might already exist
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 1;`) //nolint:noctx // TODO(context): plumb ctx through this layer
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_received INTEGER NOT NULL DEFAULT 0;`) //nolint:noctx // TODO(context): plumb ctx through this layer
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_timeout TIMESTAMP;`)                   //nolint:noctx // TODO(context): plumb ctx through this layer
-
-	// Create index if it doesn't exist (idempotent) - must be after ALTER TABLE
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_ack_required ON message_queue(ack_required, ack_received);`) //nolint:noctx // TODO(context): plumb ctx through this layer
-
 	return &MessageQueue{db: db}, nil
 }
 
