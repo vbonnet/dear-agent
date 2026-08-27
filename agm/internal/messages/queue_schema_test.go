@@ -381,11 +381,12 @@ func TestMessageQueueConcurrentConstructorsSerializeMigration(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "message_queue.db")
 	createHistoricalQueue(t, dbPath, []string{"B", "C", "A"})
 
+	const constructorCount = 16
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	start := make(chan struct{})
-	results := make(chan error, 4)
-	for range 4 {
+	results := make(chan error, constructorCount)
+	for range constructorCount {
 		go func() {
 			<-start
 			db, err := openMessageQueueDB(ctx, dbPath)
@@ -396,7 +397,7 @@ func TestMessageQueueConcurrentConstructorsSerializeMigration(t *testing.T) {
 		}()
 	}
 	close(start)
-	for range 4 {
+	for range constructorCount {
 		require.NoError(t, <-results)
 	}
 
@@ -450,6 +451,15 @@ func TestMessageQueueImmediateTransactionBusyTimeoutIsBoundedAndRetryable(t *tes
 		SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'message_queue'
 	`).Scan(&tableSQL))
 	assert.Equal(t, currentQueueTableSQL(queueTableName), tableSQL)
+}
+
+func TestQueueBusyRetryHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	err := waitForQueueBusyRetry(ctx, time.Hour)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Less(t, time.Since(started), time.Second)
 }
 
 func TestMessageQueueInvalidLegacyDomainsRollBack(t *testing.T) {
