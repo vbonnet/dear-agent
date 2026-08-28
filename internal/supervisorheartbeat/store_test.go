@@ -152,9 +152,13 @@ func TestStoreReadMissingDoesNotCreateDirectories(t *testing.T) {
 func TestStoreRejectsInvalidSupervisorIDs(t *testing.T) {
 	t.Parallel()
 
-	for _, id := range []string{"", ".", "..", "../escape", "nested/name", `nested\name`, "/absolute"} {
+	for _, id := range []string{"", ".", "..", "../escape", "nested/name", `nested\name`, "/absolute", "nul\x00id"} {
 		t.Run(id, func(t *testing.T) {
 			t.Parallel()
+
+			if err := ValidateID(id); err == nil {
+				t.Errorf("ValidateID(%q) error = nil, want invalid-ID error", id)
+			}
 
 			root := t.TempDir()
 			store := New(root)

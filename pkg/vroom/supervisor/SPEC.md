@@ -106,9 +106,11 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-33** When the authoritative AGM supervisor record is missing, unreadable, or has no heartbeat timestamp, the system shall not infer heartbeat freshness from a legacy mirror.
 
-**VROOM-SUP-34** When supervisor heartbeat persistence receives an empty identifier or an identifier that is not one path component, the system shall reject the operation before accessing a heartbeat record.
+**VROOM-SUP-34** When supervisor heartbeat persistence receives an empty identifier, an identifier containing NUL, or an identifier that is not one lexical path component, the system shall reject the operation before accessing a heartbeat record.
 
 **VROOM-SUP-35** When an authoritative supervisor heartbeat record's embedded identity differs from the identity used to address it, the system shall reject the record as invalid rather than infer heartbeat freshness from it.
+
+**VROOM-SUP-36** When supervisor launch receives an empty identifier, an identifier containing NUL, or an identifier that is not one lexical path component, the system shall reject the operation before authentication, admission, or process preflight.
 
 ## BDD traceability
 
