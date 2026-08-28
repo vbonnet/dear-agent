@@ -64,7 +64,8 @@
 
 **VROOM-ESC-28** When an Engine transition is accepted, the system shall commit its state before invoking the associated session delivery, human dispatch, or audit event under a fresh bounded post-commit context; an effect failure shall not misreport the committed state as an uncommitted mutation.
 
-## Test Traceability
+## BDD Traceability
 
 - Package tests: `pkg/vroom/escalation/*_test.go`
-- BDD: `agm/test/bdd/features/vroom_runtime_guardrails.feature`
+- Feature: `agm/test/bdd/features/vroom_runtime_guardrails.feature`
+- Test consequence: VROOM-ESC-11 through VROOM-ESC-13 and VROOM-ESC-21 through VROOM-ESC-28 use deterministic unit and integration tests in `store_test.go`, `engine_test.go`, and `confer_test.go`; no new BDD scenario is required because the existing CLI harness cannot deterministically control package-internal cross-process locking, concurrent transition ownership, or post-commit effect timing.

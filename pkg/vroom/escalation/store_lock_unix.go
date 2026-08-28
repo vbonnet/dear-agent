@@ -7,7 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 const storeReadsRequireLock = false
@@ -19,7 +20,7 @@ type unixStoreFileLock struct {
 func acquireStoreFileLock(ctx context.Context, path string) (storeFileLock, error) {
 	// #nosec G703 -- path is the fixed sidecar name beneath the configured store
 	// directory; O_NOFOLLOW rejects a replacement symlink.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("escalation: open store lock: %w", err)
 	}
@@ -28,11 +29,11 @@ func acquireStoreFileLock(ctx context.Context, path string) (storeFileLock, erro
 	}
 	lock := &unixStoreFileLock{file: file}
 	if err := waitForStoreFileLock(ctx, func() (bool, error) {
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		switch {
 		case err == nil:
 			return true, nil
-		case errors.Is(err, syscall.EWOULDBLOCK), errors.Is(err, syscall.EAGAIN), errors.Is(err, syscall.EINTR):
+		case errors.Is(err, unix.EWOULDBLOCK), errors.Is(err, unix.EAGAIN), errors.Is(err, unix.EINTR):
 			return false, nil
 		default:
 			return false, fmt.Errorf("escalation: acquire store lock: %w", err)
@@ -61,6 +62,6 @@ func validateUnixStoreLock(file *os.File, path string) error {
 }
 
 func (l *unixStoreFileLock) Close() error {
-	unlockErr := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
+	unlockErr := unix.Flock(int(l.file.Fd()), unix.LOCK_UN)
 	return errors.Join(unlockErr, l.file.Close())
 }
