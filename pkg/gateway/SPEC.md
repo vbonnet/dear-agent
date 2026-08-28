@@ -39,4 +39,5 @@ share one in-process command contract.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/api_gateway_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Feature: `agm/test/bdd/features/api_gateway_package_guardrails.feature`
+- Test consequence: Deterministic unit tests in `pkg/gateway/run_state_test.go` prove GATEWAY-CORE-13 by returning `CodeInvalidArgs` for an unknown filter despite closed storage while preserving the empty filter; this in-process adapter boundary needs no additional Gherkin scenario.
