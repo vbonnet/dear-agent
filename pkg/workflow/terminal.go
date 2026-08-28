@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -68,12 +67,12 @@ func (r *Runner) beginRunRecord(
 	inputs map[string]string,
 	started time.Time,
 ) {
-	inputsJSON, _ := json.Marshal(inputs)
+	inputsJSON := mustMarshalJSON(inputs)
 	if err := r.recorder().BeginRun(ctx, RunRecord{
 		RunID:        runID,
 		WorkflowName: workflowName,
 		State:        RunStateRunning,
-		InputsJSON:   string(inputsJSON),
+		InputsJSON:   inputsJSON,
 		StartedAt:    started,
 		Trigger:      r.triggerOrDefault(),
 		TriggeredBy:  r.TriggeredBy,
@@ -110,12 +109,12 @@ func (r *Runner) resumeRunRecord(
 ) error {
 	recorder, ok := r.Recorder.(resumableRunRecorder)
 	if !ok {
-		inputsJSON, _ := json.Marshal(inputs)
+		inputsJSON := mustMarshalJSON(inputs)
 		if err := r.recorder().BeginRun(ctx, RunRecord{
 			RunID:        runID,
 			WorkflowName: workflowName,
 			State:        RunStateRunning,
-			InputsJSON:   string(inputsJSON),
+			InputsJSON:   inputsJSON,
 			StartedAt:    started,
 			Trigger:      r.triggerOrDefault(),
 			TriggeredBy:  r.TriggeredBy,
