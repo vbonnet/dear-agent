@@ -35,6 +35,8 @@ share one in-process command contract.
 
 **GATEWAY-CORE-12** When cancel handling is invoked before workflow cancel support exists, the system shall return `CodeUnavailable`.
 
+**GATEWAY-CORE-13** When workflow list handling receives an unknown non-empty run-state filter, the system shall return `CodeInvalidArgs` without querying workflow storage.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/api_gateway_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.

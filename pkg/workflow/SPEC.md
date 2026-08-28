@@ -30,6 +30,8 @@ execution, resume, review, and cost controls.
 
 **WFLOW-07** When a configured definition hook rejects a validated workflow, the system shall finish the run as failed and return the contextual rejection before enforcing or executing any node.
 
+**WFLOW-08** When a caller lists workflow runs with a non-empty state filter, the system shall accept only `pending`, `running`, `awaiting_hitl`, `succeeded`, `failed`, or `cancelled` and reject every other value before querying storage.
+
 ## Permission contract
 
 `DefaultPermissionEnforcer` is permissive when a policy section is absent. When

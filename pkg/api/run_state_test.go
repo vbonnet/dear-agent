@@ -8,6 +8,10 @@ import (
 
 func TestListWorkflowsRejectsInvalidRunState(t *testing.T) {
 	fixture := newFixture(t)
+	if err := fixture.state.Close(); err != nil {
+		t.Fatalf("close test database: %v", err)
+	}
+
 	response, err := http.Get(fixture.ts.URL + "/workflows?state=typo")
 	if err != nil {
 		t.Fatalf("get: %v", err)

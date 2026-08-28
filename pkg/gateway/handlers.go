@@ -105,7 +105,11 @@ func listHandler(db *sql.DB) Handler {
 	return func(ctx context.Context, cmd Command) Response {
 		opts := workflow.ListOptions{}
 		if state, ok := stringArg(cmd.Args, "state"); ok {
-			opts.State = workflow.RunState(state)
+			parsed, err := workflow.ParseRunStateFilter(state)
+			if err != nil {
+				return errorResponse(cmd.ID, WrapError(CodeInvalidArgs, "state", err))
+			}
+			opts.State = parsed
 		}
 		opts.Limit = intArg(cmd.Args, "limit", 50, 500)
 		runs, err := workflow.List(ctx, db, opts)
