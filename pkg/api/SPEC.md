@@ -46,4 +46,5 @@ workflow internals.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/api_gateway_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Feature: `agm/test/bdd/features/api_gateway_package_guardrails.feature`
+- Test consequence: Deterministic HTTP integration tests in `pkg/api/run_state_test.go` prove API-SERVER-16 by returning HTTP 400 with `invalid_state` for an unknown filter despite closed storage while preserving HTTP 200 for the empty filter; this direct transport-boundary proof needs no additional Gherkin scenario.

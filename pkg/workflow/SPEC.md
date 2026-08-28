@@ -4,6 +4,7 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 - Feature: `agm/test/bdd/features/workflow_package_guardrails.feature`
+- Test consequence: Deterministic unit tests in `pkg/workflow/run_state_test.go` prove WFLOW-08's closed vocabulary, empty-filter exception, and pre-query rejection against closed storage; the typed query boundary needs no additional Gherkin scenario.
 
 <!-- Last audited at: 2026-07-03 -->
 
