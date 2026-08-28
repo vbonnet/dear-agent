@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/supervisorheartbeat"
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
 	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 	"go.opentelemetry.io/otel"
@@ -244,43 +245,6 @@ func (h supervisorHealth) String() string {
 	}
 }
 
-// readHeartbeatTime reads a supervisor's heartbeat file and returns the
-// timestamp. Returns zero time if the file doesn't exist or can't be parsed.
-func readHeartbeatTime(home, name string) time.Time {
-	path := filepath.Join(home, ".agm", "vroom", "heartbeat", name+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return time.Time{}
-	}
-
-	// Heartbeat files contain just a timestamp string (the agm supervisor
-	// heartbeat command also writes JSON, but the skill files write a bare
-	// date string via `date -u`). Try both formats.
-	text := strings.TrimSpace(string(data))
-
-	// Try RFC3339 first (the structured format).
-	if t, err := time.Parse(time.RFC3339, text); err == nil {
-		return t
-	}
-	// Try the `date -u` format used by the skill files.
-	if t, err := time.Parse("2006-01-02T15:04:05Z", text); err == nil {
-		return t
-	}
-	// Try parsing as JSON with a "timestamp" or "ts" field.
-	var obj map[string]string
-	if err := json.Unmarshal(data, &obj); err == nil {
-		for _, key := range []string{"timestamp", "ts", "last_heartbeat"} {
-			if v, ok := obj[key]; ok {
-				if t, err := time.Parse(time.RFC3339, v); err == nil {
-					return t
-				}
-			}
-		}
-	}
-
-	return time.Time{}
-}
-
 // classifySupervisor determines the health of a supervisor based on both
 // heartbeat freshness and session liveness.
 func classifySupervisor(home string, sup supervisor) supervisorHealth {
@@ -292,16 +256,18 @@ func classifySupervisor(home string, sup supervisor) supervisorHealth {
 		return healthAuthFailed
 	}
 
-	heartbeat := readHeartbeatTime(home, heartbeatFileName(sup.Name))
-	if heartbeat.IsZero() {
-		// Session exists but no heartbeat file yet — could be booting.
+	store := supervisorheartbeat.New(filepath.Join(home, ".agm", "supervisors"))
+	record, err := store.Read(sup.Name)
+	if err != nil || record == nil || record.LastBeatUTC.IsZero() {
+		// Session exists but its authoritative heartbeat is unavailable — it
+		// could still be booting.
 		// Treat as stale rather than dead to avoid killing a session
 		// that's still initializing.
 		return healthStale
 	}
 
 	threshold := 2 * sup.TickInterval
-	if time.Since(heartbeat) > threshold {
+	if time.Since(record.LastBeatUTC) > threshold {
 		return healthStale
 	}
 

@@ -2,8 +2,8 @@
 
 <!-- Last audited at: 2026-07-17 -->
 
-**Version**: 1.2
-**Last Updated**: 2026-07-17
+**Version**: 1.3
+**Last Updated**: 2026-08-28
 **Status**: Active
 **Scope**: VROOM supervisor task queues, with emphasis on AGM-backed worker dispatch.
 
@@ -100,10 +100,18 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-31** When callers request all topology members, the system shall return a copy that cannot mutate the canonical topology.
 
+### Authoritative Supervisor Heartbeat Observation
+
+**VROOM-SUP-32** When a VROOM component observes supervisor heartbeat freshness, the system shall use the authoritative AGM supervisor record addressed by canonical supervisor ID.
+
+**VROOM-SUP-33** When the authoritative AGM supervisor record is missing, unreadable, or has no heartbeat timestamp, the system shall not infer heartbeat freshness from a legacy mirror.
+
 ## Test Traceability
 
 - Package tests: `pkg/vroom/supervisor/disk_alert_test.go`
 - Package tests: `pkg/vroom/supervisor/check_test.go`
 - Package tests: `pkg/vroom/supervisor/queue_test.go`
 - Package tests: `pkg/vroom/supervisor/topology_test.go`
+- Authoritative heartbeat store: `internal/supervisorheartbeat/store_test.go`
+- Authoritative heartbeat adapters: `agm/cmd/agm/supervisor_heartbeat_store_test.go`, `agm/cmd/agm/supervisor_test.go`, `agm/internal/bus/heartbeat_watcher_test.go`, `cmd/vroom-dispatch/coverage_test.go`
 - BDD: `agm/test/bdd/features/vroom_runtime_guardrails.feature`

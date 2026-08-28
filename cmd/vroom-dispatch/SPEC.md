@@ -49,6 +49,8 @@ harness when a supervisor is stale.
 
 **VD-18** When a supervisor session is still registered but its pane shows a provider authentication failure for its configured harness, the system shall archive that broken active session before recreating it through the normal bounded restart path.
 
+**VD-19** When the VROOM-SUP-32 authoritative heartbeat observation is missing, unreadable, or has no timestamp for a registered supervisor session, the system shall classify the supervisor as stale rather than dead or alive.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

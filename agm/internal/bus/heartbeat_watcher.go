@@ -2,14 +2,14 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/supervisorheartbeat"
 )
 
 // SupervisorHeartbeatWatcher tails the supervisor heartbeat dir and emits
@@ -110,12 +110,13 @@ func (w *SupervisorHeartbeatWatcher) scanOnce(ctx context.Context) {
 		w.Logger.Warn("heartbeat_watcher: read dir failed", "dir", w.Dir, "err", err)
 		return
 	}
+	store := supervisorheartbeat.New(w.Dir)
 	for _, ent := range entries {
 		if !ent.IsDir() {
 			continue
 		}
 		id := ent.Name()
-		rec, err := w.readRecord(id)
+		rec, err := store.Read(id)
 		if err != nil {
 			w.Logger.Debug("heartbeat_watcher: read heartbeat failed", "supervisor", id, "err", err)
 			continue
@@ -141,7 +142,7 @@ func (w *SupervisorHeartbeatWatcher) maybeEmit(
 	now time.Time,
 	id, state string,
 	age time.Duration,
-	rec *supervisorHeartbeatRecord,
+	rec *supervisorheartbeat.Record,
 ) {
 	w.mu.Lock()
 	last := w.lastEmittedAt[id]
@@ -170,35 +171,4 @@ func (w *SupervisorHeartbeatWatcher) maybeEmit(
 		w.Logger.Warn("heartbeat_watcher: emit failed", "supervisor", id, "err", err)
 	}
 	w.Logger.Info("heartbeat event emitted", "supervisor", id, "state", state, "age", age)
-}
-
-// supervisorHeartbeatRecord mirrors agm/cmd/agm/supervisor.go's
-// heartbeatRecord, deliberately duplicated here so the bus package
-// doesn't import from the agm CLI package (which would be a dep cycle).
-// Keep the JSON fields in sync.
-type supervisorHeartbeatRecord struct {
-	ID          string    `json:"id"`
-	PrimaryFor  string    `json:"primary_for,omitempty"`
-	TertiaryFor string    `json:"tertiary_for,omitempty"`
-	LastBeatUTC time.Time `json:"last_beat_utc"`
-	PID         int       `json:"pid,omitempty"`
-}
-
-// readRecord returns (nil, nil) when no heartbeat file exists (never-
-// heartbeated supervisor). Returns an error only for malformed JSON —
-// a missing file is a valid state we want to surface as "never".
-func (w *SupervisorHeartbeatWatcher) readRecord(id string) (*supervisorHeartbeatRecord, error) {
-	path := filepath.Join(w.Dir, id, "heartbeat.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var rec supervisorHeartbeatRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return &rec, nil
 }

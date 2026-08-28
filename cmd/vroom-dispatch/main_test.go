@@ -735,45 +735,6 @@ func TestSessionArchiveArgsAuthorizeSupervisorReapWithoutForce(t *testing.T) {
 	}
 }
 
-func TestReadHeartbeatTime(t *testing.T) {
-	dir := t.TempDir()
-	hbDir := filepath.Join(dir, ".agm", "vroom", "heartbeat")
-	os.MkdirAll(hbDir, 0o755)
-
-	// Test bare timestamp string (what the skill files write via `date -u`).
-	ts := "2026-06-17T21:32:03Z"
-	os.WriteFile(filepath.Join(hbDir, "orch.json"), []byte(ts+"\n"), 0o600)
-	got := readHeartbeatTime(dir, "orch")
-	want, _ := time.Parse(time.RFC3339, ts)
-	if !got.Equal(want) {
-		t.Errorf("bare timestamp: got %v, want %v", got, want)
-	}
-
-	// Test RFC3339 with timezone offset.
-	ts2 := "2026-06-17T14:32:03-07:00"
-	os.WriteFile(filepath.Join(hbDir, "meta-o.json"), []byte(ts2+"\n"), 0o600)
-	got2 := readHeartbeatTime(dir, "meta-o")
-	want2, _ := time.Parse(time.RFC3339, ts2)
-	if !got2.Equal(want2) {
-		t.Errorf("RFC3339 offset: got %v, want %v", got2, want2)
-	}
-
-	// Test missing file returns zero.
-	got3 := readHeartbeatTime(dir, "nonexistent")
-	if !got3.IsZero() {
-		t.Errorf("missing file: got %v, want zero", got3)
-	}
-
-	// Test JSON object format.
-	jsonHB := `{"timestamp":"2026-06-17T21:00:00Z"}`
-	os.WriteFile(filepath.Join(hbDir, "overseer.json"), []byte(jsonHB), 0o600)
-	got4 := readHeartbeatTime(dir, "overseer")
-	want4, _ := time.Parse(time.RFC3339, "2026-06-17T21:00:00Z")
-	if !got4.Equal(want4) {
-		t.Errorf("JSON object: got %v, want %v", got4, want4)
-	}
-}
-
 func TestHeartbeatFileName(t *testing.T) {
 	cases := []struct {
 		name string
