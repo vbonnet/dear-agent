@@ -18,11 +18,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 const (
 	queueStorageUmaskHelperEnv = "AGM_TEST_QUEUE_STORAGE_UMASK_HELPER"
 	queueStorageModeReportEnv  = "AGM_TEST_QUEUE_STORAGE_MODE_REPORT"
+	queueStorageCrashHelperEnv = "AGM_TEST_QUEUE_STORAGE_CRASH_HELPER"
 )
 
 type queueStorageModeReport struct {
@@ -72,7 +74,7 @@ func TestMessageQueueFreshStorageIsPrivateUnderUmask022(t *testing.T) {
 }
 
 func TestMessageQueueRepairsExistingDatabasePermissionsWithoutReplacement(t *testing.T) {
-	for _, initialMode := range []os.FileMode{0o644, 0o666} {
+	for _, initialMode := range []os.FileMode{0o400, 0o644, 0o666} {
 		t.Run(initialMode.String(), func(t *testing.T) {
 			homeDir := t.TempDir()
 			t.Setenv("HOME", homeDir)
@@ -99,12 +101,86 @@ func TestMessageQueueRepairsExistingDatabasePermissionsWithoutReplacement(t *tes
 
 			dbAfter := queueStorageFingerprint(t, dbPath)
 			assert.Equal(t, dbBefore.Inode, dbAfter.Inode, "permission repair must preserve DB identity")
+			assert.Equal(t, dbBefore.Size, dbAfter.Size, "permission repair must preserve DB size")
+			assert.Equal(t, dbBefore.SHA256, dbAfter.SHA256, "permission repair must preserve DB bytes")
 			assert.Equal(t, os.FileMode(0o600), dbAfter.Mode.Perm())
 			assert.Equal(t, os.FileMode(0o700), queueStorageMode(t, rootDir).Perm())
 			assert.Equal(t, canaryBefore, queueStorageFingerprint(t, canaryPath),
 				"permission repair must not mutate unrelated AGM configuration")
+
+			var tableSQL string
+			require.NoError(t, queue.db.QueryRowContext(context.Background(), `
+				SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'message_queue'
+			`).Scan(&tableSQL))
+			assert.Equal(t, currentQueueTableSQL(queueTableName), tableSQL)
+			var sequence int
+			require.NoError(t, queue.db.QueryRowContext(context.Background(), `
+				SELECT seq FROM sqlite_sequence WHERE name = 'message_queue'
+			`).Scan(&sequence))
+			assert.Equal(t, 1, sequence)
+			var indexCount int
+			require.NoError(t, queue.db.QueryRowContext(context.Background(), `
+				SELECT COUNT(*) FROM sqlite_schema
+				WHERE type = 'index' AND name LIKE 'idx_%'
+			`).Scan(&indexCount))
+			assert.Equal(t, len(queueIndexDefinitions), indexCount)
 		})
 	}
+}
+
+func TestMessageQueueRepairsCrashLeftSidecarsWithoutReplacement(t *testing.T) {
+	if os.Getenv(queueStorageCrashHelperEnv) == "1" {
+		runQueueStorageCrashHelper(t)
+		return
+	}
+
+	homeDir := t.TempDir()
+	command := exec.Command(
+		os.Args[0],
+		"-test.run=^TestMessageQueueRepairsCrashLeftSidecarsWithoutReplacement$",
+	)
+	command.Env = queueStorageTestEnvironment(map[string]string{
+		"HOME":                     homeDir,
+		queueStorageCrashHelperEnv: "1",
+	})
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "crash helper failed:\n%s", output)
+
+	rootDir := filepath.Join(homeDir, ".config", "agm")
+	dbPath := filepath.Join(rootDir, queueDatabaseLeaf)
+	before := make(map[string]queueStorageFileFingerprint, 2)
+	for _, suffix := range []string{"-wal", "-shm"} {
+		path := dbPath + suffix
+		fingerprint := queueStorageFingerprint(t, path)
+		require.Positive(t, fingerprint.Size, "%s must be a non-empty crash artifact", suffix)
+		assert.Equal(t, os.FileMode(0o644), fingerprint.Mode.Perm())
+		before[suffix] = fingerprint
+	}
+
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	require.NoError(t, storage.prepareForSQLite())
+	require.NoError(t, storage.Close())
+
+	assert.Equal(t, os.FileMode(0o700), queueStorageMode(t, rootDir).Perm())
+	for _, suffix := range []string{"-wal", "-shm"} {
+		after := queueStorageFingerprint(t, dbPath+suffix)
+		assert.Equal(t, before[suffix].Inode, after.Inode, "%s identity must survive admission", suffix)
+		assert.Equal(t, before[suffix].Size, after.Size, "%s size must survive admission", suffix)
+		assert.Equal(t, before[suffix].SHA256, after.SHA256, "%s bytes must survive admission", suffix)
+		assert.Equal(t, os.FileMode(0o600), after.Mode.Perm())
+	}
+
+	t.Setenv("HOME", homeDir)
+	queue, err := NewMessageQueue()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, queue.Close()) }()
+	var body string
+	require.NoError(t, queue.db.QueryRowContext(
+		context.Background(),
+		`SELECT message FROM message_queue WHERE message_id = 'crash-left-canary'`,
+	).Scan(&body))
+	assert.Equal(t, "crash queue body", body)
 }
 
 func TestMessageQueueRejectsUnsafeStorageWithoutTouchingTargets(t *testing.T) {
@@ -207,6 +283,318 @@ func TestMessageQueueRejectsUnsafeStorageWithoutTouchingTargets(t *testing.T) {
 	})
 }
 
+func TestMessageQueueRejectsSymlinkedStorageDirectoriesWithoutTouchingTargets(t *testing.T) {
+	for _, boundary := range []string{"home", "config", "agm"} {
+		t.Run(boundary, func(t *testing.T) {
+			targetDir := t.TempDir()
+			canaryPath := filepath.Join(targetDir, "target-canary")
+			require.NoError(t, os.WriteFile(canaryPath, []byte("directory target must survive"), 0o640))
+			before := queueStorageFingerprint(t, canaryPath)
+
+			var linkPath string
+			switch boundary {
+			case "home":
+				linkPath = filepath.Join(t.TempDir(), "home-link")
+				require.NoError(t, os.Symlink(targetDir, linkPath))
+				t.Setenv("HOME", linkPath)
+			case "config":
+				homeDir := t.TempDir()
+				linkPath = filepath.Join(homeDir, ".config")
+				require.NoError(t, os.Symlink(targetDir, linkPath))
+				t.Setenv("HOME", homeDir)
+			case "agm":
+				homeDir := t.TempDir()
+				configDir := filepath.Join(homeDir, ".config")
+				require.NoError(t, os.Mkdir(configDir, 0o700))
+				linkPath = filepath.Join(configDir, "agm")
+				require.NoError(t, os.Symlink(targetDir, linkPath))
+				t.Setenv("HOME", homeDir)
+			}
+
+			queue, err := NewMessageQueue()
+			if queue != nil {
+				require.NoError(t, queue.Close())
+			}
+			require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+			assert.NotContains(t, err.Error(), targetDir, "bounded errors must not disclose symlink targets")
+			assert.Equal(t, before, queueStorageFingerprint(t, canaryPath))
+			_, readlinkErr := os.Readlink(linkPath)
+			require.NoError(t, readlinkErr)
+		})
+	}
+}
+
+func TestMessageQueueRejectsBroadlyWritableConfigDirectoryWithoutMutation(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	configDir := filepath.Join(homeDir, ".config")
+	require.NoError(t, os.Mkdir(configDir, 0o700))
+	require.NoError(t, os.Chmod(configDir, 0o777))
+	before, err := os.Lstat(configDir)
+	require.NoError(t, err)
+
+	queue, err := NewMessageQueue()
+	if queue != nil {
+		require.NoError(t, queue.Close())
+	}
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	after, statErr := os.Lstat(configDir)
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0o777), after.Mode().Perm())
+	assert.Equal(t, queueStorageInode(t, before), queueStorageInode(t, after))
+	_, statErr = os.Lstat(filepath.Join(configDir, "agm"))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestMessageQueueRejectsBroadlyWritableHomeWithoutMutation(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	require.NoError(t, os.Chmod(homeDir, 0o777))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(homeDir, 0o700)) })
+	before, err := os.Lstat(homeDir)
+	require.NoError(t, err)
+
+	queue, err := NewMessageQueue()
+	if queue != nil {
+		require.NoError(t, queue.Close())
+	}
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	after, statErr := os.Lstat(homeDir)
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0o777), after.Mode().Perm())
+	assert.Equal(t, queueStorageInode(t, before), queueStorageInode(t, after))
+	_, statErr = os.Lstat(filepath.Join(homeDir, ".config"))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestMessageQueueRetainsSafeSharedConfigMode(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	configDir := filepath.Join(homeDir, ".config")
+	require.NoError(t, os.Mkdir(configDir, 0o700))
+	require.NoError(t, os.Chmod(configDir, 0o755))
+
+	queue, err := NewMessageQueue()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, queue.Close()) }()
+	assert.Equal(t, os.FileMode(0o755), queueStorageMode(t, configDir).Perm())
+	assert.Equal(t, os.FileMode(0o700), queueStorageMode(t, filepath.Join(configDir, "agm")).Perm())
+}
+
+func TestMessageQueueRejectsUnsafeSidecarsBeforeRepair(t *testing.T) {
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		t.Run("symlink"+suffix, func(t *testing.T) {
+			homeDir := t.TempDir()
+			t.Setenv("HOME", homeDir)
+			rootDir, dbPath := seedPrivateQueueStorage(t)
+			require.NoError(t, os.Chmod(rootDir, 0o755))
+			require.NoError(t, os.Chmod(dbPath, 0o644))
+			dbBefore := queueStorageFingerprint(t, dbPath)
+
+			targetPath := filepath.Join(t.TempDir(), "sidecar-target")
+			require.NoError(t, os.WriteFile(targetPath, []byte("sidecar target canary"), 0o664))
+			before := queueStorageFingerprint(t, targetPath)
+			require.NoError(t, os.Symlink(targetPath, dbPath+suffix))
+
+			queue, err := NewMessageQueue()
+			if queue != nil {
+				require.NoError(t, queue.Close())
+			}
+			require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+			assert.NotContains(t, err.Error(), targetPath)
+			assert.Equal(t, before, queueStorageFingerprint(t, targetPath))
+			assert.Equal(t, dbBefore, queueStorageFingerprint(t, dbPath),
+				"a later unsafe leaf must prevent earlier main-file repair")
+			assert.Equal(t, os.FileMode(0o755), queueStorageMode(t, rootDir).Perm(),
+				"all leaf classification must precede AGM-directory repair")
+		})
+	}
+
+	for _, kind := range []string{"directory", "fifo"} {
+		t.Run(kind, func(t *testing.T) {
+			homeDir := t.TempDir()
+			t.Setenv("HOME", homeDir)
+			rootDir, dbPath := seedPrivateQueueStorage(t)
+			require.NoError(t, os.Chmod(rootDir, 0o755))
+			require.NoError(t, os.Chmod(dbPath, 0o644))
+			dbBefore := queueStorageFingerprint(t, dbPath)
+			unsafePath := dbPath + "-wal"
+			if kind == "directory" {
+				require.NoError(t, os.Mkdir(unsafePath, 0o755))
+			} else {
+				require.NoError(t, unix.Mkfifo(unsafePath, 0o644))
+			}
+			before, err := os.Lstat(unsafePath)
+			require.NoError(t, err)
+
+			queue, err := NewMessageQueue()
+			if queue != nil {
+				require.NoError(t, queue.Close())
+			}
+			require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+			after, statErr := os.Lstat(unsafePath)
+			require.NoError(t, statErr)
+			assert.Equal(t, before.Mode(), after.Mode())
+			assert.Equal(t, queueStorageInode(t, before), queueStorageInode(t, after))
+			assert.Equal(t, dbBefore, queueStorageFingerprint(t, dbPath))
+			assert.Equal(t, os.FileMode(0o755), queueStorageMode(t, rootDir).Perm())
+		})
+	}
+
+	t.Run("hard-linked sidecar", func(t *testing.T) {
+		homeDir := t.TempDir()
+		t.Setenv("HOME", homeDir)
+		rootDir, dbPath := seedPrivateQueueStorage(t)
+		require.NoError(t, os.Chmod(rootDir, 0o755))
+		require.NoError(t, os.Chmod(dbPath, 0o644))
+		dbBefore := queueStorageFingerprint(t, dbPath)
+
+		targetPath := filepath.Join(t.TempDir(), "hard-link-target")
+		require.NoError(t, os.WriteFile(targetPath, []byte("hard link target canary"), 0o664))
+		require.NoError(t, os.Link(targetPath, dbPath+"-shm"))
+		targetBefore := queueStorageFingerprint(t, targetPath)
+
+		queue, err := NewMessageQueue()
+		if queue != nil {
+			require.NoError(t, queue.Close())
+		}
+		require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+		assert.Equal(t, targetBefore, queueStorageFingerprint(t, targetPath))
+		assert.Equal(t, targetBefore, queueStorageFingerprint(t, dbPath+"-shm"))
+		assert.Equal(t, dbBefore, queueStorageFingerprint(t, dbPath))
+		assert.Equal(t, os.FileMode(0o755), queueStorageMode(t, rootDir).Perm())
+	})
+}
+
+func TestMessageQueueRejectsUnreadableMainWithoutPathChmodFallback(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can descriptor-open a mode-000 fixture")
+	}
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	_, dbPath := seedPrivateQueueStorage(t)
+	require.NoError(t, os.Chmod(dbPath, 0o000))
+	before, err := os.Lstat(dbPath)
+	require.NoError(t, err)
+
+	queue, err := NewMessageQueue()
+	if queue != nil {
+		require.NoError(t, queue.Close())
+	}
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	after, statErr := os.Lstat(dbPath)
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0), after.Mode().Perm())
+	assert.Equal(t, queueStorageInode(t, before), queueStorageInode(t, after))
+}
+
+func TestQueueStoragePostcheckVerifiesWithoutRepair(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, storage.prepareForSQLite())
+
+	sidecarPath := storage.databasePath() + "-wal"
+	require.NoError(t, os.WriteFile(sidecarPath, []byte("new permissive sidecar"), 0o644))
+	require.NoError(t, os.Chmod(sidecarPath, 0o644))
+	before := queueStorageFingerprint(t, sidecarPath)
+
+	err = storage.verifyAfterSQLite()
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.Equal(t, before, queueStorageFingerprint(t, sidecarPath),
+		"post-initialization attestation must not silently repair a new sidecar")
+}
+
+func TestQueueStoragePostcheckRejectsReboundMainIdentity(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, storage.prepareForSQLite())
+
+	dbPath := storage.databasePath()
+	admittedPath := dbPath + ".admitted"
+	require.NoError(t, os.Rename(dbPath, admittedPath))
+	require.NoError(t, os.WriteFile(dbPath, []byte("same-user replacement"), 0o600))
+	replacementBefore := queueStorageFingerprint(t, dbPath)
+
+	err = storage.verifyAfterSQLite()
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.Equal(t, replacementBefore, queueStorageFingerprint(t, dbPath))
+	_, statErr := os.Stat(admittedPath)
+	require.NoError(t, statErr, "postcheck must not remove the formerly admitted inode")
+}
+
+func TestQueueStorageRetriesWholeSnapshotWhenSidecarDisappears(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	dbPath := storage.databasePath()
+	require.NoError(t, os.WriteFile(dbPath, []byte("main"), 0o600))
+	require.NoError(t, os.WriteFile(dbPath+"-wal", []byte("transient WAL"), 0o600))
+	leaves, mainPresent, retry, err := storage.classifyQueueStorageLeaves()
+	require.NoError(t, err)
+	require.True(t, mainPresent)
+	require.False(t, retry)
+	require.Len(t, leaves, 2)
+	require.NoError(t, os.Remove(dbPath+"-wal"))
+
+	retry, err = storage.admitAndRepairQueueStorageLeaves(leaves)
+	require.NoError(t, err)
+	assert.True(t, retry, "a disappearing auxiliary must discard and retry the whole snapshot")
+	assert.Equal(t, os.FileMode(0o600), queueStorageMode(t, dbPath).Perm())
+}
+
+func TestQueueStorageRevalidatesEveryLeafAfterSealingRootBeforeRepair(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, os.Chmod(storage.rootPath, 0o755))
+
+	dbPath := storage.databasePath()
+	require.NoError(t, os.WriteFile(dbPath, []byte("pre-seal database bytes"), 0o666))
+	require.NoError(t, os.Chmod(dbPath, 0o666))
+	leaves, mainPresent, retry, err := storage.classifyQueueStorageLeaves()
+	require.NoError(t, err)
+	require.True(t, mainPresent)
+	require.False(t, retry)
+	require.Len(t, leaves, 1)
+
+	for i := range leaves {
+		leaves[i].fd, err = unix.Openat(
+			storage.rootFD,
+			leaves[i].spec.name,
+			unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC,
+			0,
+		)
+		require.NoError(t, err)
+	}
+	defer closeQueueStorageLeafDescriptors(leaves)
+
+	linkedPath := filepath.Join(t.TempDir(), "raced-hard-link")
+	require.NoError(t, os.Link(dbPath, linkedPath))
+	before := queueStorageFingerprint(t, linkedPath)
+	require.NoError(t, chmodAndVerifyQueueStorageDirectory(
+		storage.rootFD,
+		"AGM directory",
+		storage.uid,
+		storage.rootIdentity,
+	))
+
+	retry, err = storage.revalidateSealedQueueStorageLeaves(leaves)
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.False(t, retry)
+	assert.Equal(t, before, queueStorageFingerprint(t, dbPath),
+		"post-seal rejection must precede the first leaf chmod")
+	assert.Equal(t, before, queueStorageFingerprint(t, linkedPath),
+		"the raced hard-link target must remain byte- and mode-identical")
+	assert.Equal(t, os.FileMode(0o700), queueStorageMode(t, storage.rootPath).Perm())
+}
+
 func TestValidateQueueStorageOwnerUsesExpectedUID(t *testing.T) {
 	const expectedUID uint32 = 1000
 
@@ -302,6 +690,37 @@ func runQueueStorageUmaskHelper(t *testing.T) {
 	reportJSON, err := json.Marshal(report)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(reportPath, reportJSON, 0o600))
+}
+
+func runQueueStorageCrashHelper(t *testing.T) {
+	queue, err := NewMessageQueue()
+	require.NoError(t, err)
+	_, err = queue.db.ExecContext(context.Background(), `
+		PRAGMA wal_autocheckpoint = 0;
+		INSERT INTO message_queue
+			(message_id, from_session, to_session, message, priority, queued_at, status)
+		VALUES
+			('crash-left-canary', 'source', 'target', 'crash queue body',
+			 'HIGH', CURRENT_TIMESTAMP, 'queued');
+	`)
+	require.NoError(t, err)
+
+	homeDir, err := os.UserHomeDir()
+	require.NoError(t, err)
+	rootDir := filepath.Join(homeDir, ".config", "agm")
+	dbPath := filepath.Join(rootDir, queueDatabaseLeaf)
+	for _, path := range []string{rootDir, dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		_, statErr := os.Stat(path)
+		require.NoError(t, statErr, "expected live crash fixture %s", filepath.Base(path))
+	}
+	require.NoError(t, os.Chmod(rootDir, 0o755))
+	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		require.NoError(t, os.Chmod(path, 0o644))
+	}
+
+	// Deliberately bypass database Close and test cleanup so SQLite cannot
+	// unlink its live WAL/SHM. The parent process validates and recovers them.
+	os.Exit(0)
 }
 
 func seedPrivateQueueStorage(t *testing.T) (rootDir, dbPath string) {

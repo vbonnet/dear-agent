@@ -82,11 +82,19 @@ var historicalQueueIndexSQLSHA256 = map[string]string{
 }
 
 func openMessageQueueAtPath(dbPath string) (*MessageQueue, error) {
-	db, err := openMessageQueueDB(context.Background(), dbPath)
+	db, err := openMessageQueueDatabaseAtPath(context.Background(), dbPath)
 	if err != nil {
 		return nil, err
 	}
 	return &MessageQueue{db: db}, nil
+}
+
+func openMessageQueueDatabaseAtPath(ctx context.Context, dbPath string) (*sql.DB, error) {
+	storage, err := prepareMessageQueueStorageAtPath(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return openMessageQueueDB(ctx, storage)
 }
 
 func TestHistoricalQueueFingerprintsMatchDriverEraGoldens(t *testing.T) {
@@ -389,7 +397,7 @@ func TestMessageQueueConcurrentConstructorsSerializeMigration(t *testing.T) {
 	for range constructorCount {
 		go func() {
 			<-start
-			db, err := openMessageQueueDB(ctx, dbPath)
+			db, err := openMessageQueueDatabaseAtPath(ctx, dbPath)
 			if err == nil {
 				err = db.Close()
 			}
@@ -419,7 +427,7 @@ func TestMessageQueueConcurrentConstructorsSerializeMigration(t *testing.T) {
 
 func TestMessageQueueImmediateTransactionBusyTimeoutIsBoundedAndRetryable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "message_queue.db")
-	db, err := openMessageQueueDB(context.Background(), dbPath)
+	db, err := openMessageQueueDatabaseAtPath(context.Background(), dbPath)
 	require.NoError(t, err)
 
 	// _txlock=immediate must acquire write intent at BeginTx, before any write.
@@ -430,7 +438,7 @@ func TestMessageQueueImmediateTransactionBusyTimeoutIsBoundedAndRetryable(t *tes
 	blockedContext, cancel := context.WithTimeout(context.Background(), portableBusyWatchdog+queueBusyTimeout)
 	defer cancel()
 	started := time.Now()
-	blockedDB, blockedErr := openMessageQueueDB(blockedContext, dbPath)
+	blockedDB, blockedErr := openMessageQueueDatabaseAtPath(blockedContext, dbPath)
 	if blockedDB != nil {
 		require.NoError(t, blockedDB.Close())
 	}
@@ -445,7 +453,7 @@ func TestMessageQueueImmediateTransactionBusyTimeoutIsBoundedAndRetryable(t *tes
 	require.NoError(t, blockingTx.Rollback())
 	require.NoError(t, db.Close())
 
-	retried, err := openMessageQueueDB(context.Background(), dbPath)
+	retried, err := openMessageQueueDatabaseAtPath(context.Background(), dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, retried.Close()) })
 

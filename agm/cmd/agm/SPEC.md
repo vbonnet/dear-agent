@@ -151,6 +151,8 @@ Provide a production-ready CLI that:
 
 **CLI-61** When any command path reactivates a session, including `agm session unarchive` and `agm admin reconcile --fix`, the command shall acquire the same stable session-ID lifecycle lock held by archive and reload the current lifecycle under that lock. Unarchive shall keep the lock through durable reactivation and legacy manifest relocation. Reconcile shall also revalidate the corresponding tmux fact under the lock and skip a mismatch that changed while it waited. No reactivation path may make a session active while archive still owns destructive cleanup.
 
+**CLI-66** When message-queue construction returns an unsafe-storage error, the AGM CLI shall propagate that bounded error without enqueuing a message, creating a delivery-pending artifact, invoking direct delivery, or using another availability fallback; ordinary queue availability failures may retain their existing safe fallback behavior.
+
 ## Requirements
 
 ### Functional Requirements
@@ -1144,6 +1146,7 @@ agm 3.0.0 (/usr/local/bin/agm)
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Test consequence: CLI-57 through CLI-60 are verified by deterministic unit tests rather than new scenarios — `runtime_authority_test.go` covers fail-closed centralized bootstrap and the isolated-HOME authority recapture through `preflight`, and `new_sandbox_test.go` covers authority-derived provisioning plus the missing-snapshot and no-authority refusals.
+- Test consequence: Deterministic package test `TestHandleQueueConstructionError` in `agm/cmd/agm/send_msg_test.go` proves CLI-66 by preserving the typed unsafe-storage error without invoking direct-delivery fallback while retaining the ordinary availability fallback; this narrow CLI error-routing branch needs no additional Gherkin scenario.
 
 ## Package Test Traceability
 
