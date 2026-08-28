@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 )
@@ -25,7 +26,13 @@ func directQueueConstructionFallback(
 	formattedMessage string,
 ) func() error {
 	return func() error {
-		fallbackAdapter, _ := getStorage()
+		fallbackAdapter, err := getStorage()
+		if err != nil {
+			return fmt.Errorf("initialize direct-delivery fallback storage: %w", err)
+		}
+		if fallbackAdapter != nil {
+			defer func() { _ = fallbackAdapter.Close() }()
+		}
 		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
 	}
 }

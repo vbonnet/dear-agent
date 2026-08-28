@@ -27,7 +27,7 @@ func prepareMessageQueueStorage(homeDir string) (*messageQueueStorage, error) {
 	storage.rootPath = filepath.Join(homeDir, ".config", "agm")
 	storage.dbPath = filepath.Join(storage.rootPath, queueDatabaseLeaf)
 	storage.dbLeaf = queueDatabaseLeaf
-	storage.uid = uint32(os.Geteuid())
+	storage.uid = queueStorageEffectiveUID()
 	storage.productionChain = true
 
 	var err error
@@ -85,7 +85,7 @@ func prepareMessageQueueStorageAtPath(dbPath string) (*messageQueueStorage, erro
 	storage.rootPath = filepath.Dir(dbPath)
 	storage.dbPath = dbPath
 	storage.dbLeaf = dbLeaf
-	storage.uid = uint32(os.Geteuid())
+	storage.uid = queueStorageEffectiveUID()
 
 	var err error
 	storage.rootFD, storage.rootIdentity, err = openQueueStorageDirectory(
@@ -109,6 +109,12 @@ func newMessageQueueStorage() *messageQueueStorage {
 		configFD: queueStorageInvalidFD,
 		rootFD:   queueStorageInvalidFD,
 	}
+}
+
+func queueStorageEffectiveUID() uint32 {
+	// os.Geteuid reports the platform uid_t through int; Darwin and Linux use
+	// non-negative 32-bit user IDs.
+	return uint32(os.Geteuid()) //nolint:gosec // guarded by the Unix uid_t contract above
 }
 
 func openQueueStorageDirectory(
@@ -351,6 +357,38 @@ func (s *messageQueueStorage) admitAndRepairQueueStorageLeaves(
 ) (bool, error) {
 	defer closeQueueStorageLeafDescriptors(leaves)
 
+	retry, err := s.openAndValidateQueueStorageLeaves(leaves)
+	if err != nil || retry {
+		return retry, err
+	}
+	if err := s.revalidateDirectoryChain(false); err != nil {
+		return false, err
+	}
+	if err := chmodAndVerifyQueueStorageDirectory(
+		s.rootFD,
+		"AGM directory",
+		s.uid,
+		s.rootIdentity,
+	); err != nil {
+		return false, err
+	}
+	if err := s.revalidateDirectoryChain(true); err != nil {
+		return false, err
+	}
+	// Sealing the root closes the path-only race for another UID, but an
+	// attacker may have added a hard link after the earlier complete admission
+	// pass and immediately before the chmod. Revalidate the entire held set
+	// again after the seal and before mutating even the first leaf.
+	retry, err = s.revalidateSealedQueueStorageLeaves(leaves)
+	if err != nil || retry {
+		return retry, err
+	}
+	return s.repairQueueStorageLeaves(leaves)
+}
+
+func (s *messageQueueStorage) openAndValidateQueueStorageLeaves(
+	leaves []queueStorageLeafSnapshot,
+) (bool, error) {
 	for i := range leaves {
 		leaf := &leaves[i]
 		fd, err := unix.Openat(
@@ -396,33 +434,12 @@ func (s *messageQueueStorage) admitAndRepairQueueStorageLeaves(
 			return false, unsafeQueueStorageError(leaf.spec.artifact, "changed identity during admission")
 		}
 	}
+	return false, nil
+}
 
-	if err := s.revalidateDirectoryChain(false); err != nil {
-		return false, err
-	}
-	if err := chmodAndVerifyQueueStorageDirectory(
-		s.rootFD,
-		"AGM directory",
-		s.uid,
-		s.rootIdentity,
-	); err != nil {
-		return false, err
-	}
-	if err := s.revalidateDirectoryChain(true); err != nil {
-		return false, err
-	}
-	// Sealing the root closes the path-only race for another UID, but an
-	// attacker may have added a hard link after the earlier complete admission
-	// pass and immediately before the chmod. Revalidate the entire held set
-	// again after the seal and before mutating even the first leaf.
-	retry, err := s.revalidateSealedQueueStorageLeaves(leaves)
-	if err != nil {
-		return false, err
-	}
-	if retry {
-		return true, nil
-	}
-
+func (s *messageQueueStorage) repairQueueStorageLeaves(
+	leaves []queueStorageLeafSnapshot,
+) (bool, error) {
 	for i := range leaves {
 		leaf := &leaves[i]
 		if err := unix.Fchmod(leaf.fd, 0o600); err != nil {
@@ -511,18 +528,13 @@ func (s *messageQueueStorage) createPrivateQueueDatabase() (bool, error) {
 	}
 
 	// Repeat the absence check after closing traversal to other UIDs. A
-	// concurrent creator is never trusted from an EEXIST result alone.
-	for _, baseSpec := range queueStorageLeafSpecs {
-		spec := baseSpec
-		spec.name = s.leafName(spec)
-		var stat unix.Stat_t
-		err := unix.Fstatat(s.rootFD, spec.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
-		if err == nil {
-			return true, nil
-		}
-		if !errors.Is(err, unix.ENOENT) {
-			return false, unsafeQueueStorageError(spec.artifact, "metadata could not be read")
-		}
+	// concurrent creator is never trusted from an existing entry alone.
+	allAbsent, err := s.queueStorageLeavesStillAbsent()
+	if err != nil {
+		return false, err
+	}
+	if !allAbsent {
+		return true, nil
 	}
 
 	fd, err := unix.Openat(
@@ -537,27 +549,11 @@ func (s *messageQueueStorage) createPrivateQueueDatabase() (bool, error) {
 	if err != nil {
 		return false, unsafeQueueStorageError("main database", "could not be created privately")
 	}
-	defer unix.Close(fd) //nolint:errcheck // the descriptor is not reused after this boundary
+	defer func() { _ = unix.Close(fd) }()
 
-	var descriptorStat unix.Stat_t
-	if err := unix.Fstat(fd, &descriptorStat); err != nil {
-		return false, unsafeQueueStorageError("main database", "descriptor metadata could not be read")
-	}
-	if err := validateQueueStorageLeafStat("main database", &descriptorStat, s.uid, false); err != nil {
+	identity, err := validateAndPrivatizeCreatedQueueDatabase(fd, s.uid)
+	if err != nil {
 		return false, err
-	}
-	identity := queueStorageIdentityFromStat(&descriptorStat)
-	if err := unix.Fchmod(fd, 0o600); err != nil {
-		return false, unsafeQueueStorageError("main database", "could not be made private")
-	}
-	if err := unix.Fstat(fd, &descriptorStat); err != nil {
-		return false, unsafeQueueStorageError("main database", "private mode could not be verified")
-	}
-	if err := validateQueueStorageLeafStat("main database", &descriptorStat, s.uid, true); err != nil {
-		return false, err
-	}
-	if queueStorageIdentityFromStat(&descriptorStat) != identity {
-		return false, unsafeQueueStorageError("main database", "changed identity during creation")
 	}
 
 	spec := queueStorageLeafSpec{name: s.dbLeaf, artifact: "main database", main: true}
@@ -573,6 +569,46 @@ func (s *messageQueueStorage) createPrivateQueueDatabase() (bool, error) {
 	}
 	s.mainIdentity = identity
 	return false, nil
+}
+
+func validateAndPrivatizeCreatedQueueDatabase(fd int, expectedUID uint32) (queueStorageIdentity, error) {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "descriptor metadata could not be read")
+	}
+	if err := validateQueueStorageLeafStat("main database", &stat, expectedUID, false); err != nil {
+		return queueStorageIdentity{}, err
+	}
+	identity := queueStorageIdentityFromStat(&stat)
+	if err := unix.Fchmod(fd, 0o600); err != nil {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "could not be made private")
+	}
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "private mode could not be verified")
+	}
+	if err := validateQueueStorageLeafStat("main database", &stat, expectedUID, true); err != nil {
+		return queueStorageIdentity{}, err
+	}
+	if queueStorageIdentityFromStat(&stat) != identity {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "changed identity during creation")
+	}
+	return identity, nil
+}
+
+func (s *messageQueueStorage) queueStorageLeavesStillAbsent() (bool, error) {
+	for _, baseSpec := range queueStorageLeafSpecs {
+		spec := baseSpec
+		spec.name = s.leafName(spec)
+		var stat unix.Stat_t
+		err := unix.Fstatat(s.rootFD, spec.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		if err == nil {
+			return false, nil
+		}
+		if !errors.Is(err, unix.ENOENT) {
+			return false, unsafeQueueStorageError(spec.artifact, "metadata could not be read")
+		}
+	}
+	return true, nil
 }
 
 func (s *messageQueueStorage) visibleQueueStorageLeafStat(
@@ -793,7 +829,7 @@ func chmodAndVerifyQueueStorageDirectory(
 
 func queueStorageIdentityFromStat(stat *unix.Stat_t) queueStorageIdentity {
 	return queueStorageIdentity{
-		device: uint64(stat.Dev),
+		device: uint64(stat.Dev), //nolint:gosec,nolintlint // Darwin dev_t is signed; equality uses its stable bit pattern
 		inode:  uint64(stat.Ino),
 	}
 }

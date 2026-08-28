@@ -190,7 +190,7 @@ func TestHandleQueueConstructionError(t *testing.T) {
 			return nil
 		})
 
-		if err != constructionErr {
+		if !errors.Is(err, constructionErr) {
 			t.Fatalf("handleQueueConstructionError() error = %v, want original construction error %v", err, constructionErr)
 		}
 		if !errors.Is(err, messages.ErrUnsafeQueueStorage) {
@@ -211,7 +211,7 @@ func TestHandleQueueConstructionError(t *testing.T) {
 			return fallbackErr
 		})
 
-		if err != fallbackErr {
+		if !errors.Is(err, fallbackErr) {
 			t.Fatalf("handleQueueConstructionError() error = %v, want fallback result %v", err, fallbackErr)
 		}
 		if fallbackCalls != 1 {
