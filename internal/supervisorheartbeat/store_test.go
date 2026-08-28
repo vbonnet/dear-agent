@@ -77,6 +77,62 @@ func TestStoreWriteReadRoundTrip(t *testing.T) {
 	assertRecordEqual(t, got, want)
 }
 
+func TestStoreReadsExistingAGMRecordFixture(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	id := "vroom-orchestrator"
+	dir := filepath.Join(root, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture := []byte(`{
+  "id": "vroom-orchestrator",
+  "primary_for": "vroom-overseer",
+  "tertiary_for": "vroom-meta-orchestrator",
+  "last_beat_utc": "2026-08-28T19:15:16.123Z",
+  "pid": 31415,
+  "tmux_session": "vroom-orchestrator"
+}`)
+	if err := os.WriteFile(filepath.Join(dir, heartbeatFilename), fixture, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := New(root).Read(id)
+	if err != nil {
+		t.Fatalf("Read() existing AGM fixture error = %v", err)
+	}
+	assertRecordEqual(t, got, Record{
+		ID:          id,
+		PrimaryFor:  "vroom-overseer",
+		TertiaryFor: "vroom-meta-orchestrator",
+		LastBeatUTC: time.Date(2026, time.August, 28, 19, 15, 16, 123_000_000, time.UTC),
+		PID:         31415,
+		TmuxSession: id,
+	})
+}
+
+func TestStoreReadRejectsMismatchedRecordID(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, "orchestrator", heartbeatFilename)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"id":"overseer","last_beat_utc":"2026-08-28T19:15:16Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := New(root).Read("orchestrator")
+	if err == nil || !strings.Contains(err.Error(), `heartbeat "orchestrator" contains record ID "overseer"`) {
+		t.Fatalf("Read() = %+v, %v; want mismatched-ID error", got, err)
+	}
+	if got != nil {
+		t.Fatalf("Read() mismatched record = %+v, want nil", got)
+	}
+}
+
 func TestStoreReadMissingDoesNotCreateDirectories(t *testing.T) {
 	t.Parallel()
 
@@ -90,6 +146,32 @@ func TestStoreReadMissingDoesNotCreateDirectories(t *testing.T) {
 	}
 	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Read() created or changed missing root: %v", err)
+	}
+}
+
+func TestStoreRejectsInvalidSupervisorIDs(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []string{"", ".", "..", "../escape", "nested/name", `nested\name`, "/absolute"} {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			store := New(root)
+			if got, err := store.Read(id); err == nil {
+				t.Errorf("Read(%q) = %+v, nil; want invalid-ID error", id, got)
+			}
+			if err := store.Write(Record{ID: id, LastBeatUTC: time.Unix(1, 0).UTC()}); err == nil {
+				t.Errorf("Write(ID=%q) error = nil, want invalid-ID error", id)
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("invalid ID %q created state beneath root: %v", id, entries)
+			}
+		})
 	}
 }
 

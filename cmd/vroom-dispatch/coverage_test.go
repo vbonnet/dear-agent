@@ -9,11 +9,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/supervisorheartbeat"
+	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 	"golang.org/x/sys/unix"
 )
 
@@ -181,7 +183,11 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, heartbeatFileName(sup.Name)+".json"), data, 0o600); err != nil {
+		member, ok := vroomsupervisor.Lookup(sup.Name)
+		if !ok {
+			t.Fatalf("legacy mirror fixture has no topology member for %q", sup.Name)
+		}
+		if err := os.WriteFile(filepath.Join(dir, member.Alias+".json"), data, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -189,14 +195,22 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 	freshHome := t.TempDir()
 	writeRecord(freshHome, sup.Name, time.Now().UTC())
 	captureSupervisorPane = func(string) (string, error) { return "codex login required", nil }
-	if got := classifySupervisor(freshHome, sup); got != healthAuthFailed {
+	classify := func(home string, candidate supervisor) supervisorHealth {
+		t.Helper()
+		health, err := classifySupervisor(home, candidate)
+		if err != nil {
+			t.Fatalf("classifySupervisor(%q): %v", candidate.Name, err)
+		}
+		return health
+	}
+	if got := classify(freshHome, sup); got != healthAuthFailed {
 		t.Errorf("fresh heartbeat with auth failure classification = %v", got)
 	}
 	captureSupervisorPane = func(string) (string, error) { return "gpt-5 · /tmp\n›", nil }
 
 	missingHome := t.TempDir()
 	writeMirror(missingHome, time.Now().UTC())
-	if got := classifySupervisor(missingHome, sup); got != healthStale {
+	if got := classify(missingHome, sup); got != healthStale {
 		t.Errorf("fresh mirror with missing authoritative heartbeat classification = %v", got)
 	}
 	zeroHome := t.TempDir()
@@ -205,7 +219,7 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeMirror(zeroHome, time.Now().UTC())
-	if got := classifySupervisor(zeroHome, sup); got != healthStale {
+	if got := classify(zeroHome, sup); got != healthStale {
 		t.Errorf("fresh mirror with zero authoritative heartbeat classification = %v", got)
 	}
 	malformedHome := t.TempDir()
@@ -217,25 +231,63 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeMirror(malformedHome, time.Now().UTC())
-	if got := classifySupervisor(malformedHome, sup); got != healthStale {
-		t.Errorf("fresh mirror with malformed authoritative heartbeat classification = %v", got)
+	malformedHealth, malformedErr := classifySupervisor(malformedHome, sup)
+	if malformedHealth != healthStale {
+		t.Errorf("fresh mirror with malformed authoritative heartbeat classification = %v", malformedHealth)
+	}
+	if malformedErr == nil ||
+		!strings.Contains(malformedErr.Error(), `read authoritative heartbeat "vroom-orchestrator"`) ||
+		!strings.Contains(malformedErr.Error(), "unmarshal") {
+		t.Errorf("malformed authoritative heartbeat diagnostic = %v", malformedErr)
 	}
 	agedHome := t.TempDir()
 	writeRecord(agedHome, sup.Name, time.Now().UTC().Add(-3*time.Hour))
 	writeMirror(agedHome, time.Now().UTC())
-	if got := classifySupervisor(agedHome, sup); got != healthStale {
+	if got := classify(agedHome, sup); got != healthStale {
 		t.Errorf("fresh mirror with aged authoritative heartbeat classification = %v", got)
 	}
 
 	home := t.TempDir()
 	writeRecord(home, sup.Name, time.Now().UTC())
 	writeMirror(home, time.Now().UTC().Add(-24*time.Hour))
-	if got := classifySupervisor(home, sup); got != healthAlive {
+	if got := classify(home, sup); got != healthAlive {
 		t.Errorf("fresh authoritative heartbeat with stale mirror classification = %v", got)
 	}
 	writeRecord(home, "missing", time.Now().UTC())
-	if got := classifySupervisor(home, supervisor{Name: "missing", TickInterval: time.Hour}); got != healthDead {
+	if got := classify(home, supervisor{Name: "missing", TickInterval: time.Hour}); got != healthDead {
 		t.Errorf("fresh heartbeat with absent session classification = %v", got)
+	}
+}
+
+func TestSupervisorDiagnosticTrackerDebouncesUntilRecovery(t *testing.T) {
+	tracker := newSupervisorDiagnosticTracker()
+	readErr := errors.New("malformed heartbeat")
+	if !tracker.shouldReportHeartbeatReadError("orchestrator", readErr) {
+		t.Fatal("first heartbeat read error was suppressed")
+	}
+	if tracker.shouldReportHeartbeatReadError("orchestrator", readErr) {
+		t.Fatal("identical heartbeat read error was reported twice")
+	}
+	if !tracker.shouldReportHeartbeatReadError("orchestrator", errors.New("permission denied")) {
+		t.Fatal("changed heartbeat read error was suppressed")
+	}
+	if tracker.shouldReportHeartbeatReadError("orchestrator", nil) {
+		t.Fatal("recovery should clear state without reporting an error")
+	}
+	if !tracker.shouldReportHeartbeatReadError("orchestrator", readErr) {
+		t.Fatal("heartbeat read error after recovery was suppressed")
+	}
+}
+
+func TestStaleSupervisorTrailDetailsIdentifyAuthoritativeRecord(t *testing.T) {
+	details := staleSupervisorTrailDetails("vroom-orchestrator")
+	want := map[string]any{
+		"supervisor":       "vroom-orchestrator",
+		"heartbeat_id":     "vroom-orchestrator",
+		"heartbeat_source": "authoritative_agm_supervisor_record",
+	}
+	if !reflect.DeepEqual(details, want) {
+		t.Fatalf("staleSupervisorTrailDetails() = %#v, want %#v", details, want)
 	}
 }
 

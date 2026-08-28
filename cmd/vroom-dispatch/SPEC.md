@@ -1,6 +1,6 @@
 # vroom-dispatch Specification
 
-<!-- Last audited at: 2026-07-17 -->
+<!-- Last audited at: 2026-08-28 -->
 
 ## Purpose
 
@@ -39,7 +39,7 @@ harness when a supervisor is stale.
 
 **VD-13** When `vroom-dispatch` materializes supervisor launch policy, the system shall derive session identity, role, and Primary/Tertiary peers from `pkg/vroom/supervisor` while keeping harness, model, skill, tick interval, and tick prompt policy local to the dispatcher.
 
-**VD-14** When `vroom-dispatch` resolves a supervisor heartbeat filename, the system shall use the compact alias from the canonical supervisor topology.
+**VD-14** When `vroom-dispatch` records a stale supervisor observation, the system shall name the canonical supervisor identity and identify the authoritative AGM supervisor record as the heartbeat source.
 
 **VD-15** When supervisor instructions encounter a permission prompt, the system shall delegate approval only to the typed cross-check classifier and shall not provide a manual approval fallback.
 
@@ -51,8 +51,9 @@ harness when a supervisor is stale.
 
 **VD-19** When the VROOM-SUP-32 authoritative heartbeat observation is missing, unreadable, or has no timestamp for a registered supervisor session, the system shall classify the supervisor as stale rather than dead or alive.
 
-## BDD Traceability
+## BDD traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Feature: `agm/test/bdd/features/stall_detection.feature`
+- No BDD change, with reason: the stale-observation payload is a deterministic Dispatch adapter projection pinned by `TestStaleSupervisorTrailDetailsIdentifyAuthoritativeRecord`; no process orchestration or user-visible scenario changes.
 - Package tests: `cmd/vroom-dispatch/main_test.go`, `cmd/vroom-dispatch/coverage_test.go`

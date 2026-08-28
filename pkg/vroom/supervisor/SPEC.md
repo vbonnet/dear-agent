@@ -106,6 +106,14 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-33** When the authoritative AGM supervisor record is missing, unreadable, or has no heartbeat timestamp, the system shall not infer heartbeat freshness from a legacy mirror.
 
+**VROOM-SUP-34** When supervisor heartbeat persistence receives an empty identifier or an identifier that is not one path component, the system shall reject the operation before accessing a heartbeat record.
+
+**VROOM-SUP-35** When an authoritative supervisor heartbeat record's embedded identity differs from the identity used to address it, the system shall reject the record as invalid rather than infer heartbeat freshness from it.
+
+## BDD traceability
+
+- No BDD change, with reason: an independent existing-AGM JSON fixture plus deterministic Store, AGM command, and Dispatch adapter tests exercise the established file protocol, invalid-identifier rejection, bounded read diagnostics, and classification precedence without process orchestration.
+
 ## Test Traceability
 
 - Package tests: `pkg/vroom/supervisor/disk_alert_test.go`

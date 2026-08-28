@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,9 @@ func New(root string) Store {
 
 // Read returns the latest heartbeat for id. A missing record is not an error.
 func (s Store) Read(id string) (*Record, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(s.root, id, heartbeatFilename)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -46,11 +50,17 @@ func (s Store) Read(id string) (*Record, error) {
 	if err := json.Unmarshal(data, &rec); err != nil {
 		return nil, fmt.Errorf("unmarshal supervisor heartbeat %q: %w", id, err)
 	}
+	if rec.ID != id {
+		return nil, fmt.Errorf("supervisor heartbeat %q contains record ID %q", id, rec.ID)
+	}
 	return &rec, nil
 }
 
 // Write atomically replaces rec's authoritative heartbeat file.
 func (s Store) Write(rec Record) error {
+	if err := ValidateID(rec.ID); err != nil {
+		return err
+	}
 	dir := filepath.Join(s.root, rec.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create supervisor heartbeat directory %q: %w", rec.ID, err)
@@ -72,11 +82,24 @@ func (s Store) Write(rec Record) error {
 		_ = tmp.Close()
 		return fmt.Errorf("write supervisor heartbeat temporary file %q: %w", rec.ID, err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync supervisor heartbeat temporary file %q: %w", rec.ID, err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close supervisor heartbeat temporary file %q: %w", rec.ID, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("replace supervisor heartbeat %q: %w", rec.ID, err)
+	}
+	return nil
+}
+
+// ValidateID returns an error unless id is one nonempty path component.
+func ValidateID(id string) error {
+	if id == "" || id == "." || id == ".." || filepath.IsAbs(id) ||
+		filepath.Base(id) != id || strings.ContainsAny(id, `/\`) || strings.ContainsRune(id, 0) {
+		return fmt.Errorf("invalid supervisor ID %q", id)
 	}
 	return nil
 }

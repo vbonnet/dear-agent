@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,5 +118,41 @@ func TestRunSupervisorHeartbeatWritesCanonicalStoreAndPreservesMirrorProjection(
 	}
 	if mirror.Role != string(vroomsupervisor.RoleOrchestrator) || mirror.ISO != rec.LastBeatUTC.Format(time.RFC3339) {
 		t.Fatalf("legacy mirror projection = %+v, authoritative heartbeat = %+v", mirror, rec)
+	}
+}
+
+func TestRunSupervisorHeartbeatRejectsUnsafeIDBeforeFilesystemAccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalID := supervisorID
+	originalPrimary := supervisorPrimaryFor
+	originalTertiary := supervisorTertiaryFor
+	t.Cleanup(func() {
+		supervisorID = originalID
+		supervisorPrimaryFor = originalPrimary
+		supervisorTertiaryFor = originalTertiary
+	})
+	supervisorID = "../escape"
+	supervisorPrimaryFor = ""
+	supervisorTertiaryFor = ""
+
+	err := runSupervisorHeartbeat(&cobra.Command{}, nil)
+	if err == nil || !strings.Contains(err.Error(), `invalid supervisor ID "../escape"`) {
+		t.Fatalf("runSupervisorHeartbeat() error = %v, want unsafe-ID rejection", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".agm")); !os.IsNotExist(statErr) {
+		t.Fatalf("unsafe heartbeat ID touched AGM state: %v", statErr)
+	}
+}
+
+func TestRunSupervisorRunRejectsUnsafeIDBeforePreflight(t *testing.T) {
+	originalID := supervisorID
+	t.Cleanup(func() { supervisorID = originalID })
+	supervisorID = "../escape"
+
+	err := runSupervisorRun(&cobra.Command{}, nil)
+	if err == nil || !strings.Contains(err.Error(), `invalid supervisor ID "../escape"`) {
+		t.Fatalf("runSupervisorRun() error = %v, want unsafe-ID rejection", err)
 	}
 }

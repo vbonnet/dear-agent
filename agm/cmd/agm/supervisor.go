@@ -387,6 +387,9 @@ func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath strin
 }
 
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
+	if err := supervisorheartbeat.ValidateID(supervisorID); err != nil {
+		return fmt.Errorf("supervisor run: %w", err)
+	}
 	var admission *circuitBreakerAdmission
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error

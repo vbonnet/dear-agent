@@ -735,28 +735,6 @@ func TestSessionArchiveArgsAuthorizeSupervisorReapWithoutForce(t *testing.T) {
 	}
 }
 
-func TestHeartbeatFileName(t *testing.T) {
-	cases := []struct {
-		name string
-		want string
-	}{
-		{"vroom-meta-orchestrator", "meta-o"},
-		{"meta-orchestrator", "meta-o"},
-		{"meta-o", "meta-o"},
-		{"vroom-orchestrator", "orch"},
-		{"orchestrator", "orch"},
-		{"orch", "orch"},
-		{"vroom-overseer", "overseer"},
-		{"unknown", "unknown"},
-	}
-	for _, tc := range cases {
-		got := heartbeatFileName(tc.name)
-		if got != tc.want {
-			t.Errorf("heartbeatFileName(%q) = %q, want %q", tc.name, got, tc.want)
-		}
-	}
-}
-
 func TestSupervisorSkillsUseAGMHeartbeatMirror(t *testing.T) {
 	for _, sup := range supervisors {
 		doc, err := skills.ReadFile("skills/" + sup.SkillFile)
