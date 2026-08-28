@@ -40,6 +40,8 @@ execution, resume, review, and cost controls.
 
 **WFLOW-12** When an existing SQLite run resumes, the system shall atomically reopen the run and record an explicit prior-state-to-running transition before notifying observational sinks or hooks.
 
+**WFLOW-13** When a caller lists workflow runs with a non-empty state filter, the system shall accept only `pending`, `running`, `awaiting_hitl`, `succeeded`, `failed`, or `cancelled` and reject every other value before querying storage.
+
 ## Permission contract
 
 `DefaultPermissionEnforcer` is permissive when a policy section is absent. When

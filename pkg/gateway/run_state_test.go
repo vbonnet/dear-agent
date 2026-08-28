@@ -10,6 +10,10 @@ import (
 func TestListHandlerRejectsInvalidRunState(t *testing.T) {
 	state := withDB(t)
 	gw := gateway.New(gateway.WorkflowHandlers(state.DB(), nil))
+	if err := state.Close(); err != nil {
+		t.Fatalf("close test database: %v", err)
+	}
+
 	resp := gw.Dispatch(context.Background(), gateway.Command{
 		Type: gateway.CmdList,
 		Args: map[string]any{"state": "typo"},

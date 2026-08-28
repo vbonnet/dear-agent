@@ -42,6 +42,8 @@ workflow internals.
 
 **API-SERVER-15** When `ExecRunner` spawns `workflow-run`, the system shall set `DEAR_AGENT_API_TRIGGERED_BY` to the caller login name.
 
+**API-SERVER-16** When `GET /workflows` receives an unknown non-empty run-state filter, the system shall return HTTP 400 without querying workflow storage.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/api_gateway_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.

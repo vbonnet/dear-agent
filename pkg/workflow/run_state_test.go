@@ -61,7 +61,12 @@ func TestParseRunStateFilter(t *testing.T) {
 
 func TestListRejectsInvalidRunState(t *testing.T) {
 	state := openTestState(t)
-	runs, err := List(context.Background(), state.DB(), ListOptions{State: RunState("typo")})
+	db := state.DB()
+	if err := state.Close(); err != nil {
+		t.Fatalf("close test database: %v", err)
+	}
+
+	runs, err := List(context.Background(), db, ListOptions{State: RunState("typo")})
 	if !errors.Is(err, ErrInvalidRunState) {
 		t.Fatalf("List(invalid state) error = %v, want ErrInvalidRunState", err)
 	}
