@@ -4,8 +4,10 @@ package messages
 
 import (
 	"crypto/sha256"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -273,6 +275,141 @@ func TestQueueStorageExistingLeafSetRevalidatesAfterRootSeal(t *testing.T) {
 	require.False(t, retry)
 	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, dbPath))
 	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, linkedPath))
+}
+
+func TestQueueStorageFreshCreationAndPostcheckArePrivate(t *testing.T) {
+	rootDir := t.TempDir()
+	storage, err := prepareMessageQueueStorageAtPath(filepath.Join(rootDir, "custom-queue.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, os.Chmod(storage.rootPath, 0o755))
+
+	require.NoError(t, storage.prepareForSQLite())
+	assert.Equal(t, os.FileMode(0o700), queueStorageDirectoryMode(t, storage.rootPath).Perm())
+	assert.Equal(t, os.FileMode(0o600), queueStorageDirectoryMode(t, storage.databasePath()).Perm())
+	require.NoError(t, storage.verifyAfterSQLite())
+
+	secondPrepareErr := storage.prepareForSQLite()
+	require.ErrorIs(t, secondPrepareErr, ErrUnsafeQueueStorage)
+}
+
+func TestQueueStoragePreparationRepairsCrashStyleLeafSetWithoutReplacement(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	dbPath := storage.databasePath()
+	paths := []string{dbPath, dbPath + "-wal", dbPath + "-shm"}
+	for index, path := range paths {
+		require.NoError(t, os.WriteFile(path, []byte{byte(index + 1), byte(index + 11)}, 0o644))
+		require.NoError(t, os.Chmod(path, 0o644))
+	}
+	require.NoError(t, os.Chmod(storage.rootPath, 0o755))
+	before := make(map[string]queueStorageDirectoryFingerprint, len(paths))
+	for _, path := range paths {
+		before[path] = queueStorageDirectoryFingerprintAt(t, path)
+	}
+
+	require.NoError(t, storage.prepareForSQLite())
+	for _, path := range paths {
+		after := queueStorageDirectoryFingerprintAt(t, path)
+		assert.Equal(t, before[path].Inode, after.Inode)
+		assert.Equal(t, before[path].SHA256, after.SHA256)
+		assert.Equal(t, os.FileMode(0o600), after.Mode.Perm())
+	}
+	require.NoError(t, storage.verifyAfterSQLite())
+}
+
+func TestQueueStoragePreparationRejectsOrphanSidecarWithoutMutation(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, os.Chmod(storage.rootPath, 0o755))
+
+	walPath := storage.databasePath() + "-wal"
+	require.NoError(t, os.WriteFile(walPath, []byte("orphan WAL"), 0o644))
+	require.NoError(t, os.Chmod(walPath, 0o644))
+	before := queueStorageDirectoryFingerprintAt(t, walPath)
+
+	err = storage.prepareForSQLite()
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, walPath))
+	assert.Equal(t, os.FileMode(0o755), queueStorageDirectoryMode(t, storage.rootPath).Perm())
+	_, statErr := os.Lstat(storage.databasePath())
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestQueueStoragePostcheckRejectsPermissiveSidecarWithoutRepair(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, storage.prepareForSQLite())
+
+	sidecarPath := storage.databasePath() + "-wal"
+	require.NoError(t, os.WriteFile(sidecarPath, []byte("permissive sidecar"), 0o644))
+	require.NoError(t, os.Chmod(sidecarPath, 0o644))
+	before := queueStorageDirectoryFingerprintAt(t, sidecarPath)
+
+	err = storage.verifyAfterSQLite()
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, sidecarPath))
+}
+
+func TestQueueStoragePostcheckRejectsReboundMain(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, storage.prepareForSQLite())
+
+	dbPath := storage.databasePath()
+	displacedPath := dbPath + ".displaced"
+	require.NoError(t, os.Rename(dbPath, displacedPath))
+	require.NoError(t, os.WriteFile(dbPath, []byte("replacement"), 0o600))
+
+	err = storage.verifyAfterSQLite()
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.NotEqual(
+		t,
+		queueStorageDirectoryFingerprintAt(t, displacedPath).Inode,
+		queueStorageDirectoryFingerprintAt(t, dbPath).Inode,
+	)
+}
+
+func TestQueueStorageConcurrentFreshPreparationConverges(t *testing.T) {
+	homeDir := t.TempDir()
+	const constructorCount = 16
+	start := make(chan struct{})
+	results := make(chan error, constructorCount)
+	var constructors sync.WaitGroup
+	constructors.Add(constructorCount)
+
+	for range constructorCount {
+		go func() {
+			defer constructors.Done()
+			<-start
+			storage, err := prepareMessageQueueStorage(homeDir)
+			if err == nil {
+				err = storage.prepareForSQLite()
+			}
+			if storage != nil {
+				err = errors.Join(err, storage.Close())
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	constructors.Wait()
+	close(results)
+
+	for err := range results {
+		require.NoError(t, err)
+	}
+	dbPath := filepath.Join(homeDir, ".config", "agm", queueDatabaseLeaf)
+	assert.Equal(t, os.FileMode(0o600), queueStorageDirectoryMode(t, dbPath).Perm())
 }
 
 func queueStorageDirectoryMode(t *testing.T, path string) os.FileMode {
