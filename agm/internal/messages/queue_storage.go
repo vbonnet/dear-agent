@@ -54,6 +54,7 @@ type messageQueueStorage struct {
 	mainIdentity   queueStorageIdentity
 
 	productionChain bool
+	prepared        bool
 	closed          bool
 }
 

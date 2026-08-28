@@ -66,6 +66,39 @@ func prepareMessageQueueStorage(homeDir string) (*messageQueueStorage, error) {
 	return storage, nil
 }
 
+// prepareMessageQueueStorageAtPath is the package-test adapter for schema
+// fixtures with deliberately unusual database basenames. Production always
+// uses prepareMessageQueueStorage and the fixed HOME/.config/agm chain.
+func prepareMessageQueueStorageAtPath(dbPath string) (*messageQueueStorage, error) {
+	if !filepath.IsAbs(dbPath) || filepath.Clean(dbPath) != dbPath {
+		return nil, unsafeQueueStorageError("database path", "is not an absolute clean path")
+	}
+	dbLeaf := filepath.Base(dbPath)
+	if dbLeaf == "." || dbLeaf == string(filepath.Separator) || dbLeaf == "" {
+		return nil, unsafeQueueStorageError("database path", "does not name a database leaf")
+	}
+
+	storage := newMessageQueueStorage()
+	storage.rootPath = filepath.Dir(dbPath)
+	storage.dbPath = dbPath
+	storage.dbLeaf = dbLeaf
+	storage.uid = queueStorageEffectiveUID()
+
+	var err error
+	storage.rootFD, storage.rootIdentity, err = openQueueStorageDirectory(
+		storage.rootPath,
+		"queue directory",
+		storage.uid,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := storage.revalidateDirectoryChain(false); err != nil {
+		return nil, errors.Join(err, storage.Close())
+	}
+	return storage, nil
+}
+
 func newMessageQueueStorage() *messageQueueStorage {
 	return &messageQueueStorage{
 		homeFD:   queueStorageInvalidFD,
@@ -173,6 +206,83 @@ func validateQueueStorageDirectoryStat(artifact string, stat *unix.Stat_t, expec
 		return unsafeQueueStorageError(artifact, "is writable by another account")
 	}
 	return nil
+}
+
+func (s *messageQueueStorage) prepareForSQLite() error {
+	if err := s.validateUsable(false); err != nil {
+		return err
+	}
+	if s.prepared {
+		return unsafeQueueStorageError("storage capability", "was prepared more than once")
+	}
+
+	for range queueStorageAdmissionLimit {
+		if err := s.revalidateDirectoryChain(false); err != nil {
+			return err
+		}
+
+		leaves, mainPresent, retry, err := s.classifyQueueStorageLeaves()
+		if err != nil {
+			return err
+		}
+		if retry {
+			continue
+		}
+		if !mainPresent {
+			if len(leaves) != 0 {
+				mainAppeared, restatErr := s.queueStorageMainAppeared()
+				if restatErr != nil {
+					return restatErr
+				}
+				if mainAppeared {
+					// The snapshot observes leaves in fixed order. A concurrent
+					// constructor can create the main after its absent result and
+					// create a sidecar before the later sidecar checks. Re-enter
+					// the whole pass; never mistake that torn snapshot for an
+					// stable orphan-sidecar set.
+					continue
+				}
+				return unsafeQueueStorageError("main database", "is absent while a sidecar is present")
+			}
+			retry, createErr := s.createPrivateQueueDatabase()
+			if createErr != nil {
+				return createErr
+			}
+			if retry {
+				continue
+			}
+			s.prepared = true
+			return nil
+		}
+
+		retry, admissionErr := s.admitAndRepairQueueStorageLeaves(leaves)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if retry {
+			continue
+		}
+		s.prepared = true
+		return nil
+	}
+
+	return unsafeQueueStorageError("queue artifacts", "changed too often during admission")
+}
+
+func (s *messageQueueStorage) queueStorageMainAppeared() (bool, error) {
+	spec := queueStorageLeafSpec{name: s.dbLeaf, artifact: "main database", main: true}
+	var stat unix.Stat_t
+	err := unix.Fstatat(s.rootFD, spec.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	if errors.Is(err, unix.ENOENT) {
+		return false, nil
+	}
+	if err != nil {
+		return false, unsafeQueueStorageError(spec.artifact, "metadata could not be read")
+	}
+	if err := validateQueueStorageLeafStat(spec.artifact, &stat, s.uid, false); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *messageQueueStorage) classifyQueueStorageLeaves() (
@@ -400,6 +510,103 @@ func (s *messageQueueStorage) revalidateSealedQueueStorageLeaves(
 	return false, nil
 }
 
+func (s *messageQueueStorage) createPrivateQueueDatabase() (bool, error) {
+	if err := chmodAndVerifyQueueStorageDirectory(
+		s.rootFD,
+		"AGM directory",
+		s.uid,
+		s.rootIdentity,
+	); err != nil {
+		return false, err
+	}
+	if err := s.revalidateDirectoryChain(true); err != nil {
+		return false, err
+	}
+
+	// Repeat the absence check after closing traversal to other UIDs. A
+	// concurrent creator is never trusted from an existing entry alone.
+	allAbsent, err := s.queueStorageLeavesStillAbsent()
+	if err != nil {
+		return false, err
+	}
+	if !allAbsent {
+		return true, nil
+	}
+
+	fd, err := unix.Openat(
+		s.rootFD,
+		s.dbLeaf,
+		unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC,
+		0o600,
+	)
+	if errors.Is(err, unix.EEXIST) {
+		return true, nil
+	}
+	if err != nil {
+		return false, unsafeQueueStorageError("main database", "could not be created privately")
+	}
+	defer func() { _ = unix.Close(fd) }()
+
+	identity, err := validateAndPrivatizeCreatedQueueDatabase(fd, s.uid)
+	if err != nil {
+		return false, err
+	}
+
+	spec := queueStorageLeafSpec{name: s.dbLeaf, artifact: "main database", main: true}
+	visibleStat, retry, err := s.visibleQueueStorageLeafStat(spec, true)
+	if err != nil {
+		return false, err
+	}
+	if retry {
+		return true, nil
+	}
+	if queueStorageIdentityFromStat(&visibleStat) != identity {
+		return false, unsafeQueueStorageError("main database", "changed identity during creation")
+	}
+	s.mainIdentity = identity
+	return false, nil
+}
+
+func validateAndPrivatizeCreatedQueueDatabase(fd int, expectedUID uint32) (queueStorageIdentity, error) {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "descriptor metadata could not be read")
+	}
+	if err := validateQueueStorageLeafStat("main database", &stat, expectedUID, false); err != nil {
+		return queueStorageIdentity{}, err
+	}
+	identity := queueStorageIdentityFromStat(&stat)
+	if err := unix.Fchmod(fd, 0o600); err != nil {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "could not be made private")
+	}
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "private mode could not be verified")
+	}
+	if err := validateQueueStorageLeafStat("main database", &stat, expectedUID, true); err != nil {
+		return queueStorageIdentity{}, err
+	}
+	if queueStorageIdentityFromStat(&stat) != identity {
+		return queueStorageIdentity{}, unsafeQueueStorageError("main database", "changed identity during creation")
+	}
+	return identity, nil
+}
+
+func (s *messageQueueStorage) queueStorageLeavesStillAbsent() (bool, error) {
+	for _, baseSpec := range queueStorageLeafSpecs {
+		spec := baseSpec
+		spec.name = s.leafName(spec)
+		var stat unix.Stat_t
+		err := unix.Fstatat(s.rootFD, spec.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		if err == nil {
+			return false, nil
+		}
+		if !errors.Is(err, unix.ENOENT) {
+			return false, unsafeQueueStorageError(spec.artifact, "metadata could not be read")
+		}
+	}
+	return true, nil
+}
+
 func (s *messageQueueStorage) visibleQueueStorageLeafStat(
 	spec queueStorageLeafSpec,
 	requirePrivateMode bool,
@@ -419,6 +626,58 @@ func (s *messageQueueStorage) visibleQueueStorageLeafStat(
 		return stat, false, err
 	}
 	return stat, false, nil
+}
+
+func (s *messageQueueStorage) verifyAfterSQLite() error {
+	if err := s.validateUsable(true); err != nil {
+		return err
+	}
+	if err := s.revalidateDirectoryChain(true); err != nil {
+		return err
+	}
+
+	mainPresent := false
+	for _, baseSpec := range queueStorageLeafSpecs {
+		spec := baseSpec
+		spec.name = s.leafName(spec)
+		var stat unix.Stat_t
+		err := unix.Fstatat(s.rootFD, spec.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		if errors.Is(err, unix.ENOENT) && !spec.main {
+			continue
+		}
+		if errors.Is(err, unix.ENOENT) {
+			return unsafeQueueStorageError(spec.artifact, "is absent after SQLite initialization")
+		}
+		if err != nil {
+			return unsafeQueueStorageError(spec.artifact, "metadata could not be verified after SQLite initialization")
+		}
+		if err := validateQueueStorageLeafStat(spec.artifact, &stat, s.uid, true); err != nil {
+			return err
+		}
+		if spec.main {
+			mainPresent = true
+			if queueStorageIdentityFromStat(&stat) != s.mainIdentity {
+				return unsafeQueueStorageError(spec.artifact, "changed identity during SQLite initialization")
+			}
+		}
+	}
+	if !mainPresent {
+		return unsafeQueueStorageError("main database", "is absent after SQLite initialization")
+	}
+	return s.revalidateDirectoryChain(true)
+}
+
+func (s *messageQueueStorage) validateUsable(requirePrepared bool) error {
+	if s == nil {
+		return unsafeQueueStorageError("storage capability", "is absent")
+	}
+	if s.closed || s.rootFD == queueStorageInvalidFD {
+		return unsafeQueueStorageError("storage capability", "is closed")
+	}
+	if requirePrepared && !s.prepared {
+		return unsafeQueueStorageError("storage capability", "has not prepared the database")
+	}
+	return nil
 }
 
 func (s *messageQueueStorage) revalidateDirectoryChain(requirePrivateRoot bool) error {
