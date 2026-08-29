@@ -2,8 +2,8 @@
 
 This directory holds the [deepsec](https://www.npmjs.com/package/deepsec)
 config for the parent repo. Checked into git so teammates inherit
-project context (auth shape, threat model, custom matchers); generated
-scan output is gitignored.
+project context (auth shape, threat model, custom matchers); scanner-owned
+state and the documented findings export are gitignored.
 
 Currently configured project: `deepsec-scan` (target: `..`).
 
@@ -34,7 +34,10 @@ pnpm deepsec export      --format md-dir --out ./findings
 `--project-id deepsec-scan` (or whichever id you want) explicitly.
 
 `scan` is free (regex only). `process` is the AI stage (≈$0.30/file
-on Opus by default). Run state goes to `data/deepsec-scan/`.
+on Opus by default). Scanner-owned state goes to `data/deepsec-scan/`.
+That includes `tech.json`, whose timestamp and absolute `rootPath` describe the
+local checkout and therefore remain ignored. The documented `./findings`
+export is also ignored; another explicit `--out` path is caller-owned.
 
 ## Adding another project
 
@@ -52,10 +55,13 @@ in your agent to fill in INFO.md.
 
 ```
 deepsec.config.ts        Project list (one entry per scanned repo)
+findings/                Generated explicit export output (gitignored)
 data/deepsec-scan/
   INFO.md                Repo context — checked into git, hand-curated
   SETUP.md               Agent setup prompt — checked in, deletable
+  config.json            Optional project policy — checked in when present
   project.json           Generated (gitignored)
+  tech.json              Generated technology cache (gitignored; local path/time)
   files/                 One JSON per scanned source file (gitignored)
   runs/                  Run metadata (gitignored)
   reports/               Generated markdown reports (gitignored)
