@@ -33,7 +33,11 @@ func TestArchiveStoppedSessionStorageContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteAdapter() error: %v", err)
 	}
-	t.Cleanup(func() { _ = adapter.Close() })
+	t.Cleanup(func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("Close() error: %v", err)
+		}
+	})
 
 	// Create a test session through the shared storage contract.
 	sessionID := "regression-test-" + time.Now().Format("20060102-150405")
@@ -57,7 +61,6 @@ func TestArchiveStoppedSessionStorageContract(t *testing.T) {
 		},
 	}
 
-	// Insert the session through the adapter.
 	if err := adapter.CreateSession(session); err != nil {
 		t.Fatalf("Failed to create test session: %v", err)
 	}
@@ -142,7 +145,11 @@ func TestResolveIdentifierNotFoundContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteAdapter() error: %v", err)
 	}
-	t.Cleanup(func() { _ = adapter.Close() })
+	t.Cleanup(func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("Close() error: %v", err)
+		}
+	})
 
 	// Verify adapter has ResolveIdentifier method
 	// If this compiles, the method exists
