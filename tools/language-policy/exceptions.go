@@ -154,10 +154,8 @@ func (s *Store) ExpiringWithin(now time.Time, days int) []Exception {
 		out = append(out, e)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		di, _ := time.Parse("2006-01-02", *out[i].Sunset)
-		dj, _ := time.Parse("2006-01-02", *out[j].Sunset)
-		if !di.Equal(dj) {
-			return di.Before(dj)
+		if *out[i].Sunset != *out[j].Sunset {
+			return *out[i].Sunset < *out[j].Sunset
 		}
 		if out[i].Rule != out[j].Rule {
 			return out[i].Rule < out[j].Rule
