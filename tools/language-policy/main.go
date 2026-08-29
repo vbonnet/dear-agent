@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	ruleName     = "bash-20-line-limit"
-	lineLimit    = 20
-	storePath    = ".github/language-policy/exceptions.jsonl"
-	baselinePath = ".github/language-policy/baseline.json"
-	storeDir     = ".github/language-policy"
-	usageString  = `language-policy — enforce the repository shell-script policy.
+	ruleName          = "bash-20-line-limit"
+	lineLimit         = 20
+	sunsetWarningDays = 30
+	storePath         = ".github/language-policy/exceptions.jsonl"
+	baselinePath      = ".github/language-policy/baseline.json"
+	storeDir          = ".github/language-policy"
+	usageString       = `language-policy — enforce the repository shell-script policy.
 
 Usage:
   language-policy check [--files-from <file>] [--all] [--github]
@@ -30,7 +31,8 @@ Commands:
                  'git diff -z --name-only'); --all checks every path given on
                  the command line instead.
   sweep          Whole-repo scan: report over-limit scripts with no active
-                 waiver, plus waivers whose sunset date has passed.
+                 waiver, waivers whose sunset date has passed, and waivers
+                 expiring within 30 UTC calendar days.
   format         Rewrite the waiver store in canonical form (sorted, compact).
                  Run this after hand-editing it.
   verify-store   Validate the waiver store: text-only, parseable, sorted, no
@@ -140,12 +142,13 @@ func runCheck(args []string) error {
 	}
 
 	fmt.Printf("rule=%s limit=%d checked=%d compliant=%d tested=%d waived=%d violations=%d\n",
-		ruleName, lineLimit, len(paths), res.compliant, res.tested, res.waived, len(res.violations))
+		ruleName, lineLimit, res.checked, res.compliant, res.tested, res.waived, len(res.violations))
 	return report(res.violations, *github)
 }
 
 // scanResult is the outcome of checking a set of paths.
 type scanResult struct {
+	checked    int
 	compliant  int
 	tested     int
 	waived     int
@@ -180,6 +183,7 @@ func scan(repoRoot string, store *Store, tests *TestIndex, paths []string, now t
 		if closeErr != nil {
 			return res, fmt.Errorf("closing %s: %w", full, closeErr)
 		}
+		res.checked++
 		switch {
 		case n <= lineLimit:
 			res.compliant++
@@ -202,8 +206,9 @@ func scan(repoRoot string, store *Store, tests *TestIndex, paths []string, now t
 func report(violations []violation, github bool) error {
 	for _, v := range violations {
 		if github {
-			fmt.Printf("::error file=%s::%s is %d countable lines (limit %d), untested, and has no active waiver. Add a test under %s/, shorten it, or file a waiver.\n",
-				v.path, v.path, v.count, lineLimit, testDir)
+			fmt.Println(githubAnnotation("error", v.path, fmt.Sprintf(
+				"%s is %d countable lines (limit %d), untested, and has no active waiver. Add a test under %s/, shorten it, or file a waiver.",
+				v.path, v.count, lineLimit, testDir)))
 		} else {
 			fmt.Printf("  %-60s %3d lines (+%d over limit, untested)\n", v.path, v.count, v.count-lineLimit)
 		}
@@ -215,6 +220,10 @@ func report(violations []violation, github bool) error {
 }
 
 func runSweep(args []string) error {
+	return runSweepAt(args, time.Now().UTC())
+}
+
+func runSweepAt(args []string, now time.Time) error {
 	fs := flag.NewFlagSet("sweep", flag.ExitOnError)
 	github := fs.Bool("github", false, "emit GitHub Actions annotations")
 	repoRoot := fs.String("repo", ".", "repository root")
@@ -226,8 +235,6 @@ func runSweep(args []string) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-
 	expired := store.Expired(now)
 	for _, e := range expired {
 		sunset := ""
@@ -235,10 +242,15 @@ func runSweep(args []string) error {
 			sunset = *e.Sunset
 		}
 		if *github {
-			fmt.Printf("::warning file=%s::waiver for %s expired on %s\n", e.Path, e.Path, sunset)
+			fmt.Println(githubAnnotation("warning", e.Path,
+				fmt.Sprintf("waiver for %s expired on %s", e.Path, sunset)))
 		} else {
 			fmt.Printf("expired waiver: %s (sunset %s)\n", e.Path, sunset)
 		}
+	}
+	expiring := store.ExpiringWithin(now, sunsetWarningDays)
+	for _, e := range expiring {
+		fmt.Println(formatExpiringWarning(e, sunsetWarningDays, *github))
 	}
 
 	paths := fs.Args()
@@ -251,12 +263,17 @@ func runSweep(args []string) error {
 	}
 	// Report the waiver census before the error return below, so a failing
 	// sweep still tells the reader how large the backlog is.
-	defer fmt.Printf("sweep: %d waiver(s) total, %d expired, %d script(s) scanned\n", len(store.All), len(expired), len(paths))
+	scanned := 0
+	defer func() {
+		fmt.Printf("sweep: %d waiver(s) total, %d expired, %d expiring within %d days, %d script(s) scanned\n",
+			len(store.All), len(expired), len(expiring), sunsetWarningDays, scanned)
+	}()
 	tests, terr := BuildTestIndex(*repoRoot)
 	if terr != nil {
 		return terr
 	}
 	res, err := scan(*repoRoot, store, tests, paths, now)
+	scanned = res.checked
 	if err != nil {
 		return err
 	}
@@ -267,6 +284,46 @@ func runSweep(args []string) error {
 	}
 	calibration(res, len(store.All), dead, *github)
 	return nil
+}
+
+func formatExpiringWarning(e Exception, days int, github bool) string {
+	sunset := ""
+	if e.Sunset != nil {
+		sunset = *e.Sunset
+	}
+	action := fmt.Sprintf(
+		"remove it if no longer needed, otherwise shorten the script, add a test under %s/, or renew it with explicit owner approval before expiry",
+		testDir)
+	if github {
+		return githubAnnotation("warning", e.Path, fmt.Sprintf(
+			"%s waiver expires on %s (within %d days); %s",
+			e.Rule, sunset, days, action))
+	}
+	return fmt.Sprintf("expiring waiver: %s (rule %s, sunset %s, within %d days); %s",
+		e.Path, e.Rule, sunset, days, action)
+}
+
+func githubAnnotation(level, path, message string) string {
+	properties := ""
+	if path != "" {
+		properties = " file=" + escapeWorkflowCommandProperty(path)
+	}
+	return "::" + level + properties + "::" + escapeWorkflowCommandData(message)
+}
+
+func escapeWorkflowCommandData(s string) string {
+	return strings.NewReplacer(
+		"%", "%25",
+		"\r", "%0D",
+		"\n", "%0A",
+	).Replace(s)
+}
+
+func escapeWorkflowCommandProperty(s string) string {
+	return strings.NewReplacer(
+		":", "%3A",
+		",", "%2C",
+	).Replace(escapeWorkflowCommandData(s))
 }
 
 // reportDeadWaivers names waivers whose target no longer exists and returns how
@@ -281,7 +338,8 @@ func reportDeadWaivers(repoRoot string, store *Store, github bool) int {
 		}
 		n++
 		if github {
-			fmt.Printf("::warning::waiver for %s references a file that no longer exists; remove it\n", e.Path)
+			fmt.Println(githubAnnotation("warning", "",
+				fmt.Sprintf("waiver for %s references a file that no longer exists; remove it", e.Path)))
 		} else {
 			fmt.Printf("dead waiver (file gone): %s\n", e.Path)
 		}
@@ -311,7 +369,7 @@ func calibration(res scanResult, waiverCount, deadCount int, github bool) {
 				"Lower max_waivers in %s as they clear.",
 			ruleName, waiverCount, passing, testDir, baselinePath)
 		if github {
-			fmt.Printf("::warning::%s\n", msg)
+			fmt.Println(githubAnnotation("warning", "", msg))
 		} else {
 			fmt.Printf("WARNING: %s\n", msg)
 		}

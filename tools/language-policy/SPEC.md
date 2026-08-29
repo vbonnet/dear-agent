@@ -65,7 +65,19 @@ in a diff. See
 
 **LANGPOLICY-CMD-24** When `format` is invoked, the system shall rewrite the waiver store sorted by rule then path, one compact JSON object per line, preserving the file's existing permissions.
 
+**LANGPOLICY-CMD-25** When `sweep` evaluates waiver sunsets, the system shall classify dates by UTC calendar day and shall treat a valid sunset strictly after today and no later than 30 calendar days after today as expiring.
+
+**LANGPOLICY-CMD-26** When more than one waiver is expiring, the system shall report them by sunset date, then rule, then path.
+
+**LANGPOLICY-CMD-27** When `sweep` reports expiring waivers, the system shall emit actionable warnings and shall not fail the run solely because a waiver is approaching its sunset.
+
+**LANGPOLICY-CMD-28** When a GitHub Actions annotation is emitted, the system shall encode percent, carriage return, and newline in message data and shall additionally encode colon and comma in property values.
+
+**LANGPOLICY-CMD-29** When `sweep` reports its census, the system shall include the total, expired, expiring-within-30-days, and scanned-script counts even when a later scan verdict fails.
+
+**LANGPOLICY-CMD-30** When a waiver's sunset is today, earlier than today, or malformed, the system shall keep it in the expired fail-closed class and shall not classify it as expiring.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`
-- Command tests: `tools/language-policy/exceptions_test.go`, `tools/language-policy/lines_test.go`, `tools/language-policy/store_test.go`, `tools/language-policy/verify_test.go`
+- Command tests: `tools/language-policy/exceptions_test.go`, `tools/language-policy/lines_test.go`, `tools/language-policy/store_test.go`, `tools/language-policy/sweep_test.go`, `tools/language-policy/verify_test.go`

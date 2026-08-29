@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ func TestActive(t *testing.T) {
 		`{"rule":"bash-20-line-limit","path":"c.sh","status":"active","sunset":"2020-01-01"}`,
 		`{"rule":"bash-20-line-limit","path":"d.sh","status":"revoked","sunset":null}`,
 		`{"rule":"bash-20-line-limit","path":"e.sh","status":"active","sunset":"not-a-date"}`,
+		`{"rule":"bash-20-line-limit","path":"f.sh","status":"active","sunset":""}`,
 	}, "\n")))
 	if err != nil {
 		t.Fatalf("LoadStore: %v", err)
@@ -64,6 +66,7 @@ func TestActive(t *testing.T) {
 		{"c.sh", false, "sunset already passed"},
 		{"d.sh", false, "revoked"},
 		{"e.sh", false, "unparseable sunset must fail closed"},
+		{"f.sh", false, "empty sunset must fail closed rather than act open-ended"},
 		{"missing.sh", false, "no entry"},
 		{"./a.sh", true, "leading ./ is normalized"},
 	}
@@ -83,13 +86,84 @@ func TestExpired(t *testing.T) {
 		`{"rule":"r","path":"a.sh","status":"active","sunset":"2020-01-01"}`,
 		`{"rule":"r","path":"b.sh","status":"active","sunset":null}`,
 		`{"rule":"r","path":"c.sh","status":"revoked","sunset":"2020-01-01"}`,
+		`{"rule":"r","path":"d.sh","status":"active","sunset":""}`,
 	}, "\n")))
 	if err != nil {
 		t.Fatalf("LoadStore: %v", err)
 	}
 	got := store.Expired(refNow)
-	if len(got) != 1 || got[0].Path != "a.sh" {
-		t.Fatalf("Expired = %+v, want exactly a.sh", got)
+	if len(got) != 2 || got[0].Path != "a.sh" || got[1].Path != "d.sh" {
+		t.Fatalf("Expired = %+v, want a.sh then empty-sunset d.sh", got)
+	}
+}
+
+func TestExpiringWithin(t *testing.T) {
+	now := time.Date(2026, 8, 19, 23, 59, 59, 0, time.UTC)
+	store, err := LoadStore(strings.NewReader(strings.Join([]string{
+		`{"rule":"z-rule","path":"z-boundary.sh","status":"active","sunset":"2026-09-18"}`,
+		`{"rule":"z-rule","path":"z-same-day.sh","status":"active","sunset":"2026-08-20"}`,
+		`{"rule":"a-rule","path":"b-same-day.sh","status":"active","sunset":"2026-08-20"}`,
+		`{"rule":"a-rule","path":"a-same-day.sh","status":"active","sunset":"2026-08-20"}`,
+		`{"rule":"b-rule","path":"grandfathered.sh","status":"grandfathered","sunset":"2026-08-21"}`,
+		`{"rule":"r","path":"past.sh","status":"active","sunset":"2026-08-18"}`,
+		`{"rule":"r","path":"today.sh","status":"active","sunset":"2026-08-19"}`,
+		`{"rule":"r","path":"beyond.sh","status":"active","sunset":"2026-09-19"}`,
+		`{"rule":"r","path":"malformed.sh","status":"active","sunset":"not-a-date"}`,
+		`{"rule":"r","path":"open-ended.sh","status":"active","sunset":null}`,
+		`{"rule":"r","path":"revoked.sh","status":"revoked","sunset":"2026-08-20"}`,
+		`{"rule":"r","path":"explicitly-expired.sh","status":"expired","sunset":"2026-08-20"}`,
+	}, "\n")))
+	if err != nil {
+		t.Fatalf("LoadStore: %v", err)
+	}
+
+	got := store.ExpiringWithin(now, 30)
+	var gotKeys []string
+	for _, e := range got {
+		gotKeys = append(gotKeys, fmt.Sprintf("%s:%s", e.Rule, e.Path))
+	}
+	wantKeys := []string{
+		"a-rule:a-same-day.sh",
+		"a-rule:b-same-day.sh",
+		"z-rule:z-same-day.sh",
+		"b-rule:grandfathered.sh",
+		"z-rule:z-boundary.sh",
+	}
+	if strings.Join(gotKeys, "\n") != strings.Join(wantKeys, "\n") {
+		t.Fatalf("ExpiringWithin order/result = %v, want %v", gotKeys, wantKeys)
+	}
+
+	for _, days := range []int{0, -1} {
+		if got := store.ExpiringWithin(now, days); len(got) != 0 {
+			t.Errorf("ExpiringWithin(now, %d) = %+v, want no results", days, got)
+		}
+	}
+
+	expiredKeys := make(map[string]bool)
+	for _, e := range store.Expired(now) {
+		expiredKeys[key(e.Rule, e.Path)] = true
+	}
+	for _, e := range got {
+		if expiredKeys[key(e.Rule, e.Path)] {
+			t.Errorf("waiver %s/%s was both expired and expiring", e.Rule, e.Path)
+		}
+	}
+}
+
+func TestExpiringWithinUsesUTCCalendarDay(t *testing.T) {
+	store, err := LoadStore(strings.NewReader(
+		`{"rule":"r","path":"sunset.sh","status":"active","sunset":"2026-08-20"}`))
+	if err != nil {
+		t.Fatalf("LoadStore: %v", err)
+	}
+	// This is still August 19 in the supplied location but August 20 UTC.
+	now := time.Date(2026, 8, 19, 18, 0, 0, 0, time.FixedZone("PDT", -7*60*60))
+	if got := store.ExpiringWithin(now, 30); len(got) != 0 {
+		t.Fatalf("ExpiringWithin = %+v, want the UTC-today sunset excluded", got)
+	}
+	expired := store.Expired(now)
+	if len(expired) != 1 || expired[0].Path != "sunset.sh" {
+		t.Fatalf("Expired = %+v, want sunset.sh", expired)
 	}
 }
 
