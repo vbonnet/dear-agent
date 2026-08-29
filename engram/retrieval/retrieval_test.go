@@ -8,6 +8,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/engram/ecphory"
 	"github.com/vbonnet/dear-agent/internal/testutil"
+	"github.com/vbonnet/dear-agent/pkg/engram"
 )
 
 // TestNewService tests the Service constructor
@@ -357,6 +358,61 @@ func TestService_Search_IndexOnly(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestService_SearchTracksResultsAndCloseFlushes(t *testing.T) {
+	service := NewService()
+	tmpdir := testutil.SetupTestEngrams(t)
+
+	results, err := service.Search(context.Background(), SearchOptions{
+		EngramPath: tmpdir,
+		Limit:      2,
+	})
+	if err != nil {
+		t.Fatalf("Search() failed: %v", err)
+	}
+	if got := len(results); got != 2 {
+		t.Fatalf("Search() returned %d results, want 2", got)
+	}
+
+	if err := service.Close(); err != nil {
+		t.Fatalf("Close() returned a tracking flush error: %v", err)
+	}
+
+	for _, result := range results {
+		persisted, err := engram.NewParser().Parse(result.Path)
+		if err != nil {
+			t.Fatalf("parse tracked result %q: %v", result.Path, err)
+		}
+		if got := persisted.Frontmatter.RetrievalCount; got != 1 {
+			t.Errorf("%s retrieval_count = %d, want 1", result.Path, got)
+		}
+		if persisted.Frontmatter.LastAccessed.IsZero() {
+			t.Errorf("%s last_accessed was not persisted", result.Path)
+		}
+	}
+}
+
+func TestService_CloseIsBestEffort(t *testing.T) {
+	service := NewService()
+	tmpdir := testutil.SetupTestEngrams(t)
+	results, err := service.Search(context.Background(), SearchOptions{
+		EngramPath: tmpdir,
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("Search() failed: %v", err)
+	}
+	if got := len(results); got != 1 {
+		t.Fatalf("Search() returned %d results, want 1", got)
+	}
+	if err := os.Remove(results[0].Path); err != nil {
+		t.Fatalf("remove tracked result before flush: %v", err)
+	}
+
+	if err := service.Close(); err != nil {
+		t.Fatalf("Close() returned a tracking flush error: %v", err)
 	}
 }
 

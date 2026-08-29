@@ -28,10 +28,9 @@
 //	}
 //
 // The service is used by:
-//   - CLI commands: engram retrieve
-//   - API server: /api/search endpoint
-//   - Plugins: Search for relevant patterns
-//   - External tools: Import as library for programmatic access
+//   - Engram retrieve and token-estimate commands
+//   - The AGM Engram library client
+//   - External tools importing it for programmatic access
 package retrieval
 
 import (

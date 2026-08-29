@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	contextdetect "github.com/vbonnet/dear-agent/engram/internal/context"
-	"github.com/vbonnet/dear-agent/engram/internal/retrieval"
+	"github.com/vbonnet/dear-agent/engram/retrieval"
 	"github.com/vbonnet/dear-agent/internal/tokens"
 	"github.com/vbonnet/dear-agent/pkg/cliframe"
 )
