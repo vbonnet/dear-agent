@@ -69,13 +69,16 @@ search.
 - The service rebuilds its index for each search and does not promise caching,
   pagination, custom ranker injection, or concurrent-use safety.
 
-## BDD and Test Traceability
+## BDD Traceability
 
-- SPEC ownership: `agm/test/bdd/features/engram_knowledge_guardrails.feature`
-- Strict EARS inventory: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-- Package tests: `engram/retrieval/retrieval_test.go`
-- Integration tests: `engram/retrieval/retrieval_integration_test.go`
-- Command regression: `engram/cmd/engram/cmd/tokens_estimate_integration_test.go`
+- Feature: `agm/test/bdd/features/engram_knowledge_guardrails.feature`
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+- Test consequence: Deterministic unit and integration tests in `engram/retrieval/retrieval_test.go`, `engram/retrieval/retrieval_integration_test.go`, and `engram/cmd/engram/cmd/tokens_estimate_integration_test.go` prove nonexistent absolute-path rejection, positive result limiting, parse-error isolation, missing-key local fallback, returned-result access persistence, best-effort flush failure handling, and external token-estimate command wiring.
+
+The current deterministic suite does not directly exercise default-path
+precedence, tag-over-type precedence, or configured-key ranker order and
+metadata. Those coverage gaps are tracked by `ce-1hu9.98`; this ownership
+refactor does not claim to close them.
 
 See `ARCHITECTURE.md` for the ownership seam and dependency flow. Durable
 behavior decisions are recorded under `docs/adrs/`.
