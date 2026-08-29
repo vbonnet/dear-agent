@@ -1413,10 +1413,8 @@ func uncertainSubmissionAcrossPrivateLaunchSurfacesShouldPreserveTheHandoff(ctx 
 		"TestMCPCreateSessionRuntimePreservesUncertainPrivateLaunch",
 		"TestClaudeAdapterCreatePreservesHandoffAfterUncertainSubmission",
 		"TestClaudeAdapterResumePreservesHandoffAfterUncertainSubmission",
-		"TestCodexCreateSessionPreservesHandoffAfterUncertainSubmission",
-		"TestCodexResumeSessionPreservesHandoffAfterUncertainSubmission",
-		"TestAgyCreateSessionPreservesHandoffAfterUncertainSubmission",
-		"TestAgyResumeSessionPreservesHandoffAfterUncertainSubmission",
+		"TestCodexCreateSessionPreservesHandoffAfterUncertainSubmission", "TestCodexResumeSessionPreservesHandoffAfterUncertainSubmission",
+		"TestAgyCreateSessionPreservesHandoffAfterUncertainSubmission", "TestAgyResumeSessionPreservesHandoffAfterUncertainSubmission",
 		"TestClaudeResumePreservesHandoffAndCreatedTmuxAfterUncertainSubmission",
 		"TestResumabilityValidatorPreservesHandoffAfterUncertainSubmission",
 	} {
