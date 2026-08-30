@@ -21,7 +21,7 @@ cmd="$(printf '%s' "$input" | hook_json -r '.tool_input.command // empty' 2>/dev
 [ -n "$cmd" ] || exit 0
 
 # BEGIN CANONICAL PR GUARD CORE
-verb="$(printf '%s' "$cmd" | awk '
+verb="$(printf '%s' "$cmd" | LC_ALL=C awk '
   function base(p){ sub(/.*\//,"",p); return p }
   function is_assignment(t) { return t ~ /^[A-Za-z_][A-Za-z0-9_]*(\[[^]]+\])?\+?=/ }
   function is_control_prefix(t) { return t ~ /^(!|if|then|elif|while|until|do|else|\{)$/ }
@@ -192,6 +192,14 @@ verb="$(printf '%s' "$cmd" | awk '
     pos=index("0123456789abcdef",tolower(ch))
     return pos ? pos-1 : -1
   }
+  function ansi_control_code(ch, pos) {
+    if (ch=="?") return 127
+    if (ch=="@" || ch=="`" || ch==" ") return 0
+    pos=index("ABCDEFGHIJKLMNOPQRSTUVWXYZ",toupper(ch))
+    if (pos) return pos
+    pos=index("[\\]^_",ch)
+    return pos ? pos+26 : -1
+  }
   function safe_heredoc_delimiter(t) { return t ~ /^[A-Za-z0-9_.:\/+-]+$/ }
 
   # env -S has its own grammar: spaces and tabs split words, \_ is a word
@@ -343,12 +351,21 @@ verb="$(printf '%s' "$cmd" | awk '
   # Tokenize shell words, redirections, and simple-command separators without
   # evaluating the command. Quotes and escapes define word boundaries, so
   # assignment/option values cannot manufacture or hide standalone syntax.
-  function lex_and_classify(s, depth, words, hdelim, htab, pieces, n, word, active, protected, discard, heredoc_capture, heredoc_tabs, hcount, quote, sq, parse_error, heredoc_missing, matched, i, ch, next_ch, h1, h2, code, close_at, name, value, trimmed, part_count, p, found, j, k, line_start, line_size, line, compared) {
-    n=0; word=""; active=0; protected=0; discard=0; heredoc_capture=0; heredoc_tabs=0; hcount=0; quote=""; sq=sprintf("%c",39); parse_error=0; heredoc_missing=0
+  function lex_and_classify(s, depth, words, hdelim, htab, pieces, n, word, active, protected, discard, heredoc_capture, heredoc_tabs, hcount, quote, sq, parse_error, heredoc_missing, matched, i, ch, next_ch, h1, h2, code, close_at, name, value, trimmed, part_count, p, found, j, k, line_start, line_size, line, compared, digits, limit, ansi_truncated, control) {
+    n=0; word=""; active=0; protected=0; discard=0; heredoc_capture=0; heredoc_tabs=0; hcount=0; quote=""; sq=sprintf("%c",39); parse_error=0; heredoc_missing=0; ansi_truncated=0
     for (i=1; i<=length(s); i++) {
       ch=substr(s,i,1)
       if (quote=="A") {
-        if (ch==sq) { quote=""; continue }
+        if (ch==sq) { quote=""; ansi_truncated=0; continue }
+        # Bash discards an ANSI-C segment after NUL, then resumes adjacent text.
+        if (ansi_truncated) {
+          if (ch=="\\" && i<length(s)) {
+            next_ch=substr(s,i+1,1)
+            if (next_ch=="c" && i+1<length(s)) i+=2
+            else i++
+          }
+          continue
+        }
         if (ch=="\\" && i<length(s)) {
           next_ch=substr(s,i+1,1)
           if (next_ch=="x") {
@@ -356,8 +373,42 @@ verb="$(printf '%s' "$cmd" | awk '
             if (h1>=0) {
               code=h1; i+=2; h2=hex_digit(substr(s,i+1,1))
               if (h2>=0) { code=code*16+h2; i++ }
+              if (code==0) { ansi_truncated=1; active=1; continue }
               word=word sprintf("%c",code); active=1; continue
             }
+          }
+          if (next_ch=="u" || next_ch=="U") {
+            limit=next_ch=="u" ? 4 : 8; code=0; digits=0
+            for (j=1; j<=limit; j++) {
+              h1=hex_digit(substr(s,i+1+j,1))
+              if (h1<0) break
+              code=code*16+h1; digits++
+            }
+            if (digits>0) {
+              i+=1+digits
+              if (code==0) { ansi_truncated=1; active=1; continue }
+              # Only ASCII escapes can compose the protected literal words.
+              if (code<128) word=word sprintf("%c",code)
+              else word=word "__PR_GUARD_UNICODE?__"
+              active=1; continue
+            }
+          }
+          if (next_ch ~ /^[0-7]$/) {
+            code=next_ch+0; i++
+            for (j=1; j<=2; j++) {
+              h1=substr(s,i+1,1)
+              if (h1 !~ /^[0-7]$/) break
+              code=code*8+(h1+0); i++
+            }
+            code=code % 256
+            if (code==0) { ansi_truncated=1; active=1; continue }
+            word=word sprintf("%c",code); active=1; continue
+          }
+          if (next_ch=="c" && i+1<length(s)) {
+            control=ansi_control_code(substr(s,i+2,1)); i+=2
+            if (control==0) ansi_truncated=1
+            else word=word "__PR_GUARD_CONTROL?__"
+            active=1; continue
           }
           i++
           if (next_ch=="a") word=word sprintf("%c",7)

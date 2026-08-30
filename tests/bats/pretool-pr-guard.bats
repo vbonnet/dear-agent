@@ -156,6 +156,23 @@ assert_allowed() {
         'gh pr merge 42 --squash # --help' \
         'echo "${PR_GUARD_UNSET:-default}"; gh pr merge 42 --squash' \
         'echo "${#PATH}"; gh pr merge 42 --squash' \
+        "gh pr \$'\\155erge' 42 --squash" \
+        "\$'\\147\\150' pr merge 42 --squash" \
+        "gh \$'\\160\\162' merge 42 --squash" \
+        "gh pr \$'\\155\\145\\162\\147\\145' 42 --squash" \
+        "gh pr \$'\\u006derge' 42 --squash" \
+        "\$'\\u0067\\u0068' pr merge 42 --squash" \
+        "gh \$'\\u0070\\u0072' merge 42 --squash" \
+        "gh pr \$'\\U0000006derge' 42 --squash" \
+        "\$'g\\0junk''h' pr merge 42 --squash" \
+        "\$'g\\00junk''h' pr merge 42 --squash" \
+        "\$'g\\000junk''h' pr merge 42 --squash" \
+        "\$'g\\400junk''h' pr merge 42 --squash" \
+        "\$'g\\x00junk''h' pr merge 42 --squash" \
+        "gh pr \$'m\\0junk''erge' 42 --squash" \
+        "gh pr \$'m\\u0000junk''erge' 42 --squash" \
+        "gh pr \$'m\\U00000000junk''erge' 42 --squash" \
+        "gh pr \$'m\\c@junk''erge' 42 --squash" \
         'gh --help=false pr merge 42 --squash' \
         'gh pr merge --help=false 42 --squash'
     do
@@ -166,6 +183,20 @@ assert_allowed() {
             [[ "$output" == *pr-blockers* ]]
             [[ "$output" == *safe-merge* ]]
             [[ "$output" == *PERMISSION_ESCALATION* ]]
+        done
+    done
+}
+
+@test "keeps ANSI-C truncation scoped to its quoted segment" {
+    for command_line in \
+        "\$'gh\\0junk'x pr merge 42" \
+        "gh pr \$'merge\\0junk'x 42" \
+        "\$'g\\cAjunk''h' pr merge 42"
+    do
+        payload="$(jq -cn --arg c "$command_line" '{tool_name:"Bash",tool_input:{command:$c}}')"
+        for hook_path in "${HOOK_PATHS[@]}"; do
+            hook_at "$hook_path" "$payload"
+            assert_allowed
         done
     done
 }
@@ -283,6 +314,8 @@ assert_allowed() {
     ansi_octal=$'cat <<$\'E\\117F\' >/dev/null\nbody\nEOF\ngh pr merge 42 --squash\nE117F'
     ansi_unicode=$'cat <<$\'E\\u004fF\' >/dev/null\nbody\nEOF\ngh pr merge 42 --squash\nEu004fF'
     ansi_unknown=$'cat <<$\'\\q\' >/dev/null\nbody\n\\q\ngh pr merge 42 --squash\nq'
+    ansi_control_collision=$'cat <<$\'\\cA\' >/dev/null\nbody\n\001\ngh pr merge 42 --squash\n__PR_GUARD_CONTROL__'
+    ansi_unicode_collision=$'cat <<$\'\\u2603\' >/dev/null\nbody\n\342\230\203\ngh pr merge 42 --squash\n__PR_GUARD_UNICODE__'
     for hook_path in "${HOOK_PATHS[@]}"; do
         payload="$(jq -cn --arg c "$inert" '{tool_name:"Bash",tool_input:{command:$c}}')"
         hook_at "$hook_path" "$payload"
@@ -297,7 +330,7 @@ assert_allowed() {
         [ "$status" -eq 2 ]
         [[ "$output" == *safe-merge* ]]
 
-        for command_line in "$arithmetic" "$arithmetic_matching_line" "$arithmetic_expansion" "$literal_delimiter" "$ansi_delimiter" "$ansi_octal" "$ansi_unicode" "$ansi_unknown"; do
+        for command_line in "$arithmetic" "$arithmetic_matching_line" "$arithmetic_expansion" "$literal_delimiter" "$ansi_delimiter" "$ansi_octal" "$ansi_unicode" "$ansi_unknown" "$ansi_control_collision" "$ansi_unicode_collision"; do
             payload="$(jq -cn --arg c "$command_line" '{tool_name:"Bash",tool_input:{command:$c}}')"
             hook_at "$hook_path" "$payload"
             [ "$status" -eq 2 ]
