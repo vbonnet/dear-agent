@@ -17,6 +17,7 @@ setup() {
     AUDIT_SCRIPT="$PROJECT_ROOT/scripts/gobin-guard-audit.sh"
 
     TEST_DIR="$(mktemp -d)"
+	TEST_DIR="$(cd "$TEST_DIR" && pwd -P)"
     export FAKE_HOME="$TEST_DIR/home"
     export TRAIL="$TEST_DIR/trail.jsonl"
 	export HEARTBEAT="$TEST_DIR/gobin-guard.heartbeat"
@@ -76,6 +77,22 @@ EOF
 
 notification_lines() {
 	[ -f "$NOTIFY_LOG" ] && wc -l <"$NOTIFY_LOG" | tr -d ' ' || echo 0
+}
+
+install_non_owner_chmod_mock() {
+	export REAL_CHMOD
+	REAL_CHMOD="$(command -v chmod)"
+	cat >"$MOCK_BIN/chmod" <<'EOF'
+#!/bin/sh
+if [ "$1" = "u+x" ]; then
+	case "$2" in
+	"$FAKE_HOME" | "$FAKE_HOME"/*) ;;
+	*) exit 1 ;;
+	esac
+fi
+exec "$REAL_CHMOD" "$@"
+EOF
+	chmod +x "$MOCK_BIN/chmod"
 }
 
 @test "healthy GOBIN: exit 0, no escalation" {
@@ -236,6 +253,7 @@ notification_lines() {
 		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
 	assert_failure 1
 	assert_equal "$(file_mode "$guard_target")" "600"
+	assert_file_not_exists "$FAKE_HOME/guard-link/state/alarm"
 
 	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
 		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
@@ -243,6 +261,23 @@ notification_lines() {
 		GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
 	assert_failure 1
 	assert_equal "$(file_mode "$audit_target")" "600"
+	assert_file_not_exists "$FAKE_HOME/audit-link/state/alarm"
+}
+
+@test "already-searchable non-owned ancestors do not block either publisher" {
+	install_non_owner_chmod_mock
+
+	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$ALARM" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_fresh_private_alarm_tree "$ALARM"
+
+	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(file_mode "$AUDIT_ALARM")" "600"
 }
 
 @test "independent auditor rejects a multi-line heartbeat" {

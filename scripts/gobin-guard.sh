@@ -95,12 +95,14 @@ ensure_searchable_dir() (
 	if [ "$parent" != "$dir" ]; then
 		ensure_searchable_dir "$parent" || return 1
 	fi
-	# Searchable links (for example, a host path alias) are safe to traverse,
-	# but never chmod through a link to repair a target outside the lexical tree.
+	# Never repair through a link to a target outside the lexical state tree.
+	# chmod u+x enforces the owner bit when permitted; the fallback accepts an
+	# already-traversable non-owned ancestor. test -x alone is insufficient
+	# because root reports effective access for mode-0600 directories.
 	if [ -L "$dir" ]; then
-		[ -d "$dir" ] && [ -x "$dir" ]
+		return 1
 	elif [ -d "$dir" ]; then
-		[ -x "$dir" ] || chmod u+x "$dir"
+		chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
 	elif [ -e "$dir" ]; then
 		return 1
 	else

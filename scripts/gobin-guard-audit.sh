@@ -5,9 +5,9 @@ ensure_searchable_dir() (
   dir=$1; parent=$(dirname "$dir")
   [ "$parent" = "$dir" ] || ensure_searchable_dir "$parent" || return 1
   if [ -L "$dir" ]; then
-    [ -d "$dir" ] && [ -x "$dir" ]
+    return 1
   elif [ -d "$dir" ]; then
-    [ -x "$dir" ] || chmod u+x "$dir"
+    chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
   elif [ -e "$dir" ]; then
     return 1
   else
