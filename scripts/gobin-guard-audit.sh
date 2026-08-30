@@ -23,6 +23,8 @@ persist_alarm_marker() (
 home=${HOME:?HOME is not set}; heartbeat=${GOBIN_GUARD_HEARTBEAT:-$home/.local/state/dear-agent/gobin-guard.heartbeat}
 trail=${GOBIN_GUARD_TRAIL:-$home/.agm/vroom/trail.jsonl}; max_age=${GOBIN_GUARD_MAX_AGE:-180}
 alarm=${GOBIN_GUARD_AUDIT_ALARM_STATE:-$home/.local/state/dear-agent/gobin-guard-audit.alarm}
+case "$heartbeat" in -*) heartbeat="./$heartbeat";; esac
+case "$trail" in -*) trail="./$trail";; esac
 case "$alarm" in -*) alarm="./$alarm";; esac
 case "$max_age" in *[!0-9]*|''|???????????*) echo "gobin-guard-audit: invalid GOBIN_GUARD_MAX_AGE" >&2; exit 2;; esac
 now=$(date +%s); last=$(cat "$heartbeat" 2>/dev/null || true); reason=

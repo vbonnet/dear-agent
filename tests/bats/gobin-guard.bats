@@ -216,28 +216,36 @@ EOF
 	assert_equal "$(notification_lines)" "1"
 }
 
-@test "option-looking relative alarm paths persist for both publishers" {
+@test "option-looking relative state paths remain operands for both publishers" {
 	cd "$TEST_DIR"
-	guard_trail="$TEST_DIR/guard-trail.jsonl"
-	audit_trail="$TEST_DIR/audit-trail.jsonl"
+	guard_trail="-guard-trail.jsonl"
+	guard_heartbeat="-guard-heartbeat"
+	audit_trail="-audit-trail.jsonl"
+	audit_heartbeat="-audit-heartbeat"
 	guard_alarm="-guard-state/a/alarm"
 	audit_alarm="-audit-state/a/alarm"
 
 	for _ in 1 2; do
-		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$guard_trail" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$guard_trail" GOBIN_GUARD_HEARTBEAT="$guard_heartbeat" \
 			GOBIN_GUARD_ALARM_STATE="$guard_alarm" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
 		assert_failure 1
 	done
-	assert_equal "$(wc -l <"$guard_trail" | tr -d ' ')" "1"
+	assert_equal "$(wc -l <"$TEST_DIR/$guard_trail" | tr -d ' ')" "1"
+	assert_equal "$(file_mode "$TEST_DIR/$guard_heartbeat")" "600"
 	assert_equal "$(file_mode "$TEST_DIR/$guard_alarm")" "600"
 
 	for _ in 1 2; do
-		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$audit_trail" GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$audit_trail" GOBIN_GUARD_HEARTBEAT="$audit_heartbeat" \
 			GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
 		assert_failure 1
 	done
-	assert_equal "$(wc -l <"$audit_trail" | tr -d ' ')" "1"
+	assert_equal "$(wc -l <"$TEST_DIR/$audit_trail" | tr -d ' ')" "1"
 	assert_equal "$(file_mode "$TEST_DIR/$audit_alarm")" "600"
+
+	date +%s >"$TEST_DIR/$audit_heartbeat"
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$audit_trail" GOBIN_GUARD_HEARTBEAT="$audit_heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_success
 }
 
 @test "alarm repair never chmods through a non-searchable symlink" {

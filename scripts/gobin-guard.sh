@@ -80,9 +80,15 @@ heartbeat_path="${GOBIN_GUARD_HEARTBEAT:-$HOME_DIR/.local/state/dear-agent/gobin
 alarm_path="${GOBIN_GUARD_ALARM_STATE:-$HOME_DIR/.local/state/dear-agent/gobin-guard.alarm}"
 role="${GOBIN_GUARD_ROLE:-watchdog}"
 
-# Keep option-looking relative paths from being parsed as utility flags. Shell
-# redirections accept the original spelling, but dirname/rm do not reliably do
-# so across the supported host utilities.
+# Keep option-looking relative state paths from being parsed as utility flags.
+# Shell redirections accept the original spelling, but dirname/cat/mv/rm do not
+# reliably do so across the supported host utilities.
+case "$trail_path" in
+-*) trail_path="./$trail_path" ;;
+esac
+case "$heartbeat_path" in
+-*) heartbeat_path="./$heartbeat_path" ;;
+esac
 case "$alarm_path" in
 -*) alarm_path="./$alarm_path" ;;
 esac
