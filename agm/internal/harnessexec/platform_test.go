@@ -39,3 +39,27 @@ func TestRunForPlatformPreservesNonExecutionDispatch(t *testing.T) {
 		t.Fatalf("FreeBSD unknown protocol error = %v, want ordinary protocol validation", err)
 	}
 }
+
+func TestFreeBSDPlatformPolicyFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	for _, protocol := range []string{
+		CodexProtocol,
+		ClaudeProtocol,
+		HarnessProtocol,
+		AgyProtocol,
+		"__exec-future-protocol",
+	} {
+		t.Run(protocol, func(t *testing.T) {
+			t.Parallel()
+			err := privateHarnessExecutionPlatformError("freebsd", protocol)
+			if !errors.Is(err, errFreeBSDPrivateHarnessExecution) {
+				t.Fatalf("platform error = %v, want fail-closed FreeBSD refusal", err)
+			}
+		})
+	}
+
+	if err := privateHarnessExecutionPlatformError("freebsd", ExpiryProtocol); err != nil {
+		t.Fatalf("FreeBSD expiry platform error = %v, want explicit exception", err)
+	}
+}

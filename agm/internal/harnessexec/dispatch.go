@@ -15,6 +15,9 @@ func Run(protocol string, args []string) error {
 }
 
 func runForPlatform(goos, protocol string, args []string) error {
+	if !IsProtocol(protocol) {
+		return fmt.Errorf("unsupported private harness protocol %q", protocol)
+	}
 	if err := privateHarnessExecutionPlatformError(goos, protocol); err != nil {
 		return err
 	}
@@ -36,13 +39,8 @@ func runForPlatform(goos, protocol string, args []string) error {
 }
 
 func privateHarnessExecutionPlatformError(goos, protocol string) error {
-	if goos != "freebsd" {
+	if goos != "freebsd" || protocol == ExpiryProtocol {
 		return nil
 	}
-	switch protocol {
-	case CodexProtocol, ClaudeProtocol, HarnessProtocol, AgyProtocol:
-		return fmt.Errorf("%w: protocol %q", errFreeBSDPrivateHarnessExecution, protocol)
-	default:
-		return nil
-	}
+	return fmt.Errorf("%w: protocol %q", errFreeBSDPrivateHarnessExecution, protocol)
 }
