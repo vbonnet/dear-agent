@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"math/bits"
 	"os"
 	"strconv"
 	"strings"
@@ -20,15 +21,15 @@ type MetricsRequest struct {
 
 // MetricsResult is the full metrics payload.
 type MetricsResult struct {
-	Operation  string           `json:"operation"`
-	Timestamp  string           `json:"timestamp"`
-	Sessions   SessionMetrics   `json:"sessions"`
+	Operation  string            `json:"operation"`
+	Timestamp  string            `json:"timestamp"`
+	Sessions   SessionMetrics    `json:"sessions"`
 	Throughput ThroughputMetrics `json:"throughput"`
-	Cost       CostMetrics      `json:"cost"`
-	Resources  ResourceMetrics  `json:"resources"`
-	Alerts     []Alert          `json:"alerts"`
-	Workflow   *WorkflowMetrics `json:"workflow,omitempty"`
-	Batch      *BatchMetrics    `json:"batch,omitempty"`
+	Cost       CostMetrics       `json:"cost"`
+	Resources  ResourceMetrics   `json:"resources"`
+	Alerts     []Alert           `json:"alerts"`
+	Workflow   *WorkflowMetrics  `json:"workflow,omitempty"`
+	Batch      *BatchMetrics     `json:"batch,omitempty"`
 }
 
 // CostMetrics tracks aggregate spending across sessions.
@@ -89,8 +90,8 @@ type DiskMetrics struct {
 
 // Alert represents a threshold violation.
 type Alert struct {
-	Level   string `json:"level"`   // "warning", "critical"
-	Type    string `json:"type"`    // "load", "memory", "disk", "throughput"
+	Level   string `json:"level"` // "warning", "critical"
+	Type    string `json:"type"`  // "load", "memory", "disk", "throughput"
 	Message string `json:"message"`
 	Value   string `json:"value"`
 }
@@ -338,30 +339,58 @@ func statfsDisk(mount string) DiskMetrics {
 		return DiskMetrics{Mount: mount}
 	}
 
-	// stat.Bsize is int64 on Linux (gosec G115 warns on the cast) and
-	// uint32 on darwin (a widening cast is trivially safe). Filesystem
-	// block sizes are non-negative by kernel contract on both platforms.
-	bsize := uint64(stat.Bsize) //nolint:gosec // filesystem block size is non-negative
-	totalBytes := stat.Blocks * bsize
-	freeBytes := stat.Bavail * bsize
-	usedBytes := totalBytes - (stat.Bfree * bsize)
+	return diskMetricsFromBlockCounts(
+		mount,
+		nonNegativeStatfsBlockCount(stat.Bsize),
+		nonNegativeStatfsBlockCount(stat.Blocks),
+		nonNegativeStatfsBlockCount(stat.Bfree),
+		nonNegativeStatfsBlockCount(stat.Bavail),
+	)
+}
 
-	totalGB := float64(totalBytes) / (1024 * 1024 * 1024)
-	usedGB := float64(usedBytes) / (1024 * 1024 * 1024)
-	availGB := float64(freeBytes) / (1024 * 1024 * 1024)
+type statfsBlockCount interface {
+	~int32 | ~int64 | ~uint32 | ~uint64
+}
 
-	var usedPct float64
-	if totalBytes > 0 {
-		usedPct = float64(usedBytes) / float64(totalBytes) * 100
+// nonNegativeStatfsBlockCount normalizes the signed availability counters used
+// by FreeBSD without allowing a negative kernel value to wrap to uint64.
+func nonNegativeStatfsBlockCount[T statfsBlockCount](value T) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	return uint64(value)
+}
+
+func diskMetricsFromBlockCounts(
+	mount string,
+	blockSize, totalBlocks, freeBlocks, availableBlocks uint64,
+) DiskMetrics {
+	if blockSize == 0 || totalBlocks == 0 {
+		return DiskMetrics{Mount: mount}
 	}
 
-	return DiskMetrics{
-		Mount:       mount,
-		TotalGB:     roundTo1(totalGB),
-		UsedGB:      roundTo1(usedGB),
-		AvailGB:     roundTo1(availGB),
-		UsedPercent: roundTo1(usedPct),
+	freeBlocks = min(freeBlocks, totalBlocks)
+	availableBlocks = min(availableBlocks, totalBlocks)
+
+	if overflow, totalBytes := bits.Mul64(totalBlocks, blockSize); overflow == 0 {
+		_, usedBytes := bits.Mul64(totalBlocks-freeBlocks, blockSize)
+		_, availableBytes := bits.Mul64(availableBlocks, blockSize)
+
+		totalGB := float64(totalBytes) / (1024 * 1024 * 1024)
+		usedGB := float64(usedBytes) / (1024 * 1024 * 1024)
+		availableGB := float64(availableBytes) / (1024 * 1024 * 1024)
+		usedPercent := float64(usedBytes) / float64(totalBytes) * 100
+
+		return DiskMetrics{
+			Mount:       mount,
+			TotalGB:     roundTo1(totalGB),
+			UsedGB:      roundTo1(usedGB),
+			AvailGB:     roundTo1(availableGB),
+			UsedPercent: roundTo1(usedPercent),
+		}
 	}
+
+	return DiskMetrics{Mount: mount}
 }
 
 // generateAlerts checks thresholds and returns violations.
