@@ -110,6 +110,22 @@ ensure_searchable_dir() (
 	fi
 )
 
+is_alarm_marker() {
+	[ ! -L "$1" ] && [ -f "$1" ]
+}
+
+persist_alarm_marker() (
+	marker_path=$1
+	ensure_searchable_dir "$(dirname "$marker_path")" || return 1
+	# Reject every existing leaf before redirection so FIFOs and devices are
+	# never opened. Noclobber also rejects a regular file or link inserted after
+	# this serialized check; ce-1hu9.108 owns broader concurrent replacement.
+	[ ! -e "$marker_path" ] && [ ! -L "$marker_path" ] || return 1
+	set -C
+	umask 0077
+	: >"$marker_path"
+)
+
 # A distinct launchd agent audits this bounded freshness record. Write it before
 # classification so a failing detector is distinguishable from an unloaded or
 # missing detector; use rename so the auditor never reads a partial timestamp.
@@ -221,12 +237,12 @@ fi
 # Degraded: report only the healthy-to-degraded transition. A missing GOBIN
 # can persist for hours; repeating notifications and trail entries each tick
 # obscures the original event rather than improving observability.
-if [ ! -e "$alarm_path" ]; then
+if ! is_alarm_marker "$alarm_path"; then
 	delivered=1
 	escalate && delivered=0
 	notify_operator && delivered=0
 	if [ "$delivered" -eq 0 ]; then
-		(ensure_searchable_dir "$(dirname "$alarm_path")" && umask 0077 && : >"$alarm_path") 2>/dev/null || \
+		persist_alarm_marker "$alarm_path" 2>/dev/null || \
 			echo "$PROG: warning: cannot persist alarm state: $alarm_path" >&2
 	fi
 fi

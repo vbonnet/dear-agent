@@ -264,6 +264,89 @@ EOF
 	assert_file_not_exists "$FAKE_HOME/audit-link/state/alarm"
 }
 
+@test "dangling alarm-marker symlinks fail closed for both publishers" {
+	guard_target="$TEST_DIR/guard-dangling-target"
+	audit_target="$TEST_DIR/audit-dangling-target"
+	guard_alarm="$FAKE_HOME/guard-alarm"
+	audit_alarm="$FAKE_HOME/audit-alarm"
+	ln -s "$guard_target" "$guard_alarm"
+	ln -s "$audit_target" "$audit_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_file_not_exists "$guard_target"
+	[ -L "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_file_not_exists "$audit_target"
+	[ -L "$audit_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+}
+
+@test "resolved alarm-marker symlinks neither suppress nor mutate for both publishers" {
+	guard_target="$TEST_DIR/guard-target"
+	audit_target="$TEST_DIR/audit-target"
+	printf 'guard sentinel\n' >"$guard_target"
+	printf 'audit sentinel\n' >"$audit_target"
+	chmod 600 "$guard_target" "$audit_target"
+	guard_alarm="$FAKE_HOME/guard-alarm"
+	audit_alarm="$FAKE_HOME/audit-alarm"
+	ln -s "$guard_target" "$guard_alarm"
+	ln -s "$audit_target" "$audit_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_equal "$(cat "$guard_target")" "guard sentinel"
+	assert_equal "$(file_mode "$guard_target")" "600"
+	[ -L "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(cat "$audit_target")" "audit sentinel"
+	assert_equal "$(file_mode "$audit_target")" "600"
+	[ -L "$audit_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+}
+
+@test "non-regular alarm-marker leaves fail closed for both publishers" {
+	guard_alarm="$FAKE_HOME/guard-fifo"
+	audit_alarm="$FAKE_HOME/audit-fifo"
+	mkfifo "$guard_alarm" "$audit_alarm"
+	# Keep both sides open so a regression that redirects into the FIFO cannot
+	# hang the test; the persistence warning proves the primary refused it.
+	exec 8<>"$guard_alarm"
+	exec 9<>"$audit_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_output --partial "cannot persist alarm state"
+	[ -p "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	[ -p "$audit_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+
+	exec 8>&-
+	exec 9>&-
+}
+
 @test "already-searchable non-owned ancestors do not block either publisher" {
 	install_non_owner_chmod_mock
 
