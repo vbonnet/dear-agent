@@ -39,11 +39,15 @@ type findings struct {
 
 func findingsFromEnvironment(getenv func(string) string) findings {
 	return findings{
-		compromised:       getenv("compromised"),
-		unpinned:          getenv("unpinned"),
-		permissions:       getenv("perm_findings"),
-		pullRequestTarget: getenv("prt_hits"),
+		compromised:       normalizeLineEndings(getenv("compromised")),
+		unpinned:          normalizeLineEndings(getenv("unpinned")),
+		permissions:       normalizeLineEndings(getenv("perm_findings")),
+		pullRequestTarget: normalizeLineEndings(getenv("prt_hits")),
 	}
+}
+
+func normalizeLineEndings(value string) string {
+	return strings.ReplaceAll(value, "\r\n", "\n")
 }
 
 func (f findings) any() bool {
@@ -316,6 +320,7 @@ See %s for the rules. Auto-managed; closes once every check passes.
 }
 
 func bodyMatchesSnapshot(body string, snapshot findings) bool {
+	body = normalizeLineEndings(body)
 	lines := strings.Split(body, "\n")
 	if len(lines) < 3 || lines[0] != managedMarker || lines[1] != findingsDigestMarker(snapshot) {
 		return false

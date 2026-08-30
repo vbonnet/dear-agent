@@ -130,6 +130,26 @@ func TestReconcileIdenticalCanonicalIsTrueNoOp(t *testing.T) {
 	}
 }
 
+func TestReconcileProviderCRLFBodyIsTrueNoOp(t *testing.T) {
+	firstObservedAt := time.Date(2026, 8, 29, 1, 2, 3, 0, time.UTC)
+	laterObservedAt := firstObservedAt.Add(24 * time.Hour)
+	snapshot := findings{pullRequestTarget: "workflow.yml:8: pull_request_target:"}
+	body := strings.ReplaceAll(renderIssueBody(snapshot, firstObservedAt), "\n", "\r\n")
+	provider := &scriptedProvider{t: t, calls: []providerCall{
+		{args: labelArgs()},
+		{args: listArgs(), out: `[[{"number":17,"title":"security-audit: workflow findings","body":` + strconv.Quote(body) + `}]]`},
+	}}
+
+	result, err := reconcile(context.Background(), provider, "owner/repository", snapshot, laterObservedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.done()
+	if got := result.summary(); got != "security-audit issue #17 already current" {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
 func TestReconcileRepairsTamperedManagedBody(t *testing.T) {
 	firstObservedAt := time.Date(2026, 8, 29, 1, 2, 3, 0, time.UTC)
 	laterObservedAt := firstObservedAt.Add(24 * time.Hour)
@@ -295,13 +315,13 @@ func TestValidateRepositoryRejectsUntrustedShapesBeforeProviderCall(t *testing.T
 
 func TestFindingsFromEnvironmentUsesWorkflowContract(t *testing.T) {
 	values := map[string]string{
-		"compromised":   "c",
-		"unpinned":      "u",
-		"perm_findings": "p",
-		"prt_hits":      "t",
+		"compromised":   "c\r\n1",
+		"unpinned":      "u\r\n2",
+		"perm_findings": "p\r\n3",
+		"prt_hits":      "t\r\n4",
 	}
 	got := findingsFromEnvironment(func(key string) string { return values[key] })
-	want := findings{compromised: "c", unpinned: "u", permissions: "p", pullRequestTarget: "t"}
+	want := findings{compromised: "c\n1", unpinned: "u\n2", permissions: "p\n3", pullRequestTarget: "t\n4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("findings = %#v, want %#v", got, want)
 	}

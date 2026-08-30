@@ -52,9 +52,13 @@ they carry the same label.
 
 **SECURITY-AUDIT-ISSUES-12** When a Security Audit run targets a non-default ref, the system shall not mutate the shared rolling issue.
 
-## BDD traceability
+## BDD Traceability
 
 - Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`
+- Test consequence: Deterministic unit fixtures exercise create, update,
+  cross-time no-op, tamper repair, pagination, duplicate, failure, and clean
+  transitions; deterministic workflow-source tests exercise serialization and
+  ref authority without mutating a shared provider issue.
 - Deterministic provider fixtures: `tools/security-audit-issues/reconcile_test.go`
 - Workflow ownership check: `tools/security-audit-issues/workflow_test.go`
 - Requirements 11 and 12 use the deterministic workflow ownership check
