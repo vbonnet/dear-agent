@@ -16,7 +16,10 @@
 
 **REPO-SCRIPT-07** When full local preflight cannot resolve a required Go-installed security tool from `PATH`, the system shall inspect a configured `GOBIN` first and shall use the first `GOPATH` entry's `bin` directory only when `GOBIN` is empty, so the documented `go install` remediation produces a discoverable executable.
 
+**REPO-SCRIPT-08** When a harness PR-lifecycle adapter supplies a decoded Bash command, the canonical repository guard shall deny recognized raw `gh pr create`, `close`, `reopen`, and `merge` mutations while preserving read-only PR commands and unambiguous help or launcher-query modes.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
+- Bats: `tests/bats/pretool-pr-guard.bats`
