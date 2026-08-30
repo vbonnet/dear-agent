@@ -590,8 +590,7 @@ func requireEndpointAbsent(address string, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("owned Dolt listener %s still accepts connections", address)
 		}
-		timer := time.NewTimer(10 * time.Millisecond)
-		<-timer.C
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -608,8 +607,7 @@ func requirePathAbsent(path string, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("owned Dolt socket still exists: %s", path)
 		}
-		timer := time.NewTimer(10 * time.Millisecond)
-		<-timer.C
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
