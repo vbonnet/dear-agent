@@ -561,8 +561,8 @@ EOF
 fi
 
 if [ "$verb" = "reopen" ]; then
-  guidance='Reopening a closed PR has no sanctioned automated path — it is a human
-decision. Ask the supervisor/user to reopen it (and say why), or escalate.'
+  guidance='Reopening a closed PR has no sanctioned automated path — it is a human decision.
+Ask the supervisor/user to reopen it (and say why), or escalate.'
 else
   guidance="  safe-pr create --wayfinder <wayfinder-project-dir> --title \"...\" --body \"...\" [gh flags]
   safe-pr close  --wayfinder <wayfinder-project-dir> <number|url>
