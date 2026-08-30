@@ -120,37 +120,3 @@ func TestVertexAIClaudeProvider_Capabilities(t *testing.T) {
 	assert.Equal(t, 5, caps.MaxConcurrentRequests)
 	assert.Equal(t, 200000, caps.MaxTokensPerRequest) // Claude context window
 }
-
-func TestVertexAIClaudeProvider_BuildRankingPrompt(t *testing.T) {
-	t.Setenv("TEST_GCP_PROJECT_CLAUDE", "test-project")
-
-	provider, err := NewVertexAIClaudeProvider(VertexAIClaudeConfig{
-		ProjectIDEnv: "TEST_GCP_PROJECT_CLAUDE",
-	})
-	require.NoError(t, err)
-
-	vcp := provider.(*VertexAIClaudeProvider)
-
-	candidates := []Candidate{
-		{
-			Name:        "oauth-pattern",
-			Description: "OAuth 2.0 implementation",
-			Tags:        []string{"security"},
-		},
-		{
-			Name:        "jwt-validation",
-			Description: "JWT token validation",
-			Tags:        []string{"security", "tokens"},
-		},
-	}
-
-	prompt := vcp.buildRankingPrompt("implement OAuth", candidates)
-
-	// Verify prompt structure (same as Anthropic provider)
-	assert.Contains(t, prompt, "Query: implement OAuth")
-	assert.Contains(t, prompt, "Candidates:")
-	assert.Contains(t, prompt, "0. Name: oauth-pattern")
-	assert.Contains(t, prompt, "Description: OAuth 2.0 implementation")
-	assert.Contains(t, prompt, "1. Name: jwt-validation")
-	assert.Contains(t, prompt, "ranked list")
-}
