@@ -69,8 +69,17 @@ jobs:
   workflow-hygiene:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      # The mutation step is default-branch-only. Serialize that ref's entire
+      # detector/reconciliation job without blocking independent diagnostics.
+      group: security-audit-issue-reconciliation-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
 
       # Static list of known-compromised action versions. Expand when
       # incidents are reported. Format: `owner/repo@ref`.
@@ -205,67 +214,13 @@ jobs:
             } >> "$GITHUB_ENV"
           fi
 
-      # `gh issue create --label security-audit` fails outright when the label
-      # does not exist ("could not add label: 'security-audit' not found"), and
-      # `set -euo pipefail` turns that into a failed job. The label was never
-      # created, so this workflow has never delivered a finding — it only ever
-      # went red. Same idiom as merge-audit.yml / bypassed-merge-audit.yml.
-      - name: Ensure security-audit label exists
-        if: ${{ env.compromised != '' || env.unpinned != '' || env.perm_findings != '' || env.prt_hits != '' }}
+      # Label ownership, complete pagination, exact-title matching, body
+      # replacement, duplicate consolidation, and clean close live together
+      # behind one tested provider boundary. Detector policy stays above.
+      - name: Reconcile security-audit issue
+        if: ${{ github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-        run: |
-          gh label create security-audit \
-            --color "d93f0b" \
-            --description "CI workflow hygiene finding from the Security Audit" \
-            --repo "$REPO" 2>/dev/null || true
-
-      - name: Open / update security-audit issue
-        if: ${{ env.compromised != '' || env.unpinned != '' || env.perm_findings != '' || env.prt_hits != '' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          title="security-audit: workflow findings"
-          body=$(cat <<EOF
-          The Security Audit found CI hygiene issues as of $(date -u +"%Y-%m-%dT%H:%M:%SZ"):
-
-          ### Known-compromised action versions
-          ${compromised:-_(none)_}
-
-          ### Third-party actions not pinned by SHA
-          \`\`\`
-          ${unpinned:-(none)}
-          \`\`\`
-
-          ### Permissions findings
-          ${perm_findings:-_(none)_}
-
-          ### pull_request_target usage
-          \`\`\`
-          ${prt_hits:-(none)}
-          \`\`\`
-
-          See \`.github/workflows/security-audit.yml\` for the rules. Auto-managed; closes once every check passes.
-          EOF
-          )
-          existing=$(timeout 30 gh issue list --repo "$REPO" --label security-audit --state open --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
-          else
-            timeout 30 gh issue create --repo "$REPO" --title "$title" --body "$body" --label security-audit
-          fi
-
-      - name: Auto-close security-audit issue when clean
-        if: ${{ env.compromised == '' && env.unpinned == '' && env.perm_findings == '' && env.prt_hits == '' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          existing=$(timeout 30 gh issue list --repo "$REPO" --label security-audit --state open --json number --jq '.[].number')
-          for n in $existing; do
-            timeout 30 gh issue close "$n" --repo "$REPO" --comment "All workflow hygiene checks pass; auto-closing."
-          done
+          GOWORK: "off"
+        run: go run ./tools/security-audit-issues -repo "$REPO"
