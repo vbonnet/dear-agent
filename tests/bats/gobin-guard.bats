@@ -20,6 +20,8 @@ setup() {
     export FAKE_HOME="$TEST_DIR/home"
     export TRAIL="$TEST_DIR/trail.jsonl"
 	export HEARTBEAT="$TEST_DIR/gobin-guard.heartbeat"
+	export ALARM="$FAKE_HOME/.local/state/dear-agent/gobin-guard.alarm"
+	export AUDIT_ALARM="$FAKE_HOME/.local/state/dear-agent/gobin-guard-audit.alarm"
     mkdir -p "$FAKE_HOME"
 	MOCK_BIN="$TEST_DIR/mock-bin"
 	mkdir -p "$MOCK_BIN"
@@ -31,11 +33,49 @@ teardown() {
 
 # run_guard invokes the guard against the isolated fixture HOME/trail.
 run_guard() {
-    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" "$@"
+    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$ALARM" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" "$@"
 }
 
 trail_lines() {
     [ -f "$TRAIL" ] && wc -l <"$TRAIL" | tr -d ' ' || echo 0
+}
+
+file_mode() {
+	local mode
+	if mode="$(stat -f '%Lp' "$1" 2>/dev/null)"; then
+		printf '%s\n' "$mode"
+	else
+		stat -c '%a' "$1"
+	fi
+}
+
+assert_fresh_private_alarm_tree() {
+	for private_dir in "$FAKE_HOME/.local" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local/state/dear-agent"; do
+		assert_equal "$(file_mode "$private_dir")" "700"
+	done
+	assert_equal "$(file_mode "$1")" "600"
+}
+
+poison_alarm_tree() {
+	mkdir -p "$FAKE_HOME/.local/state/dear-agent"
+	chmod 600 "$FAKE_HOME/.local/state/dear-agent" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local"
+}
+
+install_notification_mocks() {
+	cat >"$MOCK_BIN/uname" <<'EOF'
+#!/bin/sh
+echo Darwin
+EOF
+	cat >"$MOCK_BIN/osascript" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$NOTIFY_LOG"
+EOF
+	chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/osascript"
+	export NOTIFY_LOG="$TEST_DIR/notifications.log"
+}
+
+notification_lines() {
+	[ -f "$NOTIFY_LOG" ] && wc -l <"$NOTIFY_LOG" | tr -d ' ' || echo 0
 }
 
 @test "healthy GOBIN: exit 0, no escalation" {
@@ -61,12 +101,21 @@ trail_lines() {
 }
 
 @test "independent auditor alarms when guard heartbeat is missing" {
+	poison_alarm_tree
 	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
-		GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
 	assert_failure 1
 	assert_output --partial "heartbeat is missing or invalid"
 	assert_file_contains "$TRAIL" '"kind":"watchdog.gobin_guard.stale"'
 	assert_file_contains "$TRAIL" '"event_id":"gobin-guard-audit-'
+	assert_fresh_private_alarm_tree "$AUDIT_ALARM"
+	assert_equal "$(file_mode "$TRAIL")" "600"
+	assert_equal "$(trail_lines)" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(trail_lines)" "1"
 }
 
 @test "independent auditor accepts a fresh guard heartbeat" {
@@ -87,9 +136,113 @@ trail_lines() {
 	run_guard
 	assert_failure 1
 	assert_equal "$(trail_lines)" "1"
+	assert_fresh_private_alarm_tree "$ALARM"
+	assert_equal "$(file_mode "$HEARTBEAT")" "600"
+	assert_equal "$(file_mode "$TRAIL")" "600"
 	run_guard
 	assert_failure 1
 	assert_equal "$(trail_lines)" "1"
+}
+
+@test "missing GOBIN repairs legacy non-searchable alarm parents" {
+	poison_alarm_tree
+	run_guard
+	assert_failure 1
+	assert_equal "$(trail_lines)" "1"
+	assert_fresh_private_alarm_tree "$ALARM"
+}
+
+@test "default heartbeat and alarm preserve existing searchable parents" {
+	mkdir -p "$FAKE_HOME/.local/state/dear-agent"
+	chmod 755 "$FAKE_HOME/.local" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local/state/dear-agent"
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	for existing_dir in "$FAKE_HOME/.local" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local/state/dear-agent"; do
+		assert_equal "$(file_mode "$existing_dir")" "755"
+	done
+	assert_equal "$(file_mode "$ALARM")" "600"
+	assert_equal "$(file_mode "$FAKE_HOME/.local/state/dear-agent/gobin-guard.heartbeat")" "600"
+	assert_equal "$(file_mode "$TRAIL")" "600"
+}
+
+@test "notification-only guard delivery persists and suppresses its alarm" {
+	install_notification_mocks
+	trail_blocker="$TEST_DIR/trail-blocker"
+	: >"$trail_blocker"
+	bad_trail="$trail_blocker/trail.jsonl"
+
+	for _ in 1 2; do
+		run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$bad_trail" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$ALARM" \
+			GOBIN_GUARD_NOTIFY=1 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+
+	assert_fresh_private_alarm_tree "$ALARM"
+	assert_equal "$(notification_lines)" "1"
+}
+
+@test "notification-only auditor delivery persists and suppresses its alarm" {
+	install_notification_mocks
+	trail_blocker="$TEST_DIR/trail-blocker"
+	: >"$trail_blocker"
+	bad_trail="$trail_blocker/trail.jsonl"
+
+	for _ in 1 2; do
+		run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$bad_trail" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" \
+			GOBIN_GUARD_NOTIFY=1 /bin/sh "$AUDIT_SCRIPT"
+		assert_failure 1
+	done
+
+	assert_fresh_private_alarm_tree "$AUDIT_ALARM"
+	assert_equal "$(notification_lines)" "1"
+}
+
+@test "option-looking relative alarm paths persist for both publishers" {
+	cd "$TEST_DIR"
+	guard_trail="$TEST_DIR/guard-trail.jsonl"
+	audit_trail="$TEST_DIR/audit-trail.jsonl"
+	guard_alarm="-guard-state/a/alarm"
+	audit_alarm="-audit-state/a/alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$guard_trail" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+			GOBIN_GUARD_ALARM_STATE="$guard_alarm" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	assert_equal "$(wc -l <"$guard_trail" | tr -d ' ')" "1"
+	assert_equal "$(file_mode "$TEST_DIR/$guard_alarm")" "600"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$audit_trail" GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+			GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+		assert_failure 1
+	done
+	assert_equal "$(wc -l <"$audit_trail" | tr -d ' ')" "1"
+	assert_equal "$(file_mode "$TEST_DIR/$audit_alarm")" "600"
+}
+
+@test "alarm repair never chmods through a non-searchable symlink" {
+	guard_target="$TEST_DIR/guard-target"
+	audit_target="$TEST_DIR/audit-target"
+	mkdir "$guard_target" "$audit_target"
+	chmod 600 "$guard_target" "$audit_target"
+	ln -s "$guard_target" "$FAKE_HOME/guard-link"
+	ln -s "$audit_target" "$FAKE_HOME/audit-link"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$FAKE_HOME/guard-link/state/alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_equal "$(file_mode "$guard_target")" "600"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$FAKE_HOME/audit-link/state/alarm" \
+		GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(file_mode "$audit_target")" "600"
 }
 
 @test "independent auditor rejects a multi-line heartbeat" {
@@ -166,16 +319,7 @@ trail_lines() {
 }
 
 @test "macOS launchd alarm posts an active notification" {
-	cat >"$MOCK_BIN/uname" <<'EOF'
-#!/bin/sh
-echo Darwin
-EOF
-	cat >"$MOCK_BIN/osascript" <<'EOF'
-#!/bin/sh
-printf '%s\n' "$*" >>"$NOTIFY_LOG"
-EOF
-	chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/osascript"
-	export NOTIFY_LOG="$TEST_DIR/notifications.log"
+	install_notification_mocks
 
 	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" "$SCRIPT" --quiet
 	assert_failure 1

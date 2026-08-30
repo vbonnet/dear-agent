@@ -80,12 +80,40 @@ heartbeat_path="${GOBIN_GUARD_HEARTBEAT:-$HOME_DIR/.local/state/dear-agent/gobin
 alarm_path="${GOBIN_GUARD_ALARM_STATE:-$HOME_DIR/.local/state/dear-agent/gobin-guard.alarm}"
 role="${GOBIN_GUARD_ROLE:-watchdog}"
 
+# Keep option-looking relative paths from being parsed as utility flags. Shell
+# redirections accept the original spelling, but dirname/rm do not reliably do
+# so across the supported host utilities.
+case "$alarm_path" in
+-*) alarm_path="./$alarm_path" ;;
+esac
+
+# Repair state directories left non-searchable by the former alarm umask. A
+# subshell gives each recursive call private variables in POSIX sh.
+ensure_searchable_dir() (
+	dir=$1
+	parent=$(dirname "$dir")
+	if [ "$parent" != "$dir" ]; then
+		ensure_searchable_dir "$parent" || return 1
+	fi
+	# Searchable links (for example, a host path alias) are safe to traverse,
+	# but never chmod through a link to repair a target outside the lexical tree.
+	if [ -L "$dir" ]; then
+		[ -d "$dir" ] && [ -x "$dir" ]
+	elif [ -d "$dir" ]; then
+		[ -x "$dir" ] || chmod u+x "$dir"
+	elif [ -e "$dir" ]; then
+		return 1
+	else
+		(umask 0077 && mkdir "$dir")
+	fi
+)
+
 # A distinct launchd agent audits this bounded freshness record. Write it before
 # classification so a failing detector is distinguishable from an unloaded or
 # missing detector; use rename so the auditor never reads a partial timestamp.
 write_heartbeat() {
 	heartbeat_dir=$(dirname "$heartbeat_path")
-	if ! mkdir -p "$heartbeat_dir" 2>/dev/null; then
+	if ! ensure_searchable_dir "$heartbeat_dir" 2>/dev/null; then
 		echo "$PROG: warning: cannot create heartbeat dir $heartbeat_dir" >&2
 		return 0
 	fi
@@ -196,7 +224,7 @@ if [ ! -e "$alarm_path" ]; then
 	escalate && delivered=0
 	notify_operator && delivered=0
 	if [ "$delivered" -eq 0 ]; then
-		(umask 0177 && mkdir -p "$(dirname "$alarm_path")" && : >"$alarm_path") 2>/dev/null || \
+		(ensure_searchable_dir "$(dirname "$alarm_path")" && umask 0077 && : >"$alarm_path") 2>/dev/null || \
 			echo "$PROG: warning: cannot persist alarm state: $alarm_path" >&2
 	fi
 fi
