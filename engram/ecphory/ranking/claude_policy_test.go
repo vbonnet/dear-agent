@@ -87,6 +87,13 @@ func TestParseClaudeRankingResponse(t *testing.T) {
 	}
 }
 
+func TestParseClaudeRankingResponseRejectsNil(t *testing.T) {
+	results, err := parseClaudeRankingResponse(nil, []Candidate{{Name: "candidate"}})
+
+	require.ErrorContains(t, err, "nil response from API")
+	assert.Nil(t, results)
+}
+
 func TestClaudeRankingSystemPromptDefinesStructuredContract(t *testing.T) {
 	assert.Contains(t, claudeRankingSystemPrompt, `"index": the 0-based index`)
 	assert.Contains(t, claudeRankingSystemPrompt, `"score": a float between 0.0`)

@@ -124,6 +124,10 @@ func (p *VertexAIClaudeProvider) Rank(ctx context.Context, query string, candida
 
 // recordCost records API usage costs
 func (p *VertexAIClaudeProvider) recordCost(ctx context.Context, resp *anthropic.Message) error {
+	if resp == nil {
+		return fmt.Errorf("nil response from API")
+	}
+
 	usage := resp.Usage
 
 	tokens := costtrack.Tokens{

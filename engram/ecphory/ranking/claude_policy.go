@@ -51,6 +51,10 @@ func buildClaudeRankingRequest(model, query string, candidates []Candidate) anth
 // do not name an admitted candidate. Malformed JSON preserves the established
 // deterministic fallback behavior.
 func parseClaudeRankingResponse(resp *anthropic.Message, candidates []Candidate) ([]RankedResult, error) {
+	if resp == nil {
+		return nil, fmt.Errorf("nil response from API")
+	}
+
 	var responseText strings.Builder
 	for _, block := range resp.Content {
 		if block.Type == "text" {

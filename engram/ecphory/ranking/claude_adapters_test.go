@@ -189,3 +189,10 @@ func TestClaudeRankingAdaptersPreserveAPIErrorContext(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeCostRecordersRejectNilResponse(t *testing.T) {
+	ctx := context.Background()
+
+	assert.ErrorContains(t, (&AnthropicProvider{}).recordCost(ctx, nil), "nil response from API")
+	assert.ErrorContains(t, (&VertexAIClaudeProvider{}).recordCost(ctx, nil), "nil response from API")
+}

@@ -104,6 +104,10 @@ func (p *AnthropicProvider) Rank(ctx context.Context, query string, candidates [
 
 // recordCost records API usage costs
 func (p *AnthropicProvider) recordCost(ctx context.Context, resp *anthropic.Message) error {
+	if resp == nil {
+		return fmt.Errorf("nil response from API")
+	}
+
 	usage := resp.Usage
 
 	tokens := costtrack.Tokens{
