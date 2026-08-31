@@ -169,7 +169,7 @@ jobs:
         # a substituted action the repository's Claude credentials and a
         # writable issue surface. The repository's own workflow-hygiene check
         # wants third-party actions pinned.
-        uses: anthropics/claude-code-action@dcb57747bfceeaa1fa72638cae52295d1d853d4a # v1
+        uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Job-level `permissions:` govern the workflow token; the action
