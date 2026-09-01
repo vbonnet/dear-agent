@@ -55,6 +55,7 @@
       "github.com/vbonnet/dear-agent/internal/baseline",
       "github.com/vbonnet/dear-agent/internal/telemetry/enrichment",
       "github.com/vbonnet/dear-agent/internal/telemetry/errors",
+      "github.com/vbonnet/dear-agent/pkg/absencealarm",
       "github.com/vbonnet/dear-agent/pkg/audit/verifiers",
       "github.com/vbonnet/dear-agent/pkg/benchmark",
       "github.com/vbonnet/dear-agent/pkg/frontmatter",
@@ -1092,6 +1093,31 @@
         "raw-mem-gate": [],
         "zero-test": []
       }
+    },
+    {
+      "previous_baseline_sha256": "d3061ae2ebd892d3d7427261894a4540cd3dee49abf6a2e2ed5729f68d20a1cb",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/pkg/absencealarm"
+        ],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Nothing imports pkg/absencealarm on this branch because its only importer is cmd/absence-alarm in the stack tip; the admission becomes moot the moment the tip lands.",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1427"
     }
   ]
 }
