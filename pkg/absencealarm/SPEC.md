@@ -129,4 +129,4 @@ the absence alarm itself.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
-- Package tests: `cmd/absence-alarm/*_test.go`
+- Package tests: `pkg/absencealarm/*_test.go` (domain), `cmd/absence-alarm/*_test.go` (CLI)
