@@ -68,3 +68,29 @@ is configured:
   the release's published `*.sha256sum.txt` over TLS. That integrity check
   guards against corrupt/truncated downloads; it is not a substitute for
   verifying the release itself (no GPG `.asc` check is performed).
+- The Jaeger binary is a checksum-verified **download**, not a `go install`
+  target, so it must live outside `~/go/bin`. The launch agent
+  (`make install-jaeger-launchagent`) runs it from the dear-agent cache. When
+  all of `~/go/bin` was deleted on 2026-07-15 (bead ce-24f1) every Go-built tool
+  there was restored by rebuilding; jaeger could not be, and local tracing was
+  dark from 2026-07-16 until 2026-09-01.
+
+## Known gap: nothing alarms on the absence of spans
+
+That six-week outage was silent. The collector process was down, the launch
+agent was reporting exit 78, and no emitter could reach `:4317`, but nothing
+watched for it, so the first signal was a human noticing the traces had stopped.
+
+The detector already exists: `cmd/jaeger-health` implements exactly the right
+check (JAEGER-HEALTH-03 reports `degraded` and exits `1` when Jaeger is alive
+but no traces appear in the lookback window, and `down`/exit `2` when it is
+unreachable). What is missing is that **nothing ever runs it**: there is no
+launch agent, no scheduled task, and no alarm sink for its exit code.
+
+The durable check that would have caught this is an alarm on the ABSENCE of
+received spans over a 24h window, not a process-liveness or port check. A
+collector can be up and still receiving nothing, which is the failure mode that
+actually matters here.
+
+Deliberately **not built in this change**. Flagged for the flywheel-resilience
+workstream, which owns scheduling and alarm routing.
