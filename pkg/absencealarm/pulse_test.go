@@ -1,4 +1,4 @@
-package main
+package absencealarm
 
 import (
 	"context"
@@ -12,18 +12,18 @@ import (
 
 var t0 = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 
-func fixedProbes() probes {
-	return probes{
-		now: func() time.Time { return t0 },
+func fixedProbes() Probes {
+	return Probes{
+		Now: func() time.Time { return t0 },
 	}
 }
 
 // AA-01: stale mtime is ABSENT.
 func TestFileMtimePulse_StaleIsAbsent(t *testing.T) {
 	pr := fixedProbes()
-	pr.statMtime = func(string) (time.Time, bool, error) { return t0.Add(-3 * time.Hour), true, nil }
+	pr.StatMtime = func(string) (time.Time, bool, error) { return t0.Add(-3 * time.Hour), true, nil }
 	p := Pulse{Name: "spans", Type: PulseFileMtime, Path: "/x/spans.jsonl", Window: "1h", window: time.Hour}
-	res := evaluatePulse(context.Background(), p, pr, "", nil)
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
 	if res.Status != StatusAbsent {
 		t.Fatalf("status = %s, want absent", res.Status)
 	}
@@ -35,9 +35,9 @@ func TestFileMtimePulse_StaleIsAbsent(t *testing.T) {
 // AA-01: fresh mtime is PRESENT.
 func TestFileMtimePulse_FreshIsPresent(t *testing.T) {
 	pr := fixedProbes()
-	pr.statMtime = func(string) (time.Time, bool, error) { return t0.Add(-10 * time.Minute), true, nil }
+	pr.StatMtime = func(string) (time.Time, bool, error) { return t0.Add(-10 * time.Minute), true, nil }
 	p := Pulse{Name: "spans", Type: PulseFileMtime, Path: "/x/spans.jsonl", Window: "1h", window: time.Hour}
-	res := evaluatePulse(context.Background(), p, pr, "", nil)
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
 	if res.Status != StatusPresent {
 		t.Fatalf("status = %s, want present", res.Status)
 	}
@@ -49,9 +49,9 @@ func TestFileMtimePulse_FreshIsPresent(t *testing.T) {
 // AA-02: missing file is ABSENT with a missing-file reason.
 func TestFileMtimePulse_MissingIsAbsent(t *testing.T) {
 	pr := fixedProbes()
-	pr.statMtime = func(string) (time.Time, bool, error) { return time.Time{}, false, nil }
+	pr.StatMtime = func(string) (time.Time, bool, error) { return time.Time{}, false, nil }
 	p := Pulse{Name: "hb", Type: PulseFileMtime, Path: "/x/hb.json", Window: "1h", window: time.Hour}
-	res := evaluatePulse(context.Background(), p, pr, "", nil)
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
 	if res.Status != StatusAbsent || !strings.Contains(res.Reason, "does not exist") {
 		t.Fatalf("got %s %q, want absent with missing-file reason", res.Status, res.Reason)
 	}
@@ -60,13 +60,13 @@ func TestFileMtimePulse_MissingIsAbsent(t *testing.T) {
 // AA-05: an unreadable stat is UNDETERMINED, not OK.
 func TestFileMtimePulse_StatErrorIsUndetermined(t *testing.T) {
 	pr := fixedProbes()
-	pr.statMtime = func(string) (time.Time, bool, error) { return time.Time{}, false, errors.New("permission denied") }
+	pr.StatMtime = func(string) (time.Time, bool, error) { return time.Time{}, false, errors.New("permission denied") }
 	p := Pulse{Name: "hb", Type: PulseFileMtime, Path: "/x/hb.json", Window: "1h", window: time.Hour}
-	res := evaluatePulse(context.Background(), p, pr, "", nil)
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
 	if res.Status != StatusUndetermined {
 		t.Fatalf("status = %s, want undetermined", res.Status)
 	}
-	if !res.Status.alarming() {
+	if !res.Status.Alarming() {
 		t.Error("undetermined must alarm")
 	}
 }
@@ -74,9 +74,9 @@ func TestFileMtimePulse_StatErrorIsUndetermined(t *testing.T) {
 // AA-06: a future mtime beyond skew tolerance is UNDETERMINED.
 func TestFileMtimePulse_FutureMtimeIsUndetermined(t *testing.T) {
 	pr := fixedProbes()
-	pr.statMtime = func(string) (time.Time, bool, error) { return t0.Add(10 * time.Minute), true, nil }
+	pr.StatMtime = func(string) (time.Time, bool, error) { return t0.Add(10 * time.Minute), true, nil }
 	p := Pulse{Name: "hb", Type: PulseFileMtime, Path: "/x/hb.json", Window: "1h", window: time.Hour}
-	res := evaluatePulse(context.Background(), p, pr, "", nil)
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
 	if res.Status != StatusUndetermined {
 		t.Fatalf("status = %s, want undetermined for a future mtime", res.Status)
 	}
@@ -87,12 +87,12 @@ func TestLaunchdPulse(t *testing.T) {
 	listing := "123\t0\tcom.dear-agent.disk-watchdog\n-\t0\tcom.dear-agent.loop-tick\n"
 	pr := fixedProbes()
 	p := Pulse{Name: "mergeloop-loaded", Type: PulseLaunchdLoaded, Label: "com.dear-agent.mergeloop"}
-	res := evaluatePulse(context.Background(), p, pr, listing, nil)
+	res := EvaluatePulse(context.Background(), p, pr, listing, nil)
 	if res.Status != StatusAbsent || !strings.Contains(res.Reason, "not loaded") {
 		t.Fatalf("got %s %q, want absent not-loaded", res.Status, res.Reason)
 	}
 	p.Label = "com.dear-agent.disk-watchdog"
-	if res := evaluatePulse(context.Background(), p, pr, listing, nil); res.Status != StatusPresent {
+	if res := EvaluatePulse(context.Background(), p, pr, listing, nil); res.Status != StatusPresent {
 		t.Fatalf("loaded label: status = %s, want present", res.Status)
 	}
 }
@@ -102,7 +102,7 @@ func TestLaunchdPulse_NoSubstringMatch(t *testing.T) {
 	listing := "123\t0\tcom.dear-agent.mergeloop-canary\n"
 	pr := fixedProbes()
 	p := Pulse{Name: "mergeloop-loaded", Type: PulseLaunchdLoaded, Label: "com.dear-agent.mergeloop"}
-	if res := evaluatePulse(context.Background(), p, pr, listing, nil); res.Status != StatusAbsent {
+	if res := EvaluatePulse(context.Background(), p, pr, listing, nil); res.Status != StatusAbsent {
 		t.Fatalf("status = %s, want absent (substring must not count)", res.Status)
 	}
 }
@@ -111,7 +111,7 @@ func TestLaunchdPulse_NoSubstringMatch(t *testing.T) {
 func TestLaunchdPulse_ListErrorIsUndetermined(t *testing.T) {
 	pr := fixedProbes()
 	p := Pulse{Name: "mergeloop-loaded", Type: PulseLaunchdLoaded, Label: "com.dear-agent.mergeloop"}
-	res := evaluatePulse(context.Background(), p, pr, "", errors.New("launchctl exploded"))
+	res := EvaluatePulse(context.Background(), p, pr, "", errors.New("launchctl exploded"))
 	if res.Status != StatusUndetermined {
 		t.Fatalf("status = %s, want undetermined", res.Status)
 	}
@@ -120,14 +120,14 @@ func TestLaunchdPulse_ListErrorIsUndetermined(t *testing.T) {
 // AA-04: non-zero exit is ABSENT with the exit status; zero exit is PRESENT.
 func TestCommandPulse(t *testing.T) {
 	pr := fixedProbes()
-	pr.runCommand = func(_ context.Context, argv []string) (int, error) { return 1, nil }
+	pr.RunCommand = func(_ context.Context, argv []string) (int, error) { return 1, nil }
 	p := Pulse{Name: "main-merge", Type: PulseCommand, Command: []string{"check-merge"}}
-	res := evaluatePulse(context.Background(), p, pr, "", nil)
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
 	if res.Status != StatusAbsent || !strings.Contains(res.Reason, "exited 1") {
 		t.Fatalf("got %s %q, want absent exited-1", res.Status, res.Reason)
 	}
-	pr.runCommand = func(_ context.Context, argv []string) (int, error) { return 0, nil }
-	if res := evaluatePulse(context.Background(), p, pr, "", nil); res.Status != StatusPresent {
+	pr.RunCommand = func(_ context.Context, argv []string) (int, error) { return 0, nil }
+	if res := EvaluatePulse(context.Background(), p, pr, "", nil); res.Status != StatusPresent {
 		t.Fatalf("zero exit: status = %s, want present", res.Status)
 	}
 }
@@ -135,9 +135,9 @@ func TestCommandPulse(t *testing.T) {
 // AA-05: a command that cannot start is UNDETERMINED.
 func TestCommandPulse_StartErrorIsUndetermined(t *testing.T) {
 	pr := fixedProbes()
-	pr.runCommand = func(_ context.Context, argv []string) (int, error) { return -1, errors.New("no such binary") }
+	pr.RunCommand = func(_ context.Context, argv []string) (int, error) { return -1, errors.New("no such binary") }
 	p := Pulse{Name: "main-merge", Type: PulseCommand, Command: []string{"check-merge"}}
-	if res := evaluatePulse(context.Background(), p, pr, "", nil); res.Status != StatusUndetermined {
+	if res := EvaluatePulse(context.Background(), p, pr, "", nil); res.Status != StatusUndetermined {
 		t.Fatalf("status = %s, want undetermined", res.Status)
 	}
 }
@@ -166,7 +166,7 @@ func TestLoadPulseConfig_Validation(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.doc), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := loadPulseConfig(path)
+			_, err := LoadPulseConfig(path)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
 			}
@@ -183,9 +183,9 @@ func TestLoadPulseConfig_Valid(t *testing.T) {
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pulses, err := loadPulseConfig(path)
+	pulses, err := LoadPulseConfig(path)
 	if err != nil {
-		t.Fatalf("loadPulseConfig: %v", err)
+		t.Fatalf("LoadPulseConfig: %v", err)
 	}
 	if len(pulses) != 3 {
 		t.Fatalf("len = %d, want 3", len(pulses))
