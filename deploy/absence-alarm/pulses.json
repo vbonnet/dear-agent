@@ -1,0 +1,51 @@
+{
+  "pulses": [
+    {
+      "name": "main-merge",
+      "type": "command",
+      "command": ["~/go/bin/merge-health", "--lookback", "96h"],
+      "window": "96h",
+      "expect": "a commit landed on dear-agent origin/main within 96h"
+    },
+    {
+      "name": "mergeloop-loaded",
+      "type": "launchd_loaded",
+      "label": "com.dear-agent.mergeloop",
+      "expect": "the mergeloop launchd job to be loaded"
+    },
+    {
+      "name": "mergeloop-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/mergeloop.out.log",
+      "window": "24h",
+      "expect": "a mergeloop tick within 24h"
+    },
+    {
+      "name": "otel-receiving",
+      "type": "command",
+      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
+      "window": "24h",
+      "expect": "Jaeger alive and receiving traces within 24h"
+    },
+    {
+      "name": "disk-watchdog-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/disk-watchdog.out.log",
+      "window": "1h",
+      "expect": "a disk-watchdog tick within 1h"
+    },
+    {
+      "name": "oauth-fresh",
+      "type": "command",
+      "command": ["~/go/bin/credential-monitor"],
+      "expect": "a fresh shared OAuth access token"
+    },
+    {
+      "name": "gobin-guard-heartbeat",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/gobin-guard.heartbeat",
+      "window": "15m",
+      "expect": "a gobin-guard heartbeat within 15m"
+    }
+  ]
+}
