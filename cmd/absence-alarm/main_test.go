@@ -1,0 +1,278 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+type runEnv struct {
+	dir       string
+	config    string
+	state     string
+	snooze    string
+	journal   string
+	heartbeat string
+	notices   []string
+	notifyErr error
+}
+
+func newRunEnv(t *testing.T, configDoc string) *runEnv {
+	t.Helper()
+	dir := t.TempDir()
+	e := &runEnv{
+		dir:       dir,
+		config:    filepath.Join(dir, "pulses.json"),
+		state:     filepath.Join(dir, "state.json"),
+		snooze:    filepath.Join(dir, "snooze.json"),
+		journal:   filepath.Join(dir, "journal.jsonl"),
+		heartbeat: filepath.Join(dir, "heartbeat.json"),
+	}
+	if err := os.WriteFile(e.config, []byte(configDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func (e *runEnv) args(extra ...string) []string {
+	base := []string{
+		"--config", e.config, "--state", e.state, "--snooze", e.snooze,
+		"--journal", e.journal, "--heartbeat", e.heartbeat,
+	}
+	return append(base, extra...)
+}
+
+func (e *runEnv) notifier() notifier {
+	return func(_ context.Context, title, body string) error {
+		e.notices = append(e.notices, title+" | "+body)
+		return e.notifyErr
+	}
+}
+
+const oneStalePulse = `{"pulses":[{"name":"spans","type":"file_mtime","path":"%s","window":"1h","expect":"a fresh OTel span file"}]}`
+
+func stalePulseEnv(t *testing.T) *runEnv {
+	t.Helper()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "spans.jsonl")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	if err := os.Chtimes(target, old, old); err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.ReplaceAll(oneStalePulse, "%s", target)
+	return newRunEnv(t, doc)
+}
+
+// AA-07 + AA-09 + AA-10 + AA-16: an absent pulse exits 1, journals, notifies
+// on transition, and the tick writes a heartbeat.
+func TestRun_AbsentPulseAlarms(t *testing.T) {
+	e := stalePulseEnv(t)
+	var out, errb bytes.Buffer
+	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
+	}
+	if len(e.notices) != 1 || !strings.Contains(e.notices[0], "ABSENT: spans") {
+		t.Fatalf("notices = %v, want one ABSENT notice", e.notices)
+	}
+	raw, err := os.ReadFile(e.journal)
+	if err != nil {
+		t.Fatalf("journal not written: %v", err)
+	}
+	var rec journalRecord
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &rec); err != nil {
+		t.Fatalf("journal not JSONL: %v", err)
+	}
+	if rec.Pulse != "spans" || rec.Status != StatusAbsent || rec.Misses != 1 {
+		t.Errorf("journal record = %+v", rec)
+	}
+	var hb heartbeat
+	hraw, err := os.ReadFile(e.heartbeat)
+	if err != nil {
+		t.Fatalf("heartbeat not written: %v", err)
+	}
+	if err := json.Unmarshal(hraw, &hb); err != nil || len(hb.Results) != 1 {
+		t.Fatalf("heartbeat = %s err=%v", hraw, err)
+	}
+}
+
+// AA-10 + AA-11: the second tick within the backoff window does not
+// re-notify but still journals and exits 1.
+func TestRun_SecondTickDedupsNotification(t *testing.T) {
+	e := stalePulseEnv(t)
+	var out, errb bytes.Buffer
+	run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if len(e.notices) != 1 {
+		t.Fatalf("notices = %v, want exactly one (deduped)", e.notices)
+	}
+	raw, _ := os.ReadFile(e.journal)
+	if lines := strings.Count(strings.TrimSpace(string(raw)), "\n") + 1; lines != 2 {
+		t.Errorf("journal lines = %d, want 2 (every alarming tick journals)", lines)
+	}
+}
+
+// AA-12: recovery notifies once.
+func TestRun_RecoveryNotifies(t *testing.T) {
+	e := stalePulseEnv(t)
+	var out, errb bytes.Buffer
+	run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+
+	// Freshen the watched file: the pulse returns.
+	var cfg pulseConfig
+	raw, _ := os.ReadFile(e.config)
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(cfg.Pulses[0].Path, now, now); err != nil {
+		t.Fatal(err)
+	}
+	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 after recovery", code)
+	}
+	if len(e.notices) != 2 || !strings.Contains(e.notices[1], "RECOVERED: spans") {
+		t.Fatalf("notices = %v, want ABSENT then RECOVERED", e.notices)
+	}
+}
+
+// AA-08 + AA-13: a validly snoozed absent pulse exits 0 and stays quiet.
+func TestRun_SnoozedPulseIsQuiet(t *testing.T) {
+	e := stalePulseEnv(t)
+	until := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
+	doc := `[{"pulse":"spans","until":"` + until + `","reason":"migration"}]`
+	if err := os.WriteFile(e.snooze, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for a snoozed pulse", code)
+	}
+	if len(e.notices) != 0 {
+		t.Fatalf("notices = %v, want none", e.notices)
+	}
+	if !strings.Contains(out.String(), "snoozed") {
+		t.Errorf("report does not show the snooze:\n%s", out.String())
+	}
+}
+
+// AA-14: an expiry-less snooze is a usage error.
+func TestRun_SnoozeWithoutExpiryExits2(t *testing.T) {
+	e := stalePulseEnv(t)
+	if err := os.WriteFile(e.snooze, []byte(`[{"pulse":"spans"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := run(e.args(), &out, &errb, defaultProbes(), e.notifier()); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+}
+
+// AA-15: an expired snooze does not silence the alarm and is named in it.
+func TestRun_ExpiredSnoozeAlarms(t *testing.T) {
+	e := stalePulseEnv(t)
+	until := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	doc := `[{"pulse":"spans","until":"` + until + `","reason":"was migrating"}]`
+	if err := os.WriteFile(e.snooze, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := run(e.args(), &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if len(e.notices) != 1 || !strings.Contains(e.notices[0], "snooze expired") {
+		t.Fatalf("notices = %v, want alarm naming the expired snooze", e.notices)
+	}
+}
+
+// AA-17: a notification failure is reported and does not change the exit code.
+func TestRun_NotifyFailureKeepsExitCode(t *testing.T) {
+	e := stalePulseEnv(t)
+	e.notifyErr = errors.New("osascript unavailable")
+	var out, errb bytes.Buffer
+	if code := run(e.args(), &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+		t.Fatalf("exit = %d, want 1 despite notify failure", code)
+	}
+	if !strings.Contains(errb.String(), "notify") {
+		t.Errorf("stderr does not report the notify failure: %s", errb.String())
+	}
+}
+
+// AA-19: a missing config is a usage error, not a quiet OK.
+func TestRun_MissingConfigExits2(t *testing.T) {
+	e := newRunEnv(t, `{"pulses":[{"name":"a","type":"command","command":["true"]}]}`)
+	var out, errb bytes.Buffer
+	args := e.args()
+	args[1] = filepath.Join(e.dir, "no-such-config.json")
+	if code := run(args, &out, &errb, defaultProbes(), e.notifier()); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+}
+
+// AA-20: dry-run alarms in the report but performs no side effects.
+func TestRun_DryRunHasNoSideEffects(t *testing.T) {
+	e := stalePulseEnv(t)
+	var out, errb bytes.Buffer
+	if code := run(e.args("--dry-run"), &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if len(e.notices) != 0 {
+		t.Errorf("dry run notified: %v", e.notices)
+	}
+	for _, p := range []string{e.state, e.journal, e.heartbeat} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("dry run wrote %s", p)
+		}
+	}
+}
+
+// AA-21 + AA-22: JSON mode emits one object listing every pulse once.
+func TestRun_JSONReport(t *testing.T) {
+	e := stalePulseEnv(t)
+	var out, errb bytes.Buffer
+	run(e.args("--json"), &out, &errb, defaultProbes(), e.notifier())
+	var rep report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, out.String())
+	}
+	if len(rep.Results) != 1 || rep.Alarming != 1 || rep.Results[0].Name != "spans" {
+		t.Fatalf("report = %+v", rep)
+	}
+}
+
+// AA-23: an unwritable journal is reported on stderr and the exit code holds.
+func TestRun_UnwritableJournalKeepsExitCode(t *testing.T) {
+	e := stalePulseEnv(t)
+	// A journal path whose parent is a file cannot be created.
+	blocker := filepath.Join(e.dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := e.args()
+	for i, a := range args {
+		if a == e.journal {
+			args[i] = filepath.Join(blocker, "journal.jsonl")
+		}
+	}
+	var out, errb bytes.Buffer
+	if code := run(args, &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "journal") {
+		t.Errorf("stderr does not report the journal failure: %s", errb.String())
+	}
+}

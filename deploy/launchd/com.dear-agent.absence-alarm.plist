@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.absence-alarm: alarm on the ABSENCE of expected positive
+  events (cmd/absence-alarm). Every silent multi-week outage of 2026-07/08
+  (mergeloop disabled 41 days, OTel dead 46 days, supervisors down 45 days,
+  sandbox GC failing hourly for a month) was invisible because monitoring
+  watched for errors, and a dead process emits no errors. This tick watches
+  for the missing heartbeat instead, and it runs on the host, outside the
+  mesh, because a watcher that lives inside the thing being watched dies
+  with it.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.dear-agent.absence-alarm</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__HOME__/go/bin/absence-alarm</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>__HOME__</string>
+		<key>PATH</key>
+		<string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>StartInterval</key>
+	<integer>600</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>AbandonProcessGroup</key>
+	<false/>
+	<key>WorkingDirectory</key>
+	<string>__HOME__</string>
+	<key>StandardOutPath</key>
+	<string>__HOME__/.local/state/dear-agent/absence-alarm.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/.local/state/dear-agent/absence-alarm.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,51 @@
+{
+  "pulses": [
+    {
+      "name": "main-merge",
+      "type": "command",
+      "command": ["/bin/sh", "-c", "git -C \"$HOME/src/dear-agent\" log -1 --since='96 hours ago' --pretty=%h origin/main | grep -q ."],
+      "window": "96h",
+      "expect": "a commit landed on dear-agent origin/main within 96h"
+    },
+    {
+      "name": "mergeloop-loaded",
+      "type": "launchd_loaded",
+      "label": "com.dear-agent.mergeloop",
+      "expect": "the mergeloop launchd job to be loaded"
+    },
+    {
+      "name": "mergeloop-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/mergeloop.out.log",
+      "window": "24h",
+      "expect": "a mergeloop tick within 24h"
+    },
+    {
+      "name": "otel-spans",
+      "type": "command",
+      "command": ["/bin/sh", "-c", "find \"$HOME/.engram/traces\" -name spans.jsonl -mtime -1 2>/dev/null | grep -q ."],
+      "window": "24h",
+      "expect": "a fresh OTel span JSONL file within 24h"
+    },
+    {
+      "name": "disk-watchdog-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/disk-watchdog.out.log",
+      "window": "1h",
+      "expect": "a disk-watchdog tick within 1h"
+    },
+    {
+      "name": "oauth-fresh",
+      "type": "command",
+      "command": ["~/go/bin/credential-monitor"],
+      "expect": "a fresh shared OAuth access token"
+    },
+    {
+      "name": "gobin-guard-heartbeat",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/gobin-guard.heartbeat",
+      "window": "15m",
+      "expect": "a gobin-guard heartbeat within 15m"
+    }
+  ]
+}
