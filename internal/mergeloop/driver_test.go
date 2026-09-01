@@ -54,12 +54,40 @@ func (f *fakeSpawner) Spawn(_ context.Context, req AgentRequest) (string, error)
 type fakeThreadResolver struct {
 	calls    []int
 	resolved int
+	withheld int
 	err      error
+
+	gateCalls []int
+	blocking  []BlockingFinding
+	gateErr   error
 }
 
-func (f *fakeThreadResolver) ResolveBotThreads(_ context.Context, _ string, pr int) (int, error) {
+func (f *fakeThreadResolver) ResolveBotThreads(_ context.Context, _ string, pr int) (ThreadResolution, error) {
 	f.calls = append(f.calls, pr)
-	return f.resolved, f.err
+	return ThreadResolution{Resolved: f.resolved, Withheld: f.withheld}, f.err
+}
+
+func (f *fakeThreadResolver) BlockingFindings(_ context.Context, _ string, pr int) ([]BlockingFinding, error) {
+	f.gateCalls = append(f.gateCalls, pr)
+	return f.blocking, f.gateErr
+}
+
+// auditActions flattens an audit log to its action names for assertions.
+func auditActions(evs []AuditEvent) []string {
+	out := make([]string, 0, len(evs))
+	for _, e := range evs {
+		out = append(out, e.Action)
+	}
+	return out
+}
+
+func hasAction(evs []AuditEvent, action string) bool {
+	for _, e := range evs {
+		if e.Action == action {
+			return true
+		}
+	}
+	return false
 }
 
 func newTestDriver(t *testing.T, prs []PR, deps *Deps) (*Driver, *Tracker) {
@@ -379,5 +407,125 @@ func TestThreadResolverErrorDoesNotBlockMerge(t *testing.T) {
 	}
 	if !foundError {
 		t.Error("expected thread_resolve_error audit event")
+	}
+}
+
+// ---- ce-lr7j: the independent at-merge-time review-thread gate ----
+//
+// The severity classifier decides what the loop may auto-resolve. This gate
+// decides what the loop may merge, and it deliberately does NOT trust the
+// classifier's earlier verdict: it re-queries the PR at merge time. A
+// classifier that mis-reads a future badge format still cannot land a blocking
+// finding, because the merge itself is refused here.
+
+func TestMergeRefusedWhenBlockingFindingPresent(t *testing.T) {
+	prs := []PR{{Number: 30, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{
+		blocking: []BlockingFinding{{
+			ThreadID: "PRRT_x", Author: "chatgpt-codex-connector",
+			Severity: SeverityBlocking, Excerpt: "Require delivery evidence before closing merged work",
+		}},
+	}
+	var audited []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr,
+		Audit: func(ev AuditEvent) { audited = append(audited, ev) }})
+
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(mer.calls) != 0 {
+		t.Errorf("merger was called %v, want no merge over a blocking finding", mer.calls)
+	}
+	if res.Merged != 0 {
+		t.Errorf("Merged = %d, want 0", res.Merged)
+	}
+	if !hasAction(audited, "merge_blocked_findings") {
+		t.Errorf("audit actions = %v, want merge_blocked_findings", auditActions(audited))
+	}
+}
+
+func TestMergeRefusedWhenGateErrors(t *testing.T) {
+	// Fail closed. An unreachable gate must never be read as "no findings".
+	prs := []PR{{Number: 31, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{gateErr: fmt.Errorf("GraphQL 502")}
+	var audited []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr,
+		Audit: func(ev AuditEvent) { audited = append(audited, ev) }})
+
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(mer.calls) != 0 {
+		t.Errorf("merger was called %v, want no merge when the gate cannot be evaluated", mer.calls)
+	}
+	if res.Merged != 0 {
+		t.Errorf("Merged = %d, want 0", res.Merged)
+	}
+	if !hasAction(audited, "thread_gate_error") {
+		t.Errorf("audit actions = %v, want thread_gate_error", auditActions(audited))
+	}
+}
+
+func TestMergeProceedsWhenGateClean(t *testing.T) {
+	prs := []PR{{Number: 32, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{resolved: 2}
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr})
+
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(thr.gateCalls) != 1 || thr.gateCalls[0] != 32 {
+		t.Errorf("gate calls = %v, want [32]: the gate must run on every merge", thr.gateCalls)
+	}
+	if res.Merged != 1 {
+		t.Errorf("Merged = %d, want 1", res.Merged)
+	}
+}
+
+func TestWithheldThreadsAreAudited(t *testing.T) {
+	// DoD item 6: a distinct audit event when a thread is withheld from
+	// auto-resolve on severity grounds, so the withholding is observable.
+	prs := []PR{{Number: 33, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	thr := &fakeThreadResolver{resolved: 1, withheld: 3}
+	var audited []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{Merger: &fakeMerger{}, Threads: thr,
+		Audit: func(ev AuditEvent) { audited = append(audited, ev) }})
+
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if !hasAction(audited, "bot_threads_withheld") {
+		t.Errorf("audit actions = %v, want bot_threads_withheld", auditActions(audited))
+	}
+	if !hasAction(audited, "bot_threads_resolved") {
+		t.Errorf("audit actions = %v, want bot_threads_resolved too", auditActions(audited))
+	}
+}
+
+func TestGateRunsEvenWhenResolverErrors(t *testing.T) {
+	// A resolver error leaves threads unresolved, which GitHub's own gate
+	// blocks, so it does not itself stop the merge attempt. The independent
+	// gate must still run: the resolver failing is not licence to skip it.
+	prs := []PR{{Number: 34, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{err: fmt.Errorf("GraphQL error")}
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr})
+
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(thr.gateCalls) != 1 {
+		t.Errorf("gate calls = %v, want the gate to run despite the resolver error", thr.gateCalls)
 	}
 }
