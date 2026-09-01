@@ -55,6 +55,7 @@
       "github.com/vbonnet/dear-agent/internal/baseline",
       "github.com/vbonnet/dear-agent/internal/telemetry/enrichment",
       "github.com/vbonnet/dear-agent/internal/telemetry/errors",
+      "github.com/vbonnet/dear-agent/pkg/absencealarm",
       "github.com/vbonnet/dear-agent/pkg/audit/verifiers",
       "github.com/vbonnet/dear-agent/pkg/benchmark",
       "github.com/vbonnet/dear-agent/pkg/frontmatter",
@@ -1023,6 +1024,31 @@
       },
       "reason": "The ACL-reloader goroutine moved again, from line 460 to 471, when watchACLReload was folded into serve to give cmdServe and the tests one shared orchestration. Still five go func sites in the file, still the same four without recover(), and the goroutine-recover total is unchanged at 29. Relocation, not a new finding.",
       "reference": "https://github.com/vbonnet/dear-agent/pull/1352"
+    },
+    {
+      "previous_baseline_sha256": "5d8fec39706f2a71b79fd298e8e370bdec834f6705e2514b537bb4c136e774dc",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/pkg/absencealarm"
+        ],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "pkg/absencealarm is the bottom slice of a 2-PR stack; its importer cmd/absence-alarm lands in the tip",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1427"
     }
   ]
 }
