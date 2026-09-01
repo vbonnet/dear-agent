@@ -1,4 +1,4 @@
-package main
+package absencealarm
 
 import (
 	"context"
@@ -54,8 +54,8 @@ const (
 	StatusSnoozed Status = "snoozed"
 )
 
-// alarming reports whether the status raises an alarm (AA-07).
-func (s Status) alarming() bool { return s == StatusAbsent || s == StatusUndetermined }
+// Alarming reports whether the status raises an alarm (AA-07).
+func (s Status) Alarming() bool { return s == StatusAbsent || s == StatusUndetermined }
 
 // Result is the report entry for one pulse (AA-21).
 type Result struct {
@@ -68,8 +68,8 @@ type Result struct {
 	Misses   int       `json:"misses,omitempty"`
 }
 
-// pulseConfig is the on-disk configuration document.
-type pulseConfig struct {
+// PulseConfig is the on-disk configuration document.
+type PulseConfig struct {
 	Pulses []Pulse `json:"pulses"`
 }
 
@@ -77,19 +77,20 @@ type pulseConfig struct {
 // sit before it stops counting as proof of life (AA-06).
 const clockSkewTolerance = 5 * time.Minute
 
-// probes are the injectable host observations, so tests never touch the
+// Probes are the injectable host observations, so tests never touch the
 // real launchd, filesystem clock, or subprocesses.
-type probes struct {
-	now         func() time.Time
-	statMtime   func(path string) (mtime time.Time, exists bool, err error)
-	launchdList func(ctx context.Context) (string, error)
-	runCommand  func(ctx context.Context, argv []string) (exitCode int, err error)
+type Probes struct {
+	Now         func() time.Time
+	StatMtime   func(path string) (mtime time.Time, exists bool, err error)
+	LaunchdList func(ctx context.Context) (string, error)
+	RunCommand  func(ctx context.Context, argv []string) (exitCode int, err error)
 }
 
-func defaultProbes() probes {
-	return probes{
-		now: time.Now,
-		statMtime: func(path string) (time.Time, bool, error) {
+// DefaultProbes returns the real host observations used outside tests.
+func DefaultProbes() Probes {
+	return Probes{
+		Now: time.Now,
+		StatMtime: func(path string) (time.Time, bool, error) {
 			fi, err := os.Stat(path)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -99,14 +100,14 @@ func defaultProbes() probes {
 			}
 			return fi.ModTime(), true, nil
 		},
-		launchdList: func(ctx context.Context) (string, error) {
+		LaunchdList: func(ctx context.Context) (string, error) {
 			out, err := exec.CommandContext(ctx, "launchctl", "list").Output()
 			if err != nil {
 				return "", err
 			}
 			return string(out), nil
 		},
-		runCommand: func(ctx context.Context, argv []string) (int, error) {
+		RunCommand: func(ctx context.Context, argv []string) (int, error) {
 			cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 			err := cmd.Run()
 			if err == nil {
@@ -120,15 +121,15 @@ func defaultProbes() probes {
 	}
 }
 
-// loadPulseConfig reads and validates the pulse configuration. Any invalid
+// LoadPulseConfig reads and validates the pulse configuration. Any invalid
 // pulse refuses the whole run (AA-19): a typo must not silently unmonitor
 // part of the fleet.
-func loadPulseConfig(path string) ([]Pulse, error) {
+func LoadPulseConfig(path string) ([]Pulse, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read pulse config: %w", err)
 	}
-	var cfg pulseConfig
+	var cfg PulseConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("parse pulse config %s: %w", path, err)
 	}
@@ -198,12 +199,12 @@ func expandHome(s string) string {
 	return s
 }
 
-// evaluatePulse probes one pulse and classifies it (AA-01..AA-06).
-func evaluatePulse(ctx context.Context, p Pulse, pr probes, launchdListing string, launchdErr error) Result {
+// EvaluatePulse Probes one pulse and classifies it (AA-01..AA-06).
+func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing string, launchdErr error) Result {
 	res := Result{Name: p.Name, Expect: p.Expect, Window: p.Window}
 	switch p.Type {
 	case PulseFileMtime:
-		mtime, exists, err := pr.statMtime(p.Path)
+		mtime, exists, err := pr.StatMtime(p.Path)
 		if err != nil {
 			res.Status = StatusUndetermined
 			res.Reason = fmt.Sprintf("stat %s: %v", p.Path, err)
@@ -215,7 +216,7 @@ func evaluatePulse(ctx context.Context, p Pulse, pr probes, launchdListing strin
 			return res
 		}
 		res.Evidence = mtime
-		now := pr.now()
+		now := pr.Now()
 		if mtime.After(now.Add(clockSkewTolerance)) {
 			res.Status = StatusUndetermined
 			res.Reason = fmt.Sprintf("%s modified %s in the future", p.Path, mtime.Sub(now).Round(time.Second))
@@ -240,7 +241,7 @@ func evaluatePulse(ctx context.Context, p Pulse, pr probes, launchdListing strin
 		}
 		res.Status = StatusPresent
 	case PulseCommand:
-		code, err := pr.runCommand(ctx, p.Command)
+		code, err := pr.RunCommand(ctx, p.Command)
 		if err != nil {
 			res.Status = StatusUndetermined
 			res.Reason = fmt.Sprintf("run %s: %v", strings.Join(p.Command, " "), err)

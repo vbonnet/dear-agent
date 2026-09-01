@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/vbonnet/dear-agent/pkg/absencealarm"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +78,7 @@ func stalePulseEnv(t *testing.T) *runEnv {
 func TestRun_AbsentPulseAlarms(t *testing.T) {
 	e := stalePulseEnv(t)
 	var out, errb bytes.Buffer
-	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	code := run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 	}
@@ -88,14 +89,14 @@ func TestRun_AbsentPulseAlarms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("journal not written: %v", err)
 	}
-	var rec journalRecord
+	var rec absencealarm.JournalRecord
 	if err := json.Unmarshal(bytes.TrimSpace(raw), &rec); err != nil {
 		t.Fatalf("journal not JSONL: %v", err)
 	}
-	if rec.Pulse != "spans" || rec.Status != StatusAbsent || rec.Misses != 1 {
+	if rec.Pulse != "spans" || rec.Status != absencealarm.StatusAbsent || rec.Misses != 1 {
 		t.Errorf("journal record = %+v", rec)
 	}
-	var hb heartbeat
+	var hb absencealarm.Heartbeat
 	hraw, err := os.ReadFile(e.heartbeat)
 	if err != nil {
 		t.Fatalf("heartbeat not written: %v", err)
@@ -110,8 +111,8 @@ func TestRun_AbsentPulseAlarms(t *testing.T) {
 func TestRun_SecondTickDedupsNotification(t *testing.T) {
 	e := stalePulseEnv(t)
 	var out, errb bytes.Buffer
-	run(e.args(), &out, &errb, defaultProbes(), e.notifier())
-	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
+	code := run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
@@ -128,10 +129,10 @@ func TestRun_SecondTickDedupsNotification(t *testing.T) {
 func TestRun_RecoveryNotifies(t *testing.T) {
 	e := stalePulseEnv(t)
 	var out, errb bytes.Buffer
-	run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
 
 	// Freshen the watched file: the pulse returns.
-	var cfg pulseConfig
+	var cfg absencealarm.PulseConfig
 	raw, _ := os.ReadFile(e.config)
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func TestRun_RecoveryNotifies(t *testing.T) {
 	if err := os.Chtimes(cfg.Pulses[0].Path, now, now); err != nil {
 		t.Fatal(err)
 	}
-	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	code := run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 after recovery", code)
 	}
@@ -158,7 +159,7 @@ func TestRun_SnoozedPulseIsQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := run(e.args(), &out, &errb, defaultProbes(), e.notifier())
+	code := run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 for a snoozed pulse", code)
 	}
@@ -177,7 +178,7 @@ func TestRun_SnoozeWithoutExpiryExits2(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	if code := run(e.args(), &out, &errb, defaultProbes(), e.notifier()); code != 2 {
+	if code := run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier()); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
 	}
 }
@@ -191,7 +192,7 @@ func TestRun_ExpiredSnoozeAlarms(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	if code := run(e.args(), &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+	if code := run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier()); code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	if len(e.notices) != 1 || !strings.Contains(e.notices[0], "snooze expired") {
@@ -204,7 +205,7 @@ func TestRun_NotifyFailureKeepsExitCode(t *testing.T) {
 	e := stalePulseEnv(t)
 	e.notifyErr = errors.New("osascript unavailable")
 	var out, errb bytes.Buffer
-	if code := run(e.args(), &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+	if code := run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier()); code != 1 {
 		t.Fatalf("exit = %d, want 1 despite notify failure", code)
 	}
 	if !strings.Contains(errb.String(), "notify") {
@@ -218,7 +219,7 @@ func TestRun_MissingConfigExits2(t *testing.T) {
 	var out, errb bytes.Buffer
 	args := e.args()
 	args[1] = filepath.Join(e.dir, "no-such-config.json")
-	if code := run(args, &out, &errb, defaultProbes(), e.notifier()); code != 2 {
+	if code := run(args, &out, &errb, absencealarm.DefaultProbes(), e.notifier()); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
 	}
 }
@@ -227,7 +228,7 @@ func TestRun_MissingConfigExits2(t *testing.T) {
 func TestRun_DryRunHasNoSideEffects(t *testing.T) {
 	e := stalePulseEnv(t)
 	var out, errb bytes.Buffer
-	if code := run(e.args("--dry-run"), &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+	if code := run(e.args("--dry-run"), &out, &errb, absencealarm.DefaultProbes(), e.notifier()); code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	if len(e.notices) != 0 {
@@ -244,7 +245,7 @@ func TestRun_DryRunHasNoSideEffects(t *testing.T) {
 func TestRun_JSONReport(t *testing.T) {
 	e := stalePulseEnv(t)
 	var out, errb bytes.Buffer
-	run(e.args("--json"), &out, &errb, defaultProbes(), e.notifier())
+	run(e.args("--json"), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
 	var rep report
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("stdout is not one JSON object: %v\n%s", err, out.String())
@@ -269,7 +270,7 @@ func TestRun_UnwritableJournalKeepsExitCode(t *testing.T) {
 		}
 	}
 	var out, errb bytes.Buffer
-	if code := run(args, &out, &errb, defaultProbes(), e.notifier()); code != 1 {
+	if code := run(args, &out, &errb, absencealarm.DefaultProbes(), e.notifier()); code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	if !strings.Contains(errb.String(), "journal") {
