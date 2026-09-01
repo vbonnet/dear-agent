@@ -50,6 +50,25 @@ fail() { printf '%s✗%s %s\n' "$R" "$N" "$*"; exit 1; }
 # Mirror CI: GOWORK=off so we don't accidentally pull in unrelated modules.
 export GOWORK=off
 
+# golangci-lint takes a file lock at $TMPDIR/golangci-lint.lock on every run and
+# exits 3 ("parallel golangci-lint is running") when it cannot acquire it. That
+# lock is global to the host: it is scoped to neither the repository nor the
+# checkout. safe-pr's own transaction lock is keyed on the worktree git dir, so
+# it does not serialize two agents in different worktrees: both reach
+# `make preflight-full` and one dies on the other's linter lock. A global lock
+# in the shift-left gate wedges the tool everyone uses to open a PR.
+#
+# --allow-parallel-runners releases the lock. It is only safe when each run owns
+# its cache, which is why the two settings below are a pair: isolating the cache
+# alone does not help (the lock is not under the cache), and allowing parallel
+# runners over one shared cache is the corruption case upstream warns about.
+#
+# The cache is keyed on this checkout rather than made unique per invocation, so
+# it stays warm across runs in one worktree while never being shared with a
+# concurrent run in another. Callers may override it.
+: "${GOLANGCI_LINT_CACHE:=${XDG_CACHE_HOME:-$HOME/.cache}/dear-agent/golangci-lint/$(printf '%s' "$REPO_ROOT" | cksum | cut -d' ' -f1)}"
+export GOLANGCI_LINT_CACHE
+
 START_TS=$(date +%s)
 
 step "go mod download"
@@ -99,7 +118,19 @@ fi
 # visible in the log.
 LINT_VER="$(golangci-lint version 2>&1 | head -n 1 || true)"
 warn "local linter: ${LINT_VER}"
-golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
+warn "lint cache: ${GOLANGCI_LINT_CACHE}"
+# Do not collapse the linter's exit codes. Exit 3 is "could not acquire the
+# lock", and folding it into fail()'s exit 1 is what made months of lock
+# collisions indistinguishable from real lint failures in safe-pr's audit log.
+set +e
+golangci-lint run --allow-parallel-runners --timeout=5m ./...
+LINT_RC=$?
+set -e
+if [[ "$LINT_RC" -eq 3 ]]; then
+  fail "golangci-lint could not acquire its lock (exit 3) despite --allow-parallel-runners. Another run is holding ${TMPDIR:-/tmp}golangci-lint.lock; this is a tooling regression, not a lint failure."
+elif [[ "$LINT_RC" -ne 0 ]]; then
+  fail "lint failed (see above)"
+fi
 ok "lint clean"
 
 step "verify AGM plugin hashes"
