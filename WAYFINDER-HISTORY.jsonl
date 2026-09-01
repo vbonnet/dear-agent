@@ -1,1 +1,2 @@
 {"timestamp":"2026-09-01T10:41:00.829692-07:00","type":"phase.started","phase":"CHARTER"}
+{"timestamp":"2026-09-01T10:41:00.987427-07:00","type":"validation.failed","phase":"PROBLEM","data":{"error":"cannot start PROBLEM: previous phase CHARTER is not completed. Fix: Complete CHARTER first with 'complete-phase CHARTER'"}}
