@@ -61,6 +61,7 @@ allowlist AGM already pre-approves into the same file.
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/claudetrust/trust_test.go`,
   `agm/internal/claudetrust/mcp_test.go`
 - Wiring tests: `agm/cmd/agm/new_session_trust_test.go`
