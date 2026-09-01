@@ -55,13 +55,17 @@ func run(argv []string) error {
 	}
 	mode := argv[0]
 	if mode == "-h" || mode == "--help" {
-		fmt.Println("mergeloop <tick|run> [flags] — persistent PR-merge loop (ADR-029)")
-		fmt.Println("  tick   one idempotent pass over all open PRs")
-		fmt.Println("  run    daemon: tick, sleep --interval, repeat")
+		fmt.Println("mergeloop <tick|run|threads> [flags] — persistent PR-merge loop (ADR-029)")
+		fmt.Println("  tick     one idempotent pass over all open PRs")
+		fmt.Println("  run      daemon: tick, sleep --interval, repeat")
+		fmt.Println("  threads  read-only: show how one PR's review threads classify")
 		return nil
 	}
+	if mode == "threads" {
+		return runThreadsReport(argv[1:])
+	}
 	if mode != "tick" && mode != "run" {
-		return fmt.Errorf("unknown mode %q (want tick or run)", mode)
+		return fmt.Errorf("unknown mode %q (want tick, run, or threads)", mode)
 	}
 
 	opts := options{mode: mode}
