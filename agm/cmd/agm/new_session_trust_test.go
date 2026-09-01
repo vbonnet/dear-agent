@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 func trustedProjects(t *testing.T, home string) map[string]map[string]any {
@@ -73,6 +75,47 @@ func TestSeedWorkspaceTrustSkipsOtherHarnesses(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".claude.json")); !os.IsNotExist(err) {
 		t.Error("seeding a non-Claude harness touched the Claude config")
+	}
+}
+
+func mcpApprovedIn(t *testing.T, workDir string) bool {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(workDir, ".claude", "settings.local.json"))
+	if err != nil {
+		return false
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parse sandbox settings: %v", err)
+	}
+	return settings["enableAllProjectMcpServers"] == true
+}
+
+// Seeding trust alone only moves the stall one dialog later: a project shipping
+// a .mcp.json blocks on the MCP-server prompt instead.
+func TestApproveSandboxProjectMcpServersApprovesInSandbox(t *testing.T) {
+	workDir := t.TempDir()
+	approveSandboxProjectMcpServers("claude-code", &manifest.SandboxConfig{Enabled: true}, workDir)
+	if !mcpApprovedIn(t, workDir) {
+		t.Error("project MCP servers were not pre-approved in a sandbox workspace")
+	}
+}
+
+// A non-sandboxed session runs in a checkout the user works in. Enabling
+// code-executing servers there is not AGM's call to make.
+func TestApproveSandboxProjectMcpServersSkipsRealCheckouts(t *testing.T) {
+	workDir := t.TempDir()
+	approveSandboxProjectMcpServers("claude-code", nil, workDir)
+	if mcpApprovedIn(t, workDir) {
+		t.Error("project MCP servers were pre-approved outside a sandbox")
+	}
+}
+
+func TestApproveSandboxProjectMcpServersSkipsOtherHarnesses(t *testing.T) {
+	workDir := t.TempDir()
+	approveSandboxProjectMcpServers("codex-cli", &manifest.SandboxConfig{Enabled: true}, workDir)
+	if mcpApprovedIn(t, workDir) {
+		t.Error("project MCP servers were pre-approved for a non-Claude harness")
 	}
 }
 

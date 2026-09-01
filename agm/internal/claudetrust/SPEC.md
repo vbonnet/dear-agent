@@ -39,9 +39,30 @@ composer wait gives up.
 
 **TRUST-08** When seeding fails, the session-creation path shall report trust as not pre-configured, so the trust dialog monitor runs instead of being skipped.
 
+## Project MCP servers
+
+A project that ships a `.mcp.json` triggers a second prompt on first run in each
+new directory, asking which of its servers to enable. That prompt owns input the
+same way the trust dialog does, so seeding trust alone only moves the stall one
+dialog later.
+
+Approving it is a capability grant: MCP servers can execute code. The grant is
+therefore limited to sandbox workspaces, which are throwaway clones, and covers
+only the servers the cloned project declares itself — alongside the permission
+allowlist AGM already pre-approves into the same file.
+
+**MCP-01** When a sandboxed Claude session is prepared, the system shall pre-approve the project's declared MCP servers in the sandbox workspace's `.claude/settings.local.json`.
+
+**MCP-02** When a session is not sandboxed, the system shall not pre-approve project MCP servers, so a real checkout is never widened on the user's behalf.
+
+**MCP-03** When the workspace settings file already exists, the system shall preserve its contents, including the permission allowlist written earlier in preparation.
+
+**MCP-04** When the workspace settings file cannot be parsed, the system shall return an error and leave it unchanged.
+
 ## BDD Traceability
 
-- Package tests: `agm/internal/claudetrust/trust_test.go`
+- Package tests: `agm/internal/claudetrust/trust_test.go`,
+  `agm/internal/claudetrust/mcp_test.go`
 - Wiring tests: `agm/cmd/agm/new_session_trust_test.go`
 - Dialog fallback: `agm/internal/tmux/trust_option_block_test.go`,
   `agm/internal/tmux/trust_answer_test.go`

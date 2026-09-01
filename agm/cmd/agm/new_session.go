@@ -232,6 +232,7 @@ func runCreateSessionLifecycle(
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
 		trustPreConfigured = seedWorkspaceTrust(harnessName, preparedWorkDir)
+		approveSandboxProjectMcpServers(harnessName, preparedSandbox, preparedWorkDir)
 		bypassCodexHookTrust, prepareErr = prepareCodexHookTrustBypass(prepareCtx, preparedSandbox)
 		if prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
@@ -587,6 +588,27 @@ func seedWorkspaceTrust(harness, workDir string) bool {
 	}
 	debug.Log("Pre-approved workspace trust for %s", seeded)
 	return true
+}
+
+// approveSandboxProjectMcpServers pre-answers Claude's project MCP-server
+// prompt, which otherwise blocks the composer immediately after the trust
+// dialog and stalls the spawn just the same.
+//
+// Sandboxes only. The workspace here is a throwaway clone, and the servers being
+// enabled are the ones the cloned project declares in its own .mcp.json —
+// alongside the permission allowlist configureProjectPermissions has already
+// written to the same file. A non-sandboxed session runs in a real checkout the
+// user works in, and AGM does not widen that on their behalf.
+func approveSandboxProjectMcpServers(harness string, sandboxInfo *manifest.SandboxConfig, workDir string) {
+	if sandboxInfo == nil || agent.NormalizeHarnessName(harness) != "claude-code" {
+		return
+	}
+	if err := claudetrust.ApproveProjectMcpServers(workDir); err != nil {
+		debug.Log("Could not pre-approve project MCP servers: %v", err)
+		ui.PrintWarning("Could not pre-approve project MCP servers - the MCP prompt may appear")
+		return
+	}
+	debug.Log("Pre-approved project MCP servers for %s", workDir)
 }
 
 // collectExtraAddDirsForHarness resolves the current configured writable roots
