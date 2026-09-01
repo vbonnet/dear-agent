@@ -114,3 +114,17 @@ place, so counting either would let a broken reaper suppress its own alarm.
 **DW-22** When evaluating reaper liveness, the system shall ignore records that are not sandbox-GC operations and records timestamped beyond the clock-skew tolerance (5 minutes) ahead of the current time.
 
 **DW-23** If the sandbox GC log cannot be read, then the system shall classify the sandbox reaper as stale.
+
+**DW-32** The system shall reap abandoned Go-style build caches on every tick, regardless of whether any disk threshold is breached. A cache older than the age gate has no value — the next run creates its own — and on this host they accrued roughly 9 GB/day, so deferring the reap to a breach would absorb that growth between breaches instead of bounding it.
+
+**DW-33** When identifying a build cache, the system shall require structural proof and shall never rely on the directory's name: every top-level entry must be a two-hex-digit shard directory or known cache furniture, there must be at least 64 shards, and every sampled shard must contain only content-addressed cache files or nothing at all. A directory holding any foreign entry, at either level, shall be kept.
+
+**DW-34** When a build cache's modification time is newer than the configured age gate, when a process holds a file open inside it, or when that liveness probe cannot be evaluated, the system shall keep the cache and shall record the reason it was kept.
+
+**DW-35** While dry-run mode is set, the system shall scan for build caches and report the reclaimable bytes but shall delete nothing.
+
+**DW-36** The system shall not follow symbolic links when scanning for build caches, so a link planted inside a scanned directory cannot direct a deletion outside the configured scan roots.
+
+**DW-37** When the configured build-cache age gate is not positive while the reaper is enabled, the system shall reject it as a usage error and exit 2, because a zero or negative window would make a cache an in-flight build is writing immediately eligible. Passing empty scan roots is the supported way to disable the reaper.
+
+**DW-38** When a configured build-cache scan root does not exist, the system shall treat it as an empty result rather than a failure, so a host without that directory still completes a healthy tick.
