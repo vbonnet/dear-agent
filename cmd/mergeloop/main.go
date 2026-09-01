@@ -143,7 +143,7 @@ func newMergeLoopFlagSet(mode string, opts *options) *flag.FlagSet {
 	fs := flag.NewFlagSet("mergeloop "+mode, flag.ContinueOnError)
 	fs.StringVar(&opts.repo, "repo", "", "GitHub repo owner/name (auto-detected if empty)")
 	fs.DurationVar(&opts.interval, "interval", 10*time.Minute, "run mode: delay between ticks")
-	fs.IntVar(&opts.cap, "cap", 50, "backpressure: skip the tick above this many open PRs")
+	fs.IntVar(&opts.cap, "cap", mergeloop.DefaultCap, "backpressure: skip the tick above this many open PRs")
 	fs.IntVar(&opts.maxAttempts, "max-attempts", mergeloop.DefaultMaxAgentAttempts, "max agent fix attempts per PR before escalation")
 	fs.DurationVar(&opts.stallThreshold, "stall-threshold", time.Hour, "a PR actionable but untouched longer than this is counted as stalled")
 	fs.DurationVar(&opts.rebaseCooldown, "rebase-cooldown", mergeloop.DefaultRebaseCooldown, "minimum delay between two rebases of the same PR; must exceed the slowest required check so CI can finish (0 disables)")

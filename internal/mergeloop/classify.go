@@ -327,3 +327,16 @@ func isPermanentProjectionError(errStr string) bool {
 		strings.Contains(lower, "reconciling") ||
 		strings.Contains(lower, "normalizing")
 }
+
+// DefaultCap is the backpressure ceiling: a tick that sees more open PRs than
+// this does nothing at all.
+//
+// The old value was 50, chosen when the repo carried ~12 open PRs. It sat two
+// PRs above the live count of 48 on 2026-09-01, which meant the loop was two
+// merges away from backpressuring itself into a permanent, silent no-op. That
+// is the same class of invisible stop as the 41-day outage this cap was never
+// meant to cause, so it now carries real headroom.
+//
+// Backpressure exists to stop the loop thrashing a queue it cannot drain, not
+// to switch it off. Raise this rather than let it bind.
+const DefaultCap = 250
