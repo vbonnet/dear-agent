@@ -53,6 +53,8 @@ creation.
 
 **SAFE-PR-19** When `reopen` is requested, the system shall require an explicit reason and stamp the active Wayfinder trace into the reopening comment before invoking GitHub CLI.
 
+**SAFE-PR-20** When `make preflight-full` fails, the system shall report the gate that failed, and the names of the failing tests when the gate collected them, rather than only the process exit status.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

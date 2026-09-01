@@ -24,9 +24,9 @@ type fakeRewindCommitter struct {
 
 func (f *fakeRewindCommitter) CheckGitRepo() (bool, error) { return f.isRepo, nil }
 
-func (f *fakeRewindCommitter) CommitRewind(_, _ string, _ archive.ArchiveRef) error {
+func (f *fakeRewindCommitter) CommitRewind(_, _ string, _ archive.ArchiveRef) (bool, error) {
 	f.called = true
-	return f.err
+	return f.err == nil, f.err
 }
 
 func TestCommitRewindStateReturnsCommitFailure(t *testing.T) {
@@ -163,7 +163,12 @@ func setupRewindCommandProject(t *testing.T, projectName, currentPhase string) s
 	gittest.Run(t, projectDir, "config", "user.email", "test@example.com")
 
 	for path, content := range map[string]string{
-		".gitignore": ".wayfinder/archives/\n*.jsonl\nRETRO-retrospective.md\n",
+		// These cases pin rewind's commit scoping, not ignore policy, so the
+		// lifecycle artifacts stay commit-eligible here. A repository that
+		// ignores them keeps them untracked instead; that is covered by
+		// internal/git's TestLifecycleCommitsLeaveIgnoredMarkersUntracked
+		// (ce-2sgej).
+		".gitignore": "*.tmp\n",
 		"README.md":  "# Test\n",
 	} {
 		if err := os.WriteFile(filepath.Join(projectDir, path), []byte(content), 0o644); err != nil {
@@ -273,7 +278,7 @@ func TestRunRewindSamePhaseCommitsExactTraceAndArchive(t *testing.T) {
 	}
 	committedFiles := string(committed)
 	if !strings.Contains(committedFiles, ".wayfinder/archives/RETRO-") {
-		t.Fatalf("rewind commit missing ignored archive:\n%s", committedFiles)
+		t.Fatalf("rewind commit missing exact archive:\n%s", committedFiles)
 	}
 	for _, unrelated := range []string{"user-notes.md", "RETRO-sibling"} {
 		if strings.Contains(committedFiles, unrelated) {

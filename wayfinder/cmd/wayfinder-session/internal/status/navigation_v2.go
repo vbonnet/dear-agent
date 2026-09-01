@@ -1,6 +1,14 @@
 package status
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrFinalWaypoint reports that the session is already on the last waypoint in
+// the sequence. Callers advancing a session pointer must distinguish this from
+// a malformed status, so it is a sentinel rather than a formatted string.
+var ErrFinalWaypoint = errors.New("already at final waypoint RETRO")
 
 // NextWaypoint returns the next waypoint in the V2 sequence
 // Returns error if:
@@ -30,7 +38,7 @@ func (s *StatusV2) NextWaypoint() (string, error) {
 
 	// Check if at final waypoint
 	if currentIdx == len(allWaypoints)-1 {
-		return "", fmt.Errorf("already at final waypoint RETRO")
+		return "", ErrFinalWaypoint
 	}
 
 	// Check if current waypoint is completed
@@ -49,7 +57,7 @@ func (s *StatusV2) NextWaypoint() (string, error) {
 		return allWaypoints[next], nil
 	}
 
-	return "", fmt.Errorf("already at final waypoint RETRO")
+	return "", ErrFinalWaypoint
 }
 
 // isWaypointCompleted checks if a waypoint is marked as completed or skipped

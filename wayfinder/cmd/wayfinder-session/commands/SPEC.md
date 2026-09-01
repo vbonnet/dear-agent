@@ -37,6 +37,14 @@
 
 **WFCMD-15** When `.wayfinder`, its lock directory, or its rewind lock file is a symbolic link, reparse point, non-directory parent, non-regular file, or multiply linked file, the system shall reject lock admission rather than open or create a lock outside the owned project namespace.
 
+**WFCMD-16** When a lifecycle command stages a canonical marker or phase artifact, the system shall obey the repository's ignore policy: a path the repository ignores and does not already track shall be left untracked rather than force-added.
+
+**WFCMD-17** When a lifecycle command skips every candidate artifact, the system shall not report that a Git commit was created.
+
+**WFCMD-18** When a phase completes and the session pointer is on that phase, the system shall advance `current_waypoint` to the next waypoint the profile runs, and shall move a `planning` session to `in-progress`. On the final waypoint the pointer shall be held rather than advanced.
+
+**WFCMD-19** When a phase completion is written, the system shall re-read the canonical status and shall fail rather than report success if the completion or the pointer advance did not persist.
+
 ## Traceability
 
 - Command tests: `wayfinder/cmd/wayfinder-session/commands/*_test.go`

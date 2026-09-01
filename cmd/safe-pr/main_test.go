@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -730,6 +731,51 @@ func TestRun_CreateAuditsFinalTransactionOutcome(t *testing.T) {
 			}
 			if tc.finalErr != "" && !strings.Contains(record.Error, tc.finalErr) {
 				t.Fatalf("audit error = %q, want substring %q", record.Error, tc.finalErr)
+			}
+		})
+	}
+}
+
+// TestPreflightFailureNamesTheGate pins that a preflight failure identifies
+// which gate broke. safe-pr previously surfaced only "preflight-full failed …
+// exit status 1", so an operator had to re-run the whole race suite just to
+// learn what had failed (ce-2sgej DoD 4).
+func TestPreflightFailureNamesTheGate(t *testing.T) {
+	tests := map[string]struct {
+		record string
+		want   []string
+	}{
+		"gate name only": {
+			record: "go vet failed\n",
+			want:   []string{"go vet failed"},
+		},
+		"gate name with failing tests": {
+			record: "tests failed\n--- FAIL: TestRepositoryTreeHasNoTemporalDebt\n--- FAIL: TestOther\n",
+			want:   []string{"tests failed", "TestRepositoryTreeHasNoTemporalDebt", "TestOther"},
+		},
+		"empty record falls back to the exit status": {
+			record: "",
+			want:   []string{"exit status 1"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			gateLog := filepath.Join(t.TempDir(), "gate")
+			if tc.record != "" {
+				if err := os.WriteFile(gateLog, []byte(tc.record), 0o600); err != nil {
+					t.Fatalf("seed gate log: %v", err)
+				}
+			}
+
+			err := describePreflightFailure(gateLog, errors.New("exit status 1"))
+			if err == nil {
+				t.Fatal("describePreflightFailure returned nil for a failed preflight")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not name %q", err.Error(), want)
+				}
 			}
 		})
 	}

@@ -8,6 +8,8 @@
 
 **BATS-02** If a shell guard changes its user-facing remediation contract, the system shall require the corresponding Bats expectation to pass.
 
+**BATS-03** When a preflight gate fails, the system shall record the gate name, and any failing test names it collected, to the report file the calling tool reads, without depending on the caller having enabled `pipefail`.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`

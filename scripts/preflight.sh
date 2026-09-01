@@ -19,6 +19,22 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Records the failing gate to $PREFLIGHT_GATE_LOG so callers (safe-pr) can name
+# it. Streaming output already says what broke; a caller that only sees the
+# exit status does not (ce-2sgej).
+# shellcheck source=scripts/lib/preflight-gate.sh
+source "$REPO_ROOT/scripts/lib/preflight-gate.sh"
+
+# One cleanup list so a later gate adding a temp file does not silently replace
+# an earlier gate's EXIT trap.
+PREFLIGHT_TMP_FILES=()
+cleanup_preflight_tmp() {
+  if [[ ${#PREFLIGHT_TMP_FILES[@]} -gt 0 ]]; then
+    rm -f "${PREFLIGHT_TMP_FILES[@]}"
+  fi
+}
+trap cleanup_preflight_tmp EXIT
+
 MODE="fast"
 case "${1:-}" in
   --full) MODE="full" ;;
@@ -45,7 +61,15 @@ fi
 step() { printf '%s==> %s%s\n' "$B" "$*" "$N"; }
 ok()   { printf '%s✓%s %s\n' "$G" "$N" "$*"; }
 warn() { printf '%s!%s %s\n' "$Y" "$N" "$*"; }
-fail() { printf '%s✗%s %s\n' "$R" "$N" "$*"; exit 1; }
+fail() {
+  printf '%s✗%s %s\n' "$R" "$N" "$*"
+  preflight_record_gate "$*"
+  exit 1
+}
+
+# Aborts on a gate that has already written its own report (with details), so
+# the summary line does not overwrite the detail lines with a bare gate name.
+fail_recorded() { printf '%s✗%s %s\n' "$R" "$N" "$*"; exit 1; }
 
 # Full preflight requires an exclusive host-scoped advisory lease so that
 # concurrent preflight-full runs across worktrees do not contend for memory,
@@ -82,6 +106,9 @@ cleanup_preflight() {
     if grep -q "^PID=$$$" "$OWNER_FILE" 2>/dev/null; then
       rm -f "$OWNER_FILE" 2>/dev/null || true
     fi
+  fi
+  if [[ ${#PREFLIGHT_TMP_FILES[@]} -gt 0 ]]; then
+    rm -f "${PREFLIGHT_TMP_FILES[@]}" 2>/dev/null || true
   fi
   if [[ -n "${TMP_VULN:-}" && -f "${TMP_VULN:-}" ]]; then
     rm -f "$TMP_VULN" 2>/dev/null || true
@@ -223,7 +250,7 @@ export GOLANGCI_LINT_CACHE
 START_TS=$(date +%s)
 
 step "go mod download"
-go mod download
+go mod download || fail "go mod download failed"
 ok "modules ready"
 
 step "go vet ./..."
@@ -308,10 +335,14 @@ if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
   fi
   # --full and --race both use -race -count=1 (CI parity for data-race detection).
   # --tests skips -race for a faster contributor sanity check.
+  TEST_LOG="$(mktemp)"
+  PREFLIGHT_TMP_FILES+=("$TEST_LOG")
   if [[ "$MODE" == "full" || "$MODE" == "race" ]]; then
-    go test -race -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail "tests failed"
+    preflight_run_go_tests "tests failed" "$TEST_LOG" \
+      go test -race -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail_recorded "tests failed"
   else
-    go test -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail "tests failed"
+    preflight_run_go_tests "tests failed" "$TEST_LOG" \
+      go test -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail_recorded "tests failed"
   fi
   ok "tests pass"
 fi
@@ -326,12 +357,15 @@ if [[ "$MODE" == "full" ]]; then
   # Clear inherited Go test flags as well as CI: GOFLAGS=-race, -short, -run,
   # or custom tags can otherwise skip the exact assertions this gate exists to
   # enforce while `go test` still exits successfully.
-  GOFLAGS='' CI='' go test -race=false -short=false -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
+  SLA_LOG="$(mktemp)"
+  PREFLIGHT_TMP_FILES+=("$SLA_LOG")
+  GOFLAGS='' CI='' preflight_run_go_tests "ordinary performance SLA tests failed" "$SLA_LOG" \
+    go test -race=false -short=false -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
     ./pkg/workflow \
     ./agm/test/performance \
     ./internal/telemetry/enrichment \
     ./pkg/validation/scope ||
-    fail "ordinary performance SLA tests failed"
+    fail_recorded "ordinary performance SLA tests failed"
   ok "ordinary performance SLAs pass"
 
   step "govulncheck ./..."
@@ -363,7 +397,7 @@ if [[ "$MODE" == "full" ]]; then
   # `-t prefix.XXX.json` template tripping GNU mktemp's "must end in XXX"
   # rule is not worth the prettier filename.
   TMP_VULN=$(mktemp)
-  # cleanup_preflight registered above removes TMP_VULN on exit.
+  PREFLIGHT_TMP_FILES+=("$TMP_VULN")
   # govulncheck exit codes: 0 = no findings, 3 = findings (allowlisted or
   # not). Anything else (compile error, panic, module load failure) is a
   # real failure we must not mask. A blanket `|| true` would let those
