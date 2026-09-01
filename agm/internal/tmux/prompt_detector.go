@@ -450,6 +450,11 @@ type claudeInputProbeRuntime struct {
 	capture   func(context.Context, string) (string, error)
 	liveness  func(context.Context, activePaneTarget) (PaneLiveness, error)
 	sendEnter func(context.Context, string) error
+	// sendKey delivers a named tmux key (only "Up"/"Down" here) to move the
+	// trust dialog's selector. It is separate from sendEnter so the two
+	// authorizations stay distinct: moving a selector is reversible, confirming
+	// it is not.
+	sendKey func(context.Context, string, string) error
 }
 
 type claudeInputObservation struct {
@@ -484,6 +489,10 @@ func probeClaudeInputContext(ctx context.Context, sessionName string, autoAnswer
 		},
 		sendEnter: func(ctx context.Context, targetPane string) error {
 			_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "send-keys", "-t", targetPane, "-H", "0d")
+			return err
+		},
+		sendKey: func(ctx context.Context, targetPane, key string) error {
+			_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "send-keys", "-t", targetPane, key)
 			return err
 		},
 	}
@@ -524,7 +533,8 @@ func observeClaudeInput(
 		return claudeInputObservation{}, fmt.Errorf("capture current Claude pane %q: %w", targetPane.ID, err)
 	}
 	observation, selection := classifyClaudeInputObservation(content)
-	needsLiveClaude := observation.probe.ComposerOwnsInput || autoAnswerTrust && selection == claudeTrustAffirmativeSelected
+	answerableTrust := selection == claudeTrustAffirmativeSelected || selection == claudeTrustNegativeSelected
+	needsLiveClaude := observation.probe.ComposerOwnsInput || autoAnswerTrust && answerableTrust
 	if !needsLiveClaude {
 		return observation, nil
 	}
@@ -547,6 +557,27 @@ func observeClaudeInput(
 		return observation, fmt.Errorf("re-capture current Claude pane %q before trust answer: %w", targetPane.ID, err)
 	}
 	observation, selection = classifyClaudeInputObservation(content)
+
+	// The dialog opens with "No, exit" selected, so observing it is not enough:
+	// left alone it never resolves, and a blind Enter kills the harness. Move
+	// the selector onto the affirmative option first, then re-verify before
+	// confirming — the capture after the move is what authorizes Enter, never
+	// the assumption that the move landed.
+	if selection == claudeTrustNegativeSelected {
+		key, needsMove := trustAffirmativeNavigationKey(content)
+		if !needsMove || runtime.sendKey == nil {
+			return observation, nil
+		}
+		if err := runtime.sendKey(ctx, targetPane.ID, key); err != nil {
+			return observation, fmt.Errorf("move Claude trust selector on pane %q: %w", targetPane.ID, err)
+		}
+		content, err = runtime.capture(ctx, targetPane.ID)
+		if err != nil {
+			return observation, fmt.Errorf("re-capture current Claude pane %q after trust selector move: %w", targetPane.ID, err)
+		}
+		observation, selection = classifyClaudeInputObservation(content)
+	}
+
 	if selection != claudeTrustAffirmativeSelected {
 		return observation, nil
 	}
@@ -619,6 +650,14 @@ func classifyTrustDialogOwnership(content string) claudeTrustSelection {
 		}
 	}
 	if selectorIndex < 0 {
+		// The numbered, Yes-first patterns above match nothing against Claude
+		// Code 2.1.234, which renders the options unnumbered and No-first. Fall
+		// back to the tail-shaped option-block recognizer before the partial
+		// heuristic, so a fully rendered current-layout dialog is classified
+		// precisely rather than as merely indeterminate.
+		if selection := classifyCurrentTrustOptionBlock(content); selection != claudeTrustNotSelected {
+			return selection
+		}
 		if partialTrustDialogOwnsTail(content) {
 			return claudeTrustIndeterminateSelected
 		}

@@ -61,6 +61,45 @@ func ReadyTimeout() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
+// Composer-detection wait bounds. This budget covers a different thing from
+// ReadyTimeout: not the association ready-file, but the harness reaching its
+// interactive prompt at all. A cold Claude start is routinely slower than the
+// ready-file wait, so the default stays at the 90s this wait has always used —
+// honoring AGM_READY_TIMEOUT_SECONDS must not silently shorten it.
+const (
+	defaultClaudePromptTimeout = 90 * time.Second
+	minClaudePromptTimeout     = 5 * time.Second
+	maxClaudePromptTimeout     = 600 * time.Second
+)
+
+// ClaudePromptTimeout returns the budget for waiting on Claude's composer.
+//
+// It honors AGM_READY_TIMEOUT_SECONDS, which was previously ignored here: the
+// wait was hardcoded, so an operator raising the env var to debug a slow or
+// stuck bring-up saw no effect and the spawn still failed at 90s. Unset or
+// invalid values keep the 90s default; valid ones are clamped to
+// [minClaudePromptTimeout, maxClaudePromptTimeout].
+func ClaudePromptTimeout() time.Duration {
+	raw := os.Getenv(ReadyTimeoutEnvVar)
+	if raw == "" {
+		return defaultClaudePromptTimeout
+	}
+	secs, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || secs <= 0 {
+		debug.Log("Ignoring invalid %s=%q; using default %v", ReadyTimeoutEnvVar, raw, defaultClaudePromptTimeout)
+		return defaultClaudePromptTimeout
+	}
+	// Clamped in whole seconds before conversion, for the overflow reason
+	// documented on ReadyTimeout.
+	if secs < int(minClaudePromptTimeout/time.Second) {
+		return minClaudePromptTimeout
+	}
+	if secs > int(maxClaudePromptTimeout/time.Second) {
+		return maxClaudePromptTimeout
+	}
+	return time.Duration(secs) * time.Second
+}
+
 // ReadyFilePayload represents the JSON structure of ready-files.
 type ReadyFilePayload struct {
 	Status          string   `json:"status"`           // "ready" or "crashed"

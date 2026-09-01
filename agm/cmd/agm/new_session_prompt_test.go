@@ -39,7 +39,7 @@ func TestCollectExtraAddDirsScopesWritableDirsToCodex(t *testing.T) {
 	} {
 		t.Run(test.harness, func(t *testing.T) {
 			harnessName = test.harness
-			got, _ := collectExtraAddDirs(&manifest.SandboxConfig{Enabled: true}, nil)
+			got := collectExtraAddDirs(&manifest.SandboxConfig{Enabled: true}, nil)
 			if !slices.Equal(got, test.want) {
 				t.Fatalf("collectExtraAddDirs() = %v, want %v", got, test.want)
 			}
