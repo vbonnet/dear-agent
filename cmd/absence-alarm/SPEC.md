@@ -22,12 +22,37 @@ monitoring cannot see any of these, because a dead process emits no errors.
 The absence alarm inverts the question. It carries a declarative set of
 **pulses** - expected positive events with a maximum silence window - and
 alarms LOUDLY when a pulse has not been observed inside its window: a merge
-into main, a fresh OTel span file, a supervisor heartbeat, a completed sweep,
+into main, fresh OTel traces, a supervisor heartbeat, a completed sweep,
 a critical launchd job still loaded. It runs as a host-level launchd tick,
 independent of the mesh, Dispatch, and any agent session, because "the
 watcher lives inside the thing being watched" is the exact anti-pattern that
 produced the 46-day OTel gap (the prior health check degraded into a
 sandboxed reminder addressed to an offline Dispatch).
+
+The OTel restore sharpened the diagnosis this tool answers. The fleet did
+not lack absence detectors: `cmd/jaeger-health` already implemented exactly
+the right check (alive but no traces in the lookback window reports
+degraded, exit 1) while OTel sat dark for 46 days - because nothing ran it,
+and no sink consumed its exit code. What was missing is generic: a registry
+of liveness checks, a scheduler that guarantees each one runs, and an alarm
+sink that escalates each failure to a human even when the mesh is down.
+That is this tool's decomposition:
+
+- **Registry**: the pulse config. Each entry declares one expected positive
+  event and how to probe it.
+- **Scheduler**: the launchd tick. One job runs every registered check; a
+  check can no longer exist without being run.
+- **Sink**: the alarm ladder - desktop notification with backoff, the
+  escalation journal, the exit code - one shared, tested path instead of a
+  seventh bespoke notify implementation.
+
+Probe checks themselves follow the `jaeger-health` pattern: small,
+spec-pinned, no-side-effect binaries sharing the exit contract 0 healthy /
+1 degraded / 2 down / 3 usage, registered here as `command` pulses.
+`jaeger-health` is the first registered check; `merge-health` (the
+merge-pipeline absence probe, EARS MH-01..MH-08) is its first deliberate
+sibling; bead-close and sweep-success checks follow the same shape rather
+than becoming bespoke one-liners inside this config.
 
 Three design rules carried over from the disk-watchdog retros:
 
@@ -100,3 +125,8 @@ the absence alarm itself.
 **AA-22** When JSON output mode is set, the system shall emit the full report as a single JSON object on stdout.
 
 **AA-23** If appending to the escalation journal or writing the heartbeat or state file fails, then the system shall report the failure on stderr and the system shall not change its exit code.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
+- Package tests: `cmd/absence-alarm/*_test.go`

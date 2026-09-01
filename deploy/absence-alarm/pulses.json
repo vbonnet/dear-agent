@@ -3,7 +3,7 @@
     {
       "name": "main-merge",
       "type": "command",
-      "command": ["/bin/sh", "-c", "git -C \"$HOME/src/dear-agent\" log -1 --since='96 hours ago' --pretty=%h origin/main | grep -q ."],
+      "command": ["~/go/bin/merge-health", "--lookback", "96h"],
       "window": "96h",
       "expect": "a commit landed on dear-agent origin/main within 96h"
     },
@@ -21,11 +21,11 @@
       "expect": "a mergeloop tick within 24h"
     },
     {
-      "name": "otel-spans",
+      "name": "otel-receiving",
       "type": "command",
-      "command": ["/bin/sh", "-c", "find \"$HOME/.engram/traces\" -name spans.jsonl -mtime -1 2>/dev/null | grep -q ."],
+      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
       "window": "24h",
-      "expect": "a fresh OTel span JSONL file within 24h"
+      "expect": "Jaeger alive and receiving traces within 24h"
     },
     {
       "name": "disk-watchdog-tick",

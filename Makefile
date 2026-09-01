@@ -65,6 +65,7 @@ override BUILD_STAMP_FLAGS = $(if $(_INVALID_EXTRA_GO_LDFLAGS),$(error EXTRA_GO_
 # this registry with the recipes so a new governed build cannot bypass it.
 override _GOVERNED_BUILD_TARGETS := \
 	health-check \
+	build-absence-alarm \
 	build-reaper-e2e \
 	build-routing-guard \
 	build-stamp-test-probe \
