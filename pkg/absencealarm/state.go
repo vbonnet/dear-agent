@@ -1,4 +1,4 @@
-package main
+package absencealarm
 
 import (
 	"encoding/json"
@@ -26,9 +26,9 @@ type Snooze struct {
 	Reason string    `json:"reason,omitempty"`
 }
 
-// loadSnoozes reads and validates the snooze file. A missing file means no
+// LoadSnoozes reads and validates the snooze file. A missing file means no
 // snoozes; an invalid snooze refuses the run (AA-14).
-func loadSnoozes(path string, now time.Time) (map[string]Snooze, error) {
+func LoadSnoozes(path string, now time.Time) (map[string]Snooze, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -56,23 +56,24 @@ func loadSnoozes(path string, now time.Time) (map[string]Snooze, error) {
 	return out, nil
 }
 
-// pulseAlarm is the persisted per-pulse alarm state used for notification
+// PulseAlarm is the persisted per-pulse alarm state used for notification
 // dedup (AA-10..AA-12).
-type pulseAlarm struct {
+type PulseAlarm struct {
 	Since        time.Time `json:"since"`
 	LastNotified time.Time `json:"last_notified"`
 	Misses       int       `json:"misses"`
 }
 
-type alarmState struct {
-	Pulses map[string]pulseAlarm `json:"pulses"`
+// AlarmState is the full persisted alarm state, keyed by pulse name.
+type AlarmState struct {
+	Pulses map[string]PulseAlarm `json:"pulses"`
 }
 
-// loadAlarmState reads the persisted alarm state. Any read or parse failure
+// LoadAlarmState reads the persisted alarm state. Any read or parse failure
 // returns an empty state and the error: the caller reports it and proceeds,
 // so lost dedup state degrades toward louder, never toward silent (AA-18).
-func loadAlarmState(path string) (alarmState, error) {
-	st := alarmState{Pulses: map[string]pulseAlarm{}}
+func LoadAlarmState(path string) (AlarmState, error) {
+	st := AlarmState{Pulses: map[string]PulseAlarm{}}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -81,15 +82,16 @@ func loadAlarmState(path string) (alarmState, error) {
 		return st, fmt.Errorf("read alarm state: %w", err)
 	}
 	if err := json.Unmarshal(raw, &st); err != nil {
-		return alarmState{Pulses: map[string]pulseAlarm{}}, fmt.Errorf("parse alarm state %s: %w", path, err)
+		return AlarmState{Pulses: map[string]PulseAlarm{}}, fmt.Errorf("parse alarm state %s: %w", path, err)
 	}
 	if st.Pulses == nil {
-		st.Pulses = map[string]pulseAlarm{}
+		st.Pulses = map[string]PulseAlarm{}
 	}
 	return st, nil
 }
 
-func saveAlarmState(path string, st alarmState) error {
+// SaveAlarmState atomically persists the alarm state for the next tick.
+func SaveAlarmState(path string, st AlarmState) error {
 	raw, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -100,38 +102,41 @@ func saveAlarmState(path string, st alarmState) error {
 	return writeFileAtomic(path, raw)
 }
 
-// notifyDecision says what, if anything, to dispatch for a pulse this tick.
-type notifyDecision int
+// NotifyDecision says what, if anything, to dispatch for a pulse this tick.
+type NotifyDecision int
 
 const (
-	notifyNone notifyDecision = iota
-	notifyAlarm
-	notifyRecovery
+	// NotifyNone dispatches nothing this tick.
+	NotifyNone NotifyDecision = iota
+	// NotifyAlarm dispatches an absence notification (AA-10, AA-11).
+	NotifyAlarm
+	// NotifyRecovery dispatches a recovery notification (AA-12).
+	NotifyRecovery
 )
 
-// updateAlarm advances one pulse's alarm state and decides whether to notify
+// UpdateAlarm advances one pulse's alarm state and decides whether to notify
 // (AA-10, AA-11, AA-12). It mutates st in place.
-func updateAlarm(st *alarmState, name string, alarming bool, now time.Time) notifyDecision {
+func UpdateAlarm(st *AlarmState, name string, alarming bool, now time.Time) NotifyDecision {
 	prev, wasAlarming := st.Pulses[name]
 	if !alarming {
 		if wasAlarming {
 			delete(st.Pulses, name)
-			return notifyRecovery
+			return NotifyRecovery
 		}
-		return notifyNone
+		return NotifyNone
 	}
 	if !wasAlarming {
-		st.Pulses[name] = pulseAlarm{Since: now, LastNotified: now, Misses: 1}
-		return notifyAlarm
+		st.Pulses[name] = PulseAlarm{Since: now, LastNotified: now, Misses: 1}
+		return NotifyAlarm
 	}
 	prev.Misses++
 	if due := reNotifyDue(prev.Since, prev.LastNotified, now); due {
 		prev.LastNotified = now
 		st.Pulses[name] = prev
-		return notifyAlarm
+		return NotifyAlarm
 	}
 	st.Pulses[name] = prev
-	return notifyNone
+	return NotifyNone
 }
 
 // reNotifyDue reports whether a re-notification point has been crossed since
@@ -153,8 +158,8 @@ func reNotifyDue(since, lastNotified, now time.Time) bool {
 	return false
 }
 
-// journalRecord is one appended escalation-journal line (AA-09).
-type journalRecord struct {
+// JournalRecord is one appended escalation-journal line (AA-09).
+type JournalRecord struct {
 	Time     time.Time `json:"time"`
 	Kind     string    `json:"kind"`
 	Pulse    string    `json:"pulse"`
@@ -166,7 +171,8 @@ type journalRecord struct {
 	Misses   int       `json:"misses,omitempty"`
 }
 
-func appendJournal(path string, rec journalRecord) error {
+// AppendJournal appends one alarm record to the escalation journal (AA-09).
+func AppendJournal(path string, rec JournalRecord) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -185,13 +191,14 @@ func appendJournal(path string, rec journalRecord) error {
 	return f.Close()
 }
 
-// heartbeat is the self-liveness record written every completed tick (AA-16).
-type heartbeat struct {
+// Heartbeat is the self-liveness record written every completed tick (AA-16).
+type Heartbeat struct {
 	TickTime time.Time `json:"tick_time"`
 	Results  []Result  `json:"results"`
 }
 
-func writeHeartbeat(path string, hb heartbeat) error {
+// WriteHeartbeat atomically records the completed tick for independent watchers (AA-16).
+func WriteHeartbeat(path string, hb Heartbeat) error {
 	raw, err := json.MarshalIndent(hb, "", "  ")
 	if err != nil {
 		return err
