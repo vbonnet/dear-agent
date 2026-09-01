@@ -359,8 +359,8 @@ if [[ "$MODE" == "full" ]]; then
   # enforce while `go test` still exits successfully.
   SLA_LOG="$(mktemp)"
   PREFLIGHT_TMP_FILES+=("$SLA_LOG")
-  GOFLAGS='' CI='' preflight_run_go_tests "ordinary performance SLA tests failed" "$SLA_LOG" \
-    go test -race=false -short=false -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
+  preflight_run_go_tests "ordinary performance SLA tests failed" "$SLA_LOG" \
+    env GOFLAGS='' CI='' go test -race=false -short=false -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
     ./pkg/workflow \
     ./agm/test/performance \
     ./internal/telemetry/enrichment \
