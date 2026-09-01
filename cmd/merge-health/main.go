@@ -32,6 +32,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -74,7 +75,7 @@ func defaultDeps() deps {
 			full := append([]string{"-C", repo}, args...)
 			out, err := exec.CommandContext(ctx, "git", full...).Output()
 			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+				if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && len(exitErr.Stderr) > 0 {
 					return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exitErr.Stderr)))
 				}
 				return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
