@@ -39,7 +39,7 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-15** When a bot review thread is withheld from auto-resolution on severity grounds, the command shall record a distinct audit event naming the withheld count, so the withholding is observable rather than silent.
 
-**MLC-16** Before merging a green pull request, the command shall independently re-read that pull request's review threads and shall refuse the merge when any bot thread carries a blocking severity marker and has no human reply, regardless of whether that thread is already marked resolved.
+**MLC-16** When a green pull request is about to be merged, the command shall independently re-read that pull request's review threads and shall refuse the merge if any bot thread carries a blocking severity marker and has no human reply, regardless of whether that thread is already marked resolved.
 
 **MLC-17** When the independent review-thread merge gate cannot be evaluated, the command shall refuse the merge and audit the refusal, and shall never treat an unavailable gate as an absence of findings.
 
