@@ -504,3 +504,63 @@ func TestMarkAttemptWriteFailureLeavesPendingFailClosed(t *testing.T) {
 		t.Fatal("pending attempt after failed accounting did not remain fail-closed")
 	}
 }
+
+// A crash between claiming a legacy file and stamping its identity leaves an
+// ID-less claim file at the ID-keyed migration path. Every state file written
+// before the SessionID field existed is ID-less, so this is the ordinary
+// recovery case, not an exotic one. The claim path proves ownership by itself,
+// so recovery must complete rather than refusing the process's own
+// half-finished migration forever.
+func TestLoadStateForSessionRecoversIDLessClaimedLegacyMigration(t *testing.T) {
+	baseDir := t.TempDir()
+	legacy := &CompactionState{
+		SessionName:     "display",
+		CompactionCount: 3,
+		History: []CompactionRecord{{
+			Timestamp:  time.Now().Add(-2 * time.Hour),
+			PromptFile: "legacy-prompt.md",
+		}},
+	}
+	if err := SaveState(baseDir, legacy); err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+	if err := os.Rename(stateFile(baseDir, "display"), legacyMigrationFile(baseDir, "stable-id")); err != nil {
+		t.Fatalf("simulate crash after claim, before stamp: %v", err)
+	}
+
+	state, err := loadStateForSession(baseDir, "stable-id", "display")
+	if err != nil {
+		t.Fatalf("loadStateForSession() error = %v, want recovery of the ID-less claim", err)
+	}
+	if state.SessionID != "stable-id" {
+		t.Errorf("SessionID = %q, want stable-id: recovery must stamp the identity", state.SessionID)
+	}
+	if state.CompactionCount != 3 || len(state.History) != 1 {
+		t.Errorf("recovered state = %+v, want the legacy count and history preserved", state)
+	}
+	if _, err := os.Stat(legacyMigrationFile(baseDir, "stable-id")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("claim file still present after recovery: %v", err)
+	}
+	if _, err := os.Stat(stableStateFile(baseDir, "stable-id")); err != nil {
+		t.Errorf("recovered stable state missing: %v", err)
+	}
+}
+
+// A claim file whose embedded ID disagrees with the ID-keyed path it sits at is
+// still refused: the path proves ownership only when the bytes do not claim
+// otherwise.
+func TestLoadStateForSessionRejectsMismatchedClaimedLegacyMigration(t *testing.T) {
+	baseDir := t.TempDir()
+	legacy := &CompactionState{SessionID: "other-session", SessionName: "display"}
+	if err := SaveState(baseDir, legacy); err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+	if err := os.Rename(stateFile(baseDir, "display"), legacyMigrationFile(baseDir, "stable-id")); err != nil {
+		t.Fatalf("stage mismatched claim: %v", err)
+	}
+
+	if _, err := loadStateForSession(baseDir, "stable-id", "display"); err == nil ||
+		!strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("loadStateForSession() error = %v, want an identity mismatch refusal", err)
+	}
+}

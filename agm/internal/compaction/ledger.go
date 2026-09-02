@@ -302,11 +302,17 @@ func finishLegacyMigration(baseDir, sessionID, displayName, migrationPath string
 	return state, nil
 }
 
+// validateClaimedLegacyState validates a claim file, which lives at a path
+// already keyed by the stable session ID (legacyMigrationFile). Ownership is
+// therefore established by the path, not by the bytes, so an empty embedded ID
+// is accepted here: a claim file is a legacy file that has been renamed but not
+// yet stamped, and every state file written before the SessionID field existed
+// is ID-less by construction. Requiring a non-empty ID would make crash
+// recovery impossible for exactly the files the claim step exists to recover -
+// the process would refuse its own half-finished migration forever. A
+// non-empty ID that disagrees with the path is still a hard error.
 func validateClaimedLegacyState(state *CompactionState, sessionID string) error {
-	if state.SessionID == "" {
-		return fmt.Errorf("embedded stable session ID is empty and ownership is ambiguous")
-	}
-	if state.SessionID != sessionID {
+	if state.SessionID != "" && state.SessionID != sessionID {
 		return fmt.Errorf("embedded stable session ID %q does not match %q", state.SessionID, sessionID)
 	}
 	if state.SessionName == "" {
@@ -315,7 +321,15 @@ func validateClaimedLegacyState(state *CompactionState, sessionID string) error 
 	return validateAttemptRecords(state.History)
 }
 
+// validateLegacyState validates a legacy file found at a display-name-keyed
+// path, before it is claimed. Here an empty embedded ID IS ambiguous: display
+// names are reusable, so an ID-less file at that path cannot be proven to
+// belong to the session now asking for it, and adopting it would let a
+// replacement session inherit another session's compaction history.
 func validateLegacyState(state *CompactionState, sessionID, displayName string) error {
+	if state.SessionID == "" {
+		return fmt.Errorf("embedded stable session ID is empty and ownership is ambiguous")
+	}
 	if err := validateClaimedLegacyState(state, sessionID); err != nil {
 		return err
 	}

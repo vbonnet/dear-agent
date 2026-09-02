@@ -181,21 +181,34 @@ func writeExclusivePrompt(file *os.File, path, content string) error {
 	return writeExclusivePromptWithDirSync(file, path, content, fileutil.SyncDir)
 }
 
+// writeExclusivePromptWithDirSync writes content to an already-created
+// exclusive file and makes it durable, removing the file again on any failure
+// so a partial prompt is never left behind.
+//
+// The descriptor is closed by a defer so it cannot leak through a future error
+// path or a panic, but the success path closes explicitly and returns the
+// error. Close is where a deferred write error surfaces on several
+// filesystems, so on a file whose whole purpose is durability, discarding it
+// in a defer would report success for a prompt that never landed. The closed
+// flag keeps the defer from double-closing after that explicit Close.
 func writeExclusivePromptWithDirSync(file *os.File, path, content string, syncDir func(string) error) error {
 	remove := true
+	closed := false
 	defer func() {
+		if !closed {
+			_ = file.Close()
+		}
 		if remove {
 			_ = os.Remove(path)
 		}
 	}()
 	if _, err := file.WriteString(content); err != nil {
-		_ = file.Close()
 		return fmt.Errorf("write prompt file: %w", err)
 	}
 	if err := file.Sync(); err != nil {
-		_ = file.Close()
 		return fmt.Errorf("sync prompt file: %w", err)
 	}
+	closed = true
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close prompt file: %w", err)
 	}
