@@ -455,10 +455,16 @@ func (RealSweepDeps) Discover(base string) ([]DiscoveredWorktree, error) {
 			continue
 		}
 		for _, ch := range children {
-			if !ch.IsDir() {
+			if !ch.IsDir() || strings.HasPrefix(ch.Name(), ".") {
 				continue
 			}
 			probe := filepath.Join(repoDir, ch.Name())
+			if resolvedProbe, rerr := filepath.EvalSymlinks(probe); rerr == nil && seen[resolvedProbe] {
+				continue
+			}
+			if seen[probe] {
+				continue
+			}
 			wts, err := gitpkg.ListWorktrees(probe)
 			if err != nil || wts == nil {
 				continue
@@ -474,7 +480,6 @@ func (RealSweepDeps) Discover(base string) ([]DiscoveredWorktree, error) {
 					Branch: wt.Branch,
 				})
 			}
-			break // repo fully enumerated from this one probe
 		}
 	}
 	return out, nil
