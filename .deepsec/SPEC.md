@@ -1,6 +1,10 @@
 # Deepsec Configuration Specification
 
-<!-- Last audited at: 2026-08-29 -->
+<!-- Last audited at: 2026-07-10 -->
+<!-- DEEPSEC-03 verified 2026-08-29 against the tracked-path boundary and
+     agm/test/bdd/steps/deepsec_output_contract_test.go. The file-wide stamp is
+     deliberately NOT advanced: DEEPSEC-01/02 and the scanner runtime were not
+     rechecked, and moving the date would claim they were. -->
 
 ## EARS Requirements
 
