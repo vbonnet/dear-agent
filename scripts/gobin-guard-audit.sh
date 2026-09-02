@@ -14,13 +14,14 @@ ensure_searchable_dir() (
     (umask 0077 && mkdir "$dir")
   fi
 )
-is_alarm_marker() { [ ! -L "$1" ] && [ -f "$1" ]; }
+is_alarm_marker() { [ ! -L "$1" ] && [ -f "$1" ] || return 1; _d=$(dirname "$1"); _r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]; }
 persist_alarm_marker() (
   marker=$1; ensure_searchable_dir "$(dirname "$marker")" || return 1
   [ ! -e "$marker" ] && [ ! -L "$marker" ] || return 1
   set -C; umask 0077; : >"$marker"
 )
-home=${HOME:?HOME is not set}; heartbeat=${GOBIN_GUARD_HEARTBEAT:-$home/.local/state/dear-agent/gobin-guard.heartbeat}
+home=${HOME:?HOME is not set}; _r=$(cd -P -- "$home" 2>/dev/null && pwd -P) && home=$_r
+heartbeat=${GOBIN_GUARD_HEARTBEAT:-$home/.local/state/dear-agent/gobin-guard.heartbeat}
 trail=${GOBIN_GUARD_TRAIL:-$home/.agm/vroom/trail.jsonl}; max_age=${GOBIN_GUARD_MAX_AGE:-180}
 alarm=${GOBIN_GUARD_AUDIT_ALARM_STATE:-$home/.local/state/dear-agent/gobin-guard-audit.alarm}
 case "$heartbeat" in -*) heartbeat="./$heartbeat";; esac

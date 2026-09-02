@@ -71,6 +71,9 @@ if [ -z "$HOME_DIR" ]; then
 	echo "$PROG: HOME is not set" >&2
 	exit 2
 fi
+# Resolve physical path once so state dirs beneath a symlinked home (e.g. macOS
+# /Users -> /private/Users) are accepted by ensure_searchable_dir.
+_real=$(cd -P -- "$HOME_DIR" 2>/dev/null && pwd -P) && HOME_DIR=$_real
 
 gobin_dir="${GOBIN_GUARD_DIR:-$HOME_DIR/go/bin}"
 sentinel_name="${GOBIN_GUARD_BINARY:-agm}"
@@ -117,7 +120,9 @@ ensure_searchable_dir() (
 )
 
 is_alarm_marker() {
-	[ ! -L "$1" ] && [ -f "$1" ]
+	[ ! -L "$1" ] && [ -f "$1" ] || return 1
+	_d=$(dirname "$1")
+	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]
 }
 
 persist_alarm_marker() (
