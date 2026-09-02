@@ -70,27 +70,25 @@ is configured:
   verifying the release itself (no GPG `.asc` check is performed).
 - The Jaeger binary is a checksum-verified **download**, not a `go install`
   target, so it must live outside `~/go/bin`. The launch agent
-  (`make install-jaeger-launchagent`) runs it from the dear-agent cache. When
-  all of `~/go/bin` was deleted on 2026-07-15 (bead ce-24f1) every Go-built tool
-  there was restored by rebuilding; jaeger could not be, and local tracing was
-  dark from 2026-07-16 until 2026-09-01.
+  (`make install-jaeger-launchagent`) runs it from the dear-agent cache, because
+  a `GOBIN` sweep removes anything under `~/go/bin` and a download cannot be
+  restored by rebuilding from source (`DECL-LAUNCHD-05`, bead ce-24f1).
+- Every collector listener is loopback-only. `deploy/jaeger/SPEC.md` contracts
+  the receiver, query, and storage bounds; `cmd/otel-local/config_contract_test.go`
+  enforces them against the deployed `deploy/jaeger/config.yaml`.
+- Both the plist and the collector config are registered in
+  `deploy/manifest.yaml`, so `dear-deploy status` reports drift and
+  `dear-deploy sync` is the only supported way to stage them. A restaged plist
+  needs `launchctl bootout` then `bootstrap`; `kickstart` restarts only the job
+  definition launchd already holds in memory.
 
-## Known gap: nothing alarms on the absence of spans
+## Verifying that spans are actually arriving
 
-That six-week outage was silent. The collector process was down, the launch
-agent was reporting exit 78, and no emitter could reach `:4317`, but nothing
-watched for it, so the first signal was a human noticing the traces had stopped.
+A collector can be up, reachable, and receiving nothing. Process liveness and a
+port check both pass in that state, so neither is sufficient.
 
-The detector already exists: `cmd/jaeger-health` implements exactly the right
-check (JAEGER-HEALTH-03 reports `degraded` and exits `1` when Jaeger is alive
-but no traces appear in the lookback window, and `down`/exit `2` when it is
-unreachable). What is missing is that **nothing ever runs it**: there is no
-launch agent, no scheduled task, and no alarm sink for its exit code.
-
-The durable check that would have caught this is an alarm on the ABSENCE of
-received spans over a 24h window, not a process-liveness or port check. A
-collector can be up and still receiving nothing, which is the failure mode that
-actually matters here.
-
-Deliberately **not built in this change**. Flagged for the flywheel-resilience
-workstream, which owns scheduling and alarm routing.
+`cmd/jaeger-health` is the check that distinguishes them: it reports `degraded`
+and exits `1` when Jaeger is alive but no traces appear in the lookback window
+(`JAEGER-HEALTH-03`), and `down` with exit `2` when it is unreachable. Run it
+directly, or schedule it through `absence-alarm`, which owns running absence
+probes on an interval and routing their exit codes to a notifier.

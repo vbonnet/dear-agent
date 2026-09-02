@@ -1,6 +1,12 @@
 # Jaeger v2 all-in-one config - local dev.
-# OTLP gRPC on :4317, HTTP on :4318, UI on :16686.
+# OTLP gRPC on 127.0.0.1:4317, HTTP on 127.0.0.1:4318, UI on 127.0.0.1:16686.
 # In-memory storage (memstore) - traces lost on restart.
+#
+# Every listener is pinned to loopback (JAEGER-CFG-01/02). This collector runs
+# as an always-on launch agent on a laptop that joins untrusted networks, and it
+# authenticates nothing: a 0.0.0.0 bind would let any peer on the current LAN
+# inject traces, exhaust the bounded memstore, or read the locally collected
+# trace contents through the query API.
 service:
   extensions: [jaeger_storage, jaeger_query]
   pipelines:
@@ -19,14 +25,18 @@ extensions:
   jaeger_query:
     storage:
       traces: memstore
+    http:
+      endpoint: 127.0.0.1:16686
+    grpc:
+      endpoint: 127.0.0.1:16685
 
 receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: 0.0.0.0:4317
+        endpoint: 127.0.0.1:4317
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: 127.0.0.1:4318
 
 processors:
   batch:

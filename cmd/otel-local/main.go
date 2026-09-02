@@ -389,16 +389,33 @@ func fetchJaeger(ctx context.Context, version string) (string, error) {
 // Extraction goes to a sibling temp path first so a checksum failure can never
 // leave an unverified binary at the path otel-local resolves and launches
 // (OTEL-LOCAL-12).
+//
+// The staging path is unique per invocation (OTEL-LOCAL-13). A fixed
+// "<dst>.incoming" name is shared state: two concurrent `otel-local up --fetch`
+// runs would extract into the same inode, so one could verify its bytes and
+// then rename what the other had since rewritten -- reporting success for
+// content it never checked against its own manifest. Even two runs of the same
+// version race, because whichever renames first removes the file the other is
+// still reading.
 func installVerified(tarball []byte, want, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	tmp := dst + ".incoming"
+	staged, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".incoming-*")
+	if err != nil {
+		return err
+	}
+	tmp := staged.Name()
+	// extractBinary owns writing tmp; close our handle so it can recreate the
+	// path without leaking a descriptor.
+	if err := staged.Close(); err != nil {
+		return err
+	}
 	defer func() { _ = os.Remove(tmp) }()
 	if err := extractBinary(tarball, "jaeger", tmp); err != nil {
 		return err
 	}
-	// tmp is a path we just wrote inside our own cache dir.
+	// tmp is a path only this invocation knows, inside our own cache dir.
 	extracted, err := os.ReadFile(tmp)
 	if err != nil {
 		return err

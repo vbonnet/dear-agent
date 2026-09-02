@@ -609,17 +609,22 @@ otel-up: install-otel-local
 # than a `go install` target, so a GOBIN sweep silently unrecoverably removes it
 # (this is what broke local tracing from 2026-07-16, bead ce-24f1).
 # Fetch the binary first with: make otel-up  (or otel-local up --fetch).
-install-jaeger-launchagent:
-	@mkdir -p "$(HOME)/Library/Application Support/Jaeger"
-	@cp deploy/jaeger/config.yaml "$(HOME)/Library/Application Support/Jaeger/config.yaml"
-	@mkdir -p $(HOME)/Library/LaunchAgents
-	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.jaegertracing.jaeger.plist \
-		> $(HOME)/Library/LaunchAgents/com.jaegertracing.jaeger.plist
-	@echo "Staged: $(HOME)/Library/LaunchAgents/com.jaegertracing.jaeger.plist"
+# Both artifacts are registered in deploy/manifest.yaml, so `dear-deploy sync`
+# owns staging them (atomic stage/verify/activate) and `dear-deploy status`
+# reports drift. The post-merge hook's Stage 1.6 calls `dear-deploy sync`, so a
+# source change to either file reconciles on the next merge. This target is the
+# manual entry point for the same path -- it must never hand-copy, or the
+# deployed bytes would diverge from what the deployer believes it installed.
+install-jaeger-launchagent: install-dear-deploy
+	@$(HOME)/go/bin/dear-deploy sync
+	@echo "Staged via dear-deploy: $(HOME)/Library/LaunchAgents/com.jaegertracing.jaeger.plist"
 	@echo "Activate it yourself (ask-gated host action):"
 	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.jaegertracing.jaeger.plist"
-	@echo "Already bootstrapped? Restart it to pick up changes:"
-	@echo "  launchctl kickstart -k gui/$$(id -u)/com.jaegertracing.jaeger"
+	@echo "Already bootstrapped? launchctl kickstart only restarts the job launchd"
+	@echo "already has in memory -- it does NOT reload a restaged plist, so the old"
+	@echo "program path would keep running. Reload it:"
+	@echo "  launchctl bootout gui/$$(id -u)/com.jaegertracing.jaeger"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.jaegertracing.jaeger.plist"
 
 uninstall-jaeger-launchagent:
 	@launchctl bootout gui/$$(id -u)/com.jaegertracing.jaeger 2>/dev/null || true
