@@ -11,6 +11,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type queueStorageLeafSnapshot struct {
+	spec     queueStorageLeafSpec
+	identity queueStorageIdentity
+	fd       int
+}
+
 func prepareMessageQueueStorage(homeDir string) (*messageQueueStorage, error) {
 	if !filepath.IsAbs(homeDir) || filepath.Clean(homeDir) != homeDir {
 		return nil, unsafeQueueStorageError("home directory", "is not an absolute clean path")
@@ -169,6 +175,252 @@ func validateQueueStorageDirectoryStat(artifact string, stat *unix.Stat_t, expec
 	return nil
 }
 
+func (s *messageQueueStorage) classifyQueueStorageLeaves() (
+	[]queueStorageLeafSnapshot,
+	bool,
+	bool,
+	error,
+) {
+	leaves := make([]queueStorageLeafSnapshot, 0, len(queueStorageLeafSpecs))
+	mainPresent := false
+	for _, baseSpec := range queueStorageLeafSpecs {
+		spec := baseSpec
+		spec.name = s.leafName(spec)
+		var stat unix.Stat_t
+		err := unix.Fstatat(s.rootFD, spec.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		if errors.Is(err, unix.ENOENT) {
+			continue
+		}
+		if err != nil {
+			return nil, false, false, unsafeQueueStorageError(spec.artifact, "metadata could not be read")
+		}
+		if !spec.main && uint64(stat.Nlink) == 0 {
+			return nil, false, true, nil
+		}
+		if err := validateQueueStorageLeafStat(spec.artifact, &stat, s.uid, false); err != nil {
+			return nil, false, false, err
+		}
+		leaves = append(leaves, queueStorageLeafSnapshot{
+			spec:     spec,
+			identity: queueStorageIdentityFromStat(&stat),
+			fd:       queueStorageInvalidFD,
+		})
+		mainPresent = mainPresent || spec.main
+	}
+	return leaves, mainPresent, false, nil
+}
+
+func (s *messageQueueStorage) leafName(spec queueStorageLeafSpec) string {
+	if spec.main {
+		return s.dbLeaf
+	}
+	return s.dbLeaf + spec.name[len(queueDatabaseLeaf):]
+}
+
+func validateQueueStorageLeafStat(
+	artifact string,
+	stat *unix.Stat_t,
+	expectedUID uint32,
+	requirePrivateMode bool,
+) error {
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return unsafeQueueStorageError(artifact, "is not a regular file")
+	}
+	if err := validateQueueStorageOwner(artifact, stat.Uid, expectedUID); err != nil {
+		return err
+	}
+	if uint64(stat.Nlink) != 1 {
+		return unsafeQueueStorageError(artifact, "does not have exactly one link")
+	}
+	if requirePrivateMode && stat.Mode&0o777 != 0o600 {
+		return unsafeQueueStorageError(artifact, "does not have mode 0600")
+	}
+	return nil
+}
+
+func (s *messageQueueStorage) admitAndRepairQueueStorageLeaves(
+	leaves []queueStorageLeafSnapshot,
+) (bool, error) {
+	defer closeQueueStorageLeafDescriptors(leaves)
+
+	retry, err := s.openAndValidateQueueStorageLeaves(leaves)
+	if err != nil || retry {
+		return retry, err
+	}
+	if err := s.revalidateDirectoryChain(false); err != nil {
+		return false, err
+	}
+	if err := chmodAndVerifyQueueStorageDirectory(
+		s.rootFD,
+		"AGM directory",
+		s.uid,
+		s.rootIdentity,
+	); err != nil {
+		return false, err
+	}
+	if err := s.revalidateDirectoryChain(true); err != nil {
+		return false, err
+	}
+	// Sealing the root closes the path-only race for another UID, but an
+	// attacker may have added a hard link after the earlier complete admission
+	// pass and immediately before the chmod. Revalidate the entire held set
+	// again after the seal and before mutating even the first leaf.
+	retry, err = s.revalidateSealedQueueStorageLeaves(leaves)
+	if err != nil || retry {
+		return retry, err
+	}
+	return s.repairQueueStorageLeaves(leaves)
+}
+
+func (s *messageQueueStorage) openAndValidateQueueStorageLeaves(
+	leaves []queueStorageLeafSnapshot,
+) (bool, error) {
+	for i := range leaves {
+		leaf := &leaves[i]
+		fd, err := unix.Openat(
+			s.rootFD,
+			leaf.spec.name,
+			unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC,
+			0,
+		)
+		if errors.Is(err, unix.ENOENT) {
+			return true, nil
+		}
+		if err != nil {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "could not be descriptor-admitted")
+		}
+		leaf.fd = fd
+
+		var descriptorStat unix.Stat_t
+		if err := unix.Fstat(fd, &descriptorStat); err != nil {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "descriptor metadata could not be read")
+		}
+		if !leaf.spec.main && uint64(descriptorStat.Nlink) == 0 {
+			// SQLite can unlink a WAL, SHM, or rollback journal between the
+			// no-follow snapshot and descriptor admission. Discard the entire
+			// snapshot rather than treating its now-unlinked descriptor as a
+			// candidate for mutation.
+			return true, nil
+		}
+		if err := validateQueueStorageLeafStat(leaf.spec.artifact, &descriptorStat, s.uid, false); err != nil {
+			return false, err
+		}
+		if queueStorageIdentityFromStat(&descriptorStat) != leaf.identity {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "changed identity during admission")
+		}
+
+		visibleStat, retry, err := s.visibleQueueStorageLeafStat(leaf.spec, false)
+		if err != nil {
+			return false, err
+		}
+		if retry {
+			return true, nil
+		}
+		if queueStorageIdentityFromStat(&visibleStat) != leaf.identity {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "changed identity during admission")
+		}
+	}
+	return false, nil
+}
+
+func (s *messageQueueStorage) repairQueueStorageLeaves(
+	leaves []queueStorageLeafSnapshot,
+) (bool, error) {
+	for i := range leaves {
+		leaf := &leaves[i]
+		if err := unix.Fchmod(leaf.fd, 0o600); err != nil {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "could not be made private")
+		}
+
+		var descriptorStat unix.Stat_t
+		if err := unix.Fstat(leaf.fd, &descriptorStat); err != nil {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "private mode could not be verified")
+		}
+		if !leaf.spec.main && uint64(descriptorStat.Nlink) == 0 {
+			return true, nil
+		}
+		if err := validateQueueStorageLeafStat(leaf.spec.artifact, &descriptorStat, s.uid, true); err != nil {
+			return false, err
+		}
+		if queueStorageIdentityFromStat(&descriptorStat) != leaf.identity {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "changed identity during repair")
+		}
+
+		visibleStat, retry, err := s.visibleQueueStorageLeafStat(leaf.spec, true)
+		if err != nil {
+			return false, err
+		}
+		if retry {
+			return true, nil
+		}
+		if queueStorageIdentityFromStat(&visibleStat) != leaf.identity {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "changed identity during repair")
+		}
+		if leaf.spec.main {
+			s.mainIdentity = leaf.identity
+		}
+	}
+	return false, nil
+}
+
+func (s *messageQueueStorage) revalidateSealedQueueStorageLeaves(
+	leaves []queueStorageLeafSnapshot,
+) (bool, error) {
+	for i := range leaves {
+		leaf := &leaves[i]
+		if leaf.fd == queueStorageInvalidFD {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "lost its admitted descriptor")
+		}
+
+		var descriptorStat unix.Stat_t
+		if err := unix.Fstat(leaf.fd, &descriptorStat); err != nil {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "sealed metadata could not be read")
+		}
+		if !leaf.spec.main && uint64(descriptorStat.Nlink) == 0 {
+			return true, nil
+		}
+		if err := validateQueueStorageLeafStat(leaf.spec.artifact, &descriptorStat, s.uid, false); err != nil {
+			return false, err
+		}
+		if queueStorageIdentityFromStat(&descriptorStat) != leaf.identity {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "changed identity before repair")
+		}
+
+		visibleStat, retry, err := s.visibleQueueStorageLeafStat(leaf.spec, false)
+		if err != nil {
+			return false, err
+		}
+		if retry {
+			return true, nil
+		}
+		if queueStorageIdentityFromStat(&visibleStat) != leaf.identity {
+			return false, unsafeQueueStorageError(leaf.spec.artifact, "changed identity before repair")
+		}
+	}
+	return false, nil
+}
+
+func (s *messageQueueStorage) visibleQueueStorageLeafStat(
+	spec queueStorageLeafSpec,
+	requirePrivateMode bool,
+) (unix.Stat_t, bool, error) {
+	var stat unix.Stat_t
+	err := unix.Fstatat(s.rootFD, spec.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	if errors.Is(err, unix.ENOENT) {
+		return stat, true, nil
+	}
+	if err != nil {
+		return stat, false, unsafeQueueStorageError(spec.artifact, "visible metadata could not be read")
+	}
+	if !spec.main && uint64(stat.Nlink) == 0 {
+		return stat, true, nil
+	}
+	if err := validateQueueStorageLeafStat(spec.artifact, &stat, s.uid, requirePrivateMode); err != nil {
+		return stat, false, err
+	}
+	return stat, false, nil
+}
+
 func (s *messageQueueStorage) revalidateDirectoryChain(requirePrivateRoot bool) error {
 	if s == nil {
 		return unsafeQueueStorageError("storage capability", "is absent")
@@ -316,6 +568,15 @@ func queueStorageIdentityFromStat(stat *unix.Stat_t) queueStorageIdentity {
 	return queueStorageIdentity{
 		device: uint64(stat.Dev), //nolint:gosec,nolintlint // Darwin dev_t is signed; equality uses its stable bit pattern
 		inode:  uint64(stat.Ino),
+	}
+}
+
+func closeQueueStorageLeafDescriptors(leaves []queueStorageLeafSnapshot) {
+	for i := range leaves {
+		if leaves[i].fd != queueStorageInvalidFD {
+			_ = unix.Close(leaves[i].fd)
+			leaves[i].fd = queueStorageInvalidFD
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 type queueStorageDirectoryFingerprint struct {
@@ -130,6 +131,148 @@ func TestQueueStorageDirectoryOwnerUsesExpectedUID(t *testing.T) {
 	require.NoError(t, validateQueueStorageOwner("home directory", expectedUID, expectedUID))
 	err := validateQueueStorageOwner("home directory", expectedUID+1, expectedUID)
 	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+}
+
+func TestQueueStorageExistingLeafSetRepairsOnlyAfterCompleteAdmission(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	dbPath := storage.databasePath()
+	walPath := dbPath + "-wal"
+	require.NoError(t, os.WriteFile(dbPath, []byte("main database bytes"), 0o644))
+	require.NoError(t, os.WriteFile(walPath, []byte("WAL bytes"), 0o644))
+	require.NoError(t, os.Chmod(storage.rootPath, 0o755))
+	require.NoError(t, os.Chmod(dbPath, 0o644))
+	require.NoError(t, os.Chmod(walPath, 0o644))
+	dbBefore := queueStorageDirectoryFingerprintAt(t, dbPath)
+	walBefore := queueStorageDirectoryFingerprintAt(t, walPath)
+
+	leaves, mainPresent, retry, err := storage.classifyQueueStorageLeaves()
+	require.NoError(t, err)
+	require.True(t, mainPresent)
+	require.False(t, retry)
+	retry, err = storage.admitAndRepairQueueStorageLeaves(leaves)
+	require.NoError(t, err)
+	require.False(t, retry)
+
+	dbAfter := queueStorageDirectoryFingerprintAt(t, dbPath)
+	walAfter := queueStorageDirectoryFingerprintAt(t, walPath)
+	assert.Equal(t, dbBefore.Inode, dbAfter.Inode)
+	assert.Equal(t, dbBefore.SHA256, dbAfter.SHA256)
+	assert.Equal(t, walBefore.Inode, walAfter.Inode)
+	assert.Equal(t, walBefore.SHA256, walAfter.SHA256)
+	assert.Equal(t, os.FileMode(0o600), dbAfter.Mode.Perm())
+	assert.Equal(t, os.FileMode(0o600), walAfter.Mode.Perm())
+	assert.Equal(t, os.FileMode(0o700), queueStorageDirectoryMode(t, storage.rootPath).Perm())
+}
+
+func TestQueueStorageExistingLeafSetRejectsLateUnsafeSidecarBeforeRepair(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	dbPath := storage.databasePath()
+	require.NoError(t, os.WriteFile(dbPath, []byte("main database bytes"), 0o644))
+	require.NoError(t, os.Chmod(dbPath, 0o644))
+	require.NoError(t, os.Chmod(storage.rootPath, 0o755))
+	dbBefore := queueStorageDirectoryFingerprintAt(t, dbPath)
+
+	targetPath := filepath.Join(t.TempDir(), "sidecar-target")
+	require.NoError(t, os.WriteFile(targetPath, []byte("target bytes"), 0o664))
+	targetBefore := queueStorageDirectoryFingerprintAt(t, targetPath)
+	require.NoError(t, os.Symlink(targetPath, dbPath+"-shm"))
+
+	_, _, _, err = storage.classifyQueueStorageLeaves()
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.Equal(t, dbBefore, queueStorageDirectoryFingerprintAt(t, dbPath))
+	assert.Equal(t, targetBefore, queueStorageDirectoryFingerprintAt(t, targetPath))
+	assert.Equal(t, os.FileMode(0o755), queueStorageDirectoryMode(t, storage.rootPath).Perm())
+}
+
+func TestQueueStorageExistingLeafSetRejectsHardLinkedMain(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	targetPath := filepath.Join(t.TempDir(), "hard-link-target")
+	require.NoError(t, os.WriteFile(targetPath, []byte("linked bytes"), 0o664))
+	require.NoError(t, os.Link(targetPath, storage.databasePath()))
+	before := queueStorageDirectoryFingerprintAt(t, targetPath)
+
+	_, _, _, err = storage.classifyQueueStorageLeaves()
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, targetPath))
+	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, storage.databasePath()))
+}
+
+func TestQueueStorageExistingLeafSetRetriesWholeDisappearingSnapshot(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	dbPath := storage.databasePath()
+	require.NoError(t, os.WriteFile(dbPath, []byte("main"), 0o644))
+	require.NoError(t, os.WriteFile(dbPath+"-wal", []byte("transient WAL"), 0o644))
+	require.NoError(t, os.Chmod(dbPath, 0o644))
+	before := queueStorageDirectoryFingerprintAt(t, dbPath)
+
+	leaves, mainPresent, retry, err := storage.classifyQueueStorageLeaves()
+	require.NoError(t, err)
+	require.True(t, mainPresent)
+	require.False(t, retry)
+	require.NoError(t, os.Remove(dbPath+"-wal"))
+
+	retry, err = storage.admitAndRepairQueueStorageLeaves(leaves)
+	require.NoError(t, err)
+	require.True(t, retry)
+	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, dbPath))
+}
+
+func TestQueueStorageExistingLeafSetRevalidatesAfterRootSeal(t *testing.T) {
+	homeDir := t.TempDir()
+	storage, err := prepareMessageQueueStorage(homeDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+	require.NoError(t, os.Chmod(storage.rootPath, 0o755))
+
+	dbPath := storage.databasePath()
+	require.NoError(t, os.WriteFile(dbPath, []byte("pre-seal database bytes"), 0o666))
+	require.NoError(t, os.Chmod(dbPath, 0o666))
+	leaves, mainPresent, retry, err := storage.classifyQueueStorageLeaves()
+	require.NoError(t, err)
+	require.True(t, mainPresent)
+	require.False(t, retry)
+	require.Len(t, leaves, 1)
+
+	leaves[0].fd, err = unix.Openat(
+		storage.rootFD,
+		leaves[0].spec.name,
+		unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC,
+		0,
+	)
+	require.NoError(t, err)
+	defer closeQueueStorageLeafDescriptors(leaves)
+
+	linkedPath := filepath.Join(t.TempDir(), "raced-hard-link")
+	require.NoError(t, os.Link(dbPath, linkedPath))
+	before := queueStorageDirectoryFingerprintAt(t, linkedPath)
+	require.NoError(t, chmodAndVerifyQueueStorageDirectory(
+		storage.rootFD,
+		"AGM directory",
+		storage.uid,
+		storage.rootIdentity,
+	))
+
+	retry, err = storage.revalidateSealedQueueStorageLeaves(leaves)
+	require.ErrorIs(t, err, ErrUnsafeQueueStorage)
+	require.False(t, retry)
+	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, dbPath))
+	assert.Equal(t, before, queueStorageDirectoryFingerprintAt(t, linkedPath))
 }
 
 func queueStorageDirectoryMode(t *testing.T, path string) os.FileMode {

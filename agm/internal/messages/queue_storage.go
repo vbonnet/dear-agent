@@ -21,6 +21,19 @@ type queueStorageIdentity struct {
 	inode  uint64
 }
 
+type queueStorageLeafSpec struct {
+	name     string
+	artifact string
+	main     bool
+}
+
+var queueStorageLeafSpecs = [...]queueStorageLeafSpec{
+	{name: queueDatabaseLeaf, artifact: "main database", main: true},
+	{name: queueDatabaseLeaf + "-wal", artifact: "WAL sidecar"},
+	{name: queueDatabaseLeaf + "-shm", artifact: "SHM sidecar"},
+	{name: queueDatabaseLeaf + "-journal", artifact: "rollback journal"},
+}
+
 // messageQueueStorage is a retained, private capability for the admitted queue
 // directory chain. SQLite receives only databasePath; the capability keeps the
 // descriptors needed to verify that the visible boundary did not change.
@@ -38,9 +51,17 @@ type messageQueueStorage struct {
 	homeIdentity   queueStorageIdentity
 	configIdentity queueStorageIdentity
 	rootIdentity   queueStorageIdentity
+	mainIdentity   queueStorageIdentity
 
 	productionChain bool
 	closed          bool
+}
+
+func (s *messageQueueStorage) databasePath() string {
+	if s == nil {
+		return ""
+	}
+	return s.dbPath
 }
 
 func unsafeQueueStorageError(artifact, invariant string) error {
