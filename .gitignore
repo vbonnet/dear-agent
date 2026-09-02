@@ -137,3 +137,4 @@ infra/*.tfvars
 /pr-blockers
 /safe-merge
 /safe-push
+/absence-alarm
