@@ -113,6 +113,15 @@ func DefaultProbes() Probes {
 			if err == nil {
 				return 0, nil
 			}
+			// A probe killed by its own deadline was never evaluated. Report
+			// that as an evaluation failure (UNDETERMINED, AA-05) rather than
+			// letting CommandContext's signal kill surface as a non-zero exit
+			// (ABSENT, AA-04). "The check did not finish" and "the check said
+			// the thing is missing" are different facts, and collapsing them
+			// would blame the monitored subject for the monitor's own timeout.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return -1, fmt.Errorf("probe did not finish within its deadline: %w", ctxErr)
+			}
 			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 				return exitErr.ExitCode(), nil
 			}

@@ -141,6 +141,10 @@ the absence alarm itself.
 
 **AA-23** If appending to the escalation journal or writing the heartbeat or state file fails, then the system shall report the failure on stderr and the system shall not change its exit code.
 
+**AA-24** When a pulse is evaluated, the system shall bound that evaluation with a per-pulse deadline inside a bounded tick deadline, and the system shall continue evaluating the remaining pulses.
+
+**AA-25** If a pulse's probe does not finish before its deadline, then the system shall classify that pulse as UNDETERMINED rather than ABSENT, because a check that did not complete is not evidence that the monitored event is missing.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`

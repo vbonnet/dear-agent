@@ -152,3 +152,15 @@ artifacts:
     deployed: ~/go/bin/disk-watchdog
     mode: "0755"
     remediation: make install-disk-watchdog
+
+  # The absence-alarm plist's ProgramArguments points at this binary. Without a
+  # binary entry, `dear-deploy status` reports the launch agent current while
+  # the executable it needs is missing or stale, and the monitor silently never
+  # runs after bootstrap -- the same unwired-detector failure this job exists to
+  # catch.
+  - name: absence-alarm
+    kind: binary
+    source: cmd/absence-alarm
+    deployed: ~/go/bin/absence-alarm
+    mode: "0755"
+    remediation: make install-absence-alarm
