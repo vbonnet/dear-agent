@@ -127,7 +127,10 @@ golangci-lint run --allow-parallel-runners --timeout=5m ./...
 LINT_RC=$?
 set -e
 if [[ "$LINT_RC" -eq 3 ]]; then
-  fail "golangci-lint could not acquire its lock (exit 3) despite --allow-parallel-runners. Another run is holding ${TMPDIR:-/tmp}golangci-lint.lock; this is a tooling regression, not a lint failure."
+  # Normalize the trailing slash: macOS sets TMPDIR with one, an unset TMPDIR
+  # falls back to a bare /tmp, and naive concatenation prints /tmpgolangci-lint.lock.
+  LOCK_DIR="${TMPDIR:-/tmp}"
+  fail "golangci-lint could not acquire its lock (exit 3) despite --allow-parallel-runners. Another run is holding ${LOCK_DIR%/}/golangci-lint.lock; this is a tooling regression, not a lint failure."
 elif [[ "$LINT_RC" -ne 0 ]]; then
   fail "lint failed (see above)"
 fi
