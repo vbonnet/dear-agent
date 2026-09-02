@@ -184,8 +184,8 @@ func AppendJournal(path string, rec JournalRecord) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	if _, err := f.Write(append(raw, '\n')); err != nil {
+		f.Close()
 		return err
 	}
 	return f.Close()
