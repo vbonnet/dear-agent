@@ -168,11 +168,16 @@ func writeConfig(configPath string, config map[string]any) error {
 		_ = temp.Close()
 		return fmt.Errorf("sync temporary Claude config: %w", err)
 	}
+	// Set the mode on the open descriptor, before Close. Chmod'ing tempPath
+	// after the handle is gone is a path-based operation on a name that no
+	// longer has to refer to the file we wrote (TOCTOU); fchmod cannot be
+	// redirected that way.
+	if err := temp.Chmod(configFileMode(configPath)); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("set permissions on temporary Claude config: %w", err)
+	}
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close temporary Claude config: %w", err)
-	}
-	if err := os.Chmod(tempPath, configFileMode(configPath)); err != nil {
-		return fmt.Errorf("set permissions on temporary Claude config: %w", err)
 	}
 	if err := os.Rename(tempPath, configPath); err != nil {
 		return fmt.Errorf("replace Claude config %q: %w", configPath, err)

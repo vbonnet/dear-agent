@@ -101,9 +101,9 @@
       "agm/internal/sentinel/daemon/monitor.go (1036 lines)",
       "agm/internal/session/context_detector_test.go (1432 lines)",
       "agm/internal/tmux/liveness.go (1031 lines)",
-      "agm/internal/tmux/prompt_detector.go (1751 lines)",
+      "agm/internal/tmux/prompt_detector.go (1830 lines)",
       "agm/internal/tmux/prompt_detector_test.go (1201 lines)",
-      "agm/internal/tmux/readiness.go (1044 lines)",
+      "agm/internal/tmux/readiness.go (1074 lines)",
       "agm/internal/tmux/tmux.go (1258 lines)",
       "agm/internal/tmux/tmux_test.go (1109 lines)",
       "agm/internal/ui/table.go (1054 lines)",
@@ -1092,6 +1092,35 @@
         "raw-mem-gate": [],
         "zero-test": []
       }
+    },
+    {
+      "previous_baseline_sha256": "d3061ae2ebd892d3d7427261894a4540cd3dee49abf6a2e2ed5729f68d20a1cb",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/tmux/prompt_detector.go (1830 lines)",
+          "agm/internal/tmux/readiness.go (1074 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/tmux/prompt_detector.go (1751 lines)",
+          "agm/internal/tmux/readiness.go (1044 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "prompt_detector.go and readiness.go were already admitted over the 1000-line threshold at 1751 and 1044 lines. The gate keys on the exact count, so adding lines inside an already-admitted file registers as a new finding even though nothing crossed the threshold. Splitting either file is a separate refactor and is not bundled into a mesh-unblocking fix.",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1433"
     }
   ]
 }
