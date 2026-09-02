@@ -65,7 +65,7 @@ type Report struct {
 type deps struct {
 	now        func() time.Time
 	gitOutput  func(ctx context.Context, repo string, args ...string) (string, error)
-	fetchMtime func(repo string) (time.Time, bool)
+	fetchMtime func(ctx context.Context, repo string) (time.Time, bool)
 }
 
 func defaultDeps() deps {
@@ -82,8 +82,8 @@ func defaultDeps() deps {
 			}
 			return strings.TrimSpace(string(out)), nil
 		},
-		fetchMtime: func(repo string) (time.Time, bool) {
-			gitDir, err := exec.Command("git", "-C", repo, "rev-parse", "--git-common-dir").Output()
+		fetchMtime: func(ctx context.Context, repo string) (time.Time, bool) {
+			gitDir, err := exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--git-common-dir").Output()
 			if err != nil {
 				return time.Time{}, false
 			}
@@ -119,6 +119,13 @@ func run(args []string, d deps) int {
 		return 3
 	}
 
+	// One deadline covers every subprocess this probe runs. merge-health is
+	// scheduled by absence-alarm, so a git call that blocks -- a hung
+	// credential helper, an unresponsive filesystem -- would otherwise stall
+	// the whole observation tick rather than reporting a bounded failure.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	now := d.now()
 	r := Report{
 		CheckedAt: now.UTC().Format(time.RFC3339),
@@ -126,12 +133,9 @@ func run(args []string, d deps) int {
 		Ref:       *ref,
 		Lookback:  *lookback,
 	}
-	if mtime, ok := d.fetchMtime(*repo); ok {
+	if mtime, ok := d.fetchMtime(ctx, *repo); ok {
 		r.LastFetchAge = now.Sub(mtime).Round(time.Minute).String()
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	// MH-03: an unreadable repo or unresolvable ref is "down", not silence.
 	out, err := d.gitOutput(ctx, *repo, "log", "-1", "--format=%H %ct", *ref)

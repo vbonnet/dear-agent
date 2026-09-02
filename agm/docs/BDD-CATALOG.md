@@ -1082,8 +1082,9 @@ session lifecycle and circuit breaker support both platforms.
 **File:** [`observability_package_guardrails.feature`](../test/bdd/features/observability_package_guardrails.feature)
 
 **Drives:** observability SPEC coverage for `cmd/jaeger-health`,
-`cmd/otel-local`, `internal/metrics`, telemetry agent, telemetry analysis,
-telemetry enrichment, telemetry error rendering, and `pkg/otelsetup`.
+`cmd/merge-health`, `cmd/otel-local`, `internal/metrics`, telemetry agent,
+telemetry analysis, telemetry enrichment, telemetry error rendering, and
+`pkg/otelsetup`.
 
 **Key scenarios:**
 - Observability packages keep co-located SPEC coverage.

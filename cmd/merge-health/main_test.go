@@ -19,7 +19,7 @@ func testDeps(tipAge time.Duration, gitErr error) deps {
 			}
 			return fmt.Sprintf("abcdef0123456789 %d", t0.Add(-tipAge).Unix()), nil
 		},
-		fetchMtime: func(string) (time.Time, bool) { return t0.Add(-10 * time.Minute), true },
+		fetchMtime: func(context.Context, string) (time.Time, bool) { return t0.Add(-10 * time.Minute), true },
 	}
 }
 
@@ -80,7 +80,7 @@ func TestRun_SmallSkewIsHealthy(t *testing.T) {
 // MH-07: a missing FETCH_HEAD does not change the status.
 func TestRun_NoFetchHeadStillHealthy(t *testing.T) {
 	d := testDeps(time.Hour, nil)
-	d.fetchMtime = func(string) (time.Time, bool) { return time.Time{}, false }
+	d.fetchMtime = func(context.Context, string) (time.Time, bool) { return time.Time{}, false }
 	if code := run([]string{"--lookback", "96h"}, d); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
@@ -98,5 +98,41 @@ func TestRun_ReadOnly(t *testing.T) {
 	run([]string{"--lookback", "96h"}, d)
 	if len(calls) != 1 || calls[0][0] != "log" {
 		t.Fatalf("git calls = %v, want exactly one log invocation", calls)
+	}
+}
+
+// TestRun_BoundsEverySubprocessWithOneDeadline covers MH-09. merge-health is
+// invoked by a scheduler (absence-alarm) that runs other pulses after it, so a
+// git call that never returns must not stall the tick. Both injected host
+// observations must therefore receive a context that already carries a
+// deadline, and it must be the same one -- a second, later deadline would let
+// the probe outlive its own budget.
+func TestRun_BoundsEverySubprocessWithOneDeadline(t *testing.T) {
+	var fetchDeadline, gitDeadline time.Time
+	var fetchOK, gitOK bool
+
+	d := testDeps(1*time.Hour, nil)
+	d.fetchMtime = func(ctx context.Context, _ string) (time.Time, bool) {
+		fetchDeadline, fetchOK = ctx.Deadline()
+		return t0.Add(-10 * time.Minute), true
+	}
+	inner := d.gitOutput
+	d.gitOutput = func(ctx context.Context, repo string, args ...string) (string, error) {
+		gitDeadline, gitOK = ctx.Deadline()
+		return inner(ctx, repo, args...)
+	}
+
+	if code := run([]string{"--json"}, d); code != 0 {
+		t.Fatalf("run exit = %d, want 0", code)
+	}
+	if !fetchOK {
+		t.Error("fetchMtime received a context with no deadline (MH-09)")
+	}
+	if !gitOK {
+		t.Error("gitOutput received a context with no deadline (MH-09)")
+	}
+	if fetchOK && gitOK && !fetchDeadline.Equal(gitDeadline) {
+		t.Errorf("subprocesses ran under different deadlines %v vs %v; want one tick budget (MH-09)",
+			fetchDeadline, gitDeadline)
 	}
 }

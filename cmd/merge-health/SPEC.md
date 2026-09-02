@@ -32,6 +32,17 @@ absence semantics, not a false positive - a dead fetch loop is itself an
 absent positive event in the same pipeline - and the report carries the
 last-fetch age so a responder can tell the two apart at a glance.
 
+## Shared absence-probe contract
+
+The status vocabulary, exit codes, and JSON envelope in MH-01..MH-08 are not
+merge-specific: they are the generic absence-probe interface a scheduler
+consumes. `pkg/absencealarm/SPEC.md` owns that interface (PULSE-01..PULSE-04 —
+exit 0 healthy, 1 degraded, 2 down, 3 usage, and the JSON report shape). The
+requirements below are the merge-applicability scoping of it: what counts as
+the positive event, what the lookback means for this pipeline, and what the
+last-fetch age adds. A change to the shared vocabulary belongs in the
+absence-alarm contract, not here, so the sibling probes cannot drift apart.
+
 ## EARS Requirements
 
 **MH-01** When at least one commit exists on the tracked ref with a commit time inside the lookback window, the system shall report healthy and exit 0.
@@ -49,6 +60,8 @@ last-fetch age so a responder can tell the two apart at a glance.
 **MH-07** When the repository's FETCH_HEAD is readable, the system shall include the time since the last fetch in the report as advisory context, and its absence shall not change the status.
 
 **MH-08** The system shall not mutate the repository: it shall run no fetch, no pull, and no write of any kind.
+
+**MH-09** When the probe runs any subprocess, the system shall bound every one of them with a single tick deadline so that a hung git invocation reports a bounded failure instead of stalling the scheduler that invoked it.
 
 ## BDD Traceability
 
