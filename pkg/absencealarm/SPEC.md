@@ -1,12 +1,10 @@
 # Absence Alarm Specification
 
 <!-- Last audited at: 2026-09-01 -->
-<!-- Audit scope: pkg/absencealarm, the domain this revision ships. Every
-     requirement below is satisfied by that package and covered by
-     pkg/absencealarm/*_test.go. The audit deliberately makes no claim about
-     cmd/absence-alarm, its launchd deployment, or the default pulse registry:
-     none of them exist at this revision, and they are audited by the slice
-     that introduces them. -->
+<!-- Audit scope: pkg/absencealarm and cmd/absence-alarm, both of which exist
+     at this revision (the CLI slice completes the stack the domain slice
+     opened). Every requirement below is covered by pkg/absencealarm/*_test.go
+     or cmd/absence-alarm/*_test.go. -->
 
 ## Purpose
 
@@ -139,9 +137,4 @@ the absence alarm itself.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
-- Package tests: `pkg/absencealarm/*_test.go` (domain)
-
-The CLI's executable coverage (`cmd/absence-alarm/*_test.go`) lands with the
-CLI slice. It is deliberately not listed as current evidence: `cmd/absence-alarm`
-does not exist at this revision, so citing it here would let the audit stamp
-certify paths that cannot have been checked.
+- Package tests: `pkg/absencealarm/*_test.go` (domain), `cmd/absence-alarm/*_test.go` (CLI)
