@@ -169,3 +169,37 @@ func TestJaegerArtifactsAreDeployManaged(t *testing.T) {
 		}
 	}
 }
+
+// TestForegroundAndLaunchdUseTheSameConfigLocation covers JAEGER-CFG-05. The
+// loopback binding only protects the host if BOTH collector start paths read
+// the managed config. The launch agent passes it via the plist; otel-local
+// passes it via managedConfigLocation. If those two drift, `make otel-up`
+// silently runs on Jaeger's upstream defaults, which listen on every
+// interface, while the launchd job stays loopback-only.
+func TestForegroundAndLaunchdUseTheSameConfigLocation(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "deploy", "launchd", "com.jaegertracing.jaeger.plist"))
+	if err != nil {
+		t.Fatalf("reading jaeger plist: %v", err)
+	}
+	plist := string(raw)
+	if !strings.Contains(plist, "--config") {
+		t.Fatal("plist does not pass --config to the collector (JAEGER-CFG-05)")
+	}
+
+	// The plist is a template: __HOME__ stands in for the real home directory.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	rendered := strings.ReplaceAll(plist, "__HOME__", home)
+
+	want := managedConfigLocation()
+	if want == "" {
+		t.Fatal("managedConfigLocation() is empty")
+	}
+	if !strings.Contains(rendered, want) {
+		t.Errorf("plist --config path and managedConfigLocation() disagree.\n"+
+			"otel-local would read: %s\n"+
+			"the launch agent reads a path not containing it (JAEGER-CFG-05)", want)
+	}
+}

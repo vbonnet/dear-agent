@@ -23,7 +23,13 @@ cannot own this file's observable behavior. These requirements do.
 
 **JAEGER-CFG-04** When the collector configuration changes in source, the deployment gate shall report drift against the deployed copy rather than allowing the running collector to diverge silently.
 
+**JAEGER-CFG-05** When `otel-local` starts a collector in the foreground, the command shall pass the managed configuration explicitly, and if that configuration is absent the command shall warn that the upstream defaults listen on every interface.
+
 ## BDD Traceability
 
 - Package tests: `cmd/otel-local/config_contract_test.go`
 - Manifest registration: `deploy/manifest.yaml` (`jaeger-collector-config`)
+
+This directory owns its own `SPEC.md`, so it carries no `SPEC.owner` edge: an
+owner file pointing back at a co-located specification is a self-edge and adds
+no ownership information.

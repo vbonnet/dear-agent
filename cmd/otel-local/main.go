@@ -159,7 +159,21 @@ func cmdUp(argv []string) error {
 
 	// bin is an operator-controlled path (JAEGER_BINARY, the dear-agent cache,
 	// or a "jaeger" on PATH), not external/network input.
-	proc := exec.Command(bin)
+	//
+	// Pass the managed config explicitly (OTEL-LOCAL-14). Without --config,
+	// Jaeger falls back to its upstream defaults, which bind 0.0.0.0 on every
+	// listener -- so the quick-start path everyone actually runs would expose
+	// an unauthenticated collector and query API on every interface, while only
+	// the launch agent got the loopback-pinned config. Same bytes, both paths.
+	args := []string{}
+	if cfg, ok := managedConfigPath(); ok {
+		args = append(args, "--config", cfg)
+	} else {
+		fmt.Fprintf(os.Stderr, "otel-local: warning: no managed collector config at %s; "+
+			"Jaeger will use its upstream defaults, which listen on all interfaces. "+
+			"Install it with: make install-jaeger-launchagent\n", managedConfigLocation())
+	}
+	proc := exec.Command(bin, args...)
 	// Jaeger writes its own startup logs to stderr; surface them prefixed so
 	// they don't masquerade as otel-local output.
 	proc.Stdout = prefixWriter{w: os.Stderr, prefix: "jaeger: "}
@@ -261,7 +275,30 @@ func cacheDir() string {
 }
 
 func cacheBinPath() string { return filepath.Join(cacheDir(), "jaeger") }
-func pidfilePath() string  { return filepath.Join(cacheDir(), "jaeger.pid") }
+
+// managedConfigLocation is where dear-deploy stages deploy/jaeger/config.yaml.
+// It is the same path the launch agent's plist passes to --config, so the
+// foreground and launchd collectors run identical configuration.
+func managedConfigLocation() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "Library", "Application Support", "Jaeger", "config.yaml")
+}
+
+// managedConfigPath returns the staged collector config when it is readable.
+func managedConfigPath() (string, bool) {
+	path := managedConfigLocation()
+	if path == "" {
+		return "", false
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return "", false
+	}
+	return path, true
+}
+func pidfilePath() string { return filepath.Join(cacheDir(), "jaeger.pid") }
 
 func fetchHint(ver string) string {
 	asset := assetName(ver, runtime.GOOS, runtime.GOARCH)
