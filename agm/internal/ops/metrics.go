@@ -86,6 +86,9 @@ type DiskMetrics struct {
 	UsedGB      float64 `json:"used_gb"`
 	AvailGB     float64 `json:"avail_gb"`
 	UsedPercent float64 `json:"used_percent"`
+	// OverflowErr is non-empty when block-count arithmetic overflowed uint64;
+	// the mount is present but all numeric fields are zero.
+	OverflowErr string `json:"overflow_err,omitempty"`
 }
 
 // Alert represents a threshold violation.
@@ -317,7 +320,13 @@ func readDiskUsage() []DiskMetrics {
 	var results []DiskMetrics
 
 	for _, mount := range mounts {
-		dm := statfsDisk(mount)
+		dm, err := statfsDisk(mount)
+		if err != nil {
+			// Overflow on a real mount: include it with zeroed counters so
+			// callers can see the mount exists rather than silently omitting it.
+			results = append(results, DiskMetrics{Mount: mount, OverflowErr: err.Error()})
+			continue
+		}
 		if dm.TotalGB > 0 {
 			results = append(results, dm)
 		}
@@ -333,10 +342,10 @@ func readDiskUsage() []DiskMetrics {
 }
 
 // statfsDisk gets disk usage for a mount point using the statfs syscall.
-func statfsDisk(mount string) DiskMetrics {
+func statfsDisk(mount string) (DiskMetrics, error) {
 	var stat unix.Statfs_t
 	if err := unix.Statfs(mount, &stat); err != nil {
-		return DiskMetrics{Mount: mount}
+		return DiskMetrics{Mount: mount}, nil
 	}
 
 	return diskMetricsFromBlockCounts(
@@ -364,9 +373,9 @@ func nonNegativeStatfsBlockCount[T statfsBlockCount](value T) uint64 {
 func diskMetricsFromBlockCounts(
 	mount string,
 	blockSize, totalBlocks, freeBlocks, availableBlocks uint64,
-) DiskMetrics {
+) (DiskMetrics, error) {
 	if blockSize == 0 || totalBlocks == 0 {
-		return DiskMetrics{Mount: mount}
+		return DiskMetrics{Mount: mount}, nil
 	}
 
 	freeBlocks = min(freeBlocks, totalBlocks)
@@ -387,10 +396,10 @@ func diskMetricsFromBlockCounts(
 			UsedGB:      roundTo1(usedGB),
 			AvailGB:     roundTo1(availableGB),
 			UsedPercent: roundTo1(usedPercent),
-		}
+		}, nil
 	}
 
-	return DiskMetrics{Mount: mount}
+	return DiskMetrics{Mount: mount}, fmt.Errorf("disk metric overflow on %s: totalBlocks=%d blockSize=%d exceeds uint64", mount, totalBlocks, blockSize)
 }
 
 // generateAlerts checks thresholds and returns violations.

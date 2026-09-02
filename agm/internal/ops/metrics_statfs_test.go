@@ -30,6 +30,7 @@ func TestDiskMetricsFromBlockCounts(t *testing.T) {
 		free      uint64
 		available uint64
 		want      DiskMetrics
+		wantErr   bool
 	}{
 		{
 			name:      "normal",
@@ -72,13 +73,23 @@ func TestDiskMetricsFromBlockCounts(t *testing.T) {
 			blockSize: 2,
 			total:     math.MaxUint64,
 			want:      DiskMetrics{Mount: "/data"},
+			wantErr:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := diskMetricsFromBlockCounts("/data", tt.blockSize, tt.total, tt.free, tt.available)
+			got, err := diskMetricsFromBlockCounts("/data", tt.blockSize, tt.total, tt.free, tt.available)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("diskMetricsFromBlockCounts() error = nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("diskMetricsFromBlockCounts() unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Fatalf("diskMetricsFromBlockCounts() = %+v, want %+v", got, tt.want)
 			}
