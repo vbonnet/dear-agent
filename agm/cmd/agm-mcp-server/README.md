@@ -5,8 +5,8 @@ MCP (Model Context Protocol) server for AGM session management and Wayfinder pro
 ## Overview
 
 The AGM MCP Server bridges Claude Code (and other MCP clients) with AGM session data
-and local Wayfinder project files. It runs as a stdio process and registers eight tools
-across two domains.
+and local Wayfinder project files. It runs as a stdio process and registers 14 tools
+across 4 domains.
 
 ## Tools
 
@@ -17,9 +17,25 @@ across two domains.
 | `agm_list_sessions` | List sessions with status/type/limit filters |
 | `agm_search_sessions` | Search sessions by partial name match |
 | `agm_get_session_metadata` | Full session metadata by ID or name |
+| `agm_get_session_output` | Read live or durably captured terminal output |
 | `agm_archive_session` | Mark a session archived (dry-run supported) |
 | `agm_kill_session` | Kill the exact tmux session (`dry_run`, `force`, and active-session `confirmed_stuck` supported) |
+| `agm_create_session` | Create an AGM-managed session |
+| `agm_send_message` | Send a message to an AGM-managed session |
+
+### Schema tool
+
+| Tool | Description |
+|------|-------------|
 | `agm_list_ops` | List available ops (schema discovery) |
+
+### Dispatch routing tools
+
+| Tool | Description |
+|------|-------------|
+| `agm_get_quota_status` | Read recorded provider quota status for routing decisions |
+| `agm_get_completion_relay_target` | Read the live completion-relay target |
+| `agm_set_completion_relay_target` | Point completion relay at a live Dispatch session |
 
 ### Wayfinder tools
 
@@ -81,5 +97,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
 ## Privacy
 
-Exposes only session metadata. Conversation history, prompts, and API keys
-are never read or returned.
+Most tools expose only session metadata. `agm_get_session_output` is the
+deliberate exception: its captured terminal output may contain prompts,
+responses, file paths, or rendered credentials and must be treated as
+sensitive. No tool reads API-key storage directly.
