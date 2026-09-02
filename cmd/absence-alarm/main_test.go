@@ -277,3 +277,72 @@ func TestRun_UnwritableJournalKeepsExitCode(t *testing.T) {
 		t.Errorf("stderr does not report the journal failure: %s", errb.String())
 	}
 }
+
+// AA-24: a hung command pulse must not disable the monitor. The probe is
+// bounded, its expiry classifies as UNDETERMINED rather than ABSENT (a check
+// that never finished is not evidence the subject is missing), and every later
+// pulse is still evaluated and still reaches the heartbeat.
+func TestRun_HungProbeDoesNotDisableTheTick(t *testing.T) {
+	dir := t.TempDir()
+	fresh := filepath.Join(dir, "fresh.log")
+	if err := os.WriteFile(fresh, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc := `{"pulses":[
+	  {"name":"hangs","type":"command","command":["hang"],"expect":"a probe that returns"},
+	  {"name":"after","type":"file_mtime","path":"` + fresh + `","window":"1h","expect":"a fresh file"}
+	]}`
+	e := newRunEnv(t, doc)
+
+	probes := absencealarm.DefaultProbes()
+	var sawDeadline bool
+	probes.RunCommand = func(ctx context.Context, _ []string) (int, error) {
+		if _, ok := ctx.Deadline(); ok {
+			sawDeadline = true
+		}
+		// Stand in for a process that outlives its budget: block until the
+		// probe's own context is cancelled, then report as CommandContext does.
+		<-ctx.Done()
+		return -1, ctx.Err()
+	}
+
+	done := make(chan int, 1)
+	var out, errb bytes.Buffer
+	go func() { done <- run(e.args("--probe-timeout", "150ms"), &out, &errb, probes, e.notifier()) }()
+
+	var code int
+	select {
+	case code = <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("run did not return: a hung probe stalled the whole tick (AA-24)")
+	}
+
+	if !sawDeadline {
+		t.Error("command probe ran with no deadline (AA-24)")
+	}
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
+	}
+
+	var hb absencealarm.Heartbeat
+	hraw, err := os.ReadFile(e.heartbeat)
+	if err != nil {
+		t.Fatalf("heartbeat not written after a hung probe (AA-24): %v", err)
+	}
+	if err := json.Unmarshal(hraw, &hb); err != nil {
+		t.Fatalf("heartbeat unreadable: %v", err)
+	}
+	if len(hb.Results) != 2 {
+		t.Fatalf("heartbeat has %d results, want 2: the pulse after the hung one was skipped (AA-24)", len(hb.Results))
+	}
+	byName := map[string]absencealarm.Status{}
+	for _, r := range hb.Results {
+		byName[r.Name] = r.Status
+	}
+	if got := byName["hangs"]; got != absencealarm.StatusUndetermined {
+		t.Errorf("hung probe status = %q, want UNDETERMINED: a check that never finished is not proof of absence (AA-24)", got)
+	}
+	if got := byName["after"]; got != absencealarm.StatusPresent {
+		t.Errorf("pulse after the hung one = %q, want PRESENT", got)
+	}
+}

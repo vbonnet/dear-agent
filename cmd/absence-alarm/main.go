@@ -48,6 +48,18 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/notify"
 )
 
+const (
+	// defaultProbeTimeout bounds one pulse's evaluation. Command pulses run
+	// arbitrary external processes, so this is the guard against a single check
+	// hanging and taking the monitor down with it (AA-24). Overridable with
+	// --probe-timeout.
+	defaultProbeTimeout = 30 * time.Second
+	// defaultTickTimeout bounds the whole pass, so N slow probes cannot
+	// serialize into an unbounded tick even though each one respects the probe
+	// budget. Overridable with --tick-timeout.
+	defaultTickTimeout = 5 * time.Minute
+)
+
 // notifier delivers one alarm or recovery message to the operator.
 type notifier func(ctx context.Context, title, body string) error
 
@@ -89,6 +101,8 @@ type tick struct {
 	snoozes        map[string]absencealarm.Snooze
 	launchdListing string
 	launchdErr     error
+	// probeTimeout is the per-pulse evaluation deadline (AA-24).
+	probeTimeout time.Duration
 }
 
 func run(args []string, stdout, stderr io.Writer, pr absencealarm.Probes, notifyFn notifier) int {
@@ -103,8 +117,14 @@ func run(args []string, stdout, stderr io.Writer, pr absencealarm.Probes, notify
 		heartbeatPath = fs.String("heartbeat", filepath.Join(home, ".local", "state", "dear-agent", "absence-alarm.heartbeat.json"), "self-liveness heartbeat file")
 		jsonOut       = fs.Bool("json", false, "emit the report as JSON on stdout")
 		dryRun        = fs.Bool("dry-run", false, "evaluate and report only; no notifications, state, journal, or heartbeat writes")
+		probeBudget   = fs.Duration("probe-timeout", defaultProbeTimeout, "per-pulse evaluation deadline; expiry classifies the pulse UNDETERMINED")
+		tickBudget    = fs.Duration("tick-timeout", defaultTickTimeout, "deadline for the whole pass across all pulses")
 	)
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *probeBudget <= 0 || *tickBudget <= 0 {
+		fmt.Fprintf(stderr, "absence-alarm: --probe-timeout and --tick-timeout must be positive\n")
 		return 2
 	}
 
@@ -126,15 +146,29 @@ func run(args []string, stdout, stderr io.Writer, pr absencealarm.Probes, notify
 		fmt.Fprintf(stderr, "absence-alarm: %v (treating all alarms as new)\n", stErr)
 	}
 
-	ctx := context.Background()
+	// AA-24: the tick and each probe inside it are bounded. Every command
+	// pulse runs an external process and the launchd listing shells out, so an
+	// unbounded context lets one hung probe disable the entire monitor: later
+	// pulses never evaluate, nothing is notified for them, and the heartbeat
+	// this job exists to write is never written. The tick budget caps the whole
+	// pass; each probe additionally gets its own slice so one slow check cannot
+	// consume the rest. Notifications deliberately use the tick context, not a
+	// probe's -- a probe that just timed out must still be able to alarm.
+	ctx, cancelTick := context.WithTimeout(context.Background(), *tickBudget)
+	defer cancelTick()
+
 	tk := &tick{
 		pr: pr, notifyFn: notifyFn, stderr: stderr, dryRun: *dryRun,
 		journalPath: *journalPath, now: now, st: &st, snoozes: snoozes,
+		probeTimeout: *probeBudget,
 	}
-	// One launchd listing shared by every launchd pulse.
+	// One launchd listing shared by every launchd pulse, bounded like any
+	// other probe.
 	for _, p := range pulses {
 		if p.Type == absencealarm.PulseLaunchdLoaded {
-			tk.launchdListing, tk.launchdErr = pr.LaunchdList(ctx)
+			listCtx, cancel := context.WithTimeout(ctx, *probeBudget)
+			tk.launchdListing, tk.launchdErr = pr.LaunchdList(listCtx)
+			cancel()
 			break
 		}
 	}
@@ -175,7 +209,9 @@ func (t *tick) process(ctx context.Context, p absencealarm.Pulse) absencealarm.R
 		res = absencealarm.Result{Name: p.Name, Status: absencealarm.StatusSnoozed, Expect: p.Expect, Window: p.Window,
 			Reason: fmt.Sprintf("snoozed until %s: %s", sn.Until.Format(time.RFC3339), sn.Reason)}
 	} else {
-		res = absencealarm.EvaluatePulse(ctx, p, t.pr, t.launchdListing, t.launchdErr)
+		probeCtx, cancelProbe := context.WithTimeout(ctx, t.probeTimeout)
+		res = absencealarm.EvaluatePulse(probeCtx, p, t.pr, t.launchdListing, t.launchdErr)
+		cancelProbe()
 		if snoozed && res.Status.Alarming() {
 			// AA-15: an expired snooze is part of the story.
 			res.Reason = fmt.Sprintf("%s (snooze expired %s)", res.Reason, sn.Until.Format(time.RFC3339))
