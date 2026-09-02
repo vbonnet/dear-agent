@@ -483,17 +483,20 @@ func waitForOwnedDolt(
 		probeCancel()
 		lastErr = err
 
+		// Stop without the legacy post-Stop drain. Under Go 1.23+ synchronous
+		// timer semantics (this module targets 1.26) the channel is unbuffered,
+		// so a false return from Stop no longer guarantees a value is sitting
+		// in timer.C waiting to be received. If the timer fires at the same
+		// moment process.done or the deadline becomes ready and select picks
+		// the other arm, the drain blocks forever - hanging this test and
+		// leaving the owned Dolt child running until the outer test timeout.
 		timer := time.NewTimer(25 * time.Millisecond)
 		select {
 		case <-process.done:
-			if !timer.Stop() {
-				<-timer.C
-			}
+			timer.Stop()
 			return process.readinessExitError()
 		case <-overall.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
+			timer.Stop()
 			deadlineErr := fmt.Errorf("readiness deadline exceeded: %w", overall.Err())
 			if lastErr == nil {
 				return deadlineErr

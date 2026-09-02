@@ -1165,6 +1165,12 @@ go test -v ./internal/fuzzy
 
 # Dolt storage tests (requires Dolt server on port 3307)
 DOLT_TEST_INTEGRATION=1 WORKSPACE=test DOLT_PORT=3307 go test -v ./internal/dolt
+
+# Owned-server migration contract (starts and stops its own Dolt on a random
+# port; needs `dolt` on PATH). The -tags=integration is required: without it
+# the file is excluded by its build constraint and the command above reports
+# success without ever running this test.
+DOLT_TEST_INTEGRATION=1 go test -v -tags=integration -run TestLiveDoltMigrationContract ./internal/dolt
 ```
 
 ### Testing with agm test
