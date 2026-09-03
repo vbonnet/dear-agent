@@ -40,7 +40,7 @@ depend on its flags and exit behavior.
 
 **AGM-REAPER-12** When asynchronous archive execution crosses into `agm-reaper`, the command shall require both `--session-id` with the stable AGM lifecycle identifier and `--session` with the resolved tmux target, and shall pass those identities to storage and pane-control paths without conflating them.
 
-**AGM-REAPER-13** When a non-empty `--outcome` is provided, the system shall accept only `completed`, `crashed`, `killed`, or `gc-stale`, and shall reject any other text before durable log creation, startup acknowledgement, or reaper construction.
+**AGM-REAPER-13** When a non-empty `--outcome` is provided, the system shall accept only the canonical archive-outcome vocabulary defined by MAN-11 in `agm/internal/manifest/SPEC.md`, and shall reject any other text before durable log creation, startup acknowledgement, or reaper construction.
 
 ## BDD Traceability
 
