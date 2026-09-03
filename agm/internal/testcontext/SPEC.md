@@ -45,13 +45,13 @@ The approved compatibility configuration leaves are exactly:
 - `.config/opencode/tui.json`
 - `.config/opencode/tui.jsonc`
 
-**TCTX-13** While inherited authentication is selected, the system shall expose each present approved credential leaf at the same relative path in the selected home through one exact symbolic link to the host credential leaf.
+**TCTX-13** While inherited authentication is selected, the system shall expose each present approved credential leaf at the same relative path in the selected home through one exact symbolic link that can relay later provider reads or writes only to that host credential leaf.
 
 **TCTX-14** When the host replaces an approved credential leaf after successful projection, the system shall expose the replacement through the selected home's existing credential link without exposing sibling host state.
 
 **TCTX-15** While inherited authentication is selected, the system shall install each present approved compatibility configuration leaf at the same relative path in the selected home as a `0600` regular-file snapshot detached from later host changes.
 
-**TCTX-16** When an approved compatibility configuration leaf is prepared, the system shall bound the read to 1 MiB and reject a larger or identity-changing source before destination mutation.
+**TCTX-16** When an approved compatibility configuration leaf is prepared, the system shall accept at most 1 MiB of snapshot content, probe at most 1 MiB plus one byte per verification read to detect overflow, and reject a larger or identity-changing source before destination mutation.
 
 **TCTX-17** If an approved credential leaf is not owner-private or any approved source or its ancestry is redirected, wrong-owner, writable by group or other, or not the required real directory or regular-file type, then the system shall reject inherited authentication before destination mutation.
 
