@@ -49,63 +49,70 @@ part.
 
 ## EARS Requirements
 
-**GH-01** When no check fails on at least `MinPRs` pull requests *and* at least
-`MinFraction` of the evaluated queue, the package shall report `healthy`.
+Each requirement is a single line so the EARS validator sees the whole
+sentence. Rationale follows as prose beneath it.
 
-**GH-02** When a check meets both thresholds, the package shall report
-`systemic` and identify that check.
+**GH-01** When no check fails on at least `MinPRs` pull requests and at least `MinFraction` of the evaluated queue, the package shall report `healthy`.
 
-**GH-03** When a check meets only one of the two thresholds, the package shall
-not report it as systemic. Both are required: the fraction alone alarms on a
-nearly empty queue, and the absolute count alone alarms on a large queue where
-a few pull requests legitimately share a failure.
+**GH-02** When a check meets both thresholds, the package shall report `systemic` and identify that check.
 
-**GH-04** When several checks meet both thresholds, the package shall report
-all of them, ranked by pull-request count descending then check name ascending,
-and designate the first as dominant. The ordering shall be total and
-deterministic so repeated runs produce byte-identical output.
+**GH-03** When a check meets only one of the two thresholds, the package shall omit it from the systemic set.
 
-**GH-05** When a pull request's check rollup is unknown or unreported, the
-package shall exclude it from the denominator rather than count it as passing.
-Absence of a result is not evidence of health, and counting it as green dilutes
-the fraction and masks an outage.
+Both thresholds are required. The fraction alone alarms on a nearly empty
+queue; the absolute count alone alarms on a large queue where a few pull
+requests legitimately share a failure.
 
-**GH-06** When a pull request lists the same failing check more than once, the
-package shall count that pull request once for that check. GitHub leaves
-duplicate contexts on a rollup after re-runs and matrix legs, and
-double-counting can drive a fraction above 1.
+**GH-04** When several checks meet both thresholds, the package shall report all of them ranked by pull-request count descending then check name ascending, and designate the first as dominant.
 
-**GH-07** When `ExcludeDrafts` is unset, the package shall count draft pull
-requests. Draft status describes review intent, not whether a branch inherits a
-broken required check from `main`. In the motivating outage 33 of 42 open pull
+The ordering is total and deterministic, so repeated runs produce
+byte-identical output and a quiet tick never reads as a new alarm.
+
+**GH-05** When a pull request's check rollup is unknown or unreported, the package shall exclude that pull request from the denominator.
+
+Absence of a result is not evidence of health. Counting an unreported pull
+request as green dilutes the fraction and masks an outage.
+
+**GH-06** When a pull request lists the same failing check more than once, the package shall count that pull request once for that check.
+
+GitHub leaves duplicate contexts on a rollup after re-runs and matrix legs, and
+double-counting one pull request can drive a fraction above 1.
+
+**GH-07** Where `ExcludeDrafts` is unset, the package shall count draft pull requests.
+
+Draft status describes review intent, not whether a branch inherits a broken
+required check from `main`. In the motivating outage 33 of 42 open pull
 requests were drafts and the failure lived in them; excluding drafts reduced
 the sample to 9 and read `healthy` through an active deadlock.
 
-**GH-08** When no pull request is evaluable, the package shall report
-`no_queue`, which is neither health nor an outage. Reporting `healthy` from an
-empty sample would let a completely dead pipeline read green.
+**GH-08** When no pull request is evaluable, the package shall report `no_queue`.
 
-**GH-09** When a systemic failure is reported, the package shall name a likely
-remediation and classify it with a `RemediationKind`, so a responder receives a
-direction rather than only a symptom and an automated driver can decide what is
-safe to act on unattended.
+That state is neither health nor an outage. Reporting `healthy` from an empty
+sample would let a completely dead pipeline read green.
 
-**GH-10** When the dominant check matches no remediation rule, the package
-shall still return a non-empty, actionable remediation.
+**GH-09** When a systemic failure is reported, the package shall name a likely remediation and classify it with a `RemediationKind`.
 
-**GH-11** When a `Config` has a `MinFraction` outside `(0,1]` or a `MinPRs`
-below 1, `Validate` shall return an error. A zero fraction marks every check
-systemic and a fraction above 1 can never be met; both silently disable the
-alarm, which is the failure mode this package exists to prevent.
+A responder then receives a direction rather than only a symptom, and an
+automated driver can decide what is safe to act on unattended.
 
-**GH-12** When `Detect` receives a config that fails `Validate`, it shall fall
-back to `DefaultConfig` rather than panicking or disabling detection.
+**GH-10** When the dominant check matches no remediation rule, the package shall return a non-empty actionable remediation.
 
-**GH-13** The shipped `DefaultConfig` shall classify the 2026-09-03 outage as
-measured (19 of 42 evaluated open pull requests, 33 of them drafts) as
-`systemic`. This is pinned by
-`TestDefaultConfigWouldHaveCaughtTheGovulncheckDeadlock` and is the regression
-guard for every threshold in this package.
+**GH-11** If a `Config` has a `MinFraction` outside `(0,1]` or a `MinPRs` below 1, then the package shall return an error from `Validate`.
+
+A zero fraction marks every check systemic and a fraction above 1 can never be
+met. Both silently disable the alarm, which is the failure mode this package
+exists to prevent, so the misconfiguration is surfaced on load.
+
+**GH-12** When `Detect` receives a config that fails `Validate`, the package shall fall back to `DefaultConfig`.
+
+**GH-13** The shipped `DefaultConfig` shall classify the 2026-09-03 outage as measured, being 19 of 42 evaluated open pull requests with 33 of them drafts, as `systemic`.
+
+This is pinned by `TestDefaultConfigWouldHaveCaughtTheGovulncheckDeadlock` and
+is the regression guard for every threshold in this package.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
+- Package tests: `pkg/gatehealth` unit tests, build, and vet
 
 ## Calibration
 

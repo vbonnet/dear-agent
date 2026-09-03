@@ -28,48 +28,53 @@ that interface (PULSE-01..PULSE-04). This command conforms to it.
 
 ## EARS Requirements
 
-**GHC-01** When no check dominates the queue's failures, the command shall exit
-0 and report `healthy`.
+Each requirement is a single line so the EARS validator sees the whole
+sentence. Rationale follows as prose beneath it.
 
-**GHC-02** When a systemic gate failure is present, the command shall exit 1 and
-emit a report naming the dominant check, its scope, and the likely fix.
+**GHC-01** When no check dominates the queue's failures, the command shall exit 0 and report `healthy`.
 
-**GHC-03** When the queue cannot be read, the command shall exit 2, report
-`down`, and carry the underlying cause in the report. It shall never exit 0 on
-a failed query: reporting health when the probe could not look is the silent
-monitor this tool replaces.
+**GHC-02** When a systemic gate failure is present, the command shall exit 1 and emit a report naming the dominant check, its scope, and the likely fix.
 
-**GHC-04** When no pull request is evaluable, the command shall exit 2. An
-empty queue is the absence of evidence, never positive evidence of health.
+**GHC-03** When the queue cannot be read, the command shall exit 2, report `down`, and carry the underlying cause in the report.
 
-**GHC-05** When flags are malformed, or `--min-fraction`, `--min-prs`, or
-`--limit` are outside their valid ranges, the command shall exit 3. Usage
-errors are distinct from outages so the scheduler does not page a human for a
-typo in the pulse registry.
+**GHC-04** When the queue cannot be read, the command shall not exit 0.
 
-**GHC-06** When emitting the default human summary, the command shall name the
-dominant check, its scope as a count and a percentage of the evaluated queue,
-the likely fix, and example pull-request numbers. This text is the body of the
-desktop notification, so it shall be sufficient to act on without opening
-anything else.
+Reporting health when the probe could not look is the silent monitor this tool
+replaces.
 
-**GHC-07** When threshold flags are supplied, they shall override the shipped
-defaults, so an operator can retune the alarm without a rebuild.
+**GHC-05** When no pull request is evaluable, the command shall exit 2.
 
-**GHC-08** When a pull request's check rollup has not reported, the command
-shall mark it unknown and exclude it from the denominator.
+An empty queue is the absence of evidence, never positive evidence of health.
 
-**GHC-09** When parsing a forge response, the command shall read both modern
-check runs (`name`/`conclusion`) and legacy status contexts
-(`context`/`state`), and shall treat `FAILURE` and `ERROR` as failing.
+**GHC-06** If flags are malformed or `--min-fraction`, `--min-prs`, or `--limit` are outside their valid ranges, then the command shall exit 3.
 
-**GHC-10** When a forge response cannot be decoded, the command shall return an
-error so GHC-03 applies, rather than treating an unparseable queue as an empty
-healthy one.
+Usage errors are distinct from outages, so the scheduler does not page a human
+for a typo in the pulse registry.
 
-**GHC-11** The command shall not rerun checks, rebase branches, or open pull
-requests. It is read-only; remediation is driven separately, gated on the
+**GHC-07** When emitting the default human summary, the command shall name the dominant check, its scope as a count and a percentage, the likely fix, and example pull-request numbers.
+
+That text is the body of the desktop notification, so it is sufficient to act
+on without opening anything else.
+
+**GHC-08** When threshold flags are supplied, the command shall use them in place of the shipped defaults.
+
+**GHC-09** When a pull request's check rollup has not reported, the command shall mark it unknown and exclude it from the denominator.
+
+**GHC-10** When parsing a forge response, the command shall read both modern check runs and legacy status contexts, and treat `FAILURE` and `ERROR` as failing.
+
+**GHC-11** When a forge response cannot be decoded, the command shall return an error so GHC-03 applies.
+
+An unparseable queue is never treated as an empty healthy one.
+
+**GHC-12** The command shall not rerun checks, rebase branches, or open pull requests.
+
+It is read-only. Remediation is driven separately, gated on the
 `remediation_kind` in the report.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
+- Package tests: `cmd/gate-health` unit tests, build, and vet
 
 ## Interface
 

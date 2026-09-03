@@ -8,6 +8,8 @@
 # RELATED-SPEC: cmd/jaeger-health/SPEC.md
 # RELATED-SPEC: pkg/absencealarm/SPEC.md
 # RELATED-SPEC: cmd/merge-health/SPEC.md
+# RELATED-SPEC: pkg/gatehealth/SPEC.md
+# RELATED-SPEC: cmd/gate-health/SPEC.md
 Feature: Observability package guardrails
   Observability packages must keep executable SPEC traceability because quota,
   drift, trace, and agent-runtime monitoring need the same contracts across
@@ -20,6 +22,7 @@ Feature: Observability package guardrails
 
     Examples:
       | package                       |
+      | cmd/gate-health               |
       | cmd/jaeger-health             |
       | pkg/absencealarm              |
       | cmd/merge-health              |
@@ -29,6 +32,7 @@ Feature: Observability package guardrails
       | internal/telemetry/analysis   |
       | internal/telemetry/enrichment |
       | internal/telemetry/errors     |
+      | pkg/gatehealth                |
       | pkg/otelsetup                 |
 
   Scenario Outline: Observability specifications define cancellation and timeout edges
@@ -43,3 +47,5 @@ Feature: Observability package guardrails
       | internal/telemetry/analysis | TEL-ANALYSIS-01 | context is canceled     |
       | pkg/otelsetup               | OTELSETUP-07   | revision is shorter     |
       | cmd/jaeger-health           | JAEGER-HEALTH-02 | times out              |
+      | pkg/gatehealth              | GH-05          | exclude that pull request |
+      | cmd/gate-health             | GHC-03         | exit 2                  |
