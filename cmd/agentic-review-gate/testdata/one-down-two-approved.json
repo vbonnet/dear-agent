@@ -1,0 +1,14 @@
+{
+  "labels": [
+    "agentic-review:claude:started", "agentic-review:claude:posted", "agentic-review:claude:approved",
+    "agentic-review:gemini:started", "agentic-review:gemini:posted", "agentic-review:gemini:approved",
+    "agentic-review:codex:started", "agentic-review:codex:error"
+  ],
+  "applied_at": {
+    "agentic-review:claude:started": "2026-09-03T10:01:00Z",
+    "agentic-review:codex:started": "2026-09-03T10:01:00Z",
+    "agentic-review:gemini:started": "2026-09-03T10:01:00Z"
+  },
+  "ready_at": "2026-09-03T10:00:00Z",
+  "now": "2026-09-03T10:20:00Z"
+}

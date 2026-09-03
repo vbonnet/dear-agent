@@ -1,6 +1,10 @@
 package mergeloop
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/agenticreview"
+)
 
 // State is the classification of a PR within one tick of the merge loop.
 type State string
@@ -120,6 +124,11 @@ type Policy struct {
 	AbandonLabels    []string
 	SensitiveGlobs   []string
 	MaxAgentAttempts int
+	// AgenticReview enables the per-family review gate. Nil leaves the loop's
+	// behavior exactly as it was before the gate existed, so adopting it is an
+	// explicit configuration choice rather than a silent change to every
+	// caller. cmd/mergeloop loads it from .github/agentic-review.yml.
+	AgenticReview *agenticreview.Config
 }
 
 // NewPolicy returns a Policy seeded with the package defaults.
@@ -203,6 +212,14 @@ func (p Policy) Classify(pr PR, attempts int, agentActive bool) Classification {
 	// than forcing a merge.
 	if pr.Mergeable == "UNKNOWN" {
 		return Classification{StateCIPending, "mergeability still computing"}
+	}
+
+	// Required CI passing is not the same as having been reviewed. The
+	// per-family agentic review gate is evaluated last because it is the only
+	// check that can still be legitimately unresolved on an otherwise green
+	// head, and it must not mask a genuine policy block or a red build.
+	if cls, blocked := p.agenticReviewGate(pr, attempts); blocked {
+		return cls
 	}
 	return Classification{StateGreen, "all required checks pass; merge"}
 }

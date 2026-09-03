@@ -1,0 +1,107 @@
+name: Publish agentic review verdict
+description: >-
+  Resolve one reviewer family's lifecycle to posted plus a verdict, or to the
+  error state when the reviewer could not reach one.
+
+# The companion to agentic-review-label. That action publishes a single phase;
+# this one decides which phase a finished reviewer earned, so the decision is
+# made the same way for every family.
+#
+# The verdict comes from the GitHub review object bound to the exact head SHA,
+# not from the reviewer's exit status. A review is the evidence a human reads,
+# it carries an explicit APPROVED or CHANGES_REQUESTED state, and GitHub stamps
+# it with the commit it was submitted against. An exit status carries none of
+# that: a reviewer can exit zero having found a blocking bug, and it can exit
+# non-zero for reasons that have nothing to do with the diff.
+#
+# The three outcomes:
+#
+#   reviewer failed        -> error. The family is down, and the gate's quorum
+#                             rule decides whether the merge survives it.
+#   review requests changes -> changes-requested. Blocking at any quorum.
+#   review approves         -> approved.
+#
+# A reviewer that succeeded but left no matching review on this head fails this
+# action loudly. That case is almost always a misconfigured reviewer-logins
+# list, and the quiet alternative — publishing nothing and letting the family
+# age out into "down" — would let a misconfiguration be silently quorum'd
+# around. A red reviewer job is the cheaper failure.
+
+inputs:
+  family:
+    description: Reviewer family (claude, codex, gemini).
+    required: true
+  outcome:
+    description: The reviewer step's outcome (success, failure, cancelled, skipped).
+    required: true
+  reviewer-logins:
+    description: Comma-separated GitHub logins whose reviews count for this family.
+    required: true
+  pr-number:
+    description: Pull request to label.
+    required: true
+  head-sha:
+    description: The head SHA the reviewer reviewed.
+    required: true
+  repository:
+    description: owner/name of the repository.
+    required: true
+  token:
+    description: Token with pull-requests write scope.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the verdict phase
+      id: resolve
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repository }}
+        PR: ${{ inputs.pr-number }}
+        REVIEWED_SHA: ${{ inputs.head-sha }}
+        OUTCOME: ${{ inputs.outcome }}
+        LOGINS: ${{ inputs.reviewer-logins }}
+      run: |
+        set -euo pipefail
+        if [[ "$OUTCOME" != "success" ]]; then
+          echo "phase=error" >> "$GITHUB_OUTPUT"
+          echo "::notice::reviewer outcome '$OUTCOME'; publishing the error state"
+          exit 0
+        fi
+        gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
+          --jq ".[] | select(.commit_id == \"$REVIEWED_SHA\") | \"\(.user.login) \(.state)\"" > reviews.txt
+        states=""
+        while read -r login state; do
+          case ",$LOGINS," in *",$login,"*) states="$states $state" ;; esac
+        done < reviews.txt
+        if [[ "$states" == *"CHANGES_REQUESTED"* ]]; then
+          echo "phase=changes-requested" >> "$GITHUB_OUTPUT"
+        elif [[ -n "$states" ]]; then
+          echo "phase=approved" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::reviewer succeeded but left no review by [$LOGINS] on $REVIEWED_SHA"
+          exit 1
+        fi
+
+    - name: Publish posted
+      if: inputs.outcome == 'success'
+      uses: ./.github/actions/agentic-review-label
+      with:
+        family: ${{ inputs.family }}
+        phase: posted
+        pr-number: ${{ inputs.pr-number }}
+        head-sha: ${{ inputs.head-sha }}
+        repository: ${{ inputs.repository }}
+        token: ${{ inputs.token }}
+
+    - name: Publish the verdict
+      uses: ./.github/actions/agentic-review-label
+      with:
+        family: ${{ inputs.family }}
+        phase: ${{ steps.resolve.outputs.phase }}
+        pr-number: ${{ inputs.pr-number }}
+        head-sha: ${{ inputs.head-sha }}
+        repository: ${{ inputs.repository }}
+        token: ${{ inputs.token }}

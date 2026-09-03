@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/agenticreview"
 	"github.com/vbonnet/dear-agent/internal/mergeloop"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
@@ -47,6 +48,7 @@ type options struct {
 	enableAgents   bool
 	agentHarness   string
 	agentModel     string
+	reviewConfig   string
 }
 
 func run(argv []string) error {
@@ -103,8 +105,21 @@ func run(argv []string) error {
 	policy := mergeloop.NewPolicy()
 	policy.MaxAgentAttempts = opts.maxAttempts
 
+	// The gate is also a required status check. Evaluating it here as well is
+	// what stops this loop merging an unreviewed head if the check has not
+	// been added to the ruleset yet, or if its projection came back empty.
+	reviewPolicy, err := loadReviewPolicy(opts.reviewConfig, opts.reviewConfig != agenticreview.DefaultConfigPath)
+	if err != nil {
+		return fmt.Errorf("loading agentic review policy: %w", err)
+	}
+	policy.AgenticReview = reviewPolicy
+	lister := &ghLister{}
+	if reviewPolicy != nil {
+		lister.reviewClock = enrichReviewClock
+	}
+
 	deps := mergeloop.Deps{
-		Lister:  &ghLister{},
+		Lister:  lister,
 		Rebaser: &safeRebaser{dryRun: opts.dryRun},
 		Merger:  &safeMerger{dryRun: opts.dryRun},
 		Spawner: &agmSpawner{
@@ -142,6 +157,8 @@ func newMergeLoopFlagSet(mode string, opts *options) *flag.FlagSet {
 	fs.DurationVar(&opts.interval, "interval", 10*time.Minute, "run mode: delay between ticks")
 	fs.IntVar(&opts.cap, "cap", 50, "backpressure: skip the tick above this many open PRs")
 	fs.IntVar(&opts.maxAttempts, "max-attempts", mergeloop.DefaultMaxAgentAttempts, "max agent fix attempts per PR before escalation")
+	fs.StringVar(&opts.reviewConfig, "agentic-review-config", agenticreview.DefaultConfigPath,
+		"per-family agentic review policy; the gate stays off if the default path is absent")
 	fs.DurationVar(&opts.stallThreshold, "stall-threshold", time.Hour, "a PR actionable but untouched longer than this is counted as stalled")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "classify and report; perform no rebases/merges/spawns")
 	fs.BoolVar(&opts.enableAgents, "enable-agents", false, "spawn AGM agents to fix CI/conflicts; off → defer those PRs")

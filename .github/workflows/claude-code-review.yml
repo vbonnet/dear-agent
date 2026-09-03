@@ -36,7 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      # Write, not read: this job publishes its own agentic-review:claude:*
+      # lifecycle labels, which are what the merge gate reads.
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -45,6 +47,21 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+
+      # Published BEFORE the model is invoked, not after. The gate treats a
+      # ready pull request with no started label as not mergeable, so this step
+      # is what closes the window between going ready and the review resolving.
+      # Labelling after the model would leave that window open for exactly as
+      # long as the review takes.
+      - name: Mark the Claude review as started
+        uses: ./.github/actions/agentic-review-label
+        with:
+          family: claude
+          phase: started
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Claude Code Review
         id: claude-review
@@ -56,3 +73,22 @@ jobs:
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
+
+      # Always runs: a reviewer that failed must publish its error state, or
+      # the gate cannot tell a crashed reviewer from one still thinking and
+      # will hold the merge until the deadline expires.
+      - name: Publish the Claude review verdict
+        if: always()
+        uses: ./.github/actions/agentic-review-verdict
+        with:
+          family: claude
+          outcome: ${{ steps.claude-review.outcome }}
+          # Configurable because the login a reviewer app posts under is the
+          # app's business and can change without notice. An unmatched login
+          # fails this job loudly rather than letting the family drift into a
+          # silent "down" that the quorum merges around.
+          reviewer-logins: ${{ vars.AGENTIC_REVIEW_CLAUDE_LOGINS || 'claude[bot],github-actions[bot]' }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}

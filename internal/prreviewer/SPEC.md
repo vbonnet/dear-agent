@@ -111,6 +111,18 @@ on the same host can read them. That is a property of providers whose only
 one-shot interface takes the prompt as an argument; commands that read standard
 input keep the prompt off the command line.
 
+**PRV-38** When a pull request is about to be reviewed, the reviewer shall publish the `agentic-review:codex:started` label before invoking any provider.
+
+**PRV-39** When the review cannot be built, the reviewer shall publish the `agentic-review:codex:error` label so the merge gate can degrade around a down family without waiting for its deadline.
+
+**PRV-40** When a review is posted, the reviewer shall publish the posted label and shall publish an approved or changes-requested label only when the Codex section of the body carries the corresponding verdict line.
+
+**PRV-41** When a verdict line is absent from the Codex section, or appears only in another provider's section, the reviewer shall not publish an approval.
+
+**PRV-42** When a label cannot be published, the reviewer shall report the failure and shall not fail the review pass.
+
+**PRV-43** When dry-run mode is enabled, the reviewer shall report the labels it would publish and shall publish none.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

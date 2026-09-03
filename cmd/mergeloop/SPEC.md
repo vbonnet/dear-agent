@@ -37,6 +37,12 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-14** When the shared effective required-check policy is authoritatively empty, the command shall classify every reported check instead of treating the pull request as green.
 
+**MLC-15** When the agentic review policy file is present, the command shall enable the review gate and shall attach each pull request's label ages and readiness time using the same derivation as the required status check.
+
+**MLC-16** When the agentic review policy is present but invalid, or is named explicitly and missing, the command shall fail rather than running with the gate silently disabled.
+
+**MLC-17** When a pull request's review clock cannot be read, the command shall clear that pull request's review timing so the gate holds rather than merging on unread evidence.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

@@ -1,0 +1,164 @@
+name: Agentic Review Gate
+
+# The merge-blocking half of the per-family agentic review gate.
+#
+# Each reviewer family publishes its own lifecycle as labels — started before
+# its model is invoked, posted once its review body lands, then a verdict — and
+# this workflow collapses those labels into the `agentic-review/gate` commit
+# status that the branch ruleset requires. The policy (families, quorum,
+# timeouts) lives in .github/agentic-review.yml; the evaluation lives in
+# cmd/agentic-review-gate.
+#
+# No model runs here, by design. The reviewers are the expensive, quota-limited,
+# occasionally-down part of the system, so nothing in the merge-blocking path is
+# allowed to depend on one of them answering. This workflow reads three cheap
+# GitHub endpoints and a config file. A quota incident degrades the review while
+# leaving intact the ability to decide whether a review happened.
+#
+# Why a commit status and not this job's own check: degradation happens on a
+# clock. A reviewer that exhausts its quota mid-run publishes nothing further,
+# so there is no GitHub event left to re-trigger a check, and a gate that could
+# only report from its triggering run would stay red with nothing able to clear
+# it. A status can be refreshed against the same head by any later pass, which
+# is what the scheduled sweep below does.
+#
+# Fork pull requests get a read-only token and therefore cannot publish the
+# status, so the gate stays red for them. That matches the existing reviewer
+# workflows, which already decline to run against fork heads.
+
+on:
+  pull_request:
+    # labeled/unlabeled are what advance the gate: a reviewer publishing its
+    # verdict is a label event and nothing else, so without them the status
+    # would only ever reflect the state at push time.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
+  schedule:
+    # The sweep exists for the one transition no event announces: a reviewer
+    # family going silent past its deadline.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+# Deny-all floor; each job declares the scopes it needs.
+permissions: {}
+
+concurrency:
+  group: agentic-review-gate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GATE: go run ./cmd/agentic-review-gate
+
+jobs:
+  invalidate:
+    # A push invalidates every verdict on the old head. Clearing the labels is
+    # what makes "bound to the head SHA" true rather than aspirational: without
+    # it an approval of the previous diff would still be sitting on the pull
+    # request, and the gate reads labels.
+    name: Invalidate stale review labels
+    if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Remove every agentic review label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr view "$PR" --repo "$REPO" --json labels \
+            --jq '.labels[].name | select(startswith("agentic-review:"))' > stale.txt
+          while read -r label; do
+            [[ -n "$label" ]] || continue
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$label"
+            echo "cleared $label"
+          done < stale.txt
+
+  gate:
+    name: Evaluate agentic review quorum
+    needs: [invalidate]
+    # Always runs so the status is always published. The invalidate result is
+    # checked inside rather than in this `if:`, because a job that never runs
+    # publishes no status at all, and a merge must not proceed on a gate that
+    # stayed silent.
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Require a successful invalidation
+        env:
+          RESULT: ${{ needs.invalidate.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$RESULT" != "success" && "$RESULT" != "skipped" ]]; then
+            echo "::error::label invalidation reported '$RESULT'; stale approvals may survive"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Evaluate and publish the gate status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          $GATE \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --post-status \
+            --head-sha "${{ github.event.pull_request.head.sha }}"
+
+  sweep:
+    # Refreshes the status on every open pull request. This is the only thing
+    # that can turn a gate green after a reviewer family has been silent past
+    # its deadline, because that transition produces no GitHub event.
+    name: Refresh gate statuses on open pull requests
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Refresh each open pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$REPO" --state open --limit 200 \
+            --json number,headRefOid,isDraft \
+            --jq '.[] | select(.isDraft | not) | "\(.number) \(.headRefOid)"' > open.txt
+          while read -r number sha; do
+            [[ -n "$number" ]] || continue
+            # One pull request failing to evaluate must not stop the sweep from
+            # refreshing the rest; its own status simply stays as it was.
+            $GATE --repo "$REPO" --pr "$number" --post-status --head-sha "$sha" || true
+          done < open.txt

@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/agenticreview"
 )
 
 // ReviewEvent is the GitHub pull request review action to submit.
@@ -395,8 +397,17 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 		res.Skipped, res.Reason = true, "already-reviewed"
 		return res, nil
 	}
+	// Published before the providers run, so the merge gate can see that a
+	// codex review is in flight rather than assuming none was needed. A pull
+	// request with no started label is not mergeable.
+	publishPhase(ctx, cfg, runner, repo, pr.Number, agenticreview.PhaseStarted, stdout)
+
 	body, event, err := buildReview(ctx, cfg, runner, repo, pr, key, stdout)
 	if err != nil {
+		// The reviewer could not reach a verdict. Saying so explicitly is what
+		// lets the gate degrade around a down family immediately instead of
+		// holding every merge until this family's deadline expires.
+		publishPhase(ctx, cfg, runner, repo, pr.Number, agenticreview.PhaseError, stdout)
 		return res, err
 	}
 	// A head or base that moved, or a return to draft, describes a pull request
@@ -421,6 +432,10 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 	// The review is already public, so the result reports it as posted even if
 	// persistence fails; the pass then retries the save at the end.
 	res.Posted = true
+	publishPhase(ctx, cfg, runner, repo, pr.Number, agenticreview.PhasePosted, stdout)
+	if verdict := codexVerdict(body); verdict != agenticreview.PhasePosted {
+		publishPhase(ctx, cfg, runner, repo, pr.Number, verdict, stdout)
+	}
 	// A crash between the POST and the end of the pass would otherwise lose the
 	// record and post the same review again on the next run.
 	if err := saveState(cfg.StatePath, st); err != nil {
@@ -646,6 +661,8 @@ Title: %s
 Head SHA: %s
 
 Review the diff for correctness bugs, regressions, missing tests, privacy/security risk, and operational risk. Lead with concrete findings and file/line references when possible. If there are no issues, say that clearly and mention residual test risk briefly.
+
+End your review with a single final line, exactly "VERDICT: APPROVE" when you found no blocking issue, or exactly "VERDICT: CHANGES_REQUESTED" when you found at least one. That line is the only machine-readable part of your review: without it the review counts as posted but reaches no verdict, and the merge gate keeps waiting on this reviewer.
 
 Diff:
 %s

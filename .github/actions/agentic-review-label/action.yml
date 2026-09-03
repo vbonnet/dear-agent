@@ -1,0 +1,63 @@
+name: Publish agentic review label
+description: >-
+  Publish one agentic-review:<family>:<phase> label against the exact head a
+  reviewer family is reviewing, skipping the write if that head has moved on.
+
+# Every reviewer family calls this action rather than writing labels itself, so
+# there is one implementation of the two rules that make the labels trustworthy:
+#
+#   1. The label is bound to the head the reviewer actually read. A reviewer run
+#      can outlive the head that triggered it — a push mid-review, a re-run of
+#      an old workflow — and a label written after that push would be an
+#      approval of code nobody looked at. The write is skipped instead.
+#
+#   2. The label set is provisioned on demand, so adding a family or a phase
+#      needs no repository setup step that someone can forget.
+#
+# Publishing the started phase immediately BEFORE the model is invoked is what
+# closes the window this whole mechanism exists for: between a pull request
+# going ready and its reviews resolving, the gate must be able to see that a
+# review is in flight rather than assuming none is needed.
+
+inputs:
+  family:
+    description: Reviewer family (claude, codex, gemini).
+    required: true
+  phase:
+    description: Lifecycle phase (started, posted, approved, changes-requested, error).
+    required: true
+  pr-number:
+    description: Pull request to label.
+    required: true
+  head-sha:
+    description: The head SHA the reviewer is reviewing. The label is skipped if the live head differs.
+    required: true
+  repository:
+    description: owner/name of the repository.
+    required: true
+  token:
+    description: Token with pull-requests write scope.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Publish label
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repository }}
+        PR: ${{ inputs.pr-number }}
+        REVIEWED_SHA: ${{ inputs.head-sha }}
+        LABEL: agentic-review:${{ inputs.family }}:${{ inputs.phase }}
+      run: |
+        set -euo pipefail
+        live=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)
+        if [[ "$live" != "$REVIEWED_SHA" ]]; then
+          echo "::notice::head moved from $REVIEWED_SHA to $live; skipping $LABEL"
+          exit 0
+        fi
+        gh label create "$LABEL" --repo "$REPO" --force \
+          --color BFD4F2 --description "Agentic review lifecycle (machine-managed)"
+        gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL"
+        echo "::notice::published $LABEL for $REVIEWED_SHA"

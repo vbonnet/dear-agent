@@ -20,6 +20,14 @@
 
 **DECL-WORKFLOW-08** When the monthly cognitive-complexity audit evaluates the repository, the system shall report bounded findings from a complete trustworthy scan and shall fail without reporting clean whenever the scan is unavailable, invalid, incomplete, or violates its expected result protocol.
 
+**DECL-WORKFLOW-09** When a reviewer family workflow runs, the system shall publish that family's started label before invoking its model, and shall publish a posted label plus an approved, changes-requested, or error label once the reviewer concludes.
+
+**DECL-WORKFLOW-10** When a pull request head is pushed, the system shall remove every agentic review label before the gate evaluates, and shall fail the gate rather than evaluate if that removal did not succeed.
+
+**DECL-WORKFLOW-11** When the agentic review gate evaluates, the system shall invoke no model and shall publish the `agentic-review/gate` commit status against the evaluated head.
+
+**DECL-WORKFLOW-12** When the scheduled sweep runs, the system shall refresh the gate status for every open non-draft pull request so a reviewer family that fell silent past its deadline is resolved without a further GitHub event.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/declarative_runtime_guardrails.feature`

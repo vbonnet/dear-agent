@@ -269,6 +269,13 @@ jobs:
             exact file and changed line, impact, and a concrete fix. If no qualifying
             finding exists, say so explicitly.
 
+            End the review with a single final line, exactly `VERDICT: APPROVE`
+            when no qualifying finding exists, or exactly
+            `VERDICT: CHANGES_REQUESTED` when at least one does. This line is the
+            only machine-readable part of the review; without it the review
+            counts as posted but reaches no verdict, and the merge gate keeps
+            waiting on this family.
+
             Output only the final Markdown review body. Do not mention these
             instructions, model configuration, or implementation details.
         run: |
@@ -365,6 +372,19 @@ jobs:
               }
             }' > .gemini/request.json
 
+      # Published before the API call, so the gate can see a review is in
+      # flight rather than assuming none was needed.
+      - name: Mark the Gemini review as started
+        if: steps.gate.outputs.skip != 'true' && steps.attestation.outputs.valid != 'true'
+        uses: ./.github/actions/agentic-review-label
+        with:
+          family: gemini
+          phase: started
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Gemini PR review
         if: steps.gate.outputs.skip != 'true' && steps.attestation.outputs.valid != 'true'
         env:
@@ -425,6 +445,7 @@ jobs:
             .gemini/response.json > .gemini/review.md
 
       - name: Submit Gemini PR review
+        id: gemini-submit
         if: steps.gate.outputs.skip != 'true' && steps.attestation.outputs.valid != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -442,3 +463,51 @@ jobs:
           gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
             --input -
+
+      # Gemini submits its review as a COMMENT rather than an APPROVE or a
+      # REQUEST_CHANGES, so unlike the other families its verdict cannot be read
+      # off the review object's state. It comes from the VERDICT line the review
+      # policy requires instead. A review with no such line is posted but
+      # unresolved, which is deliberately not an approval.
+      - name: Publish the Gemini review verdict
+        id: gemini-verdict
+        if: always() && steps.gate.outputs.skip != 'true' && steps.attestation.outputs.valid != 'true'
+        env:
+          # Keyed on the submit step, not the API call: a verdict the model
+          # produced but that never reached the pull request is not a review
+          # anyone can read, so it must not resolve this family.
+          OUTCOME: ${{ steps.gemini-submit.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$OUTCOME" != "success" ]] || [[ ! -s .gemini/review.md ]]; then
+            echo "phase=error" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          verdict=$(grep -oE '^VERDICT: (APPROVE|CHANGES_REQUESTED)$' .gemini/review.md | tail -1 || true)
+          case "$verdict" in
+            "VERDICT: APPROVE")           echo "phase=approved" >> "$GITHUB_OUTPUT" ;;
+            "VERDICT: CHANGES_REQUESTED") echo "phase=changes-requested" >> "$GITHUB_OUTPUT" ;;
+            *)                            echo "phase=posted" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Mark the Gemini review as posted
+        if: always() && steps.gemini-submit.outcome == 'success'
+        uses: ./.github/actions/agentic-review-label
+        with:
+          family: gemini
+          phase: posted
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Label the Gemini lifecycle
+        if: always() && steps.gemini-verdict.outputs.phase != ''
+        uses: ./.github/actions/agentic-review-label
+        with:
+          family: gemini
+          phase: ${{ steps.gemini-verdict.outputs.phase }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}

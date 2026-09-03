@@ -67,6 +67,25 @@ type PR struct {
 	ChangedFilesTruncated bool
 
 	UpdatedAt time.Time
+	// CreatedAt is when the pull request was opened. It is the readiness
+	// fallback for a pull request that was never a draft and so never emitted
+	// a ready_for_review event.
+	CreatedAt time.Time
+
+	// ReadyAt is when this head became reviewable: the later of the pull
+	// request going ready and its head commit landing. It is the clock the
+	// agentic review gate ages an undispatched reviewer family against. Zero
+	// on a draft, which has no dispatch deadline at all.
+	ReadyAt time.Time
+	// LabelAppliedAt maps a current label to the time it was applied. Labels
+	// carry no timestamp of their own, and without one a reviewer that started
+	// and went silent can never be told apart from one still working, so the
+	// gate keeps such a family pending rather than guessing.
+	LabelAppliedAt map[string]time.Time
+	// ObservedAt is when this view of the pull request was taken. The
+	// classifier reads no clock of its own so one pass cannot disagree with
+	// itself about which reviewers have run out of time.
+	ObservedAt time.Time
 }
 
 // hasLabel reports whether the PR carries the given label (case-insensitive).

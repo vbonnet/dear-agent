@@ -41,6 +41,12 @@ per pass, tracks bounded repair attempts, and records durable audit evidence.
 
 **MLP-16** When effective required-check projection fails deterministically due to policy constraints, the classifier shall block and escalate the pull request rather than leaving it in pending.
 
+**MLP-17** When the agentic review gate is configured and every required check passes, the classifier shall keep the pull request pending while any reviewer family is unresolved, shall route a family that requested changes to repair within the existing attempt budget, and shall escalate a quorum that cannot be reached to a human.
+
+**MLP-18** When the agentic review gate is configured but no observation time or review policy is available, the classifier shall keep the pull request pending or blocked rather than merging.
+
+**MLP-19** When the agentic review gate is not configured, the classifier shall behave exactly as it did before the gate existed.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

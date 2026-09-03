@@ -21,6 +21,12 @@ type requiredCheckProjector func(context.Context, int, string) ([]safegit.Requir
 
 type ghLister struct {
 	project requiredCheckProjector
+	// reviewClock attaches the label ages the agentic review gate needs. It is
+	// nil when the gate is not configured, which keeps the loop's per-pull-
+	// request GitHub cost unchanged for repositories that have not adopted it.
+	reviewClock func(context.Context, string, *mergeloop.PR, time.Time) error
+	// now is injected so tests can drive the review clock deterministically.
+	now func() time.Time
 }
 
 // ghPR mirrors the gh pr list --json schema we request.
@@ -33,6 +39,7 @@ type ghPR struct {
 	Mergeable        string `json:"mergeable"`
 	MergeStateStatus string `json:"mergeStateStatus"`
 	ReviewDecision   string `json:"reviewDecision"`
+	CreatedAt        string `json:"createdAt"`
 	Labels           []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
@@ -48,7 +55,7 @@ const ghChangedFilePageSize = 100
 func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]mergeloop.PR, error) {
 	args := []string{
 		"pr", "list", "--state", "open",
-		"--json", "number,title,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,labels,files",
+		"--json", "number,title,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,labels,files,createdAt",
 		"--limit", strconv.Itoa(maxOpen + 1),
 	}
 	if repo != "" {
@@ -93,9 +100,29 @@ func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]me
 			continue
 		}
 		pr.Checks = checks
+		g.attachReviewClock(ctx, repo, &pr)
 		prs = append(prs, pr)
 	}
 	return prs, nil
+}
+
+// attachReviewClock records the review timing on pr, or leaves it deliberately
+// blank when it cannot be read. A blank clock keeps the gate pending rather
+// than merging: a GitHub read that failed is not evidence a reviewer approved.
+func (g *ghLister) attachReviewClock(ctx context.Context, repo string, pr *mergeloop.PR) {
+	if g.reviewClock == nil {
+		return
+	}
+	now := time.Now
+	if g.now != nil {
+		now = g.now
+	}
+	if err := g.reviewClock(ctx, repo, pr, now().UTC()); err != nil {
+		pr.ObservedAt = time.Time{}
+		pr.LabelAppliedAt = nil
+		pr.ReadyAt = time.Time{}
+		fmt.Fprintf(os.Stderr, "mergeloop: PR #%d: agentic review clock unavailable: %v\n", pr.Number, err)
+	}
 }
 
 func toPR(r ghPR, required []mergeloop.Check) mergeloop.PR {
@@ -120,6 +147,11 @@ func toPR(r ghPR, required []mergeloop.Check) mergeloop.PR {
 	// it, so a full page means the list may be incomplete. Report that rather
 	// than letting classification treat a partial list as exhaustive.
 	pr.ChangedFilesTruncated = len(r.Files) >= ghChangedFilePageSize
+	if r.CreatedAt != "" {
+		if at, err := time.Parse(time.RFC3339, r.CreatedAt); err == nil {
+			pr.CreatedAt = at
+		}
+	}
 	return pr
 }
 

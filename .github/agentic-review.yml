@@ -1,0 +1,44 @@
+# Agentic review gate policy: the single source of truth for which reviewer
+# families gate a merge and how many of them must approve.
+#
+# The gate that reads this file (cmd/agentic-review-gate) makes no model call.
+# Each family publishes its own lifecycle as labels — started, posted, and then
+# a verdict — and the gate only reads those labels. Keeping the model out of
+# the merge-blocking path means a quota incident degrades the review, never the
+# ability to evaluate whether a review happened.
+#
+# Changing any value here changes what may merge. The contract is
+# internal/agenticreview/SPEC.md; the gate is cmd/agentic-review-gate/SPEC.md.
+
+# One entry per reviewer family. Each publishes agentic-review:<family>:<phase>
+# labels and is resolved independently, so one family's approval can never
+# stand in for another's.
+#
+#   claude  — .github/workflows/claude-code-review.yml
+#   codex   — cmd/external-pr-reviewer (host-side poller)
+#   gemini  — .github/workflows/gemini-review.yml
+families:
+  - claude
+  - codex
+  - gemini
+
+# Approvals required to pass. Two of three is the degradation allowance: one
+# family may be down — quota exhausted, transport broken, never dispatched —
+# without wedging the merge queue, while no single family can carry a merge on
+# its own. Raise to 3 for unanimity; the allowance is withdrawn, and a single
+# reviewer outage then blocks every merge.
+#
+# A family that requested changes is never covered by this allowance. It blocks
+# at any quorum.
+quorum: 2
+
+# How long a family that has started (or posted) has to publish a verdict
+# before it is treated as down. Sized above the slowest observed reviewer run
+# so a merely slow review is never mistaken for a dead one.
+verdict-timeout: 45m
+
+# How long after the pull request became reviewable a family has to publish its
+# started label before it is treated as down. Without this, a reviewer that
+# never comes up at all blocks every merge forever, which is an outage dressed
+# as a policy.
+dispatch-timeout: 30m
