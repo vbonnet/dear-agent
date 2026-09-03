@@ -68,6 +68,14 @@ The nightly sweep also reports the calibration ratio and warns while waivers
 outnumber passing scripts. It warns rather than fails: the ratchet is the
 enforcing half, and a permanently red nightly is a muted one.
 
+The same sweep warns, without failing solely for that reason, when an active
+time-bounded waiver is within 30 UTC calendar days of its sunset. Warnings are
+ordered by the soonest sunset and name the removal, test, shortening, or
+explicit owner-approved renewal paths. Once the sunset date arrives, the
+existing fail-closed behavior takes over: the waiver is inactive and the full
+sweep reports the resulting policy violation if the script is still long and
+untested.
+
 ## Adding a waiver
 
 Append a line, then normalise ordering and formatting:
@@ -91,5 +99,14 @@ open-ended waiver with a generic reason is how this store reached 110 entries
 against 22 compliant scripts: 103 of them were granted in the single commit
 that introduced the rule, all with the same text and no expiry.
 
-Current state: 77 waivers (72 `grandfathered`, 5 `active`) against 27 passing
-scripts. The backlog burns down through ce-kx3fm.
+Run the full sweep for the current waiver and passing-script census:
+
+```bash
+policy_paths="$(mktemp)"
+git ls-files -z '*.sh' > "$policy_paths"
+go run ./tools/language-policy sweep --files-from "$policy_paths" -repo .
+rm -f "$policy_paths"
+```
+
+The durable backlog ceiling lives in `baseline.json`; the burn-down is tracked
+by ce-kx3fm. Do not copy a point-in-time census into living guidance.

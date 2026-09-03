@@ -99,7 +99,7 @@ func (s *Store) Active(rule, path string, now time.Time) bool {
 	if !ok || e.Status == "revoked" || e.Status == "expired" {
 		return false
 	}
-	if e.Sunset != nil && *e.Sunset != "" {
+	if e.Sunset != nil {
 		d, err := time.Parse("2006-01-02", *e.Sunset)
 		// An unparseable sunset date is treated as expired rather than
 		// ignored, so a typo fails closed instead of granting a waiver
@@ -118,13 +118,50 @@ func (s *Store) Expired(now time.Time) []Exception {
 		if e.Status == "revoked" || e.Status == "expired" {
 			continue
 		}
-		if e.Sunset == nil || *e.Sunset == "" {
+		if e.Sunset == nil {
 			continue
 		}
 		if d, err := time.Parse("2006-01-02", *e.Sunset); err != nil || !d.After(now) {
 			out = append(out, e)
 		}
 	}
+	return out
+}
+
+// ExpiringWithin lists active waivers whose sunset falls within the next
+// `days` UTC calendar dates. Sunset dates are policy dates, not elapsed
+// durations: a sweep's wall-clock hour must not move the inclusive boundary.
+func (s *Store) ExpiringWithin(now time.Time, days int) []Exception {
+	if days <= 0 {
+		return nil
+	}
+	now = now.UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	horizon := today.AddDate(0, 0, days)
+
+	var out []Exception
+	for _, e := range s.All {
+		if e.Status == "revoked" || e.Status == "expired" {
+			continue
+		}
+		if e.Sunset == nil {
+			continue
+		}
+		d, err := time.Parse("2006-01-02", *e.Sunset)
+		if err != nil || !d.After(today) || d.After(horizon) {
+			continue
+		}
+		out = append(out, e)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if *out[i].Sunset != *out[j].Sunset {
+			return *out[i].Sunset < *out[j].Sunset
+		}
+		if out[i].Rule != out[j].Rule {
+			return out[i].Rule < out[j].Rule
+		}
+		return out[i].Path < out[j].Path
+	})
 	return out
 }
 
