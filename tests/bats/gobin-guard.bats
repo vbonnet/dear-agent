@@ -451,3 +451,62 @@ EOF
 	assert_failure 1
 	assert_file_contains "$NOTIFY_LOG" 'DEAR Agent GOBIN alarm'
 }
+
+# The healthy branch clears the alarm marker. It must clear only a marker the
+# guard could have written: an unvalidated `rm -f` deletes a symlink's target,
+# or a file reached through a symlinked ancestor, from outside the configured
+# state tree.
+@test "healthy status does not delete a symlinked alarm path's target" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	outside="$TEST_DIR/precious"
+	printf 'do not delete me\n' >"$outside"
+	linked_alarm="$FAKE_HOME/linked-alarm"
+	ln -s "$outside" "$linked_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_ALARM_STATE="$linked_alarm" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	assert_equal "$(cat "$outside")" "do not delete me"
+	[ -L "$linked_alarm" ]
+}
+
+# The same rule for a file reached through a symlinked ancestor rather than a
+# symlinked leaf.
+@test "healthy status does not delete through a symlinked alarm ancestor" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	real_dir="$TEST_DIR/real-state"
+	mkdir -p "$real_dir"
+	printf 'do not delete me\n' >"$real_dir/alarm"
+	ln -s "$real_dir" "$FAKE_HOME/linked-state"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_ALARM_STATE="$FAKE_HOME/linked-state/alarm" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	assert_equal "$(cat "$real_dir/alarm")" "do not delete me"
+}
+
+# A heartbeat carries no suppressive power, so a configured path beneath a
+# symlinked state directory must still publish. Refusing it would make a
+# healthy guard look stale to the independent auditor.
+@test "heartbeat publishes beneath a symlinked directory" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	real_state="$TEST_DIR/real-heartbeat-state"
+	mkdir -p "$real_state"
+	ln -s "$real_state" "$FAKE_HOME/linked-heartbeat-state"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" \
+		GOBIN_GUARD_HEARTBEAT="$FAKE_HOME/linked-heartbeat-state/hb" \
+		GOBIN_GUARD_ALARM_STATE="$ALARM" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	[ -s "$real_state/hb" ]
+	assert_equal "$(file_mode "$real_state/hb")" "600"
+}

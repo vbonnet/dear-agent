@@ -119,9 +119,25 @@ ensure_searchable_dir() (
 	fi
 )
 
+# A marker suppresses the trail record and the notification, so it is only
+# honoured when it is a regular file with no symlinked component: a linked
+# ancestor could point at a target outside the configured state tree.
+#
+# Both operands must be absolute physical paths before the comparison. A
+# configured relative path (including the "./" rewrite applied to
+# option-looking spellings above) left the given side relative and the
+# resolved side absolute, so they never compared equal, an existing marker
+# always read as absent, and every degraded invocation appended another trail
+# record instead of suppressing delivery.
 is_alarm_marker() {
 	[ ! -L "$1" ] && [ -f "$1" ] || return 1
 	_d=$(dirname "$1")
+	case "$_d" in
+	/*) ;;
+	.) _d=$(pwd -P) ;;
+	./*) _d="$(pwd -P)/${_d#./}" ;;
+	*) _d="$(pwd -P)/$_d" ;;
+	esac
 	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]
 }
 
@@ -137,12 +153,34 @@ persist_alarm_marker() (
 	: >"$marker_path"
 )
 
+# ensure_searchable_dir refuses a symlinked ancestor because the alarm marker
+# it guards is a suppression artifact. A heartbeat carries no suppressive
+# power: it is a liveness timestamp, and a configured path beneath a symlinked
+# home or state directory is an ordinary deployment. Refusing to publish there
+# makes a healthy guard look stale to the independent auditor, which is a false
+# alarm rather than a safety gain, so links are permitted here. A component
+# that exists but is not a directory is still refused.
+ensure_heartbeat_dir() (
+	dir=$1
+	parent=$(dirname "$dir")
+	if [ "$parent" != "$dir" ]; then
+		ensure_heartbeat_dir "$parent" || return 1
+	fi
+	if [ -d "$dir" ]; then
+		chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
+	elif [ -e "$dir" ] || [ -L "$dir" ]; then
+		return 1
+	else
+		(umask 0077 && mkdir "$dir")
+	fi
+)
+
 # A distinct launchd agent audits this bounded freshness record. Write it before
 # classification so a failing detector is distinguishable from an unloaded or
 # missing detector; use rename so the auditor never reads a partial timestamp.
 write_heartbeat() {
 	heartbeat_dir=$(dirname "$heartbeat_path")
-	if ! ensure_searchable_dir "$heartbeat_dir" 2>/dev/null; then
+	if ! ensure_heartbeat_dir "$heartbeat_dir" 2>/dev/null; then
 		echo "$PROG: warning: cannot create heartbeat dir $heartbeat_dir" >&2
 		return 0
 	fi
@@ -235,7 +273,12 @@ notify_operator() {
 }
 
 if [ "$status" = "ok" ]; then
-	rm -f "$alarm_path" 2>/dev/null || true
+	# Clear only a marker this guard could have written. Removing an
+	# unvalidated path would delete a symlink's target, or a file reached
+	# through a symlinked ancestor, from outside the configured state tree.
+	if is_alarm_marker "$alarm_path"; then
+		rm -f "$alarm_path" 2>/dev/null || true
+	fi
 	if [ "$json_output" -eq 1 ]; then
 		printf '{"status":"ok","gobin_dir":"%s","sentinel":"%s"}\n' \
 			"$(json_escape "$gobin_dir")" "$(json_escape "$sentinel_path")"

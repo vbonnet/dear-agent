@@ -14,7 +14,21 @@ ensure_searchable_dir() (
     (umask 0077 && mkdir "$dir")
   fi
 )
-is_alarm_marker() { [ ! -L "$1" ] && [ -f "$1" ] || return 1; _d=$(dirname "$1"); _r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]; }
+# Mirrors scripts/gobin-guard.sh: a marker is honoured only when it is a
+# regular file with no symlinked component, and both sides of the ancestor
+# comparison must be absolute physical paths or a relative configured path
+# never matches and suppression silently stops working.
+is_alarm_marker() {
+	[ ! -L "$1" ] && [ -f "$1" ] || return 1
+	_d=$(dirname "$1")
+	case "$_d" in
+	/*) ;;
+	.) _d=$(pwd -P) ;;
+	./*) _d="$(pwd -P)/${_d#./}" ;;
+	*) _d="$(pwd -P)/$_d" ;;
+	esac
+	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]
+}
 persist_alarm_marker() (
   marker=$1; ensure_searchable_dir "$(dirname "$marker")" || return 1
   [ ! -e "$marker" ] && [ ! -L "$marker" ] || return 1
@@ -30,7 +44,13 @@ case "$alarm" in -*) alarm="./$alarm";; esac
 case "$max_age" in *[!0-9]*|''|???????????*) echo "gobin-guard-audit: invalid GOBIN_GUARD_MAX_AGE" >&2; exit 2;; esac
 now=$(date +%s); last=$(cat "$heartbeat" 2>/dev/null || true); reason=
 case "$last" in ''|*[!0-9]*|0[0-9]*|???????????*) reason="heartbeat is missing or invalid: $heartbeat";; *) [ "$last" -gt "$now" ] || [ $((now-last)) -gt "$max_age" ] && reason="heartbeat is stale: $heartbeat";; esac
-if [ -z "$reason" ]; then rm -f "$alarm" 2>/dev/null || true; exit 0; fi
+if [ -z "$reason" ]; then
+  # Clear only a validated marker: removing an unvalidated path would delete a
+  # symlink's target, or a file reached through a symlinked ancestor, from
+  # outside the configured state tree.
+  if is_alarm_marker "$alarm"; then rm -f "$alarm" 2>/dev/null || true; fi
+  exit 0
+fi
 delivered=1; trail_dir=$(dirname "$trail")
 if mkdir -p "$trail_dir" 2>/dev/null; then
   (umask 0177 && touch "$trail" && chmod 600 "$trail") 2>/dev/null || true
