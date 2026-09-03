@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-13 -->
 
-**Version:** 1.8
+**Version:** 1.9
 **Status:** Draft
 **Scope:** `internal/specguard`
 
@@ -68,7 +68,7 @@ installed, registered, or running.
 
 **SPEC-GUARD-22** Where a governed path is deleted, when the selected immutable snapshot has no surviving reciprocal BDD edge or implementation ownership edge to that path and every same-change replacement passes strict validation, the guard shall retain the deletion in its changed-path evidence and shall permit it to reach mandatory semantic retirement and stable-ID preservation review instead of blocking every deletion unconditionally.
 
-**SPEC-GUARD-23** When a `SPEC.owner` edge is deleted, the guard shall require its surviving implementation directory and every target directory of an object-identical same-change implementation relocation from that directory to retain a valid `SPEC.owner` edge or a permitted local `SPEC.md` replacement that passes strict contract and neutrality validation, and shall not treat unrelated implementation additions or modifications as relocation provenance.
+**SPEC-GUARD-23** When a `SPEC.owner` edge is deleted, the guard shall require its surviving implementation directory and every directory containing an added implementation blob whose Git object ID matches a deleted implementation blob from the deleted edge's implementation directory to retain a valid `SPEC.owner` edge or a permitted local `SPEC.md` replacement that passes strict contract and neutrality validation; because an immutable Git snapshot does not prove move intent, the guard shall conservatively classify any such added object-identical blob, including an independently added one, as a possible relocation target, while modified blobs and additions with other object IDs shall not create that content-identity edge.
 
 **SPEC-GUARD-24** When staged validation observes `assume-unchanged` or `skip-worktree` on a governed path, or those index flags change during evaluation, the guard shall block before accepting a snapshot whose dirty contract state Git may suppress. Sparse checkouts that mark governed paths `skip-worktree` are explicitly unsupported.
 
