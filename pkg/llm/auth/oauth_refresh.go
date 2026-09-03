@@ -270,6 +270,22 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			)
 		}
 
+		// Converge every other store the CLI might resolve on the credential
+		// we just persisted. Claude Code reads the macOS keychain BEFORE this
+		// file and stops as soon as the keychain answers, so a file-only
+		// refresh leaves a stale keychain item shadowing a healthy file and
+		// every harness process keeps reporting an expired session while this
+		// refresher logs success (ce-cknn).
+		//
+		// A mirror failure is logged rather than returned: the rotated token is
+		// already durably on disk, so raising ErrRefreshNotPersisted here would
+		// quarantine a credential that persisted correctly and turn a partial
+		// convergence into a self-inflicted outage. Check mode reports the
+		// unconverged state instead.
+		if merr := r.mirrorToSecondaryStores(updated); merr != nil {
+			r.log("oauth.refresh.mirror_failed", "error", merr.Error())
+		}
+
 		// The rotation completed and is on disk, so any earlier quarantine is
 		// moot: the token it named is gone.
 		if qerr := r.ClearQuarantine(); qerr != nil {
