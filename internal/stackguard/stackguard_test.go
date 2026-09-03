@@ -455,3 +455,46 @@ func TestRegisteredTipOverTrunkWithDrainedLowerEntriesPasses(t *testing.T) {
 		}
 	}
 }
+
+// A pull request that documents stacks is not claiming to be in one. This is
+// the body of #1439, the pull request that introduced this package: it quotes
+// markers in prose and in a table of examples. Reading those as claims blocked
+// the guard's own pull request, which is how the defect was found.
+func TestDocumentationAboutStacksIsNotAClaim(t *testing.T) {
+	body := "" +
+		"#1380 and #1381 both carried \"Stack N/5\" markers and both had correct base refs.\n\n" +
+		"STACK-01 separates three kinds of claim:\n\n" +
+		"| Claim | Example | Over a trunk base |\n" +
+		"| --- | --- | --- |\n" +
+		"| Positional | \"Stack 2/5\" | **blocks** |\n" +
+		"| Present-tense dependency | \"Stacked on #1379\" | **blocks** |\n" +
+		"| Affiliation | \"part of the X stack\" | advisory |\n\n" +
+		"Mark each description with the canonical marker:\n\n" +
+		"```\nStack 2/5. Base: refactor/parent.\n```\n\n" +
+		"See `Stacked on #1379` for the dependency form.\n"
+
+	pr := stackguard.PullRequest{
+		Number:  1439,
+		Title:   "feat(stack): refuse pull requests that only claim to be stacked",
+		Body:    body,
+		BaseRef: "main",
+		HeadRef: "feat/stack-integrity-guard",
+	}
+	repo := chain("main", map[string]int{"feat/stack-integrity-guard": 1439}, nil)
+
+	if findings := stackguard.Check(pr, repo); len(findings) != 0 {
+		t.Fatalf("documentation about stacks must not read as a claim, got %v", codes(findings))
+	}
+	if stackguard.ClaimsStack(body) {
+		t.Fatalf("quoted, tabulated and fenced markers must not count as a claim")
+	}
+}
+
+// The canonical marker on its own line is still a claim, even in a body that
+// also contains fenced examples.
+func TestRealMarkerBesideDocumentationStillCounts(t *testing.T) {
+	body := "Stack 2/5. Base: refactor/parent.\n\nSee the table:\n\n| x | \"Stack 9/9\" |\n"
+	if !stackguard.ClaimsStack(body) {
+		t.Fatalf("a real line-anchored marker must still be a claim")
+	}
+}

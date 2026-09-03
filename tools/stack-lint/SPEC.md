@@ -75,6 +75,11 @@ but only while an entry below it is still open. Once every lower entry has
 merged the stack has drained, nothing is left to orphan, and the trunk base is
 correct (#1218 is the fixture for that).
 
+Markers shown rather than made are not claims: fenced code, inline code spans,
+table rows, blockquotes and double-quoted text are stripped before parsing. The
+defect was found by running the checker on its own pull request, #1439, whose
+body quotes markers in a table of examples.
+
 A branch that has an open pull request targeting it is a genuine stack bottom.
 Targeting the trunk is correct there, so STACK-01 never fires on it.
 

@@ -56,6 +56,8 @@ overrides prose wherever the two disagree.
 
 **STACKGUARD-14** When the registration could not be read, the system shall suppress the registration findings and still evaluate every structural rule.
 
+**STACKGUARD-15** When a description shows a marker inside fenced code, an inline code span, a table row, a blockquote or double quotes, the system shall not read it as a claim, because a pull request that documents stacks is not claiming to be in one.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

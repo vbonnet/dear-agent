@@ -150,7 +150,27 @@ func ClaimsStack(text string) bool {
 	return parseClaim(text).present
 }
 
-func parseClaim(text string) claim {
+// quotableSpans strips the places a description shows a marker rather than
+// makes one: fenced code, inline code spans, markdown table rows, blockquotes,
+// and double-quoted text. A pull request that documents stacks, including this
+// package's own, is not claiming to be in one.
+var (
+	fencedBlock    = regexp.MustCompile("(?s)```.*?```|~~~.*?~~~")
+	inlineCode     = regexp.MustCompile("`[^`\n]*`")
+	tableOrQuote   = regexp.MustCompile(`(?m)^\s*(?:\||>).*$`)
+	doubleQuoted   = regexp.MustCompile(`"[^"\n]*"|“[^”\n]*”`)
+	claimStrippers = []*regexp.Regexp{fencedBlock, inlineCode, tableOrQuote, doubleQuoted}
+)
+
+func claimText(text string) string {
+	for _, stripper := range claimStrippers {
+		text = stripper.ReplaceAllString(text, " ")
+	}
+	return text
+}
+
+func parseClaim(raw string) claim {
+	text := claimText(raw)
 	if match := canonicalPattern.FindStringSubmatch(text); match != nil {
 		position, _ := strconv.Atoi(match[1])
 		size, _ := strconv.Atoi(match[2])
