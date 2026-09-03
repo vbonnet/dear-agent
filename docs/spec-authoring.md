@@ -22,21 +22,13 @@ permission to delete or merge anything.
 
 ## Implementation projections
 
-An implementation directory that only adapts a contract owned elsewhere must
-not create a second `SPEC.md` for co-location convenience. Add a `SPEC.owner`
-file containing exactly one canonical repository-relative path to the neutral
-product or domain `SPEC.md`, for example:
-
-```text
-internal/hookparity/SPEC.md
-```
-
-The target cannot live in a dotted or bare harness configuration,
-registration, plugin, or grouped harness root, and the implementation directory
-cannot declare both `SPEC.md` and `SPEC.owner`. Repository coverage applies the
-target's strict EARS and reciprocal BDD checks through the pointer. Use this
-only when the implementation adds no distinct observable contract; a new
-observable requires an ownership decision in the neutral product domain.
+Use the contract model's canonical
+[implementation projection rules](../spec-governance/skills/write-spec/references/contract-model.md#implementation-projections)
+when an implementation directory adapts a contract owned elsewhere. That
+reference defines whether `SPEC.owner` is permitted and which ownership and
+coverage checks the pointer inherits. The pointer is traceability, not a second
+normative contract; a distinct observable requires a neutral product or domain
+owner.
 
 ## Start here
 
@@ -56,23 +48,11 @@ authorize a product SPEC migration.
 
 ## Migration and retirement
 
-Before deleting or relocating a governed contract, select the neutral owner,
-preserve or deliberately migrate stable requirement IDs, update reciprocal BDD
-links, and retain source or test evidence for native conformance. The
-deterministic guard permits a same-change relocation or complete retirement to
-reach mandatory review only when the selected immutable snapshot has no
-surviving reciprocal BDD or implementation ownership edge to a deleted path
-and every replacement passes the ordinary strict checks.
-Deleting `SPEC.owner` while implementation source survives is therefore
-blocked unless that directory gains a permitted local `SPEC.md` replacement
-that passes the same strict neutrality and contract checks. An object-identical
-implementation relocation carries that requirement to its target directory;
-unrelated implementation additions or modifications do not.
-
-That result is structural admission, not proof that deleting an observable or
-changing a stable ID is correct. The changed-path evidence and reviewed diff
-remain the semantic preservation record, and uncertain ownership or observable
-semantics still require a maintainer decision.
+Before deleting or relocating a governed contract or `SPEC.owner` edge, follow
+the contract model's canonical
+[migration boundary](../spec-governance/skills/write-spec/references/contract-model.md#migration-boundary).
+It defines the required structural guard evidence, stable-ID handling,
+reciprocal BDD links, conformance evidence, and mandatory semantic review.
 
 ## Evidence boundary
 
