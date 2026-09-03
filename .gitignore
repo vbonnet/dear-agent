@@ -100,6 +100,7 @@ tests/test_helper/
 # the Wayfinder TOOL SOURCE under wayfinder/, which is living code.
 /wf/
 **/.wayfinder/
+.wayfinder-cache/
 WAYFINDER-STATUS.md
 WAYFINDER-HISTORY.jsonl
 WAYFINDER-HISTORY.md
