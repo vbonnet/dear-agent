@@ -39,7 +39,10 @@ jobs:
       # Write, not read: this job publishes its own agentic-review:claude:*
       # lifecycle labels, which are what the merge gate reads.
       pull-requests: write
-      issues: read
+      # Write, not read: `gh label create` provisions the lifecycle labels on
+      # demand, and label management is governed by the issues scope even when
+      # the label lands on a pull request.
+      issues: write
       id-token: write
 
     steps:

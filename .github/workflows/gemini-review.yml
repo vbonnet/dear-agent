@@ -80,6 +80,10 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
+  # Label management is governed by the issues scope, so provisioning the
+  # agentic-review lifecycle labels needs it even though they land on a pull
+  # request.
+  issues: write
 
 jobs:
   review:
