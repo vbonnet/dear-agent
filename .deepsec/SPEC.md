@@ -12,7 +12,7 @@
 
 **DEEPSEC-02** If scanner configuration is invalid, the system shall fail before reporting a successful security scan.
 
-**DEEPSEC-03** When Deepsec writes scanner-owned project metadata, technology cache, file records, run records, reports, or documented findings exports, the Git boundary shall ignore those generated paths while keeping `deepsec.config.ts`, `INFO.md`, `SETUP.md`, and optional `config.json` trackable.
+**DEEPSEC-03** When a documented Deepsec scan writes generated output, the Git boundary shall leave the worktree clean while keeping user-maintained Deepsec inputs trackable. The exact generated and tracked path inventory is implementation detail owned by `README.md` and `agm/test/bdd/steps/deepsec_output_contract_test.go`.
 
 ## BDD Traceability
 
