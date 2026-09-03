@@ -1,12 +1,21 @@
 # Absence Alarm Specification
 
 <!-- Last audited at: 2026-09-01 -->
-<!-- Audit scope: pkg/absencealarm, the domain this revision ships. Every
-     requirement below is satisfied by that package and covered by
-     pkg/absencealarm/*_test.go. The audit deliberately makes no claim about
-     cmd/absence-alarm, its launchd deployment, or the default pulse registry:
-     none of them exist at this revision, and they are audited by the slice
-     that introduces them. -->
+<!-- Audit scope: the domain helpers pkg/absencealarm ships at this revision,
+     and only those. Audited and covered by pkg/absencealarm/*_test.go:
+     AA-01 through AA-06 (pulse classification), AA-09 (journal record),
+     AA-11 (re-dispatch interval decision), AA-14 (snooze rejection),
+     AA-18 (unreadable alarm state), and AA-19 (configuration loading).
+
+     NOT audited, because nothing at this revision implements them: AA-07 and
+     AA-08 (exit-code selection), AA-10, AA-12 and AA-17 (notification
+     dispatch and its failure reporting), AA-13 and AA-15 (applying a snooze
+     to produce SNOOZED or an expired-snooze reason -- StatusSnoozed is
+     declared here but never assigned), AA-16 (heartbeat on tick completion),
+     AA-20 (dry-run enforcement), AA-21 and AA-22 (report emission and JSON
+     output), and AA-23 (the system-level response to a persistence failure).
+     Those behaviors belong to cmd/absence-alarm, which does not exist at this
+     revision and is audited by the slice that introduces it. -->
 
 ## Purpose
 

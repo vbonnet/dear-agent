@@ -2,6 +2,7 @@ package absencealarm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -184,9 +185,11 @@ func AppendJournal(path string, rec JournalRecord) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(append(raw, '\n')); err != nil {
-		f.Close()
-		return err
+	if _, werr := f.Write(append(raw, '\n')); werr != nil {
+		// Report both. The write failure is the cause, but a close that also
+		// fails can mean the record never reached the journal, and silently
+		// dropping that leaves the caller believing only the write was lost.
+		return errors.Join(werr, f.Close())
 	}
 	return f.Close()
 }
