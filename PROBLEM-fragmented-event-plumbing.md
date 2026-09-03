@@ -1,3 +1,10 @@
+---
+phase: PROBLEM
+phase_name: PROBLEM
+wayfinder_session_id: feedback-loop-event-architecture
+created_at: 2026-09-02T23:33:00-07:00
+---
+
 # Problem
 
 dear-agent has built event-like plumbing at least six separate times, independently,

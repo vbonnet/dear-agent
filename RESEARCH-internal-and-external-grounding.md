@@ -1,3 +1,10 @@
+---
+phase: RESEARCH
+phase_name: RESEARCH
+wayfinder_session_id: feedback-loop-event-architecture
+created_at: 2026-09-02T23:33:00-07:00
+---
+
 # Research
 
 Two research tracks, run manually following the discipline of this repo's own
