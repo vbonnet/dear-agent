@@ -159,11 +159,17 @@ func run(args []string, stdout, stderr io.Writer, query queryFunc) int {
 			exitDown)
 	case gatehealth.StatusSystemic:
 		return emit(report, *asJSON, stdout, systemicSummary(report), exitDegraded)
-	default:
+	case gatehealth.StatusHealthy:
 		return emit(report, *asJSON, stdout,
 			fmt.Sprintf("gate-health: HEALTHY: no check fails on more than %.0f%% of %d evaluated open PRs (%d have some failure)",
 				cfg.MinFraction*100, report.EvaluatedPRs, report.PRsWithFailures),
 			exitHealthy)
+	default:
+		// An unrecognised status is a bug in the domain, not health. Report it
+		// as down so a new status can never silently read as passing.
+		report.Error = fmt.Sprintf("unrecognised status %q", report.Status)
+		return emit(report, *asJSON, stdout,
+			fmt.Sprintf("gate-health: DOWN: unrecognised status %q", report.Status), exitDown)
 	}
 }
 
