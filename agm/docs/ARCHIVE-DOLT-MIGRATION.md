@@ -123,8 +123,9 @@ than a legacy manifest-based integration package:
 - `internal/ops/session_archive_test.go` verifies durable stopped-to-archived
   transitions, visibility, serialization, and trust events.
 - `cmd/agm/archive_test.go` verifies identifier routes and CLI error handling.
-- `test/regression/archive_dolt_stopped_sessions_test.go` preserves the
-  original stopped-session regression.
+- `test/regression/archive_storage_contract_test.go` preserves the original
+  stopped-session behavior through the backend-neutral adapter contract; it
+  does not exercise live-Dolt migration or command-routing integration.
 - `test/integration/isolated/codex_lifecycle_test.go` verifies archive at the
   end of a source-built Codex lifecycle.
 
