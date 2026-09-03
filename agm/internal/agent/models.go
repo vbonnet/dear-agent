@@ -40,7 +40,8 @@ var SupportedModelFamilies = []ModelFamilySpec{
 // HarnessModels defines known models per harness.
 var HarnessModels = map[string][]ModelSpec{
 	"claude-code": {
-		{Alias: "fable", FullName: "claude-fable-5", Description: "Mythos-class, most capable, 1M context, 128k max output (free on Pro/Max/Team through 2026-06-23)"},
+		{Alias: "fable5.1", FullName: "claude-fable-5-1", Description: "Claude Fable 5.1, most capable, 1M context, 128k max output; cache reads at 0.025x input"},
+		{Alias: "fable", FullName: "claude-fable-5", Description: "Claude Fable 5, 1M context, 128k max output (the Pro/Max/Team free window ended 2026-06-23; billed at list since)"},
 		{Alias: "opus", FullName: "claude-opus-4-8[1m]", Description: "Latest Opus, 1M context"},
 		{Alias: "opus5", FullName: "claude-opus-5", Description: "Claude Opus 5, 1M context (default and only context size, no smaller variant), same price as Opus 4.8 ($5/$25 per Mtok)"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
@@ -77,6 +78,10 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "5.3-codex-spark", FullName: "gpt-5.3-codex-spark", Description: "Research preview"},
 	},
 	"agy": {
+		{Alias: "3.8-flash", FullName: "Gemini 3.8 Flash (Medium)", Description: "Balanced Gemini 3.8 Flash reasoning"},
+		{Alias: "3.8-flash-medium", FullName: "Gemini 3.8 Flash (Medium)", Description: "Balanced Gemini 3.8 Flash reasoning"},
+		{Alias: "3.8-flash-high", FullName: "Gemini 3.8 Flash (High)", Description: "Higher-reasoning Gemini 3.8 Flash"},
+		{Alias: "3.8-flash-low", FullName: "Gemini 3.8 Flash (Low)", Description: "Fast, low-reasoning Gemini 3.8 Flash"},
 		{Alias: "3.5-flash", FullName: "Gemini 3.5 Flash (Medium)", Description: "AGY default; balanced Gemini 3.5 Flash reasoning"},
 		{Alias: "3.5-flash-medium", FullName: "Gemini 3.5 Flash (Medium)", Description: "Balanced Gemini 3.5 Flash reasoning"},
 		{Alias: "3.5-flash-high", FullName: "Gemini 3.5 Flash (High)", Description: "Higher-reasoning Gemini 3.5 Flash"},
@@ -88,6 +93,7 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "gpt-oss-120b-medium", FullName: "GPT-OSS 120B (Medium)", Description: "GPT-OSS 120B with medium reasoning"},
 	},
 	"pi-cli": {
+		{Alias: "fable5.1", FullName: "anthropic/claude-fable-5-1", Description: "Claude Fable 5.1 through Pi's Anthropic provider"},
 		{Alias: "fable", FullName: "anthropic/claude-fable-5", Description: "Claude Fable 5 through Pi's Anthropic provider"},
 		{Alias: "sonnet", FullName: "anthropic/claude-sonnet-4-6", Description: "Claude Sonnet 4.6 through Pi's Anthropic provider"},
 		{Alias: "opus", FullName: "anthropic/claude-opus-4-8", Description: "Claude Opus 4.8 through Pi's Anthropic provider"},
@@ -96,6 +102,7 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "gpt-frontier", FullName: "openai/gpt-5.6-sol", Description: "GPT-5.6 Sol through Pi's OpenAI provider"},
 		{Alias: "gpt", FullName: "openai/gpt-5.6-terra", Description: "GPT-5.6 Terra through Pi's OpenAI provider"},
 		{Alias: "gpt-fast", FullName: "openai/gpt-5.6-luna", Description: "GPT-5.6 Luna through Pi's OpenAI provider"},
+		{Alias: "gemini-flash-3.8", FullName: "google/gemini-3.8-flash", Description: "Gemini 3.8 Flash through Pi's Google provider"},
 		{Alias: "gemini-flash", FullName: "google/gemini-3.5-flash", Description: "Gemini 3.5 Flash through Pi's Google provider"},
 		{Alias: "gemini-flash-lite", FullName: "google/gemini-3.1-flash-lite", Description: "Gemini 3.1 Flash Lite through Pi's Google provider"},
 		{Alias: "glm-5.2", FullName: "openrouter/z-ai/glm-5.2", Description: "GLM 5.2 through Pi's OpenRouter provider"},
@@ -166,6 +173,7 @@ var CrossHarnessAliases = map[string]map[string]string{
 	"claude-code": {
 		"2.5-pro":   "opus",   // gemini alias → claude equivalent
 		"3.1-pro":   "sonnet", // gemini alias → claude equivalent
+		"3.8-flash": "haiku",  // gemini alias → claude equivalent
 		"3.5-flash": "haiku",  // gemini alias → claude equivalent
 		"5.6":       "opus",   // codex alias → claude equivalent
 		"5.6-sol":   "opus",   // codex tier → claude equivalent (frontier)

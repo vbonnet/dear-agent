@@ -450,7 +450,7 @@ func piKnownNativeModelContextWindow(model string) (int, bool) {
 
 func piKnownDirectModelContextWindow(model string) (int, bool) {
 	switch model {
-	case "claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6":
+	case "claude-fable-5", "claude-fable-5-1", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6":
 		return extendedContextWindowTokens, true
 	case "gpt-5.3-chat-latest", "gpt-5.3-codex-spark":
 		return 128000, true
@@ -460,7 +460,7 @@ func piKnownDirectModelContextWindow(model string) (int, bool) {
 		return 272000, true
 	case "gpt-5.4-pro", "gpt-5.5-pro":
 		return 1050000, true
-	case "gemini-3.5-flash", "gemini-3.1-flash-lite", "z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
+	case "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
 		return 1048576, true
 	case "nvidia/nemotron-3-ultra-550b-a55b":
 		return 512288, true
@@ -477,7 +477,7 @@ func piKnownDirectModelContextWindow(model string) (int, bool) {
 // be collapsed into direct-provider defaults.
 func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
 	switch route {
-	case "anthropic/claude-fable-5", "anthropic/claude-opus-5":
+	case "anthropic/claude-fable-5", "anthropic/claude-fable-5-1", "anthropic/claude-opus-5":
 		return extendedContextWindowTokens, true
 	case "openai/gpt-5.3-codex", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano":
 		return 400000, true
@@ -485,7 +485,8 @@ func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
 		"openai/gpt-5.6-terra", "openai/gpt-5.6-luna", "openai/gpt-5.4-pro",
 		"openai/gpt-5.5-pro":
 		return 1050000, true
-	case "google/gemini-3.5-flash", "google/gemini-3.1-flash-lite",
+	case "google/gemini-3.8-flash", "google/gemini-3.5-flash",
+		"google/gemini-3.1-flash-lite",
 		"z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
 		return 1048576, true
 	case "nvidia/nemotron-3-ultra-550b-a55b":

@@ -1,6 +1,6 @@
 # Model Pricing Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-09-02 -->
 
 ## Purpose
 
@@ -27,6 +27,10 @@ other model families.
 **PRICING-07** When GLM, DeepSeek, Nemotron, or Qwen default-model pricing is recorded, the system shall store a primary rate-card source and as-of date with positive input and output rates.
 
 **PRICING-08** When OpenRouter model-family defaults are selected, the system shall use the provider's current canonical model slug rather than an unverified shorthand identifier.
+
+**PRICING-09** When a model generation is priced differently from an earlier generation whose identifier is a substring of it, the system shall return the newer generation's rate rather than letting the substring fallback resolve to the older entry.
+
+**PRICING-10** When a model carries time-limited introductory pricing, the system shall record the rate-card source, the as-of date, and the date the introductory rate ends.
 
 ## BDD Traceability
 
