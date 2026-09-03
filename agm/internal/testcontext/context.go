@@ -50,23 +50,13 @@ const (
 type AuthMode string
 
 const (
-	// AuthModeInherit symlinks credential files/dirs from the host HOME.
+	// AuthModeInherit projects only approved auth leaves from the host HOME.
 	AuthModeInherit AuthMode = "inherit"
 	// AuthModeEnv relies on environment variables only (no file symlinks).
 	AuthModeEnv AuthMode = "env"
 	// AuthModeNone provides complete isolation with no auth forwarding.
 	AuthModeNone AuthMode = "none"
 )
-
-// credentialPaths lists the relative paths (from HOME) that should be
-// symlinked in AuthModeInherit. Only directories/files that exist on the
-// host are symlinked; missing sources are silently skipped.
-var credentialPaths = []string{
-	".claude",
-	".codex",
-	filepath.Join(".config", "gcloud"),
-	filepath.Join(".config", "opencode"),
-}
 
 // TestContext holds all isolated paths for a single test run.
 type TestContext struct {
@@ -588,15 +578,15 @@ func pathSafeForCleanup(path string, requireDirectory bool) (bool, error) {
 	return ownedPath(path, requireDirectory)
 }
 
-// ForwardAuth symlinks LLM credential directories from the host HOME into
-// the test environment's HomeDir based on the specified AuthMode.
+// ForwardAuth projects approved LLM authentication leaves from the host HOME
+// into the test environment's HomeDir based on the specified AuthMode.
 //
-// In AuthModeInherit: symlinks .claude/, .codex/, .config/gcloud/, .config/opencode/
+// In AuthModeInherit: links exact credential files and snapshots approved config files
 // In AuthModeEnv: no-op (credentials come from env vars in CI)
 // In AuthModeNone: no-op (complete isolation)
 //
-// Missing source directories are silently skipped. The HostHome field is
-// set to hostHome for later reference.
+// Missing approved sources are silently skipped. The HostHome field is set to
+// hostHome for later reference.
 func (tc *TestContext) ForwardAuth(hostHome string, mode AuthMode) error {
 	tc.HostHome = hostHome
 
@@ -608,26 +598,5 @@ func (tc *TestContext) ForwardAuth(hostHome string, mode AuthMode) error {
 		return fmt.Errorf("unknown auth mode: %q", mode)
 	}
 
-	for _, relPath := range credentialPaths {
-		src := filepath.Join(hostHome, relPath)
-
-		// Skip if source does not exist
-		if _, err := os.Stat(src); os.IsNotExist(err) {
-			continue
-		}
-
-		dst := filepath.Join(tc.HomeDir, relPath)
-
-		// Create parent directories
-		if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
-			return fmt.Errorf("failed to create parent dir for %s: %w", relPath, err)
-		}
-
-		// Create symlink
-		if err := os.Symlink(src, dst); err != nil {
-			return fmt.Errorf("failed to symlink %s: %w", relPath, err)
-		}
-	}
-
-	return nil
+	return projectInheritedAuth(hostHome, tc.HomeDir)
 }

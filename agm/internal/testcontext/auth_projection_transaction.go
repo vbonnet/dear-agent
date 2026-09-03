@@ -1,0 +1,760 @@
+package testcontext
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"golang.org/x/sys/unix"
+)
+
+type createdAuthNode struct {
+	relativePath string
+	info         os.FileInfo
+}
+
+type authProjectionTransaction struct {
+	home             string
+	selectedHomeInfo os.FileInfo
+	root             *os.Root
+	lock             *os.File
+	created          []createdAuthNode
+	closed           bool
+}
+
+func newAuthProjectionTransaction(
+	home string,
+	expected os.FileInfo,
+) (*authProjectionTransaction, error) {
+	before, err := os.Lstat(home)
+	if err != nil {
+		return nil, authPathError("inspect selected home", ".", err)
+	}
+	if err := validateOwnedDirectoryInfo(before, true, "selected home"); err != nil {
+		return nil, err
+	}
+	if !sameAuthFileState(expected, before) {
+		return nil, errors.New("selected home changed after preparation")
+	}
+
+	lock, err := os.OpenFile(home, os.O_RDONLY|unix.O_NONBLOCK|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, authPathError("open selected home", ".", err)
+	}
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = lock.Close()
+		if errors.Is(err, unix.EWOULDBLOCK) {
+			return nil, errors.New("selected home already has an active auth projection")
+		}
+		return nil, authPathError("lock selected home", ".", err)
+	}
+
+	root, err := os.OpenRoot(home)
+	if err != nil {
+		return nil, errors.Join(
+			authPathError("open selected home root", ".", err),
+			closeProjectionLock(lock),
+		)
+	}
+	opened, err := lock.Stat()
+	if err != nil {
+		_ = root.Close()
+		return nil, errors.Join(
+			authPathError("inspect opened selected home", ".", err),
+			closeProjectionLock(lock),
+		)
+	}
+	rooted, err := root.Stat(".")
+	if err != nil {
+		_ = root.Close()
+		return nil, errors.Join(
+			authPathError("inspect selected home root", ".", err),
+			closeProjectionLock(lock),
+		)
+	}
+	after, err := os.Lstat(home)
+	if err != nil {
+		_ = root.Close()
+		return nil, errors.Join(
+			authPathError("reinspect selected home", ".", err),
+			closeProjectionLock(lock),
+		)
+	}
+	for _, info := range []os.FileInfo{opened, rooted, after} {
+		if err := validateOwnedDirectoryInfo(info, true, "selected home"); err != nil {
+			_ = root.Close()
+			return nil, errors.Join(err, closeProjectionLock(lock))
+		}
+	}
+	if !sameAuthFileState(before, opened) || !sameAuthFileState(opened, rooted) ||
+		!sameAuthFileState(rooted, after) {
+		_ = root.Close()
+		return nil, errors.Join(
+			errors.New("selected home changed while opening transaction root"),
+			closeProjectionLock(lock),
+		)
+	}
+
+	return &authProjectionTransaction{
+		home:             home,
+		selectedHomeInfo: expected,
+		root:             root,
+		lock:             lock,
+	}, nil
+}
+
+func (tx *authProjectionTransaction) preflight(
+	links []preparedCredentialLink,
+	snapshots []preparedConfigSnapshot,
+) ([]preparedAuthDirectory, error) {
+	if err := tx.verifyRootVisible(); err != nil {
+		return nil, err
+	}
+	preflighted := make([]preparedAuthDirectory, 0, len(authNamespacePaths))
+	for _, relativePath := range authNamespacePaths {
+		info, err := tx.root.Lstat(relativePath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				preflighted = append(preflighted, preparedAuthDirectory{relativePath: relativePath})
+				continue
+			}
+			return nil, authPathError("inspect destination directory", relativePath, err)
+		}
+		if err := validateOwnedDirectoryInfo(info, true, "destination directory "+relativePath); err != nil {
+			return nil, err
+		}
+		preflighted = append(preflighted, preparedAuthDirectory{
+			relativePath: relativePath,
+			existingInfo: info,
+		})
+	}
+
+	for _, relativePath := range allAuthLeafPaths() {
+		_, err := tx.root.Lstat(relativePath)
+		if err == nil {
+			return nil, fmt.Errorf("destination leaf %s already exists", relativePath)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, authPathError("inspect destination leaf", relativePath, err)
+		}
+	}
+
+	directories := make([]preparedAuthDirectory, 0, len(preflighted))
+	for _, directory := range preflighted {
+		if authDirectoryNeeded(directory.relativePath, links, snapshots) {
+			directories = append(directories, directory)
+		}
+	}
+	return directories, nil
+}
+
+func (tx *authProjectionTransaction) apply(plan authProjectionPlan, hook authInstallHook) error {
+	if err := tx.verifyRootVisible(); err != nil {
+		return err
+	}
+	for _, directory := range plan.directories {
+		if err := tx.ensureDirectory(directory); err != nil {
+			return err
+		}
+	}
+	for _, link := range plan.links {
+		if hook != nil {
+			if err := hook(link.relativePath); err != nil {
+				return fmt.Errorf("install hook %s: %w", link.relativePath, err)
+			}
+		}
+		if err := tx.installCredentialLink(plan.hostHome, link); err != nil {
+			return err
+		}
+	}
+	for _, snapshot := range plan.snapshots {
+		if hook != nil {
+			if err := hook(snapshot.relativePath); err != nil {
+				return fmt.Errorf("install hook %s: %w", snapshot.relativePath, err)
+			}
+		}
+		if err := tx.installConfigSnapshot(snapshot); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *authProjectionTransaction) verifyRootVisible() error {
+	rooted, err := tx.root.Stat(".")
+	if err != nil {
+		return authPathError("inspect selected home root", ".", err)
+	}
+	visible, err := os.Lstat(tx.home)
+	if err != nil {
+		return authPathError("inspect selected home", ".", err)
+	}
+	for _, info := range []os.FileInfo{rooted, visible} {
+		if err := validateOwnedDirectoryInfo(info, true, "selected home"); err != nil {
+			return err
+		}
+		if !os.SameFile(tx.selectedHomeInfo, info) {
+			return errors.New("selected home changed after transaction root opened")
+		}
+	}
+	if !os.SameFile(rooted, visible) {
+		return errors.New("selected home path no longer names the transaction root")
+	}
+	return nil
+}
+
+func (tx *authProjectionTransaction) ensureDirectory(directory preparedAuthDirectory) error {
+	if directory.existingInfo != nil {
+		info, err := tx.root.Lstat(directory.relativePath)
+		if err != nil {
+			return authPathError("reinspect destination directory", directory.relativePath, err)
+		}
+		if err := validateOwnedDirectoryInfo(info, true, "destination directory "+directory.relativePath); err != nil {
+			return err
+		}
+		if !os.SameFile(directory.existingInfo, info) {
+			return fmt.Errorf("destination directory %s changed after preflight", directory.relativePath)
+		}
+		return nil
+	}
+
+	parentPath := filepath.Dir(directory.relativePath)
+	parent, err := tx.openDestinationParent(parentPath)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	if err := ensureAuthLeafAbsent(tx.root, directory.relativePath); err != nil {
+		return err
+	}
+
+	stageBase, err := createStagedDirectory(parent, filepath.Base(directory.relativePath))
+	if err != nil {
+		return authPathError("stage destination directory", directory.relativePath, err)
+	}
+	stagePath := filepath.Join(parentPath, stageBase)
+	openedFD, err := unix.Openat(
+		int(parent.Fd()),
+		stageBase,
+		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NONBLOCK|unix.O_DIRECTORY|unix.O_NOFOLLOW,
+		0,
+	)
+	if err != nil {
+		return cleanupUntrackedAuthNode(
+			parent,
+			stageBase,
+			true,
+			authPathError("open staged destination directory", directory.relativePath, err),
+		)
+	}
+	opened := os.NewFile(uintptr(openedFD), directory.relativePath)
+	if opened == nil {
+		_ = unix.Close(openedFD)
+		return cleanupUntrackedAuthNode(
+			parent,
+			stageBase,
+			true,
+			fmt.Errorf("open staged destination directory %s", directory.relativePath),
+		)
+	}
+	info, statErr := opened.Stat()
+	if statErr != nil {
+		closeErr := opened.Close()
+		return cleanupUntrackedAuthNode(
+			parent,
+			stageBase,
+			true,
+			errors.Join(
+				authPathError("inspect staged destination directory", directory.relativePath, statErr),
+				sanitizeCloseError("close staged destination directory", directory.relativePath, closeErr),
+			),
+		)
+	}
+	nodeIndex := len(tx.created)
+	tx.created = append(tx.created, createdAuthNode{relativePath: stagePath, info: info})
+	closeErr := opened.Close()
+	if closeErr != nil {
+		return authPathError("close staged destination directory", directory.relativePath, closeErr)
+	}
+	if err := validateOwnedDirectoryInfo(info, true, "destination directory "+directory.relativePath); err != nil {
+		return err
+	}
+	visible, err := tx.root.Lstat(stagePath)
+	if err != nil {
+		return authPathError("inspect staged destination directory", directory.relativePath, err)
+	}
+	if !os.SameFile(info, visible) {
+		return fmt.Errorf("staged destination directory %s changed before installation", directory.relativePath)
+	}
+
+	if err := renameNoReplace(
+		int(parent.Fd()), stageBase,
+		int(parent.Fd()), filepath.Base(directory.relativePath),
+	); err != nil {
+		return authPathError("install destination directory", directory.relativePath, err)
+	}
+	tx.created[nodeIndex].relativePath = directory.relativePath
+	current, err := tx.root.Lstat(directory.relativePath)
+	if err != nil {
+		return authPathError("verify destination directory", directory.relativePath, err)
+	}
+	if !os.SameFile(info, current) {
+		return fmt.Errorf("destination directory %s changed during installation", directory.relativePath)
+	}
+	return validateOwnedDirectoryInfo(current, true, "destination directory "+directory.relativePath)
+}
+
+func (tx *authProjectionTransaction) installCredentialLink(
+	hostHome string,
+	link preparedCredentialLink,
+) error {
+	file, current, present, err := openApprovedAuthSource(hostHome, link.relativePath, true)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("credential source %s changed after preparation", link.relativePath)
+	}
+	if err := file.Close(); err != nil {
+		return authPathError("close credential source", link.relativePath, err)
+	}
+	if !sameAuthFileState(link.sourceInfo, current) {
+		return fmt.Errorf("credential source %s changed after preparation", link.relativePath)
+	}
+
+	parentPath := filepath.Dir(link.relativePath)
+	parent, err := tx.openDestinationParent(parentPath)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	if err := ensureAuthLeafAbsent(tx.root, link.relativePath); err != nil {
+		return err
+	}
+
+	sourcePath := filepath.Join(hostHome, link.relativePath)
+	stageBase, err := createStagedSymlink(parent, filepath.Base(link.relativePath), sourcePath)
+	if err != nil {
+		return authPathError("stage credential link", link.relativePath, err)
+	}
+	stagePath := filepath.Join(parentPath, stageBase)
+	opened, err := openSymlinkAt(int(parent.Fd()), stageBase)
+	if err != nil {
+		return cleanupUntrackedAuthNode(
+			parent,
+			stageBase,
+			false,
+			authPathError("open staged credential link", link.relativePath, err),
+		)
+	}
+	info, statErr := opened.Stat()
+	if statErr != nil {
+		closeErr := opened.Close()
+		return cleanupUntrackedAuthNode(
+			parent,
+			stageBase,
+			false,
+			errors.Join(
+				authPathError("inspect staged credential link", link.relativePath, statErr),
+				sanitizeCloseError("close staged credential link", link.relativePath, closeErr),
+			),
+		)
+	}
+	nodeIndex := len(tx.created)
+	tx.created = append(tx.created, createdAuthNode{relativePath: stagePath, info: info})
+	closeErr := opened.Close()
+	if closeErr != nil {
+		return authPathError("close staged credential link", link.relativePath, closeErr)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("staged credential destination %s is not a link", link.relativePath)
+	}
+	visible, err := tx.root.Lstat(stagePath)
+	if err != nil {
+		return authPathError("inspect staged credential link", link.relativePath, err)
+	}
+	if !os.SameFile(info, visible) {
+		return fmt.Errorf("staged credential destination %s changed before installation", link.relativePath)
+	}
+	target, err := tx.root.Readlink(stagePath)
+	if err != nil {
+		return authPathError("read staged credential link", link.relativePath, err)
+	}
+	if target != sourcePath {
+		return fmt.Errorf("staged credential destination %s has an unexpected target", link.relativePath)
+	}
+
+	if err := renameNoReplace(
+		int(parent.Fd()), stageBase,
+		int(parent.Fd()), filepath.Base(link.relativePath),
+	); err != nil {
+		return authPathError("install credential link", link.relativePath, err)
+	}
+	tx.created[nodeIndex].relativePath = link.relativePath
+	currentLink, err := tx.root.Lstat(link.relativePath)
+	if err != nil {
+		return authPathError("verify credential link", link.relativePath, err)
+	}
+	if !os.SameFile(info, currentLink) || currentLink.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("credential destination %s changed during installation", link.relativePath)
+	}
+	target, err = tx.root.Readlink(link.relativePath)
+	if err != nil {
+		return authPathError("read credential link", link.relativePath, err)
+	}
+	if target != sourcePath {
+		return fmt.Errorf("credential destination %s has an unexpected target", link.relativePath)
+	}
+	return nil
+}
+
+func (tx *authProjectionTransaction) installConfigSnapshot(snapshot preparedConfigSnapshot) error {
+	parentPath := filepath.Dir(snapshot.relativePath)
+	parent, err := tx.openDestinationParent(parentPath)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	if err := ensureAuthLeafAbsent(tx.root, snapshot.relativePath); err != nil {
+		return err
+	}
+
+	fd, err := unix.Openat(
+		int(parent.Fd()),
+		filepath.Base(snapshot.relativePath),
+		unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+		0600,
+	)
+	if err != nil {
+		return authPathError("create configuration snapshot", snapshot.relativePath, err)
+	}
+	file := os.NewFile(uintptr(fd), snapshot.relativePath)
+	if file == nil {
+		_ = unix.Close(fd)
+		return cleanupUntrackedAuthNode(
+			parent,
+			filepath.Base(snapshot.relativePath),
+			false,
+			fmt.Errorf("create configuration snapshot %s", snapshot.relativePath),
+		)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		closeErr := file.Close()
+		return cleanupUntrackedAuthNode(
+			parent,
+			filepath.Base(snapshot.relativePath),
+			false,
+			errors.Join(
+				authPathError("inspect configuration snapshot", snapshot.relativePath, err),
+				sanitizeCloseError("close configuration snapshot", snapshot.relativePath, closeErr),
+			),
+		)
+	}
+	tx.created = append(tx.created, createdAuthNode{relativePath: snapshot.relativePath, info: info})
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return fmt.Errorf("configuration snapshot %s is not a regular file", snapshot.relativePath)
+	}
+	if err := file.Chmod(0600); err != nil {
+		_ = file.Close()
+		return authPathError("secure configuration snapshot", snapshot.relativePath, err)
+	}
+	if _, err := file.Write(snapshot.data); err != nil {
+		_ = file.Close()
+		return authPathError("write configuration snapshot", snapshot.relativePath, err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return authPathError("sync configuration snapshot", snapshot.relativePath, err)
+	}
+	if err := file.Close(); err != nil {
+		return authPathError("close configuration snapshot", snapshot.relativePath, err)
+	}
+
+	visible, err := tx.root.Lstat(snapshot.relativePath)
+	if err != nil {
+		return authPathError("verify configuration snapshot", snapshot.relativePath, err)
+	}
+	if !os.SameFile(info, visible) || !visible.Mode().IsRegular() || visible.Mode().Perm() != 0600 {
+		return fmt.Errorf("configuration snapshot %s failed identity or mode verification", snapshot.relativePath)
+	}
+	return nil
+}
+
+func (tx *authProjectionTransaction) openDestinationParent(relativePath string) (*os.File, error) {
+	if err := tx.verifyRootVisible(); err != nil {
+		return nil, err
+	}
+	return tx.openRootedDestinationParent(relativePath)
+}
+
+func (tx *authProjectionTransaction) openRootedDestinationParent(relativePath string) (*os.File, error) {
+	if relativePath != "." {
+		current := ""
+		for _, component := range strings.Split(filepath.ToSlash(relativePath), "/") {
+			current = filepath.Join(current, component)
+			info, err := tx.root.Lstat(current)
+			if err != nil {
+				return nil, authPathError("inspect destination directory", relativePath, err)
+			}
+			if err := validateOwnedDirectoryInfo(info, true, "destination directory "+current); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	parent, err := tx.root.Open(relativePath)
+	if err != nil {
+		return nil, authPathError("open destination directory", relativePath, err)
+	}
+	opened, err := parent.Stat()
+	if err != nil {
+		_ = parent.Close()
+		return nil, authPathError("inspect opened destination directory", relativePath, err)
+	}
+	label := "destination directory " + relativePath
+	if relativePath == "." {
+		label = "selected home"
+	}
+	if err := validateOwnedDirectoryInfo(opened, true, label); err != nil {
+		_ = parent.Close()
+		return nil, err
+	}
+	visible, err := tx.root.Lstat(relativePath)
+	if err != nil {
+		_ = parent.Close()
+		return nil, authPathError("reinspect destination directory", relativePath, err)
+	}
+	if err := validateOwnedDirectoryInfo(visible, true, label); err != nil {
+		_ = parent.Close()
+		return nil, err
+	}
+	if !os.SameFile(opened, visible) {
+		_ = parent.Close()
+		return nil, fmt.Errorf("destination directory %s changed while opening", relativePath)
+	}
+	return parent, nil
+}
+
+func ensureAuthLeafAbsent(root *os.Root, relativePath string) error {
+	_, err := root.Lstat(relativePath)
+	if err == nil {
+		return fmt.Errorf("destination leaf %s already exists", relativePath)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return authPathError("inspect destination leaf", relativePath, err)
+	}
+	return nil
+}
+
+func createStagedDirectory(parent *os.File, destinationBase string) (string, error) {
+	return allocateStagedName(destinationBase, func(stageBase string) error {
+		return unix.Mkdirat(int(parent.Fd()), stageBase, 0700)
+	})
+}
+
+func createStagedSymlink(parent *os.File, destinationBase, target string) (string, error) {
+	return allocateStagedName(destinationBase, func(stageBase string) error {
+		return unix.Symlinkat(target, int(parent.Fd()), stageBase)
+	})
+}
+
+func allocateStagedName(destinationBase string, create func(string) error) (string, error) {
+	for range 8 {
+		stageBase, err := randomAuthNodeName(destinationBase, "stage")
+		if err != nil {
+			return "", err
+		}
+		if err := create(stageBase); err == nil {
+			return stageBase, nil
+		} else if !errors.Is(err, unix.EEXIST) {
+			return "", err
+		}
+	}
+	return "", errors.New("could not allocate a unique staged auth node")
+}
+
+func randomAuthNodeName(base, purpose string) (string, error) {
+	var entropy [16]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return "", fmt.Errorf("generate %s name: %w", purpose, err)
+	}
+	return "." + base + ".agm-auth-" + purpose + "-" + hex.EncodeToString(entropy[:]), nil
+}
+
+func openSymlinkAt(directoryFD int, name string) (*os.File, error) {
+	fd, err := unix.Openat(directoryFD, name, symlinkOpenFlags, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), name)
+	if file == nil {
+		_ = unix.Close(fd)
+		return nil, unix.EBADF
+	}
+	return file, nil
+}
+
+func cleanupUntrackedAuthNode(
+	parent *os.File,
+	base string,
+	directory bool,
+	cause error,
+) error {
+	flags := 0
+	if directory {
+		flags = unix.AT_REMOVEDIR
+	}
+	removeErr := unix.Unlinkat(int(parent.Fd()), base, flags)
+	if errors.Is(removeErr, unix.ENOENT) {
+		removeErr = nil
+	}
+	if removeErr != nil {
+		return errors.Join(cause, authPathError("remove untracked staged auth node", ".", removeErr))
+	}
+	return cause
+}
+
+func (tx *authProjectionTransaction) rollback() error {
+	var rollbackErr error
+	for index := len(tx.created) - 1; index >= 0; index-- {
+		node := tx.created[index]
+		if node.info.IsDir() {
+			empty, err := tx.rollbackDirectoryEmpty(node)
+			if err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+				continue
+			}
+			if !empty {
+				rollbackErr = errors.Join(rollbackErr, errors.New("preserved non-empty rollback directory"))
+				continue
+			}
+		}
+		if err := tx.quarantineAndRemove(node); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
+	}
+	return rollbackErr
+}
+
+func (tx *authProjectionTransaction) rollbackDirectoryEmpty(node createdAuthNode) (bool, error) {
+	current, err := tx.root.Lstat(node.relativePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, authPathError("inspect rollback directory", ".", err)
+	}
+	if !os.SameFile(node.info, current) {
+		return false, errors.New("preserved rollback node whose identity changed")
+	}
+	directory, err := tx.root.Open(node.relativePath)
+	if err != nil {
+		return false, authPathError("open rollback directory", ".", err)
+	}
+	opened, err := directory.Stat()
+	if err != nil {
+		_ = directory.Close()
+		return false, authPathError("inspect opened rollback directory", ".", err)
+	}
+	if !os.SameFile(node.info, opened) {
+		_ = directory.Close()
+		return false, errors.New("preserved rollback node whose identity changed")
+	}
+	_, readErr := directory.Readdirnames(1)
+	closeErr := directory.Close()
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return false, errors.Join(
+			authPathError("read rollback directory", ".", readErr),
+			sanitizeCloseError("close rollback directory", ".", closeErr),
+		)
+	}
+	if closeErr != nil {
+		return false, authPathError("close rollback directory", ".", closeErr)
+	}
+	return errors.Is(readErr, io.EOF), nil
+}
+
+func (tx *authProjectionTransaction) quarantineAndRemove(node createdAuthNode) error {
+	parentPath := filepath.Dir(node.relativePath)
+	parent, err := tx.openRootedDestinationParent(parentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	defer parent.Close()
+
+	var quarantine string
+	for range 8 {
+		quarantine, err = randomAuthNodeName("rollback", "quarantine")
+		if err != nil {
+			return err
+		}
+		err = renameNoReplace(
+			int(parent.Fd()), filepath.Base(node.relativePath),
+			int(tx.lock.Fd()), quarantine,
+		)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		if !errors.Is(err, unix.EEXIST) {
+			return authPathError("quarantine rollback node", ".", err)
+		}
+	}
+	if err != nil {
+		return errors.New("could not allocate a unique rollback quarantine")
+	}
+
+	moved, err := tx.root.Lstat(quarantine)
+	if err != nil {
+		return authPathError("inspect quarantined rollback node", ".", err)
+	}
+	if !os.SameFile(node.info, moved) {
+		restoreErr := renameNoReplace(
+			int(tx.lock.Fd()), quarantine,
+			int(parent.Fd()), filepath.Base(node.relativePath),
+		)
+		if restoreErr != nil {
+			return errors.Join(
+				errors.New("preserved rollback node whose identity changed in quarantine"),
+				authPathError("restore changed rollback node", ".", restoreErr),
+			)
+		}
+		return errors.New("preserved rollback node whose identity changed")
+	}
+	if err := tx.root.Remove(quarantine); err != nil {
+		return authPathError("remove quarantined rollback node", ".", err)
+	}
+	return nil
+}
+
+func (tx *authProjectionTransaction) close() error {
+	if tx == nil || tx.closed {
+		return nil
+	}
+	tx.closed = true
+	rootErr := tx.root.Close()
+	lockErr := closeProjectionLock(tx.lock)
+	return errors.Join(
+		sanitizeCloseError("close selected home root", ".", rootErr),
+		lockErr,
+	)
+}
+
+func closeProjectionLock(lock *os.File) error {
+	if lock == nil {
+		return nil
+	}
+	return sanitizeCloseError("close selected home", ".", lock.Close())
+}
