@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/boundedexec"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
+
+// lintTimeout bounds the external maintainability linter.
+const lintTimeout = 5 * time.Minute
 
 // ReviewEngine orchestrates multi-persona reviews with risk-adaptive strategies
 type ReviewEngine struct {
@@ -377,10 +380,16 @@ func (e *ReviewEngine) tryExternalReviewTool(persona PersonaType, files []string
 
 // runGolangciLint executes golangci-lint for maintainability checks
 func (e *ReviewEngine) runGolangciLint(_ []string) (PersonaResult, error) {
-	cmd := exec.Command("golangci-lint", "run", "./...")
-	cmd.Dir = e.projectDir
-
-	output, err := cmd.CombinedOutput()
+	// golangci-lint takes a global cache lock, so an unbounded run can block on
+	// another linter process indefinitely. Bound it and report progress.
+	res := boundedexec.Command{
+		Dir:     e.projectDir,
+		Label:   "maintainability lint",
+		Name:    "golangci-lint",
+		Args:    []string{"run", "./..."},
+		Timeout: lintTimeout,
+	}.Run()
+	output, err := []byte(res.Output), res.Err
 
 	result := PersonaResult{
 		Persona:    PersonaMaintainability,
