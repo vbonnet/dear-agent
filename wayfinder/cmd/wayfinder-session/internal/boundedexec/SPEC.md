@@ -32,4 +32,5 @@ documented ten-minute gate timeout became an indefinite hang in
 ## Test Traceability
 
 - Package tests: `wayfinder/cmd/wayfinder-session/internal/boundedexec/boundedexec_test.go`
+- BDD: `agm/test/bdd/features/wayfinder_internal_package_guardrails.feature`
 - Callers: `wayfinder/cmd/wayfinder-session/internal/validator/`, `wayfinder/cmd/wayfinder-session/internal/review/`
