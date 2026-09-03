@@ -132,11 +132,12 @@ func TestRunSweepAtReportsCensusWhenScanFails(t *testing.T) {
 	// A long, untested, unwaived script makes report fail the sweep. The
 	// census must survive that error return: LANGPOLICY-CMD-29 keeps the
 	// backlog visible precisely when the verdict is bad.
-	long := "#!/bin/bash\n"
-	for i := 0; i < lineLimit+10; i++ {
-		long += fmt.Sprintf("echo line %d\n", i)
+	var long strings.Builder
+	long.WriteString("#!/bin/bash\n")
+	for i := range lineLimit + 10 {
+		fmt.Fprintf(&long, "echo line %d\n", i)
 	}
-	if err := os.WriteFile(filepath.Join(root, "long.sh"), []byte(long), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "long.sh"), []byte(long.String()), 0o755); err != nil {
 		t.Fatalf("WriteFile long.sh: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "short.sh"), []byte("#!/bin/bash\necho short\n"), 0o755); err != nil {
