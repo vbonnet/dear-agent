@@ -103,6 +103,13 @@ type Deps struct {
 	Metrics *Metrics
 }
 
+// DefaultRebaseCooldown is the default minimum delay between two rebases of the
+// same PR. It is sized above the slowest required check in this repository
+// (Build & Test (ubuntu-latest), measured at ~23 minutes) so that a rebase the
+// loop performs has time to produce a verdict before the loop considers
+// rebasing again.
+const DefaultRebaseCooldown = 30 * time.Minute
+
 // Driver drives one repo's open PRs toward MERGED.
 type Driver struct {
 	Repo           string
@@ -111,6 +118,19 @@ type Driver struct {
 	Deps           Deps
 	Cap            int           // backpressure: skip the tick above this many open PRs
 	StallThreshold time.Duration // a PR actionable with no action for longer is "stalled"
+
+	// RebaseCooldown is the minimum time between two rebases of the same PR.
+	//
+	// Under a strict required-status-checks policy every PR must be up to date
+	// with its base to merge, so a busy main leaves most PRs BEHIND. Advancing a
+	// branch pushes a new head, which invalidates the whole check matrix and
+	// restarts a full CI run. When the loop re-rebases a PR sooner than CI takes
+	// to finish, the PR is reset before it can ever present a green, up-to-date
+	// check set, and it can never merge no matter how many ticks run.
+	//
+	// The cooldown must therefore exceed the slowest required check. Zero
+	// disables it and restores the previous rebase-every-tick behaviour.
+	RebaseCooldown time.Duration
 }
 
 // TickResult summarizes one pass.
@@ -270,8 +290,27 @@ func (d *Driver) isStalled(st State, rec *PRRecord, now time.Time) bool {
 	return false
 }
 
+// rebaseCoolingDown reports whether this PR was rebased recently enough that
+// the CI run that rebase started has probably not finished yet. Rebasing again
+// now would discard that in-flight run and start the wait over.
+func (d *Driver) rebaseCoolingDown(rec *PRRecord, now time.Time) bool {
+	if d.RebaseCooldown <= 0 || rec == nil {
+		return false
+	}
+	if rec.LastState != StateBehind || rec.LastActionAt.IsZero() {
+		return false
+	}
+	return now.Sub(rec.LastActionAt) < d.RebaseCooldown
+}
+
 func (d *Driver) doRebase(ctx context.Context, pr PR, now time.Time, res *TickResult) {
 	if d.Deps.Rebaser == nil {
+		return
+	}
+	if d.rebaseCoolingDown(d.Tracker.Get(pr.Number, now), now) {
+		res.Skipped++
+		d.audit(AuditEvent{PR: pr.Number, State: StateBehind, Action: "rebase_cooldown",
+			Detail: fmt.Sprintf("rebased less than %s ago; letting CI settle", d.RebaseCooldown)})
 		return
 	}
 	err := d.Deps.Rebaser.Rebase(ctx, d.Repo, pr.Number)
