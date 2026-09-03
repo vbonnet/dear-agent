@@ -8,25 +8,6 @@ import (
 	"github.com/vbonnet/dear-agent/internal/craplens"
 )
 
-// TestMdCodeCollapsesLineBreaks guards against a real gap: a widened
-// backtick fence alone does not make a literal line break safe, because
-// Markdown's block-level parsing (a heading, a list) can still trigger on
-// content after a line ending even inside what reads as one inline code
-// span. CommonMark treats a lone "\r" as a line ending too, not just "\n" —
-// a path containing any of the three line-ending forms followed by heading
-// syntax must not let that syntax survive into the rendered comment.
-func TestMdCodeCollapsesLineBreaks(t *testing.T) {
-	for _, sep := range []string{"\n", "\r", "\r\n"} {
-		got := mdCode("before" + sep + "## injected")
-		if strings.ContainsAny(got, "\r\n") {
-			t.Fatalf("mdCode(sep=%q) contains a raw line break: %q", sep, got)
-		}
-		if !strings.Contains(got, "before ## injected") {
-			t.Fatalf("mdCode(sep=%q) lost content: %q", sep, got)
-		}
-	}
-}
-
 // TestRunRequiresRevisions pins the usage contract: a missing revision is the
 // one thing that exits non-zero.
 func TestRunRequiresRevisions(t *testing.T) {

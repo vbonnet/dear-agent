@@ -41,7 +41,7 @@ func (r Report) Render() string {
 		unknown := truncate(r.Unknown, maxListed)
 		encoded := make([]string, len(unknown))
 		for i, path := range unknown {
-			encoded[i] = mdCode(path)
+			encoded[i] = MarkdownCode(path)
 		}
 		fmt.Fprintf(&b, "\nCoverage could not be collected for %d touched package(s), which are excluded rather than scored as untested: %s",
 			len(r.Unknown), strings.Join(encoded, ", "))
@@ -77,7 +77,7 @@ func (r Report) renderUntested(b *strings.Builder) {
 		if p.New {
 			label = "**new package**"
 		}
-		fmt.Fprintf(b, "- %s (%s)\n", mdCode(p.ImportPath), label)
+		fmt.Fprintf(b, "- %s (%s)\n", MarkdownCode(p.ImportPath), label)
 	}
 	b.WriteString("\n")
 }
@@ -99,7 +99,7 @@ func (r Report) renderOver(b *strings.Builder) {
 		// would appear not to exceed the threshold it is listed under.
 		fmt.Fprintf(b, "| %.1f | %d | %.1f%% | %s %s |\n",
 			f.CRAP(), f.Complexity, f.Coverage*100,
-			mdCode(fmt.Sprintf("%s:%d", f.File, f.Line)), mdCode(f.Name))
+			MarkdownCode(fmt.Sprintf("%s:%d", f.File, f.Line)), MarkdownCode(f.Name))
 	}
 	b.WriteString("\n")
 }
@@ -116,7 +116,11 @@ func (r Report) renderOver(b *strings.Builder) {
 // pair collapses to one space, not two.
 var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
 
-func mdCode(text string) string {
+// MarkdownCode renders repository-controlled text as an inline code span that
+// is safe inside a Markdown table cell. It is the single owner of this
+// escaping: tools/crap-lint renders the same repository-controlled paths and
+// must not carry a second copy that can drift from this one.
+func MarkdownCode(text string) string {
 	// A literal line break survives a widened backtick fence: Markdown's
 	// block-level parsing (a heading, a list) can still trigger on content
 	// after a line ending even inside what reads as one inline code span,

@@ -112,39 +112,9 @@ func unflaggedSummary(r craplens.Report) string {
 func joinCodePaths(paths []string) string {
 	encoded := make([]string, len(paths))
 	for i, p := range paths {
-		encoded[i] = mdCode(p)
+		encoded[i] = craplens.MarkdownCode(p)
 	}
 	return strings.Join(encoded, ", ")
-}
-
-// lineBreakReplacer collapses every CommonMark line-ending form to a single
-// space: "\r\n" is checked before the lone "\r" and "\n" cases so a CRLF
-// pair collapses to one space, not two.
-var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
-
-func mdCode(text string) string {
-	// CommonMark treats a lone "\r" as a line ending too, not just "\n" —
-	// both must be collapsed before fencing, or a widened backtick fence
-	// alone does not stop a repository-controlled path from injecting
-	// block-level Markdown (a heading, a list) after the line break.
-	text = lineBreakReplacer.Replace(text)
-	longest, run := 0, 0
-	for _, r := range text {
-		if r == '`' {
-			run++
-			if run > longest {
-				longest = run
-			}
-			continue
-		}
-		run = 0
-	}
-	fence := strings.Repeat("`", longest+1)
-	padded := text
-	if strings.HasPrefix(text, "`") || strings.HasSuffix(text, "`") {
-		padded = " " + text + " "
-	}
-	return fence + strings.ReplaceAll(padded, "|", "\\|") + fence
 }
 
 // writeGitHubOutput emits the values the workflow consumes. Every value that

@@ -76,7 +76,7 @@ func TestMdCodeSurvivesMarkdownMetacharacters(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := mdCode(tc.in)
+			got := MarkdownCode(tc.in)
 			if strings.Contains(got, "|") && !strings.Contains(got, `\|`) {
 				t.Errorf("unescaped pipe would add a table column: %q", got)
 			}
@@ -121,12 +121,12 @@ func TestRenderEscapesUnknownPackagePaths(t *testing.T) {
 // syntax must not let that syntax survive into the rendered comment.
 func TestMdCodeCollapsesLineBreaks(t *testing.T) {
 	for _, sep := range []string{"\n", "\r", "\r\n"} {
-		got := mdCode("before" + sep + "## injected")
+		got := MarkdownCode("before" + sep + "## injected")
 		if strings.ContainsAny(got, "\r\n") {
-			t.Fatalf("mdCode(sep=%q) contains a raw line break: %q", sep, got)
+			t.Fatalf("MarkdownCode(sep=%q) contains a raw line break: %q", sep, got)
 		}
 		if !strings.Contains(got, "before ## injected") {
-			t.Fatalf("mdCode(sep=%q) lost content: %q", sep, got)
+			t.Fatalf("MarkdownCode(sep=%q) lost content: %q", sep, got)
 		}
 	}
 }
