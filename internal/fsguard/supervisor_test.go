@@ -364,6 +364,14 @@ func TestSupervisorDualModeGit(t *testing.T) {
 		{[]string{"worktree", "remove", "/tmp/wt"}, false},
 		{[]string{"stash", "list"}, true},
 		{[]string{"stash", "push"}, false},
+		// Bare `git stash` is `git stash push`. An empty argument list has
+		// nothing unrecognised in it, so the argument scan alone reads it as
+		// safe; the bare-form rule is what refuses it.
+		{[]string{"stash"}, false},
+		// A dual-mode subcommand whose bare form only prints usage stays
+		// allowed, so the rule does not over-block.
+		{[]string{"config"}, true},
+		{[]string{"branch"}, true},
 		{[]string{"tag", "--list"}, true},
 		{[]string{"tag", "v1.0.0"}, false},
 	}

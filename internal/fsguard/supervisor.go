@@ -126,6 +126,15 @@ var supervisorDualModeGit = map[string]bool{
 	"config": true, "stash": true,
 }
 
+// supervisorBareFormMutates are dual-mode subcommands whose no-argument form is
+// itself a mutation. `git stash` with no arguments means `git stash push`,
+// which saves local modifications and reverts the working tree to HEAD. The
+// argument scan cannot catch these on its own: an empty argument list contains
+// nothing unrecognised, so it reads as vacuously safe.
+var supervisorBareFormMutates = map[string]bool{
+	"stash": true,
+}
+
 // supervisorGitReadFlags are valueless flags that keep a dual-mode subcommand
 // in its read mode.
 var supervisorGitReadFlags = map[string]bool{
@@ -241,8 +250,13 @@ func supervisorGitAllowed(identity string, args []string) (allowed bool, message
 	if supervisorGitRead[sub] {
 		return true, ""
 	}
-	if supervisorDualModeGit[sub] && supervisorGitArgsAreReads(subArgs) {
-		return true, ""
+	if supervisorDualModeGit[sub] {
+		if len(subArgs) == 0 && supervisorBareFormMutates[sub] {
+			return false, supervisorGuidance(identity, "run `git "+sub+"`")
+		}
+		if supervisorGitArgsAreReads(subArgs) {
+			return true, ""
+		}
 	}
 	return false, supervisorGuidance(identity, "run `git "+sub+"`")
 }
