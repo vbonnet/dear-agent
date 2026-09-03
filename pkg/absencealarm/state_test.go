@@ -1,6 +1,7 @@
 package absencealarm
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,5 +155,72 @@ func TestAlarmStateRoundTrip(t *testing.T) {
 	}
 	if got.Pulses["spans"].Misses != 3 {
 		t.Fatalf("round trip lost data: %+v", got)
+	}
+}
+
+// AA-09: one alarm record per append, carrying the pulse name, status, reason,
+// window, evidence timestamp, and consecutive-miss count, appended rather than
+// overwritten so an earlier record is never lost.
+func TestAppendJournalAppendsOneRecordPerCall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "journal.jsonl")
+	evidence := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+	first := JournalRecord{
+		Time:     time.Date(2026, 9, 1, 12, 5, 0, 0, time.UTC),
+		Kind:     "absence.alarm",
+		Pulse:    "mergeloop-tick",
+		Status:   StatusAbsent,
+		Reason:   "no tick within 24h",
+		Expect:   "a mergeloop tick within 24h",
+		Window:   "24h",
+		Evidence: evidence,
+		Misses:   3,
+	}
+	if err := AppendJournal(path, first); err != nil {
+		t.Fatalf("AppendJournal() error = %v", err)
+	}
+	second := first
+	second.Pulse = "otel-receiving"
+	second.Misses = 1
+	if err := AppendJournal(path, second); err != nil {
+		t.Fatalf("AppendJournal() second error = %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("journal has %d line(s), want 2:\n%s", len(lines), raw)
+	}
+
+	var got JournalRecord
+	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
+		t.Fatalf("first record is not one JSON object: %v", err)
+	}
+	if got.Pulse != first.Pulse || got.Status != first.Status || got.Reason != first.Reason ||
+		got.Window != first.Window || got.Misses != first.Misses || !got.Evidence.Equal(evidence) {
+		t.Errorf("first record round-trip = %+v, want %+v", got, first)
+	}
+
+	var secondGot JournalRecord
+	if err := json.Unmarshal([]byte(lines[1]), &secondGot); err != nil {
+		t.Fatalf("second record is not one JSON object: %v", err)
+	}
+	if secondGot.Pulse != "otel-receiving" {
+		t.Errorf("second record pulse = %q, want otel-receiving", secondGot.Pulse)
+	}
+}
+
+// A journal path whose parent cannot be created is reported, not swallowed.
+func TestAppendJournalReportsUnusablePath(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AppendJournal(filepath.Join(blocker, "journal.jsonl"), JournalRecord{Pulse: "p"}); err == nil {
+		t.Fatal("AppendJournal() error = nil for a path under a regular file")
 	}
 }
