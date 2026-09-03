@@ -96,3 +96,75 @@ func TestDiskMetricsFromBlockCounts(t *testing.T) {
 		})
 	}
 }
+
+// Two overflowed mounts both report zeroed counters. That is absence of
+// evidence, not evidence they are the same filesystem, so deduplication must
+// not collapse them and discard the second mount's OverflowErr.
+func TestDedupeSameFilesystemKeepsEveryOverflowingMount(t *testing.T) {
+	results := []DiskMetrics{
+		{Mount: "/", OverflowErr: "block arithmetic overflowed uint64"},
+		{Mount: "/home", OverflowErr: "block arithmetic overflowed uint64"},
+	}
+
+	got := dedupeSameFilesystem(results)
+
+	if len(got) != 2 {
+		t.Fatalf("dedupeSameFilesystem kept %d overflowing mount(s), want 2: %+v", len(got), got)
+	}
+	for _, want := range []string{"/", "/home"} {
+		found := false
+		for _, dm := range got {
+			if dm.Mount == want {
+				found = true
+				if dm.OverflowErr == "" {
+					t.Errorf("mount %s lost its OverflowErr", want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("mount %s was dropped by deduplication", want)
+		}
+	}
+}
+
+// A mount that overflowed and one that measured cleanly are not the same
+// filesystem either, even when the clean one happens to report zero.
+func TestDedupeSameFilesystemKeepsMixedOverflowAndMeasurement(t *testing.T) {
+	results := []DiskMetrics{
+		{Mount: "/", OverflowErr: "block arithmetic overflowed uint64"},
+		{Mount: "/home"},
+	}
+
+	if got := dedupeSameFilesystem(results); len(got) != 2 {
+		t.Fatalf("dedupeSameFilesystem kept %d mount(s), want 2: %+v", len(got), got)
+	}
+}
+
+// Real, equal measurements still collapse: that is the case the rule exists for.
+func TestDedupeSameFilesystemCollapsesEqualMeasurements(t *testing.T) {
+	results := []DiskMetrics{
+		{Mount: "/", TotalGB: 100, UsedGB: 40},
+		{Mount: "/home", TotalGB: 100, UsedGB: 40},
+	}
+
+	got := dedupeSameFilesystem(results)
+
+	if len(got) != 1 {
+		t.Fatalf("dedupeSameFilesystem kept %d mount(s) for one filesystem, want 1: %+v", len(got), got)
+	}
+	if got[0].Mount != "/" {
+		t.Errorf("retained mount = %q, want /", got[0].Mount)
+	}
+}
+
+// Distinct real filesystems are preserved.
+func TestDedupeSameFilesystemKeepsDistinctMeasurements(t *testing.T) {
+	results := []DiskMetrics{
+		{Mount: "/", TotalGB: 100, UsedGB: 40},
+		{Mount: "/home", TotalGB: 500, UsedGB: 40},
+	}
+
+	if got := dedupeSameFilesystem(results); len(got) != 2 {
+		t.Fatalf("dedupeSameFilesystem kept %d mount(s), want 2: %+v", len(got), got)
+	}
+}

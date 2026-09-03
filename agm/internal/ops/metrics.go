@@ -332,12 +332,25 @@ func readDiskUsage() []DiskMetrics {
 		}
 	}
 
-	// Deduplicate if /home is on the same filesystem as /
-	if len(results) == 2 && results[0].TotalGB == results[1].TotalGB &&
-		results[0].UsedGB == results[1].UsedGB {
-		results = results[:1]
-	}
+	return dedupeSameFilesystem(results)
+}
 
+// dedupeSameFilesystem drops /home when its measurements prove it is the same
+// filesystem as /. Only a real measurement can prove that: an overflowed mount
+// reports zeroed counters, so two overflowed mounts would compare equal without
+// being the same filesystem. Collapsing them would discard the second mount's
+// OverflowErr and hide an unreadable filesystem entirely, so an errored entry
+// never participates in deduplication.
+func dedupeSameFilesystem(results []DiskMetrics) []DiskMetrics {
+	if len(results) != 2 {
+		return results
+	}
+	if results[0].OverflowErr != "" || results[1].OverflowErr != "" {
+		return results
+	}
+	if results[0].TotalGB == results[1].TotalGB && results[0].UsedGB == results[1].UsedGB {
+		return results[:1]
+	}
 	return results
 }
 
