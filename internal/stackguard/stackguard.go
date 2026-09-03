@@ -335,6 +335,14 @@ func (e evaluation) linkIntegrity() []Finding {
 	if !e.chained {
 		return nil
 	}
+	// Descends is an injected oracle, so a caller that builds Repository
+	// without it would panic here. Fail closed like any other undecidable
+	// link rather than crashing the guard.
+	if e.repo.Descends == nil {
+		return e.finding(CodeAncestryUnknown, true,
+			"no ancestry oracle is configured, so the stack link cannot be decided",
+			"construct Repository with a Descends function; an undecidable stack link fails closed")
+	}
 	descends, err := e.repo.Descends(e.pr.BaseRef, e.pr.HeadRef)
 	switch {
 	case err != nil:

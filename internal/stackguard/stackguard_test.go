@@ -498,3 +498,37 @@ func TestRealMarkerBesideDocumentationStillCounts(t *testing.T) {
 		t.Fatalf("a real line-anchored marker must still be a claim")
 	}
 }
+
+// Descends is an injected oracle. A Repository built without it must fail
+// closed on the ancestry question rather than panicking the whole guard.
+func TestCheckWithoutAncestryOracleFailsClosed(t *testing.T) {
+	pr := stackguard.PullRequest{
+		Number:        2,
+		Title:         "second slice",
+		Body:          "Stacked on #1.",
+		BaseRef:       "stack/one",
+		HeadRef:       "stack/two",
+		StackNumber:   1,
+		StackSize:     2,
+		StackPosition: 2,
+	}
+
+	findings := stackguard.Check(pr, stackguard.Repository{
+		Trunk:     "main",
+		OpenBases: map[string]int{"stack/one": 1},
+		OpenHeads: map[string]int{"stack/one": 1, "stack/two": 2},
+	})
+
+	if !stackguard.Blocking(findings) {
+		t.Fatalf("stackguard.Check() = %+v, want a blocking finding with no ancestry oracle", findings)
+	}
+	found := false
+	for _, f := range findings {
+		if f.Code == stackguard.CodeAncestryUnknown {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("findings %+v do not include %s", findings, stackguard.CodeAncestryUnknown)
+	}
+}

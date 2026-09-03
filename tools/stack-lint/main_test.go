@@ -9,8 +9,8 @@ import (
 )
 
 func TestReportExitsCleanWithoutFindings(t *testing.T) {
-	var out strings.Builder
-	if code := report(&out, 1404, nil, false); code != exitOK {
+	var out, errOut strings.Builder
+	if code := report(&out, &errOut, 1404, nil, false); code != exitOK {
 		t.Fatalf("exit = %d, want %d", code, exitOK)
 	}
 	if !strings.Contains(out.String(), "#1404") {
@@ -23,8 +23,8 @@ func TestReportExitsViolationOnBlockingFinding(t *testing.T) {
 		Code: stackguard.CodeStaleLink, Blocking: true,
 		Detail: "head does not descend from base", Remedy: "restack",
 	}}
-	var out strings.Builder
-	if code := report(&out, 1380, findings, false); code != exitViolation {
+	var out, errOut strings.Builder
+	if code := report(&out, &errOut, 1380, findings, false); code != exitViolation {
 		t.Fatalf("exit = %d, want %d", code, exitViolation)
 	}
 	rendered := out.String()
@@ -39,8 +39,8 @@ func TestReportExitsCleanOnAdvisoryOnly(t *testing.T) {
 	findings := []stackguard.Finding{{
 		Code: stackguard.CodeUnmarkedChain, Detail: "no marker", Remedy: "add the marker",
 	}}
-	var out strings.Builder
-	if code := report(&out, 1392, findings, false); code != exitOK {
+	var out, errOut strings.Builder
+	if code := report(&out, &errOut, 1392, findings, false); code != exitOK {
 		t.Fatalf("advisory findings must not fail the check, exit = %d", code)
 	}
 	if !strings.Contains(out.String(), "advisory") {
@@ -49,8 +49,8 @@ func TestReportExitsCleanOnAdvisoryOnly(t *testing.T) {
 }
 
 func TestReportJSONAlwaysCarriesAFindingsArray(t *testing.T) {
-	var out strings.Builder
-	report(&out, 1404, nil, true)
+	var out, errOut strings.Builder
+	report(&out, &errOut, 1404, nil, true)
 	var payload struct {
 		PullRequest int               `json:"pull_request"`
 		Blocking    bool              `json:"blocking"`

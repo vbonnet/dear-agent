@@ -25,6 +25,7 @@ import (
 	"syscall"
 
 	"github.com/vbonnet/dear-agent/internal/stackguard"
+	"time"
 )
 
 const (
@@ -43,7 +44,17 @@ func mainExitCode() int {
 	return run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 }
 
+// runTimeout bounds the whole lint, covering both the gh query and every git
+// subprocess it drives.
+const runTimeout = time.Minute
+
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	// Bound every gh and git call this command makes. Without it a stalled
+	// network call or a git subprocess waiting on a prompt hangs the lint
+	// indefinitely, and this runs inside PR tooling that has to terminate.
+	ctx, cancel := context.WithTimeout(ctx, runTimeout)
+	defer cancel()
+
 	flags := flag.NewFlagSet("stack-lint", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	var number int
@@ -81,11 +92,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		Descends:  gitDescends(ctx, repoDir),
 		Strict:    strict,
 	})
-	return report(stdout, number, findings, asJSON)
+	return report(stdout, stderr, number, findings, asJSON)
 }
 
 // report renders the findings and returns the process exit code.
-func report(stdout io.Writer, number int, findings []stackguard.Finding, asJSON bool) int {
+func report(stdout, stderr io.Writer, number int, findings []stackguard.Finding, asJSON bool) int {
 	switch {
 	case asJSON:
 		payload := struct {
@@ -98,7 +109,12 @@ func report(stdout io.Writer, number int, findings []stackguard.Finding, asJSON 
 		}
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
-		_ = encoder.Encode(payload)
+		if err := encoder.Encode(payload); err != nil {
+			// The caller never received the report, so this must not read as
+			// a clean pass. Fail closed with the violation code.
+			fmt.Fprintf(stderr, "stack-lint: encoding report: %v\n", err)
+			return exitViolation
+		}
 	case len(findings) == 0:
 		fmt.Fprintf(stdout, "stack-lint: #%d is consistent with how it describes itself\n", number)
 	default:
@@ -155,6 +171,12 @@ func fetchPullRequest(ctx context.Context, repoDir, slug string, number int) (st
 	}
 
 	var payload struct {
+		// A failed query returns errors with an empty data block. Without
+		// reading them, node.Number stays 0 and the caller reports "not
+		// found" for what is really a permission or query problem.
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 		Data struct {
 			Repository struct {
 				DefaultBranchRef struct{ Name string } `json:"defaultBranchRef"`
@@ -183,6 +205,9 @@ func fetchPullRequest(ctx context.Context, repoDir, slug string, number int) (st
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return stackguard.PullRequest{}, "", fmt.Errorf("decoding pull request #%d: %w", number, err)
+	}
+	if err := graphQLError(payload.Errors, number); err != nil {
+		return stackguard.PullRequest{}, "", err
 	}
 	node := payload.Data.Repository.PullRequest
 	if node.Number == 0 {
@@ -252,7 +277,7 @@ func gitDescends(ctx context.Context, repoDir string) func(string, string) (bool
 	return func(base, head string) (bool, error) {
 		for _, ref := range []string{base, head} {
 			if err := runGit(ctx, repoDir, "rev-parse", "--verify", "--quiet", "origin/"+ref+"^{commit}"); err != nil {
-				return false, fmt.Errorf("origin/%s is not present in this checkout (fetch it first)", ref)
+				return false, fmt.Errorf("origin/%s is not present in this checkout (fetch it first): %w", ref, err)
 			}
 		}
 		err := runGit(ctx, repoDir, "merge-base", "--is-ancestor", "origin/"+base, "origin/"+head)
@@ -301,9 +326,30 @@ func gh(ctx context.Context, repoDir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// graphQLError turns a non-empty GraphQL errors array into one error. A failed
+// query returns errors alongside an empty data block, so without this the
+// caller reads number 0 and reports "not found" for what is really a
+// permission or query problem.
+func graphQLError(errs []struct {
+	Message string `json:"message"`
+}, number int) error {
+	if len(errs) == 0 {
+		return nil
+	}
+	messages := make([]string, 0, len(errs))
+	for _, e := range errs {
+		messages = append(messages, e.Message)
+	}
+	return fmt.Errorf("querying pull request #%d: %s", number, strings.Join(messages, "; "))
+}
+
 func runGit(ctx context.Context, repoDir string, args ...string) error {
 	command := exec.CommandContext(ctx, "git", args...)
 	command.Dir = repoDir
+	// Never block on a credential prompt: with no TTY the helper can wait
+	// forever, which is the hang the context timeout would then have to
+	// absorb rather than prevent.
+	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	command.Stdout = io.Discard
 	command.Stderr = io.Discard
 	return command.Run()
