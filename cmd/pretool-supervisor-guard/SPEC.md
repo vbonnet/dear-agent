@@ -49,5 +49,6 @@ entry is a `PreToolUse` hook with no matcher, so it sees every tool call:
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 - Package tests: `cmd/pretool-supervisor-guard/*_test.go`
 - Policy tests: `internal/fsguard/supervisor_test.go`
