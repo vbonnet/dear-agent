@@ -41,6 +41,27 @@ func openMessageQueueDB(ctx context.Context, storage *messageQueueStorage) (*sql
 		)
 	}
 
+	// sql.Open is lazy, so nothing has touched the filesystem yet. Force the
+	// connection and prove the opened main database is still the admitted
+	// inode BEFORE any DDL runs. Without this, a same-UID process that
+	// replaced message_queue.db between admission and first use would have
+	// schema created or migrated in a file that was never admitted, and the
+	// mismatch would only be reported afterwards, having already written.
+	if err := db.PingContext(ctx); err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("open message queue database: %w", errQueueDatabaseOperation),
+			closeRejectedMessageQueueDB(db),
+			storage.Close(),
+		)
+	}
+	if err := storage.verifyAfterSQLite(); err != nil {
+		return nil, errors.Join(
+			err,
+			closeRejectedMessageQueueDB(db),
+			storage.Close(),
+		)
+	}
+
 	if err := initializeMessageQueueSchema(ctx, db); err != nil {
 		initializationErr := sanitizeQueueInitializationError(err)
 		return nil, errors.Join(
@@ -50,6 +71,9 @@ func openMessageQueueDB(ctx context.Context, storage *messageQueueStorage) (*sql
 		)
 	}
 
+	// Re-verify: the pre-DDL check proves what was written to, this one keeps
+	// the existing guarantee that the boundary did not change during
+	// initialization.
 	if err := storage.verifyAfterSQLite(); err != nil {
 		return nil, errors.Join(
 			err,

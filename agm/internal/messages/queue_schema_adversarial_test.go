@@ -379,7 +379,12 @@ func TestMessageQueueMalformedSQLiteSchemaDriverErrorIsSanitized(t *testing.T) {
 		require.NoError(t, queue.Close())
 	}
 	require.Error(t, openErr)
-	assert.Equal(t, "initialize message queue schema: database operation failed", openErr.Error())
+	// The bumped schema_version makes SQLite reload the corrupt schema at
+	// first use, which is now the identity-proving Ping rather than the DDL
+	// batch, so the failure is reported from the open phase. Both forms are
+	// equally bounded; what MSG-24 requires, and what this test exists to
+	// prove, is that no driver text or private canary reaches the caller.
+	assert.Equal(t, "open message queue database: database operation failed", openErr.Error())
 	assertErrorOmits(
 		t,
 		openErr,
