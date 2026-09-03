@@ -60,11 +60,19 @@ env:
 jobs:
   review:
     name: Codebase health review
-    # Non-required: gate the per-push hot path behind the `full-ci` label.
-    # Still runs for workflow_dispatch / merge_group (non-pull_request events).
+    # The `full-ci` label gate this condition used to carry was written for a
+    # per-push hot path that this workflow does not have: its only
+    # pull_request trigger is `ready_for_review`, which fires once per PR.
+    # Requiring the label therefore disabled the workflow outright rather
+    # than throttling it — 59 of the last 60 pull_request runs concluded
+    # `skipped`, and no open PR has ever carried `full-ci`. The draft->ready
+    # edge is exactly when this review is wanted, so it runs there.
+    #
+    # Fork PRs are excluded: `pull_request` from a fork gets no secrets and
+    # must not drive a privileged reviewer over untrusted content.
     if: >-
       github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'full-ci')
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

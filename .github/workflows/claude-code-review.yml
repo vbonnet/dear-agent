@@ -36,8 +36,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # The reviewer must be able to publish what it found. With
+      # `pull-requests: read` the action ran, spent budget, and exited
+      # `success` having posted nothing — a review that reports green while
+      # saying nothing is the "skipped required check" failure mode in this
+      # directory's AGENTS.md, one step removed. Write is scoped by the job's
+      # `if:` above to same-repository, non-fork pull requests.
+      pull-requests: write
+      issues: write
+      # Publishes the revision-bound review-status check run below.
+      checks: write
       id-token: write
 
     steps:
@@ -56,3 +64,35 @@ jobs:
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
+
+      # REVIEW-STATUS SEAM. Publishes one check run, bound to the exact head
+      # SHA that was reviewed, recording whether an agentic review actually
+      # ran for this revision. A later branch-protection rollout can make
+      # `Agentic Review Posted` a required context and thereby require
+      # "agentic review done" before merge; nothing here makes it required.
+      #
+      # A check run, not a label: a label survives the next push, so it would
+      # report a reviewed head that no longer exists. This mirrors the
+      # revision-binding that `SPEC Contract Review` already relies on in
+      # review.yml, and the `ai-review:override` label's own head-SHA scope.
+      #
+      # `always()` so a failed or cancelled review publishes an honest
+      # failure rather than leaving the context absent, which branch
+      # protection would treat as merely pending.
+      - name: Publish agentic-review status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.claude-review.outcome }}
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head sha is malformed"; exit 1; }
+          conclusion=failure
+          [ "$OUTCOME" = success ] && conclusion=success
+          gh api --method POST "repos/$REPO/check-runs" \
+            -f name='Agentic Review Posted' -f head_sha="$HEAD_SHA" \
+            -f status=completed -f conclusion="$conclusion" \
+            -f 'output[title]=Agentic review' \
+            -f "output[summary]=OAuth agentic review for $HEAD_SHA concluded '$OUTCOME'." >/dev/null

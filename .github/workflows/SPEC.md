@@ -1,6 +1,6 @@
 # GitHub Workflow Configuration Specification
 
-<!-- Last audited at: 2026-08-27 -->
+<!-- Last audited at: 2026-09-02 -->
 
 ## EARS Requirements
 
@@ -20,6 +20,8 @@
 
 **DECL-WORKFLOW-08** When the monthly cognitive-complexity audit evaluates the repository, the system shall report bounded findings from a complete trustworthy scan and shall fail without reporting clean whenever the scan is unavailable, invalid, incomplete, or violates its expected result protocol.
 
+**DECL-WORKFLOW-09** When a pull request from this repository transitions from draft to ready for review, the system shall dispatch the agentic reviewers with the token scopes required to publish their findings, shall not require an opt-in label for that dispatch, and shall publish a review-status check run bound to the reviewed head commit.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/declarative_runtime_guardrails.feature`
@@ -29,6 +31,11 @@
 
 - Monthly cognitive-complexity scanner and workflow contract:
   `tests/bats/monthly-audit-complexity.bats`.
+- Draft-to-ready agentic review dispatch, reviewer publish scopes, and the
+  head-bound review-status check: `tests/bats/ready-review-dispatch.bats`.
+  These are workflow-source assertions because the behaviour lives in GitHub's
+  event dispatcher and in the Actions token scopes, neither of which the
+  repository harness can execute.
 - BDD consequence: No new BDD feature is required because the scheduled GitHub
   Actions runner and external scanner are not exposed by the repository BDD
   harness; deterministic Bats fixtures and workflow-source checks exercise the
