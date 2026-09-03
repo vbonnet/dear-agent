@@ -59,7 +59,7 @@ The approved compatibility configuration leaves are exactly:
 
 **TCTX-19** The system shall not project a provider directory, wildcard match, recursively discovered file, gcloud active or nondefault profile, OpenCode data or extension, or provider project, transcript, session, log, plugin, hook, cache, database, configuration, or trust state outside the approved leaves.
 
-**TCTX-20** If inherited authentication fails after destination creation begins, then the system shall remove only unchanged nodes created by that attempt in reverse order and preserve pre-existing or identity-changed state.
+**TCTX-20** If inherited-authentication plan application fails after destination creation begins, then the system shall remove only unchanged nodes created by that attempt in reverse order and preserve pre-existing or identity-changed state.
 
 **TCTX-21** When a synthetic provider-onboarding process or the real Codex trust-state writer runs with the selected home selected through `HOME`, the system shall keep those writes below the selected home and leave synthetic host-home sentinels unchanged.
 
@@ -71,7 +71,7 @@ The approved compatibility configuration leaves are exactly:
 
 **TCTX-25** While destination preflight or apply is active, the system shall retain an opened selected-home root, serialize cooperating inherited-authentication projections with an advisory directory lock, and perform creation through descriptors rooted below that opened home.
 
-**TCTX-26** When rollback begins, the system shall move each candidate through a no-replace rename into the opened selected-home root, verify its recorded identity there, delete only a matching node, and restore an identity-changed node without replacing another entry.
+**TCTX-26** While a transaction-created node can still be compensated, the system shall retain its opened identity handle; when rollback begins, the system shall move each candidate through a no-replace rename into the opened selected-home root, verify it against that retained identity, delete only a matching node, and restore an identity-changed node without replacing another entry.
 
 **TCTX-27** The transaction's concurrency guarantee applies to cooperating inherited-authentication projectors. Arbitrary mutation by another process running as the same Unix user is outside that serialization boundary, but replacement of the selected-home pathname shall not redirect transaction writes outside the opened selected home.
 

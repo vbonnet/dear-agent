@@ -499,6 +499,130 @@ func TestForwardAuthProjectionRollbackPreservesChangedNodes(t *testing.T) {
 	assert.Equal(t, "replacement", string(data))
 }
 
+func TestAuthProjectionTransactionRetainsAndClosesCreatedIdentities(t *testing.T) {
+	hostHome := t.TempDir()
+	selectedHome := privateTempDir(t)
+	writeAuthProjectionFixture(
+		t, hostHome, filepath.Join(".claude", ".credentials.json"), "claude-auth", 0600,
+	)
+	writeAuthProjectionFixture(
+		t, hostHome, filepath.Join(".config", "opencode", "opencode.json"), "opencode-config", 0600,
+	)
+
+	plan, err := prepareAuthProjectionWithSnapshotHook(hostHome, selectedHome, nil)
+	require.NoError(t, err)
+	tx, err := newAuthProjectionTransaction(selectedHome, plan.selectedHomeInfo)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if !tx.closed {
+			_ = tx.rollback()
+			_ = tx.close()
+		}
+	})
+	plan.directories, err = tx.preflight(plan.links, plan.snapshots)
+	require.NoError(t, err)
+	require.NoError(t, tx.apply(plan, nil))
+
+	identities := make([]*os.File, 0, len(tx.created))
+	var foundDirectory, foundLink, foundSnapshot bool
+	for _, node := range tx.created {
+		require.NotNil(t, node.identity)
+		info, identityErr := node.retainedIdentity()
+		require.NoError(t, identityErr)
+		identities = append(identities, node.identity)
+		switch {
+		case info.IsDir():
+			foundDirectory = true
+		case info.Mode()&os.ModeSymlink != 0:
+			foundLink = true
+		case info.Mode().IsRegular():
+			foundSnapshot = true
+		}
+	}
+	assert.True(t, foundDirectory)
+	assert.True(t, foundLink)
+	assert.True(t, foundSnapshot)
+
+	require.NoError(t, tx.close())
+	for _, identity := range identities {
+		_, statErr := identity.Stat()
+		require.Error(t, statErr)
+	}
+}
+
+func TestForwardAuthProjectionRollbackPreservesReplacedCredentialLink(t *testing.T) {
+	hostHome := t.TempDir()
+	selectedHome := privateTempDir(t)
+	firstRelative := filepath.Join(".claude", ".credentials.json")
+	writeAuthProjectionFixture(t, hostHome, firstRelative, "claude-auth", 0600)
+	writeAuthProjectionFixture(t, hostHome, filepath.Join(".codex", "auth.json"), "codex-auth", 0600)
+	replacement := filepath.Join(selectedHome, firstRelative)
+	replacementTarget := filepath.Join(t.TempDir(), "replacement-auth")
+	require.NoError(t, os.WriteFile(replacementTarget, []byte("replacement"), 0600))
+
+	err := projectInheritedAuthWithHook(hostHome, selectedHome, func(relativePath string) error {
+		if relativePath != filepath.Join(".codex", "auth.json") {
+			return nil
+		}
+		require.NoError(t, os.Remove(replacement))
+		require.NoError(t, os.Symlink(replacementTarget, replacement))
+		return errors.New("injected apply failure")
+	})
+	require.ErrorContains(t, err, "injected apply failure")
+	assert.ErrorContains(t, err, "identity changed")
+	target, readErr := os.Readlink(replacement)
+	require.NoError(t, readErr)
+	assert.Equal(t, replacementTarget, target)
+}
+
+func TestForwardAuthProjectionRollbackPreservesReplacedConfigSnapshot(t *testing.T) {
+	hostHome := t.TempDir()
+	selectedHome := privateTempDir(t)
+	firstRelative := filepath.Join(".config", "gcloud", "configurations", "config_default")
+	secondRelative := filepath.Join(".config", "opencode", "opencode.json")
+	writeAuthProjectionFixture(t, hostHome, firstRelative, "gcloud-config", 0600)
+	writeAuthProjectionFixture(t, hostHome, secondRelative, "opencode-config", 0600)
+	replacement := filepath.Join(selectedHome, firstRelative)
+
+	err := projectInheritedAuthWithHook(hostHome, selectedHome, func(relativePath string) error {
+		if relativePath != secondRelative {
+			return nil
+		}
+		require.NoError(t, os.Remove(replacement))
+		require.NoError(t, os.WriteFile(replacement, []byte("replacement"), 0600))
+		return errors.New("injected apply failure")
+	})
+	require.ErrorContains(t, err, "injected apply failure")
+	assert.ErrorContains(t, err, "identity changed")
+	data, readErr := os.ReadFile(replacement)
+	require.NoError(t, readErr)
+	assert.Equal(t, "replacement", string(data))
+}
+
+func TestForwardAuthProjectionRollbackPreservesReplacedDirectory(t *testing.T) {
+	hostHome := t.TempDir()
+	selectedHome := privateTempDir(t)
+	relativePath := filepath.Join(".claude", ".credentials.json")
+	writeAuthProjectionFixture(t, hostHome, relativePath, "claude-auth", 0600)
+	replacement := filepath.Join(selectedHome, ".claude")
+	var replacementInfo os.FileInfo
+
+	err := projectInheritedAuthWithHook(hostHome, selectedHome, func(string) error {
+		require.NoError(t, os.Remove(replacement))
+		require.NoError(t, os.Mkdir(replacement, 0700))
+		var statErr error
+		replacementInfo, statErr = os.Lstat(replacement)
+		require.NoError(t, statErr)
+		return errors.New("injected apply failure")
+	})
+	require.ErrorContains(t, err, "injected apply failure")
+	assert.ErrorContains(t, err, "identity changed")
+	currentInfo, statErr := os.Lstat(replacement)
+	require.NoError(t, statErr)
+	require.NotNil(t, replacementInfo)
+	assert.True(t, os.SameFile(replacementInfo, currentInfo))
+}
+
 func TestForwardAuthProjectionReauthenticatesCredentialBeforeLink(t *testing.T) {
 	hostHome := t.TempDir()
 	selectedHome := privateTempDir(t)
