@@ -16,6 +16,12 @@ commands and fail-closed state checks, not from pausing for routine confirmation
 - Treat `MERGED`, `DEPLOYED`, and `VERIFIED` as distinct completion gates.
 - Surface hard blocks and authority boundaries promptly.
 
+You dispatch work; you never implement it. Do not edit repository files, create
+or delete them, or run a mutating git command, in `~/src` or in a worktree. A
+worker you dispatch does the change; taking it on yourself removes the
+dispatcher from the mesh. See the delegation boundary in `protocol.md`; the
+`pretool-supervisor-guard` hook enforces it.
+
 Do not prioritize the roadmap, reclaim host resources, approve permission
 prompts, hand-build dispatch state, or perform deployment from unmerged source.
 

@@ -627,10 +627,29 @@ func (g *Guard) checkGit(args []string, currentDir string) (allowed bool, messag
 // trips no write pattern — pure reads like cat/grep/ls/git log — is allowed.
 // cwd anchors relative paths and `cd` tracking.
 func (g *Guard) InspectCommand(command, cwd string) (allowed bool, message string) {
-	return g.inspect(command, cwd, 0)
+	return g.inspect(command, cwd, 0, g.pathCommandPolicy())
 }
 
-func (g *Guard) inspect(command, cwd string, depth int) (allowed bool, message string) {
+// commandPolicy supplies the two judgements the segment walker cannot make on
+// its own: how to classify a write target, and how to judge a git invocation.
+// The walker itself — tokenising, runner stripping, shell nesting, redirection
+// handling, `cd` tracking, write-target extraction — is policy-free and shared,
+// so a second policy reuses all of it rather than reimplementing it.
+type commandPolicy struct {
+	classify func(target, dir string) (allowed bool, message string)
+	git      func(args []string, dir string) (allowed bool, message string)
+}
+
+// pathCommandPolicy is the worktree-only filesystem policy: the default that
+// InspectCommand has always applied.
+func (g *Guard) pathCommandPolicy() commandPolicy {
+	return commandPolicy{
+		classify: func(target, dir string) (bool, string) { return g.Classify(target, dir) },
+		git:      g.checkGit,
+	}
+}
+
+func (g *Guard) inspect(command, cwd string, depth int, pol commandPolicy) (allowed bool, message string) {
 	if depth > maxShellDepth {
 		return true, "" // runaway nesting -> fail open, deny rules backstop
 	}
@@ -641,7 +660,7 @@ func (g *Guard) inspect(command, cwd string, depth int) (allowed bool, message s
 	if !ok {
 		return true, "" // unparseable -> defer to deny rules (fail open)
 	}
-	return g.checkSegments(tokens, cwd, depth)
+	return g.checkSegments(tokens, cwd, depth, pol)
 }
 
 // checkRedirections classifies the target of every redirection operator,
@@ -681,7 +700,7 @@ func (g *Guard) checkRedirectionsAt(tokens []string, classify func(string) (bool
 
 // checkSegments runs per-simple-command write analysis, tracking `cd` so a
 // chained `cd ~/src/repo && git commit` is attributed to the right directory.
-func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed bool, message string) {
+func (g *Guard) checkSegments(tokens []string, cwd string, depth int, pol commandPolicy) (allowed bool, message string) {
 	currentDir := g.expand(cwd, cwd)
 	// alsoCheck holds directories a relative target might *also* resolve
 	// against, because a `cd` that would have moved the shell there may not
@@ -692,11 +711,11 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 	var alsoCheck []string
 	var subshellDirs []string // saved cwd per open `(`
 	classify := func(target string) (bool, string) {
-		if ok, msg := g.Classify(target, currentDir); !ok {
+		if ok, msg := pol.classify(target, currentDir); !ok {
 			return false, msg
 		}
 		for _, dir := range alsoCheck {
-			if ok, msg := g.Classify(target, dir); !ok {
+			if ok, msg := pol.classify(target, dir); !ok {
 				return false, msg
 			}
 		}
@@ -749,7 +768,7 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 			continue
 		}
 		if cmd == "git" {
-			if ok, msg := g.checkGit(args[1:], currentDir); !ok {
+			if ok, msg := pol.git(args[1:], currentDir); !ok {
 				return false, msg
 			}
 			continue
@@ -761,7 +780,7 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 			continue
 		}
 		if nested, ok := shellWrapped(cmd, args[1:]); ok {
-			if allowed, msg := g.inspect(nested, currentDir, depth+1); !allowed {
+			if allowed, msg := g.inspect(nested, currentDir, depth+1, pol); !allowed {
 				return false, msg
 			}
 			continue

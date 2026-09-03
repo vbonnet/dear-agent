@@ -893,23 +893,30 @@ uninstall-fd-limit-launchdaemon:
 	sudo rm -f /Library/LaunchDaemons/com.dear-agent.fd-limit.plist
 	@echo "✓ fd-limit LaunchDaemon removed"
 
-# Build the PreToolUse filesystem write-guard hooks. These enforce the
-# worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
-# gates Edit/Write/MultiEdit, pretool-bash-write-guard gates Bash. They are
-# the Go replacements for the lost ai-tools Python stopgaps.
+# Build the PreToolUse guard hooks. Two enforce the worktree-only write policy
+# (see internal/fsguard): pretool-fs-write-guard gates Edit/Write/MultiEdit,
+# pretool-bash-write-guard gates Bash. They are the Go replacements for the lost
+# ai-tools Python stopgaps. The third, pretool-supervisor-guard, enforces the
+# role policy: a VROOM supervisor delegates work and never performs it, so
+# mutating tools are refused in supervisor sessions and untouched in worker
+# sessions.
 build-write-guards:
-	@echo "Building pretool-fs-write-guard, pretool-bash-write-guard..."
+	@echo "Building pretool-fs-write-guard, pretool-bash-write-guard, pretool-supervisor-guard..."
 	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-fs-write-guard ./cmd/pretool-fs-write-guard/
 	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-bash-write-guard ./cmd/pretool-bash-write-guard/
-	@echo "Built: bin/pretool-fs-write-guard bin/pretool-bash-write-guard"
+	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-supervisor-guard ./cmd/pretool-supervisor-guard/
+	@echo "Built: bin/pretool-fs-write-guard bin/pretool-bash-write-guard bin/pretool-supervisor-guard"
 
-# Install the write-guard hooks where settings.json references them
+# Install the guard hooks where settings.json references them
 # (~/.config/claude-code/hooks). Override the dir with HOOKS_DIR=/path.
+# Registration of the hook command in settings.json is chezmoi-managed; see
+# cmd/pretool-supervisor-guard/SPEC.md for the entry to add.
 HOOKS_DIR ?= $(HOME)/.config/claude-code/hooks
 install-write-guards: build-write-guards
 	@mkdir -p $(HOOKS_DIR)
 	$(call install-go-bin,bin/pretool-fs-write-guard,$(HOOKS_DIR))
 	$(call install-go-bin,bin/pretool-bash-write-guard,$(HOOKS_DIR))
+	$(call install-go-bin,bin/pretool-supervisor-guard,$(HOOKS_DIR))
 
 # Uninstall AGM components
 uninstall:
