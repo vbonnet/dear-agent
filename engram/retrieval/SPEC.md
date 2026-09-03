@@ -5,9 +5,12 @@
 ## Purpose and Ownership
 
 `github.com/vbonnet/dear-agent/engram/retrieval` is the sole package owner for
-high-level Engram search. It provides a public facade over ecphory indexing and
-ranking, Engram parsing, path resolution, result limiting, and best-effort
-access tracking.
+high-level Engram search: resolving an Engram location, selecting candidates by
+tag or type, optionally ranking them, bounding the returned set, and recording
+best-effort access metadata. The requirements below contract those observable
+outcomes. Which components provide indexing, ranking, parsing, and tracking is
+implementation detail recorded in `ARCHITECTURE.md`, so the facade can be
+replaced without redefining this contract.
 
 In-repository callers include the Engram `retrieve` and `tokens estimate`
 commands and the AGM Engram library client. External Go callers may import the
@@ -35,7 +38,7 @@ search.
 
 **ERT-02** When search receives an empty or relative Engram path, the system shall resolve the default `~/.engram/core/engrams` directory before falling back to a path relative to the current working directory.
 
-**ERT-03** When the resolved Engram path exists, the system shall build an ecphory index from that path before applying result filters.
+**ERT-03** When the resolved Engram path exists, the system shall index the Engrams under that path before applying result filters.
 
 **ERT-04** When tag filters are supplied, the system shall select candidates by tag before type filtering or unfiltered listing.
 
@@ -43,9 +46,9 @@ search.
 
 **ERT-06** When no tag or type filters are supplied, the system shall consider every indexed Engram candidate.
 
-**ERT-07** When API ranking is requested without `ANTHROPIC_API_KEY`, the system shall fall back to locally selected results instead of failing the search.
+**ERT-07** When API ranking is requested without configured API credentials, the system shall fall back to locally selected results instead of failing the search.
 
-**ERT-08** When API ranking is requested with API credentials, the system shall return paths in ranker order and attach relevance score and reasoning to matching results.
+**ERT-08** When API ranking is requested with configured API credentials, the system shall return paths in ranked order and attach a relevance score and reasoning to matching results.
 
 **ERT-09** When a positive limit is smaller than the candidate count, the system shall return no more than that number of result paths.
 
@@ -53,7 +56,7 @@ search.
 
 **ERT-11** When parsed results are returned, the system shall record best-effort access metadata for each returned Engram path.
 
-**ERT-12** When the retrieval service is closed, the system shall flush pending tracking updates and shall not fail the caller if the flush itself fails.
+**ERT-12** When the retrieval service is closed, the system shall persist pending access metadata and shall not fail the caller if that persistence fails.
 
 ## Behavioral Invariants
 
