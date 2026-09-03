@@ -1,8 +1,7 @@
-//go:build integration
-
 package regression_test
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,7 +9,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
-// TestArchiveStoppedSessionsFromDolt is a regression test for the bug where
+// TestArchiveStoppedSessionStorageContract is a regression test for the bug where
 // STOPPED sessions visible in `agm session list` could not be archived.
 //
 // Bug Description:
@@ -24,39 +23,28 @@ import (
 // - Migrated archive command to use Dolt storage
 // - Both commands now use same storage backend
 //
-// This test ensures:
-// 1. Sessions stored in Dolt can be found by ResolveIdentifier
-// 2. Archive command can successfully archive sessions from Dolt
-// 3. The storage backend mismatch cannot happen again
-func TestArchiveStoppedSessionsFromDolt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
+// This test exercises the backend-neutral adapter contract that fixed the
+// historical Dolt/filesystem mismatch. It ensures:
+// 1. Sessions stored through the adapter can be found by ResolveIdentifier
+// 2. Archive behavior persists through the same adapter
+// 3. Archived sessions are excluded from subsequent identifier resolution
+func TestArchiveStoppedSessionStorageContract(t *testing.T) {
+	// Tests that create Engram sessions must declare the isolation protocol
+	// (AGENTS.md) so the fixture cannot depend on ambient test configuration.
 	t.Setenv("ENGRAM_TEST_MODE", "1")
 	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 
-	// Setup: Create Dolt adapter
-	config := &dolt.Config{
-		Workspace: "test",
-		Port:      "3307",
-		Host:      "127.0.0.1",
-		Database:  "test",
-		User:      "root",
-		Password:  "",
-	}
-
-	adapter, err := dolt.New(config)
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {
-		t.Skipf("Dolt server not available: %v", err)
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
 	}
-	defer adapter.Close()
+	t.Cleanup(func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("Close() error: %v", err)
+		}
+	})
 
-	// Apply migrations
-	if err := adapter.ApplyMigrations(); err != nil {
-		t.Fatalf("Failed to apply migrations: %v", err)
-	}
-
-	// Create a test session in Dolt (simulating a STOPPED session)
+	// Create a test session through the shared storage contract.
 	sessionID := "regression-test-" + time.Now().Format("20060102-150405")
 	session := &manifest.Manifest{
 		SessionID:     sessionID,
@@ -78,11 +66,9 @@ func TestArchiveStoppedSessionsFromDolt(t *testing.T) {
 		},
 	}
 
-	// Insert session into Dolt
 	if err := adapter.CreateSession(session); err != nil {
 		t.Fatalf("Failed to create test session: %v", err)
 	}
-	defer adapter.DeleteSession(sessionID) // Cleanup
 
 	// Test Case 1: ResolveIdentifier should find the session by session ID
 	t.Run("ResolveBySessionID", func(t *testing.T) {
@@ -157,36 +143,18 @@ func TestArchiveStoppedSessionsFromDolt(t *testing.T) {
 	})
 }
 
-// TestDoltStorageBackendConsistency verifies that list and archive operations
-// use the same storage backend (Dolt) to prevent future regression.
-//
-// This test ensures the architectural constraint that caused the original bug
-// cannot be violated: all session operations MUST use the same storage adapter.
-func TestDoltStorageBackendConsistency(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-	t.Setenv("ENGRAM_TEST_MODE", "1")
-	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
-
-	// This test is more of a code structure validation
-	// The mere existence of adapter.ResolveIdentifier() and its usage
-	// in the archive command ensures consistency
-
-	config := &dolt.Config{
-		Workspace: "test",
-		Port:      "3307",
-		Host:      "127.0.0.1",
-		Database:  "test",
-		User:      "root",
-		Password:  "",
-	}
-
-	adapter, err := dolt.New(config)
+// TestResolveIdentifierNotFoundContract verifies the shared adapter result
+// that archive operations receive for an unknown session identifier.
+func TestResolveIdentifierNotFoundContract(t *testing.T) {
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {
-		t.Skipf("Dolt server not available: %v", err)
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
 	}
-	defer adapter.Close()
+	t.Cleanup(func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("Close() error: %v", err)
+		}
+	})
 
 	// Verify adapter has ResolveIdentifier method
 	// If this compiles, the method exists
@@ -196,7 +164,7 @@ func TestDoltStorageBackendConsistency(t *testing.T) {
 		return
 	}
 
-	// The error message should indicate Dolt storage is being used
+	// The shared adapter error contract should remain stable.
 	if err.Error() != "session not found: nonexistent" {
 		t.Errorf("Unexpected error format: %v", err)
 	}

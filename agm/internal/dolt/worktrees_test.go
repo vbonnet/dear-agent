@@ -191,28 +191,51 @@ func TestMigration011Exists(t *testing.T) {
 	}
 }
 
-// TestMigration011ChecksumStable verifies checksum is deterministic
-func TestMigration011ChecksumStable(t *testing.T) {
+func TestReleasedMigrationChecksumsImmutable(t *testing.T) {
+	want := []struct {
+		version  int
+		name     string
+		checksum string
+	}{
+		{1, "initial_schema", "5750a28848c941504990952cbcd290aa2d50fca8ba8e022b4992f1b5e91cd81f"},
+		{2, "messages_table", "8184630b6383da6be728aaaf3a979bd4c83b1cf7c7f8cd4b92af768dc5198058"},
+		{3, "add_tool_calls", "3be8628fddeb855d333ecc65f3302b9875926d663f6ace0731884d9da724a80b"},
+		{4, "add_session_tags", "82fc45509de72763dc7212b9ef158d20091dbe8ed738187b06ca03b7952c3bd9"},
+		{5, "add_message_embeddings", "3268230d1d134e65f0691b2ba5522a109dc5d630bc4688c760138894f5e99e53"},
+		{6, "add_performance_indexes", "a0ef519d4a84ee099bf4ef8d8942b7b7b1576be1235220587ea665d1903d63ca"},
+		{7, "add_session_hierarchy", "b828589f062c10c90ccce278b43330723f91e886408ca8998f88ffebc37ed33e"},
+		{8, "add_permission_mode", "35b79c502ab10d4a05b2d26d1e30711666969c0b94aebce3869b5e0dff46319c"},
+		{9, "rename_agent_to_harness", "8b690fa80c3bd3c4207ca5402b7378c5d11f75017208c77b48f579363777dcf4"},
+		{10, "add_is_test", "20087277dc4f363bd688637f7b88e34cdf94ccafebe5b4f299f015771c542d48"},
+		{11, "add_worktree_tracking", "1b492fa5c9e73f943f53ef86eeecbcb57a8051da2d065003c9b536a1ebd32646"},
+		{12, "add_frecency", "7eaa558df9953349a50d33a3fa3d98bb32adb3c695c7bc7923e29d2e27805a0a"},
+		{13, "add_context_usage", "4e2cec27977d2c5f1f003349b22a1e0ed55ab8d6af682be1bd0b8211665c4ced"},
+		{14, "add_monitors", "2c723837e4dd2ce591cac7328d92a6abfb2d74df733c1c2438489587a1aee63c"},
+		{15, "session_logs", "4de5ae38f1c20898a51972c22a714ad7ab1922b0c0db5656b59ce067574f3c37"},
+		{16, "artifacts", "16b4548e0cdfabaaa9d9d593b66d4075f69a3ff63be0aad4c104e957801cf6cc"},
+		{17, "harness_history", "44800fcebd4819c44741a4917871d74ec7b684cdf4983e4503323f282d6e30a0"},
+		{18, "add_tmux_session_revision", "7e5a34ac2de460064d386f10dbf56c6ffd60364e27b90598e265e597596eb29e"},
+		{19, "session_name_reservations", "4ba36ac5d7a644dfbaf00d325de724ffd8657bb8f0dd16e6e4b3403ff7764890"},
+	}
+
 	migrations := AllMigrations()
-	var checksum1, checksum2 string
-	for _, m := range migrations {
-		if m.Version == 11 {
-			checksum1 = m.Checksum
-			break
-		}
+	if len(migrations) != len(want) {
+		t.Fatalf("AllMigrations() returned %d entries, want %d; append new migrations without editing released entries", len(migrations), len(want))
 	}
-
-	// Call again
-	migrations2 := AllMigrations()
-	for _, m := range migrations2 {
-		if m.Version == 11 {
-			checksum2 = m.Checksum
-			break
+	for index, expected := range want {
+		migration := migrations[index]
+		if migration.Version != expected.version {
+			t.Errorf("migration at index %d has version %d, want %d; append new migrations without reordering released entries", index, migration.Version, expected.version)
 		}
-	}
-
-	if checksum1 != checksum2 {
-		t.Errorf("Checksum not stable: %q != %q", checksum1, checksum2)
+		if migration.Name != expected.name {
+			t.Errorf("migration %03d name = %q, want %q; append a new migration instead of renaming a released entry", expected.version, migration.Name, expected.name)
+		}
+		if migration.Checksum != expected.checksum {
+			t.Errorf("migration %03d stored checksum = %q, want %q; append a new migration instead of editing released SQL", expected.version, migration.Checksum, expected.checksum)
+		}
+		if checksum := computeChecksum(migration.SQL); checksum != expected.checksum {
+			t.Errorf("migration %03d SQL checksum = %q, want %q; append a new migration instead of editing released SQL", expected.version, checksum, expected.checksum)
+		}
 	}
 }
 
