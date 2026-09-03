@@ -346,3 +346,33 @@ func TestRun_HungProbeDoesNotDisableTheTick(t *testing.T) {
 		t.Errorf("pulse after the hung one = %q, want PRESENT", got)
 	}
 }
+
+// An exhausted tick budget is itself an alarm condition. Dispatching on the
+// expired tick context would hand the notifier a already-canceled context, so
+// DesktopDispatcher's exec.CommandContext would fail immediately and the
+// operator would lose exactly the notification the timeout should produce.
+func TestRun_NotificationSurvivesAnExpiredTickBudget(t *testing.T) {
+	e := stalePulseEnv(t)
+
+	var notifyCtxErr error
+	notifyCtx := func(ctx context.Context, title, body string) error {
+		notifyCtxErr = ctx.Err()
+		e.notices = append(e.notices, title+" | "+body)
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	// A tick budget this small is already expired by the time any pulse is
+	// classified, which is the scenario the reviewer described.
+	code := run(e.args("--tick-timeout", "1ns"), &out, &errb, absencealarm.DefaultProbes(), notifyCtx)
+
+	if len(e.notices) == 0 {
+		t.Fatalf("no notification dispatched after the tick budget expired; stderr=%s", errb.String())
+	}
+	if notifyCtxErr != nil {
+		t.Errorf("notifier received a context already in error: %v", notifyCtxErr)
+	}
+	if code == 0 {
+		t.Errorf("exit code = 0, want non-zero for an alarming pulse")
+	}
+}

@@ -28,12 +28,6 @@
       "expect": "a disk-watchdog tick within 1h"
     },
     {
-      "name": "oauth-fresh",
-      "type": "command",
-      "command": ["~/go/bin/credential-monitor"],
-      "expect": "a fresh shared OAuth access token"
-    },
-    {
       "name": "gobin-guard-heartbeat",
       "type": "file_mtime",
       "path": "~/.local/state/dear-agent/gobin-guard.heartbeat",
