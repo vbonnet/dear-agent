@@ -55,9 +55,7 @@ model call appears anywhere in the merge-blocking path.
 - Merge-loop consequence: `internal/mergeloop/agenticreview_test.go`
 - Workflow wiring: `tests/bats/agentic-review-gate.bats`
 
-## BDD Consequence
+## BDD Traceability
 
-No new BDD feature is required. The gate has no runtime surface of its own: it
-is a pure decision function whose observable consequences are the merge-loop
-classification and the published commit status, both covered by the package and
-command tests above.
+- Feature: `agm/test/bdd/features/agentic_review_gate_guardrails.feature`
+- Steps: `agm/test/bdd/steps/agentic_review_gate_guardrails_steps.go`

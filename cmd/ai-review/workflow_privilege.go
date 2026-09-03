@@ -27,13 +27,14 @@ import (
 // delegation or a schedule trigger) today, but are listed here too so this
 // invariant does not silently lapse if that incidental coverage changes.
 var requiredCheckOwningWorkflows = map[string]bool{
-	".github/workflows/ci.yml":                true,
-	".github/workflows/codeql.yml":            true,
-	".github/workflows/language-policy.yml":   true,
-	".github/workflows/sbom-scan.yml":         true,
-	".github/workflows/adr-integrity.yml":     true,
-	".github/workflows/doc-header-lint.yml":   true,
-	".github/workflows/structural-health.yml": true,
+	".github/workflows/ci.yml":                  true,
+	".github/workflows/codeql.yml":              true,
+	".github/workflows/language-policy.yml":     true,
+	".github/workflows/sbom-scan.yml":           true,
+	".github/workflows/adr-integrity.yml":       true,
+	".github/workflows/doc-header-lint.yml":     true,
+	".github/workflows/structural-health.yml":   true,
+	".github/workflows/agentic-review-gate.yml": true,
 }
 
 // requiredCheckOwnerReason reports the escalation reason, if any, for a

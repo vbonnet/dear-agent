@@ -47,7 +47,7 @@
           { "context": "Identity, index, and lifecycle parity", "integration_id": 15368 },
           { "context": "Header block format", "integration_id": 15368 },
           { "context": "Structural Health (baselined)", "integration_id": 15368 },
-          { "context": "agentic-review/gate", "integration_id": 15368 }
+          { "context": "Agentic Review Gate", "integration_id": 15368 }
         ]
       }
     }

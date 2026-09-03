@@ -217,6 +217,7 @@ func TestWorkflowPrivilegeReason_CurrentTreeGolden(t *testing.T) {
 	// TestMergeGateLabelScopesAreNeverLowBlast).
 	want := []string{
 		"adr-integrity.yml",
+		"agentic-review-gate.yml",
 		"branch-protection-audit.yml",
 		"bypassed-merge-audit.yml",
 		"ci-health-monitor.yml",
@@ -277,6 +278,7 @@ var requiredContextOwners = map[string]string{
 	"Identity, index, and lifecycle parity":  ".github/workflows/adr-integrity.yml",
 	"Header block format":                    ".github/workflows/doc-header-lint.yml",
 	"Structural Health (baselined)":          ".github/workflows/structural-health.yml",
+	"Agentic Review Gate":                    ".github/workflows/agentic-review-gate.yml",
 }
 
 // TestRequiredCheckOwningWorkflowsMatchRuleset keeps requiredCheckOwningWorkflows

@@ -18,8 +18,9 @@
 //	agentic-review-gate --repo owner/name --pr 123     # evaluate a live PR
 //	agentic-review-gate --input-file fixture.json      # evaluate recorded state
 //
-// Exit 0 = the gate permits a merge, 1 = it does not, 2 = usage or internal
-// error. A usage error is a block: an unreadable policy never becomes a pass.
+// Exit 0 = the gate permits a merge, 1 = the reviewers decided against it,
+// 3 = the lifecycle has not resolved yet, 2 = usage or internal error. A usage
+// error is a block: an unreadable policy never becomes a pass.
 package main
 
 import (
@@ -37,31 +38,28 @@ import (
 )
 
 // Exit codes. Anything other than exitPass leaves the required check red.
+//
+// Pending is distinct from blocked so a caller can tell "no verdict yet" from
+// "the reviewers decided against this". The gate job waits on the first and
+// stops immediately on the second; collapsing them would mean either waiting
+// out a deadline on a decided rejection or giving up on a review still in
+// flight.
 const (
 	exitPass    = 0
 	exitBlocked = 1
 	exitUsage   = 2
+	exitPending = 3
 )
-
-// statusContext is the commit-status context the branch ruleset requires.
-//
-// The verdict is published as a commit status rather than left as the exit
-// status of the run that computed it, because degradation happens on a clock.
-// A reviewer that runs out of time produces no GitHub event, so a gate that
-// could only report from its own triggering run would stay red with nothing
-// left to re-trigger it. A status can be refreshed against the same head by
-// any later pass.
-const statusContext = "agentic-review/gate"
 
 // ghRunner runs a gh invocation and returns its stdout. It is injected so the
 // fetch path is testable without a network or a token.
 type ghRunner func(args []string) (string, error)
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, nil))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout, stderr io.Writer, gh ghRunner) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("agentic-review-gate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -71,9 +69,6 @@ func run(args []string, stdout, stderr io.Writer, gh ghRunner) int {
 		inputFile  = fs.String("input-file", "", "evaluate recorded label state from a JSON file instead of GitHub")
 		quorum     = fs.String("quorum", "", "override the configured approval quorum")
 		asJSON     = fs.Bool("json", false, "emit the verdict as JSON instead of a text summary")
-		postStatus = fs.Bool("post-status", false, "publish the verdict as a commit status on --head-sha")
-		repoSlug   = fs.String("repo-slug", "", "owner/name to publish the commit status against")
-		headSHA    = fs.String("head-sha", "", "head commit the published status applies to")
 	)
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -83,23 +78,13 @@ func run(args []string, stdout, stderr io.Writer, gh ghRunner) int {
 		fmt.Fprintln(stderr, "agentic-review-gate:", err)
 		return exitUsage
 	}
-	if *postStatus {
-		if *repoSlug == "" {
-			*repoSlug = *repo
-		}
-		if *repoSlug == "" || *headSHA == "" {
-			fmt.Fprintln(stderr, "agentic-review-gate: --post-status needs --repo-slug and --head-sha")
-			return exitUsage
-		}
-	}
-
 	cfg, err := resolveConfig(*configPath, *quorum)
 	if err != nil {
 		fmt.Fprintln(stderr, "agentic-review-gate:", err)
 		return exitUsage
 	}
 
-	in, err := loadInput(*inputFile, *repo, *prNumber, gh)
+	in, err := loadInput(*inputFile, *repo, *prNumber)
 	if err != nil {
 		fmt.Fprintln(stderr, "agentic-review-gate:", err)
 		return exitUsage
@@ -116,24 +101,19 @@ func run(args []string, stdout, stderr io.Writer, gh ghRunner) int {
 		return exitUsage
 	}
 
-	if *postStatus {
-		runner := gh
-		if runner == nil {
-			runner = execGH
-		}
-		if err := publishStatus(runner, *repoSlug, *headSHA, verdict); err != nil {
-			// The ruleset reads the status, so a status that was never written
-			// means the gate never spoke. Reporting a pass here would hand the
-			// merge a verdict nothing recorded.
-			fmt.Fprintln(stderr, "agentic-review-gate: publishing commit status:", err)
-			return exitBlocked
-		}
-	}
-
-	if verdict.Mergeable() {
+	switch verdict.Decision {
+	case agenticreview.DecisionPass:
 		return exitPass
+	case agenticreview.DecisionPending:
+		return exitPending
+	case agenticreview.DecisionBlock:
+		return exitBlocked
+	default:
+		// An unrecognized decision is not a pass. The gate is the last thing
+		// between an unreviewed head and main.
+		fmt.Fprintln(stderr, "agentic-review-gate: unrecognized decision", verdict.Decision)
+		return exitBlocked
 	}
-	return exitBlocked
 }
 
 // resolveConfig loads the policy and applies any command-line quorum override.
@@ -172,7 +152,7 @@ func parseQuorum(raw string) (int, error) {
 	return n, nil
 }
 
-func loadInput(inputFile, repo string, prNumber int, gh ghRunner) (agenticreview.Input, error) {
+func loadInput(inputFile, repo string, prNumber int) (agenticreview.Input, error) {
 	if inputFile != "" {
 		raw, err := os.ReadFile(inputFile)
 		if err != nil {
@@ -187,10 +167,7 @@ func loadInput(inputFile, repo string, prNumber int, gh ghRunner) (agenticreview
 		}
 		return in, nil
 	}
-	if gh == nil {
-		gh = execGH
-	}
-	return fetchInput(gh, repo, prNumber)
+	return fetchInput(execGH, repo, prNumber)
 }
 
 // prView is the subset of gh pull request JSON the gate reads.
@@ -247,39 +224,6 @@ func fetchInput(gh ghRunner, repo string, number int) (agenticreview.Input, erro
 		ReadyAt:   readyAt,
 		Now:       time.Now().UTC(),
 	}, nil
-}
-
-// publishStatus writes the verdict onto the exact head it was computed for.
-func publishStatus(gh ghRunner, repo, headSHA string, v agenticreview.Verdict) error {
-	var state string
-	switch v.Decision {
-	case agenticreview.DecisionPass:
-		state = "success"
-	case agenticreview.DecisionBlock:
-		state = "failure"
-	case agenticreview.DecisionPending:
-		// Pending is a first-class outcome, not a fallback: it blocks the
-		// merge like a failure while saying the review may still resolve.
-		state = "pending"
-	}
-	_, err := gh([]string{
-		"api", "--method", "POST", fmt.Sprintf("repos/%s/statuses/%s", repo, headSHA),
-		"-f", "state=" + state,
-		"-f", "context=" + statusContext,
-		"-f", "description=" + truncateDescription(v.Reason),
-	})
-	return err
-}
-
-// truncateDescription keeps the status description inside the 140-character
-// limit GitHub enforces, so a long quorum explanation cannot fail the write
-// that the merge gate depends on.
-func truncateDescription(reason string) string {
-	const limit = 140
-	if len(reason) <= limit {
-		return reason
-	}
-	return reason[:limit-3] + "..."
 }
 
 func ghJSON(gh ghRunner, into any, args ...string) error {

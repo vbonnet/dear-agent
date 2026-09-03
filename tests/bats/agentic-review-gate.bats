@@ -54,10 +54,18 @@ line_of() {
   ! grep -qiE 'anthropic|claude-code-action|generativelanguage|openai|gemini-cli' "$GATE_WF"
 }
 
-@test "the gate publishes the commit status the ruleset requires" {
-  context="$(grep -oE 'agentic-review/gate' "${REPO_ROOT}/.github/rulesets/main.json" | head -1)"
-  [ "$context" = "agentic-review/gate" ]
-  grep -q -- '--post-status' "$GATE_WF"
+@test "the required check the ruleset names is produced by a job" {
+  # The repository invariant: a required context no job reports leaves the pull
+  # request waiting on a status that never arrives.
+  grep -q '"context": "Agentic Review Gate"' "${REPO_ROOT}/.github/rulesets/main.json"
+  grep -q 'name: Agentic Review Gate' "$GATE_WF"
+}
+
+@test "the gate waits out an unresolved lifecycle instead of reporting red" {
+  # A family aged out on a clock emits no GitHub event, so a job that reported
+  # once and exited would strand the check with nothing left to re-trigger it.
+  grep -q 'code" -eq 3' "$GATE_WF"
+  grep -qE 'timeout-minutes: (5[0-9]|[6-9][0-9])' "$GATE_WF"
 }
 
 @test "a push invalidates every stale review label before the gate evaluates" {

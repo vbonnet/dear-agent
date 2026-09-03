@@ -76,6 +76,7 @@ func RegisterScenarioDefinitions(ctx *godog.ScenarioContext) {
 	steps.RegisterCrossLanguageImplementationGuardrailSteps(ctx)
 	steps.RegisterDangerousOverrideGovernanceSteps(ctx)
 	steps.RegisterBDDRootPortabilitySteps(ctx)
+	steps.RegisterAgenticReviewGateSteps(ctx)
 	steps.RegisterAGMDiagnosticsPackageGuardrailSteps(ctx)
 	steps.RegisterDBPersistenceGuardrailSteps(ctx)
 	steps.RegisterDeveloperToolPackageGuardrailSteps(ctx)

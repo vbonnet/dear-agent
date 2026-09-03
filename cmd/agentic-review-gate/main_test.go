@@ -27,7 +27,7 @@ func runGate(t *testing.T, fixture string, extra ...string) (int, string) {
 		"--json",
 	}, extra...)
 	var out, errOut bytes.Buffer
-	code := run(args, &out, &errOut, nil)
+	code := run(args, &out, &errOut)
 	if errOut.Len() > 0 {
 		t.Logf("stderr: %s", errOut.String())
 	}
@@ -55,8 +55,8 @@ func TestGateFixtures(t *testing.T) {
 		{"all three approve is mergeable", "all-three-approved.json", exitPass, agenticreview.DecisionPass},
 		{"codex requests changes while gemini approves is blocked", "codex-changes-requested.json", exitBlocked, agenticreview.DecisionBlock},
 		{"one reviewer down plus two approvals is mergeable", "one-down-two-approved.json", exitPass, agenticreview.DecisionPass},
-		{"ready with no started label is blocked", "ready-no-started.json", exitBlocked, agenticreview.DecisionPending},
-		{"started without posted is blocked", "started-not-posted.json", exitBlocked, agenticreview.DecisionPending},
+		{"ready with no started label is blocked", "ready-no-started.json", exitPending, agenticreview.DecisionPending},
+		{"started without posted is blocked", "started-not-posted.json", exitPending, agenticreview.DecisionPending},
 		{"silent reviewer past its timeout degrades to a quorum pass", "codex-silent-past-timeout.json", exitPass, agenticreview.DecisionPass},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,8 +94,8 @@ func TestGateNamesTheBlockingFamily(t *testing.T) {
 // scenario that passed on two-of-three now blocks.
 func TestGateQuorumOverrideIsHonoured(t *testing.T) {
 	code, stdout := runGate(t, "one-down-two-approved.json", "--quorum", "3")
-	if code != exitBlocked {
-		t.Fatalf("exit = %d, want %d at quorum 3 (stdout: %s)", code, exitBlocked, stdout)
+	if code == exitPass {
+		t.Fatalf("exit = %d, want a refusal at quorum 3 (stdout: %s)", code, stdout)
 	}
 	if v := decodeVerdict(t, stdout); v.Quorum != 3 {
 		t.Fatalf("verdict quorum = %d, want 3", v.Quorum)
@@ -109,7 +109,7 @@ func TestGateTextSummaryListsEveryFamily(t *testing.T) {
 	code := run([]string{
 		"--config", repoConfig(t),
 		"--input-file", filepath.Join("testdata", "one-down-two-approved.json"),
-	}, &out, &errOut, nil)
+	}, &out, &errOut)
 	if code != exitPass {
 		t.Fatalf("exit = %d, want %d", code, exitPass)
 	}
@@ -129,7 +129,7 @@ func TestGateRejectsUsageErrors(t *testing.T) {
 		"bad quorum":      {"--input-file", "a", "--quorum", "nope"},
 	} {
 		var out, errOut bytes.Buffer
-		if code := run(args, &out, &errOut, nil); code != exitUsage {
+		if code := run(args, &out, &errOut); code != exitUsage {
 			t.Errorf("%s: exit = %d, want %d", name, code, exitUsage)
 		}
 	}
@@ -142,7 +142,7 @@ func TestGateFailsClosedOnUnreadableConfig(t *testing.T) {
 	code := run([]string{
 		"--config", filepath.Join(t.TempDir(), "absent.yml"),
 		"--input-file", filepath.Join("testdata", "all-three-approved.json"),
-	}, &out, &errOut, nil)
+	}, &out, &errOut)
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d", code, exitUsage)
 	}
@@ -280,85 +280,17 @@ func TestFetchInputSurfacesGitHubFailures(t *testing.T) {
 	}
 }
 
-// The gate publishes its verdict as a commit status on the exact head it
-// evaluated. A status is what lets a later pass update the same required
-// context: a reviewer that runs out of time produces no label event, so a
-// gate that could only report from its own triggering run would stay red
-// forever with nothing left to re-trigger it.
-func TestPostStatusPublishesVerdictAgainstTheHead(t *testing.T) {
-	for _, tc := range []struct {
-		fixture string
-		want    string
-	}{
-		{"all-three-approved.json", "success"},
-		{"ready-no-started.json", "pending"},
-		{"codex-changes-requested.json", "failure"},
-	} {
-		t.Run(tc.fixture, func(t *testing.T) {
-			gh := &fakeGH{responses: map[string]string{"statuses/deadbeef": "{}"}}
-			var out, errOut bytes.Buffer
-			run([]string{
-				"--config", repoConfig(t),
-				"--input-file", filepath.Join("testdata", tc.fixture),
-				"--post-status", "--repo-slug", "o/r", "--head-sha", "deadbeef",
-			}, &out, &errOut, gh.run)
-
-			if len(gh.calls) != 1 {
-				t.Fatalf("gh calls = %v, want a single status POST", gh.calls)
-			}
-			call := gh.calls[0]
-			if !strings.Contains(call, "repos/o/r/statuses/deadbeef") {
-				t.Fatalf("status posted to %q, not the evaluated head", call)
-			}
-			if !strings.Contains(call, "state="+tc.want) {
-				t.Fatalf("call %q does not carry state=%s", call, tc.want)
-			}
-			if !strings.Contains(call, "context="+statusContext) {
-				t.Fatalf("call %q does not carry the required context %q", call, statusContext)
-			}
-		})
+// Pending and blocked must not collapse into one code. The gate job waits on a
+// lifecycle that has not resolved and stops immediately on one that decided
+// against the merge; a single code would mean either waiting out a deadline on
+// a decided rejection or abandoning a review still in flight.
+func TestGateSeparatesPendingFromBlocked(t *testing.T) {
+	pending, _ := runGate(t, "ready-no-started.json")
+	blocked, _ := runGate(t, "codex-changes-requested.json")
+	if pending == blocked {
+		t.Fatalf("pending and blocked both exited %d", pending)
 	}
-}
-
-// The exit code is the verdict whether or not a status was published, so a
-// caller that only wants the answer is unaffected by the reporting path.
-func TestPostStatusKeepsTheExitCode(t *testing.T) {
-	gh := &fakeGH{responses: map[string]string{"statuses/deadbeef": "{}"}}
-	var out, errOut bytes.Buffer
-	code := run([]string{
-		"--config", repoConfig(t),
-		"--input-file", filepath.Join("testdata", "codex-changes-requested.json"),
-		"--post-status", "--repo-slug", "o/r", "--head-sha", "deadbeef",
-	}, &out, &errOut, gh.run)
-	if code != exitBlocked {
-		t.Fatalf("exit = %d, want %d", code, exitBlocked)
-	}
-}
-
-// A status that could not be published must not be reported as a pass: the
-// merge gate the ruleset reads is the status, so an unwritten status means the
-// gate never spoke.
-func TestPostStatusFailureIsNotAPass(t *testing.T) {
-	gh := &fakeGH{responses: map[string]string{}}
-	var out, errOut bytes.Buffer
-	code := run([]string{
-		"--config", repoConfig(t),
-		"--input-file", filepath.Join("testdata", "all-three-approved.json"),
-		"--post-status", "--repo-slug", "o/r", "--head-sha", "deadbeef",
-	}, &out, &errOut, gh.run)
-	if code == exitPass {
-		t.Fatal("a failed status write still reported a pass")
-	}
-}
-
-func TestPostStatusRequiresItsTarget(t *testing.T) {
-	for name, args := range map[string][]string{
-		"no head sha": {"--input-file", "x", "--post-status", "--repo-slug", "o/r"},
-		"no repo":     {"--input-file", "x", "--post-status", "--head-sha", "deadbeef"},
-	} {
-		var out, errOut bytes.Buffer
-		if code := run(args, &out, &errOut, nil); code != exitUsage {
-			t.Errorf("%s: exit = %d, want %d", name, code, exitUsage)
-		}
+	if pending == exitPass || blocked == exitPass {
+		t.Fatal("a refusal exited zero")
 	}
 }

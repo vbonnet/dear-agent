@@ -1277,6 +1277,23 @@ and Discord/GitHub human approval transport SPEC coverage.
 **Why this matters:** Comparative evidence and human approval decisions must
 not change because a task entered through a different harness or model family.
 
+### Agentic Review Gate Guardrails
+
+**File:** [`agentic_review_gate_guardrails.feature`](../test/bdd/features/agentic_review_gate_guardrails.feature)
+
+**Drives:** Agentic review policy, gate command, and the reviewer label and
+verdict action SPEC coverage.
+
+**Key scenarios:**
+- Every reviewer family approving permits the merge.
+- One family requesting changes is not masked by the other families' approvals.
+- A quorum carries the merge past a single family that reported it cannot run.
+- A ready pull request whose reviews have not started, or whose reviewer has started without reporting, cannot merge.
+
+**Why this matters:** A merge must reflect every reviewer family's own verdict.
+One family's approval standing in for another's, or a merge landing in the
+window before any review has started, is an unreviewed change reaching main.
+
 ### Root Lifecycle Command Guardrails
 
 **File:** [`root_lifecycle_command_guardrails.feature`](../test/bdd/features/root_lifecycle_command_guardrails.feature)
