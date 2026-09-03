@@ -72,7 +72,12 @@ func TestLoadStateForSessionRecoversClaimedLegacyMigration(t *testing.T) {
 	}
 }
 
-func TestLoadStateForSessionRejectsAmbiguousIDLessLegacyState(t *testing.T) {
+// An ID-less ledger at a reusable display-name path cannot be attributed, so it
+// must never be adopted. It must also not fail the session forever: validation
+// runs before the forceable anti-loop check, so a hard error here would make
+// compaction permanently impossible for every upgraded session. Quarantine
+// satisfies both.
+func TestLoadStateForSessionQuarantinesAmbiguousIDLessLegacyState(t *testing.T) {
 	baseDir := t.TempDir()
 	legacy := &CompactionState{
 		SessionName:     "reused-name",
@@ -82,16 +87,58 @@ func TestLoadStateForSessionRejectsAmbiguousIDLessLegacyState(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacyPath := stateFile(baseDir, "reused-name")
+	before, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	_, err := loadStateForSession(baseDir, "replacement-id", "reused-name")
-	if err == nil || !strings.Contains(err.Error(), "ownership is ambiguous") {
-		t.Fatalf("loadStateForSession() error = %v, want ambiguous ownership", err)
+	state, err := loadStateForSession(baseDir, "replacement-id", "reused-name")
+	if err != nil {
+		t.Fatalf("loadStateForSession() error = %v, want a fresh ledger", err)
 	}
-	if _, statErr := os.Stat(legacyPath); statErr != nil {
-		t.Fatalf("ambiguous legacy file was mutated: %v", statErr)
+
+	// The safety property: none of the ambiguous history is inherited.
+	if state.CompactionCount != 0 {
+		t.Errorf("replacement inherited CompactionCount = %d, want 0", state.CompactionCount)
 	}
-	if _, statErr := os.Stat(stableStateFile(baseDir, "replacement-id")); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("replacement stable ledger was created from ambiguous state: %v", statErr)
+	if len(state.History) != 0 {
+		t.Errorf("replacement inherited %d attempt record(s), want 0", len(state.History))
+	}
+	if state.SessionID != "replacement-id" {
+		t.Errorf("fresh ledger SessionID = %q, want replacement-id", state.SessionID)
+	}
+
+	// The ambiguous file is moved aside, so it is neither consumed nor
+	// re-examined on the next call, and its bytes are preserved.
+	if _, statErr := os.Stat(legacyPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("ambiguous legacy file still at its original path: %v", statErr)
+	}
+	quarantined, readErr := os.ReadFile(legacyPath + ".ambiguous")
+	if readErr != nil {
+		t.Fatalf("ambiguous legacy file was not quarantined: %v", readErr)
+	}
+	if string(quarantined) != string(before) {
+		t.Errorf("quarantined ledger was mutated:\nbefore=%s\nafter=%s", before, quarantined)
+	}
+}
+
+// A second upgraded session with the same reusable name must also recover,
+// rather than colliding with the first quarantine and failing.
+func TestLoadStateForSessionQuarantinesRepeatedAmbiguousLedgers(t *testing.T) {
+	baseDir := t.TempDir()
+	for i := range 2 {
+		if err := SaveState(baseDir, &CompactionState{SessionName: "reused-name", CompactionCount: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadStateForSession(baseDir, fmt.Sprintf("replacement-%d", i), "reused-name"); err != nil {
+			t.Fatalf("loadStateForSession() attempt %d error = %v", i, err)
+		}
+	}
+	legacyPath := stateFile(baseDir, "reused-name")
+	for _, suffix := range []string{".ambiguous", ".ambiguous.1"} {
+		if _, err := os.Stat(legacyPath + suffix); err != nil {
+			t.Errorf("missing quarantine %s: %v", suffix, err)
+		}
 	}
 }
 

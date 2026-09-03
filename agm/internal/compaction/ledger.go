@@ -96,6 +96,26 @@ func claimLegacyState(baseDir, sessionID, displayName, stablePath string) (strin
 		return "", err
 	}
 	if err := validateLegacyState(legacyState, sessionID, displayName); err != nil {
+		if errors.Is(err, errLegacyStateIDLess) {
+			// Every ledger written before the SessionID field existed is
+			// ID-less by construction, and a display name is reusable, so this
+			// file cannot be proven to belong to the session now asking for
+			// it. Adopting it could hand a replacement session another
+			// session's compaction history. Refusing it forever is not the
+			// alternative: validation runs before the forceable anti-loop
+			// check, so a hard error here permanently breaks compaction for
+			// every upgraded session, `--force` included.
+			//
+			// Quarantine resolves both: the ambiguous history is never
+			// consumed, the bytes are kept for inspection, and the caller
+			// starts a fresh ledger. The cost is that such a session's
+			// anti-loop budget restarts once, which is bounded and visible,
+			// unlike a permanently unusable command.
+			if qErr := quarantineAmbiguousLegacyState(legacyPath); qErr != nil {
+				return "", qErr
+			}
+			return "", nil
+		}
 		return "", fmt.Errorf("refuse legacy compaction state migration %s: %w", legacyPath, err)
 	}
 
@@ -261,6 +281,37 @@ func stableStateFile(baseDir, sessionID string) string {
 	return filepath.Join(stateDir(baseDir), sessionID+".json")
 }
 
+// errLegacyStateIDLess marks a display-name-keyed legacy ledger with no
+// embedded stable session ID. It is recoverable by quarantine rather than a
+// hard failure; every other legacy validation failure stays fatal.
+var errLegacyStateIDLess = errors.New("embedded stable session ID is empty and ownership is ambiguous")
+
+// quarantineAmbiguousLegacyState moves an unattributable legacy ledger aside so
+// it is never consumed and never re-examined, while keeping its bytes. The
+// suffix search is bounded: a session that has quarantined this many ledgers
+// has a problem no rename will fix.
+func quarantineAmbiguousLegacyState(legacyPath string) error {
+	for i := range 100 {
+		target := legacyPath + ".ambiguous"
+		if i > 0 {
+			target = fmt.Sprintf("%s.ambiguous.%d", legacyPath, i)
+		}
+		if _, err := os.Stat(target); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect quarantine target %s: %w", target, err)
+		}
+		if err := os.Rename(legacyPath, target); err != nil {
+			return fmt.Errorf("quarantine ambiguous compaction state %s: %w", legacyPath, err)
+		}
+		if err := fileutil.SyncDir(filepath.Dir(target)); err != nil {
+			return fmt.Errorf("persist quarantine of %s: %w", legacyPath, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("quarantine ambiguous compaction state %s: too many quarantined ledgers", legacyPath)
+}
+
 func legacyMigrationFile(baseDir, sessionID string) string {
 	return stableStateFile(baseDir, sessionID) + ".legacy-migration"
 }
@@ -328,7 +379,7 @@ func validateClaimedLegacyState(state *CompactionState, sessionID string) error 
 // replacement session inherit another session's compaction history.
 func validateLegacyState(state *CompactionState, sessionID, displayName string) error {
 	if state.SessionID == "" {
-		return fmt.Errorf("embedded stable session ID is empty and ownership is ambiguous")
+		return errLegacyStateIDLess
 	}
 	if err := validateClaimedLegacyState(state, sessionID); err != nil {
 		return err
