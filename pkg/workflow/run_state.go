@@ -40,3 +40,23 @@ func ParseRunStateFilter(value string) (RunState, error) {
 	}
 	return ParseRunState(value)
 }
+
+// ErrRepeatedRunState identifies a run-state filter supplied more than once.
+var ErrRepeatedRunState = errors.New("workflow: repeated state filter")
+
+// ParseRunStateFilterValues validates a run-state filter carried by a
+// transport that can repeat a key, such as a URL query. Reading only the
+// first value would make validation order-dependent: "?state=running&
+// state=typo" would silently ignore the unknown spelling while the reverse
+// order rejected it. A repeated filter is ambiguous rather than additive, so
+// it is refused outright.
+func ParseRunStateFilterValues(values []string) (RunState, error) {
+	switch len(values) {
+	case 0:
+		return "", nil
+	case 1:
+		return ParseRunStateFilter(values[0])
+	default:
+		return "", fmt.Errorf("%w: %d values", ErrRepeatedRunState, len(values))
+	}
+}

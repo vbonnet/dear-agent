@@ -104,7 +104,15 @@ func statusHandler(db *sql.DB) Handler {
 func listHandler(db *sql.DB) Handler {
 	return func(ctx context.Context, cmd Command) Response {
 		opts := workflow.ListOptions{}
-		if state, ok := stringArg(cmd.Args, "state"); ok {
+		// CmdList documents state as an optional string. A present value of
+		// another type violates that contract, and treating it as absent
+		// would silently widen the result set to every run.
+		if raw, present := cmd.Args["state"]; present {
+			state, isString := raw.(string)
+			if !isString {
+				return errorResponse(cmd.ID, Errorf(CodeInvalidArgs,
+					"state must be a string, got %T", raw))
+			}
 			parsed, err := workflow.ParseRunStateFilter(state)
 			if err != nil {
 				return errorResponse(cmd.ID, WrapError(CodeInvalidArgs, "state", err))

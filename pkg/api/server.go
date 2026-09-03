@@ -147,7 +147,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
-	state, err := workflow.ParseRunStateFilter(r.URL.Query().Get("state"))
+	state, err := workflow.ParseRunStateFilterValues(r.URL.Query()["state"])
 	if err != nil {
 		s.writeError(w, r, http.StatusBadRequest, "invalid_state", err)
 		return

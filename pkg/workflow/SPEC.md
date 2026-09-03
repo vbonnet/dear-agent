@@ -31,7 +31,7 @@ execution, resume, review, and cost controls.
 
 **WFLOW-07** When a configured definition hook rejects a validated workflow, the system shall finish the run as failed and return the contextual rejection before enforcing or executing any node.
 
-**WFLOW-08** When a caller lists workflow runs with a non-empty state filter, the system shall accept only `pending`, `running`, `awaiting_hitl`, `succeeded`, `failed`, or `cancelled` and reject every other value before querying storage.
+**WFLOW-08** When a caller lists workflow runs with a state filter, the system shall accept only the empty any-state filter or exactly one of `pending`, `running`, `awaiting_hitl`, `succeeded`, `failed`, or `cancelled`, and shall reject every other value, and any repeated filter, before querying storage. This is the single owner of the run-state filter contract; transport adapters map its rejection onto their own error vocabulary rather than restating the domain.
 
 ## Permission contract
 

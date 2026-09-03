@@ -74,3 +74,40 @@ func TestListRejectsInvalidRunState(t *testing.T) {
 		t.Fatalf("List(invalid state) runs = %#v, want nil", runs)
 	}
 }
+
+// A repeated state filter is ambiguous. Reading only the first value made
+// validation order-dependent: a valid value first would mask an unknown one.
+func TestParseRunStateFilterValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  []string
+		want    RunState
+		wantErr error
+	}{
+		{name: "absent", values: nil, want: ""},
+		{name: "empty any-state", values: []string{""}, want: ""},
+		{name: "single valid", values: []string{string(RunStateRunning)}, want: RunStateRunning},
+		{name: "single unknown", values: []string{"typo"}, wantErr: ErrInvalidRunState},
+		{name: "valid then unknown", values: []string{string(RunStateRunning), "typo"}, wantErr: ErrRepeatedRunState},
+		{name: "unknown then valid", values: []string{"typo", string(RunStateRunning)}, wantErr: ErrRepeatedRunState},
+		{name: "repeated valid", values: []string{string(RunStateRunning), string(RunStateFailed)}, wantErr: ErrRepeatedRunState},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseRunStateFilterValues(tc.values)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("ParseRunStateFilterValues(%q) error = %v, want %v", tc.values, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRunStateFilterValues(%q) error = %v", tc.values, err)
+			}
+			if got != tc.want {
+				t.Errorf("ParseRunStateFilterValues(%q) = %q, want %q", tc.values, got, tc.want)
+			}
+		})
+	}
+}
