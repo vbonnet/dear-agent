@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // newRepo builds a real repository whose remote default branch is `main`, so
@@ -15,34 +16,22 @@ import (
 // the conventional-name list. Returns the working clone's path.
 func newRepo(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	work := filepath.Join(root, "work")
-	run := func(dir string, args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
-			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run(root, "init", "--bare", "--initial-branch=main", remote)
-	run(root, "clone", "--quiet", remote, work)
+	gittest.Run(t, root, "init", "--bare", "--initial-branch=main", remote)
+	gittest.Run(t, root, "clone", "--quiet", remote, work)
+	// The clone was produced by git rather than by InitRepo, so it carries no
+	// sandboxed hooks path of its own until this hardens it.
+	gittest.HardenRepo(t, work)
 	if err := os.WriteFile(filepath.Join(work, "f"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(work, "add", "f")
-	run(work, "commit", "--quiet", "-m", "init")
-	run(work, "push", "--quiet", "-u", "origin", "main")
-	run(work, "remote", "set-head", "origin", "--auto")
-	run(work, "checkout", "--quiet", "-b", "feature/x")
+	gittest.Run(t, work, "add", "f")
+	gittest.Run(t, work, "commit", "--quiet", "-m", "init")
+	gittest.Run(t, work, "push", "--quiet", "-u", "origin", "main")
+	gittest.Run(t, work, "remote", "set-head", "origin", "--auto")
+	gittest.Run(t, work, "checkout", "--quiet", "-b", "feature/x")
 	return work
 }
 
@@ -110,11 +99,7 @@ func TestForcePushAllowedOnFeatureBranchRefusedOnMain(t *testing.T) {
 // though no branch name appears on the command line.
 func TestForcePushRefusedWhenDestinationIsImplicitMain(t *testing.T) {
 	repo := newRepo(t)
-	cmd := exec.Command("git", "checkout", "--quiet", "main")
-	cmd.Dir = repo
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout main: %v\n%s", err, out)
-	}
+	gittest.Run(t, repo, "checkout", "--quiet", "main")
 	if code, _ := decide(t, "git push -f origin", repo); code != 2 {
 		t.Errorf("implicit push to main: exit %d, want 2", code)
 	}

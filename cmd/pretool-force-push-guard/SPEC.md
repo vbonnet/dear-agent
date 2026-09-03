@@ -51,6 +51,7 @@ default branch is enforced by GitHub and is unaffected by anything here.
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/root_safety_command_guardrails.feature`
 - Package tests: `cmd/pretool-force-push-guard/*_test.go`
 - Scanner tests: `internal/fsguard/pushscan_test.go`
 - Policy tests: `internal/safegit/forcepolicy_test.go`
