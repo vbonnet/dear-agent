@@ -268,6 +268,7 @@ func statMtimeBounded(
 	}
 }
 
+// EvaluatePulse Probes one pulse and classifies it (AA-01..AA-06).
 func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing string, launchdErr error) Result {
 	res := Result{Name: p.Name, Expect: p.Expect, Window: p.Window}
 	switch p.Type {
