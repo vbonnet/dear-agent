@@ -229,8 +229,11 @@ func excerptFinding(comments []threadComment) string {
 			line = strings.TrimSpace(badgeNoise.ReplaceAllString(line, ""))
 			line = strings.Trim(line, "*_ ")
 			if len(line) > 8 {
-				if len(line) > 120 {
-					line = line[:120] + "..."
+				// Truncate by rune, not byte: a bot finding can be non-ASCII
+				// and a byte slice would sever a multi-byte rune, putting
+				// invalid UTF-8 into the audit record.
+				if runes := []rune(line); len(runes) > 120 {
+					line = string(runes[:120]) + "..."
 				}
 				return line
 			}

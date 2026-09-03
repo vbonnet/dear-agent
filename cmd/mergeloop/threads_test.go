@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestIsKnownBotAuthor(t *testing.T) {
@@ -286,5 +287,37 @@ func TestFullIncidentScenario(t *testing.T) {
 	}
 	if n := len(blockingFindingsIn(threads)); n != 4 {
 		t.Errorf("blocking findings = %d, want 4: the merge must be refused", n)
+	}
+}
+
+// Bot findings routinely contain non-ASCII prose. Truncating the excerpt on a
+// byte index can split a multi-byte rune, so the audit record would carry
+// invalid UTF-8 and render as a replacement character.
+func TestExcerptFindingTruncatesOnRuneBoundaries(t *testing.T) {
+	// One ASCII byte before 3-byte runes puts byte offset 120 inside a rune,
+	// so a byte slice there produces invalid UTF-8.
+	title := "x" + strings.Repeat("→", 200)
+	body := "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)\n\n**" + title + "**\n"
+
+	got := excerptFinding([]threadComment{{body: body}})
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("excerptFinding returned invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("excerptFinding did not truncate a 200-rune title: %q", got)
+	}
+	if n := utf8.RuneCountInString(strings.TrimSuffix(got, "...")); n != 120 {
+		t.Errorf("excerptFinding truncated to %d runes, want 120", n)
+	}
+}
+
+// A short non-ASCII finding is returned whole.
+func TestExcerptFindingKeepsShortNonASCIITitle(t *testing.T) {
+	title := "Réfuser les chemins non canoniques"
+	body := "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)\n\n**" + title + "**\n"
+
+	if got := excerptFinding([]threadComment{{body: body}}); got != title {
+		t.Errorf("excerptFinding = %q, want %q", got, title)
 	}
 }
