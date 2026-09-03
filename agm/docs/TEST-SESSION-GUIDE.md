@@ -229,10 +229,13 @@ exact symbolic links to the host:
 
 Each link stays at the provider's native relative path. Replacing a credential
 at that exact host path is therefore visible to the test environment, but no
-sibling file or directory becomes reachable through the link.
+sibling file or directory becomes reachable through the link. The link is not
+read-only: a later provider process can read or write that exact host credential
+leaf according to the provider's own behavior.
 
 The following optional compatibility configuration files are copied once as
-detached `0600` snapshots, each bounded to 1 MiB:
+detached `0600` snapshots. AGM accepts at most 1 MiB of content per snapshot;
+each verification read may probe one additional byte to reject overflow:
 
 - `.config/gcloud/configurations/config_default`
 - `.config/opencode/opencode.json`
@@ -263,7 +266,9 @@ only a node whose recorded identity still matches. This serializes cooperating
 AGM projectors. It does not make arbitrary code running as the same Unix user
 untrusted—the same user already controls the selected home—but such pathname
 replacement still cannot escape the retained root. Projection itself never
-writes back to the host home.
+writes back to the host home. A later provider can still write through an
+approved credential link to that exact host leaf; sibling host state remains
+outside the projected capability.
 
 Tests for this boundary must use synthetic host and selected homes. Run a
 synthetic provider-onboarding helper process and the real Codex trust writer
