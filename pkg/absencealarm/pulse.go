@@ -239,6 +239,35 @@ func statMtimeBounded(
 }
 
 // EvaluatePulse Probes one pulse and classifies it (AA-01..AA-06).
+// statMtimeBounded runs the context-free stat hook under the probe deadline.
+// A stat on a stalled network or FUSE mount is not interruptible, so the
+// goroutine can outlive this call; it holds only the probe's own arguments and
+// ends when the kernel returns. Bounding the wait is the point: without it one
+// wedged path stops every later pulse, its notifications, and the heartbeat,
+// which is precisely the silent failure this alarm exists to detect.
+func statMtimeBounded(
+	ctx context.Context,
+	stat func(string) (time.Time, bool, error),
+	path string,
+) (time.Time, bool, error) {
+	type statResult struct {
+		mtime  time.Time
+		exists bool
+		err    error
+	}
+	done := make(chan statResult, 1)
+	go func() {
+		mtime, exists, err := stat(path)
+		done <- statResult{mtime, exists, err}
+	}()
+	select {
+	case r := <-done:
+		return r.mtime, r.exists, r.err
+	case <-ctx.Done():
+		return time.Time{}, false, fmt.Errorf("did not complete within the probe deadline: %w", ctx.Err())
+	}
+}
+
 func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing string, launchdErr error) Result {
 	res := Result{Name: p.Name, Expect: p.Expect, Window: p.Window}
 	switch p.Type {
