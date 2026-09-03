@@ -45,10 +45,13 @@ internal/hookparity/SPEC.md
 
 The pointer is traceability, not a second normative contract: it cannot target
 a dotted or bare harness configuration, registration, plugin, or grouped
-harness root, cannot coexist with a local `SPEC.md`, and its target must retain
-strict EARS and reciprocal BDD coverage. Use it only when the implementation
-adds no distinct observable contract; a new observable requires an ownership
-decision in the neutral product or domain.
+harness root, and cannot coexist with a local `SPEC.md`. Apply the target
+repository's declared checks to the projection: validate the `SPEC.owner`
+pointer under its declared ownership checks, and validate the canonical target
+under each declared coverage check, such as strict EARS or reciprocal BDD.
+Record every absent evidence layer as unavailable. Use the pointer only when
+the implementation adds no distinct observable contract; a new observable
+requires an ownership decision in the neutral product or domain.
 
 Do not invent `SPEC.owner` in a target repository that does not declare this
 capability. Record the projection layer as unavailable, follow the repository's
