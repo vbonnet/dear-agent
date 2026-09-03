@@ -100,11 +100,9 @@ func (r OAuthResolver) keychainStoreFor() CredentialStore {
 	if !r.usesDefaultCredentialsPath() {
 		return nil
 	}
-	getenv := r.env
-	if r.Getenv == nil {
-		getenv = os.Getenv
-	}
-	return KeychainStore{Identity: DefaultKeychainIdentity(getenv)}
+	// r.env already falls back to os.Getenv when the hook is unset, so no
+	// second nil check is needed here.
+	return KeychainStore{Identity: DefaultKeychainIdentity(r.env)}
 }
 
 // resolveStores mirrors Claude Code's own precedence: the keychain answers

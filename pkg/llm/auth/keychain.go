@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,7 +9,6 @@ import (
 	"os/exec"
 	"os/user"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -170,7 +170,7 @@ func (k KeychainStore) Read() (fullCredentials, bool) {
 		return fullCredentials{}, false
 	}
 	var creds fullCredentials
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &creds); err != nil {
+	if err := json.Unmarshal(bytes.TrimSpace(out), &creds); err != nil {
 		return fullCredentials{}, false
 	}
 	return creds, true
@@ -179,9 +179,15 @@ func (k KeychainStore) Read() (fullCredentials, bool) {
 // Write upserts the credential item.
 //
 // The payload is hex-encoded and passed via -X because that is how the CLI
-// stores it; writing the JSON as a plaintext -w argument produces an item the
-// CLI reads back as garbage, and it would also expose the secret in the process
-// argument list where any local process could read it.
+// stores it: writing the JSON as a plaintext -w argument produces an item the
+// CLI reads back as garbage.
+//
+// Hex encoding is NOT a confidentiality measure. -X still places the encoded
+// credential in the argument vector, where any local process can read it from
+// the process list and trivially decode it (CWE-214). security(1) offers no
+// stdin path for this item, so closing that exposure means talking to Keychain
+// Services directly rather than shelling out. Tracked on the pull request;
+// until then this is a known local-attacker exposure, not a solved problem.
 func (k KeychainStore) Write(creds fullCredentials) error {
 	if k.Identity.Service == "" || k.Identity.Account == "" {
 		return fmt.Errorf("keychain identity incomplete (service=%q account=%q)",
@@ -203,11 +209,16 @@ func (k KeychainStore) Write(creds fullCredentials) error {
 	return nil
 }
 
+// securityBinary is the absolute path to the system keychain tool.
+const securityBinary = "/usr/bin/security"
+
 // runSecurity invokes the macOS security(1) binary.
 func runSecurity(args []string) ([]byte, error) {
 	ctx, cancel := contextWithTimeout(keychainTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "security", args...)
+	// Absolute path: this subprocess carries credentials, so it must be the
+	// system binary and not whatever a mutated PATH resolves "security" to.
+	cmd := exec.CommandContext(ctx, securityBinary, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
