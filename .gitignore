@@ -139,3 +139,4 @@ infra/*.tfvars
 /safe-push
 /absence-alarm
 /merge-health
+/gate-health
