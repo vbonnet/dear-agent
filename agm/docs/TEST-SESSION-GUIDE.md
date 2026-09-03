@@ -261,9 +261,13 @@ a whole-provider link.
 For destination work, AGM retains an opened root for the selected home and an
 advisory lock on that directory. Creation is descriptor-relative, so replacing
 the selected-home pathname cannot redirect transaction writes into a different
-directory. On failure, rollback uses no-replace quarantine renames and deletes
-only a node whose recorded identity still matches. This serializes cooperating
-AGM projectors. It does not make arbitrary code running as the same Unix user
+directory. Each transaction-created node keeps its opened identity handle until
+transaction close. On apply failure, rollback uses no-replace quarantine
+renames and deletes only a node that still matches that retained identity,
+preventing a removed inode from being reused as a false match. Cleanup errors
+after a successful apply are reported without removing the installed
+projection. This serializes cooperating AGM projectors. It does not make
+arbitrary code running as the same Unix user
 untrusted—the same user already controls the selected home—but such pathname
 replacement still cannot escape the retained root. Projection itself never
 writes back to the host home. A later provider can still write through an

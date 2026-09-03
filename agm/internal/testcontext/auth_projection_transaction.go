@@ -16,7 +16,7 @@ import (
 
 type createdAuthNode struct {
 	relativePath string
-	info         os.FileInfo
+	identity     *os.File
 }
 
 type stagedAuthNode struct {
@@ -328,15 +328,15 @@ func (tx *authProjectionTransaction) stageDirectory(
 		)
 	}
 	nodeIndex := len(tx.created)
-	tx.created = append(tx.created, createdAuthNode{relativePath: stagePath, info: info})
+	tx.created = append(tx.created, createdAuthNode{
+		relativePath: stagePath,
+		identity:     opened,
+	})
 	staged := stagedAuthNode{
 		base:         stageBase,
 		relativePath: stagePath,
 		info:         info,
 		ledgerIndex:  nodeIndex,
-	}
-	if err := opened.Close(); err != nil {
-		return staged, authPathError("close staged destination directory", relativePath, err)
 	}
 	return staged, nil
 }
@@ -449,15 +449,15 @@ func (tx *authProjectionTransaction) stageCredentialLink(
 		)
 	}
 	nodeIndex := len(tx.created)
-	tx.created = append(tx.created, createdAuthNode{relativePath: stagePath, info: info})
+	tx.created = append(tx.created, createdAuthNode{
+		relativePath: stagePath,
+		identity:     opened,
+	})
 	staged := stagedAuthNode{
 		base:         stageBase,
 		relativePath: stagePath,
 		info:         info,
 		ledgerIndex:  nodeIndex,
-	}
-	if err := opened.Close(); err != nil {
-		return staged, authPathError("close staged credential link", relativePath, err)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
 		return staged, fmt.Errorf("staged credential destination %s is not a link", relativePath)
@@ -551,25 +551,21 @@ func (tx *authProjectionTransaction) installConfigSnapshot(snapshot preparedConf
 			),
 		)
 	}
-	tx.created = append(tx.created, createdAuthNode{relativePath: snapshot.relativePath, info: info})
+	tx.created = append(tx.created, createdAuthNode{
+		relativePath: snapshot.relativePath,
+		identity:     file,
+	})
 	if !info.Mode().IsRegular() {
-		_ = file.Close()
 		return fmt.Errorf("configuration snapshot %s is not a regular file", snapshot.relativePath)
 	}
 	if err := file.Chmod(0600); err != nil {
-		_ = file.Close()
 		return authPathError("secure configuration snapshot", snapshot.relativePath, err)
 	}
 	if _, err := file.Write(snapshot.data); err != nil {
-		_ = file.Close()
 		return authPathError("write configuration snapshot", snapshot.relativePath, err)
 	}
 	if err := file.Sync(); err != nil {
-		_ = file.Close()
 		return authPathError("sync configuration snapshot", snapshot.relativePath, err)
-	}
-	if err := file.Close(); err != nil {
-		return authPathError("close configuration snapshot", snapshot.relativePath, err)
 	}
 
 	visible, err := tx.root.Lstat(snapshot.relativePath)
@@ -719,8 +715,13 @@ func cleanupUntrackedAuthNode(
 func (tx *authProjectionTransaction) rollback() error {
 	var rollbackErr error
 	for _, node := range slices.Backward(tx.created) {
-		if node.info.IsDir() {
-			empty, err := tx.rollbackDirectoryEmpty(node)
+		identity, err := node.retainedIdentity()
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+			continue
+		}
+		if identity.IsDir() {
+			empty, err := tx.rollbackDirectoryEmpty(node, identity)
 			if err != nil {
 				rollbackErr = errors.Join(rollbackErr, err)
 				continue
@@ -730,14 +731,28 @@ func (tx *authProjectionTransaction) rollback() error {
 				continue
 			}
 		}
-		if err := tx.quarantineAndRemove(node); err != nil {
+		if err := tx.quarantineAndRemove(node, identity); err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}
 	return rollbackErr
 }
 
-func (tx *authProjectionTransaction) rollbackDirectoryEmpty(node createdAuthNode) (bool, error) {
+func (node createdAuthNode) retainedIdentity() (os.FileInfo, error) {
+	if node.identity == nil {
+		return nil, fmt.Errorf("created auth node %s has no retained identity", node.relativePath)
+	}
+	info, err := node.identity.Stat()
+	if err != nil {
+		return nil, authPathError("inspect retained created auth node", node.relativePath, err)
+	}
+	return info, nil
+}
+
+func (tx *authProjectionTransaction) rollbackDirectoryEmpty(
+	node createdAuthNode,
+	identity os.FileInfo,
+) (bool, error) {
 	current, err := tx.root.Lstat(node.relativePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -745,7 +760,7 @@ func (tx *authProjectionTransaction) rollbackDirectoryEmpty(node createdAuthNode
 		}
 		return false, authPathError("inspect rollback directory", ".", err)
 	}
-	if !os.SameFile(node.info, current) {
+	if !os.SameFile(identity, current) {
 		return false, errors.New("preserved rollback node whose identity changed")
 	}
 	directory, err := tx.root.Open(node.relativePath)
@@ -757,7 +772,7 @@ func (tx *authProjectionTransaction) rollbackDirectoryEmpty(node createdAuthNode
 		_ = directory.Close()
 		return false, authPathError("inspect opened rollback directory", ".", err)
 	}
-	if !os.SameFile(node.info, opened) {
+	if !os.SameFile(identity, opened) {
 		_ = directory.Close()
 		return false, errors.New("preserved rollback node whose identity changed")
 	}
@@ -775,7 +790,10 @@ func (tx *authProjectionTransaction) rollbackDirectoryEmpty(node createdAuthNode
 	return errors.Is(readErr, io.EOF), nil
 }
 
-func (tx *authProjectionTransaction) quarantineAndRemove(node createdAuthNode) error {
+func (tx *authProjectionTransaction) quarantineAndRemove(
+	node createdAuthNode,
+	identity os.FileInfo,
+) error {
 	parentPath := filepath.Dir(node.relativePath)
 	parent, err := tx.openRootedDestinationParent(parentPath)
 	if err != nil {
@@ -814,7 +832,7 @@ func (tx *authProjectionTransaction) quarantineAndRemove(node createdAuthNode) e
 	if err != nil {
 		return authPathError("inspect quarantined rollback node", ".", err)
 	}
-	if !os.SameFile(node.info, moved) {
+	if !os.SameFile(identity, moved) {
 		restoreErr := renameNoReplace(
 			int(tx.lock.Fd()), quarantine,
 			int(parent.Fd()), filepath.Base(node.relativePath),
@@ -838,12 +856,28 @@ func (tx *authProjectionTransaction) close() error {
 		return nil
 	}
 	tx.closed = true
+	createdErr := tx.closeCreatedIdentities()
 	rootErr := tx.root.Close()
 	lockErr := closeProjectionLock(tx.lock)
 	return errors.Join(
+		createdErr,
 		sanitizeCloseError("close selected home root", ".", rootErr),
 		lockErr,
 	)
+}
+
+func (tx *authProjectionTransaction) closeCreatedIdentities() error {
+	var closeErr error
+	for _, node := range slices.Backward(tx.created) {
+		if node.identity == nil {
+			continue
+		}
+		closeErr = errors.Join(
+			closeErr,
+			sanitizeCloseError("close created auth node", node.relativePath, node.identity.Close()),
+		)
+	}
+	return closeErr
 }
 
 func closeProjectionLock(lock *os.File) error {

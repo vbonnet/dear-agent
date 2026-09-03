@@ -92,7 +92,9 @@ func projectInheritedAuthWithHooks(
 		return errors.Join(err, tx.close())
 	}
 	if err := tx.apply(plan, installHook); err != nil {
-		return errors.Join(err, tx.rollback(), tx.close())
+		rollbackErr := tx.rollback()
+		closeErr := tx.close()
+		return errors.Join(err, rollbackErr, closeErr)
 	}
 	return tx.close()
 }
