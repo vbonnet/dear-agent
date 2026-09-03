@@ -1,3 +1,10 @@
+---
+phase: SETUP
+phase_name: SETUP
+wayfinder_session_id: feedback-loop-event-architecture
+created_at: 2026-09-02T23:33:00-07:00
+---
+
 # Setup
 
 Drafted the design proposal and its supporting artifacts:

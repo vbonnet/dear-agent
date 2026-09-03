@@ -1,3 +1,10 @@
+---
+phase: BUILD
+phase_name: BUILD
+wayfinder_session_id: feedback-loop-event-architecture
+created_at: 2026-09-02T23:33:00-07:00
+---
+
 # Build
 
 Two full adversarial review-and-revision cycles on the design, following the
