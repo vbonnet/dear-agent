@@ -103,3 +103,62 @@ func TestApproveProjectMcpServersRefusesCorruptSettings(t *testing.T) {
 		t.Errorf("corrupt settings were rewritten as %q", data)
 	}
 }
+
+// A sandbox clone carries whatever the project contained. A .claude directory
+// that is a symlink out of the sandbox must not be followed: writing the MCP
+// capability grant through it would modify a user-writable file outside the
+// sandbox, which is the real checkout this function promises never to touch.
+func TestApproveProjectMcpServersRefusesSymlinkedClaudeDir(t *testing.T) {
+	outside := t.TempDir()
+	outsideSettings := filepath.Join(outside, "settings.local.json")
+	if err := os.WriteFile(outsideSettings, []byte(`{"untouched":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(workDir, ".claude")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	if err := ApproveProjectMcpServers(workDir); err == nil {
+		t.Fatal("ApproveProjectMcpServers() error = nil for a symlinked .claude directory")
+	}
+
+	got, err := os.ReadFile(outsideSettings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"untouched":true}` {
+		t.Errorf("settings outside the sandbox were modified: %s", got)
+	}
+}
+
+// The same for a symlinked settings leaf inside a real .claude directory.
+func TestApproveProjectMcpServersRefusesSymlinkedSettingsLeaf(t *testing.T) {
+	outside := t.TempDir()
+	outsideSettings := filepath.Join(outside, "host-settings.json")
+	if err := os.WriteFile(outsideSettings, []byte(`{"untouched":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := t.TempDir()
+	claudeDir := filepath.Join(workDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideSettings, filepath.Join(claudeDir, "settings.local.json")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	if err := ApproveProjectMcpServers(workDir); err == nil {
+		t.Fatal("ApproveProjectMcpServers() error = nil for a symlinked settings leaf")
+	}
+
+	got, err := os.ReadFile(outsideSettings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"untouched":true}` {
+		t.Errorf("settings outside the sandbox were modified: %s", got)
+	}
+}

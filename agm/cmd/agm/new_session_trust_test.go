@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"errors"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -35,7 +36,7 @@ func TestSeedWorkspaceTrustReportsRealSeeding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !seedWorkspaceTrust("claude-code", workDir) {
+	if !seedWorkspaceTrust("claude-code", &manifest.SandboxConfig{}, workDir) {
 		t.Fatal("seedWorkspaceTrust() = false for a workspace it could seed")
 	}
 	resolved, err := filepath.EvalSymlinks(workDir)
@@ -56,7 +57,7 @@ func TestSeedWorkspaceTrustReportsRealSeeding(t *testing.T) {
 func TestSeedWorkspaceTrustReportsFalseWhenItCannotSeed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if seedWorkspaceTrust("claude-code", filepath.Join(home, "does-not-exist")) {
+	if seedWorkspaceTrust("claude-code", &manifest.SandboxConfig{}, filepath.Join(home, "does-not-exist")) {
 		t.Error("seedWorkspaceTrust() = true for a workspace it could not seed")
 	}
 }
@@ -70,7 +71,7 @@ func TestSeedWorkspaceTrustSkipsOtherHarnesses(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if seedWorkspaceTrust("codex-cli", workDir) {
+	if seedWorkspaceTrust("codex-cli", &manifest.SandboxConfig{}, workDir) {
 		t.Error("seedWorkspaceTrust() = true for a non-Claude harness")
 	}
 	if _, err := os.Stat(filepath.Join(home, ".claude.json")); !os.IsNotExist(err) {
@@ -133,7 +134,7 @@ func TestSeedWorkspaceTrustSeedsResolvedSandboxPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !seedWorkspaceTrust("claude-code", filepath.Join(sandbox, "merged", "repo0")) {
+	if !seedWorkspaceTrust("claude-code", &manifest.SandboxConfig{}, filepath.Join(sandbox, "merged", "repo0")) {
 		t.Fatal("seedWorkspaceTrust() = false for a sandbox workspace")
 	}
 	resolvedUpper, err := filepath.EvalSymlinks(upper)
@@ -143,5 +144,25 @@ func TestSeedWorkspaceTrustSeedsResolvedSandboxPath(t *testing.T) {
 	projects := trustedProjects(t, home)
 	if _, ok := projects[resolvedUpper]; !ok {
 		t.Errorf("resolved sandbox path %q not trusted; trusted: %v", resolvedUpper, projects)
+	}
+}
+
+// With --no-sandbox the work directory is the user's real checkout. Recording
+// hasTrustDialogAccepted there would grant an untrusted checkout
+// trusted-project behavior while Claude runs directly against it, so trust
+// seeding is refused exactly as project MCP approval already is.
+func TestSeedWorkspaceTrustRefusesOutsideASandbox(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workDir := filepath.Join(home, "real-checkout")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if seedWorkspaceTrust("claude-code", nil, workDir) {
+		t.Error("seedWorkspaceTrust() = true with no sandbox prepared")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("trust was recorded for a non-sandboxed checkout: %v", err)
 	}
 }

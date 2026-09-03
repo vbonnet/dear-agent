@@ -231,7 +231,7 @@ func runCreateSessionLifecycle(
 		if prepareErr := configureProjectPermissions(preparedWorkDir); prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
-		trustPreConfigured = seedWorkspaceTrust(harnessName, preparedWorkDir)
+		trustPreConfigured = seedWorkspaceTrust(harnessName, preparedSandbox, preparedWorkDir)
 		approveSandboxProjectMcpServers(harnessName, preparedSandbox, preparedWorkDir)
 		bypassCodexHookTrust, prepareErr = prepareCodexHookTrustBypass(prepareCtx, preparedSandbox)
 		if prepareErr != nil {
@@ -575,8 +575,14 @@ func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig, requested []string
 // A failure here is not fatal. It only means the dialog may appear, which the
 // monitor is now able to answer, so the session degrades to the slower path
 // instead of failing to launch.
-func seedWorkspaceTrust(harness, workDir string) bool {
-	if agent.NormalizeHarnessName(harness) != "claude-code" {
+// Sandboxes only, for the same reason approveSandboxProjectMcpServers is:
+// with --no-sandbox the work directory is the user's real checkout, and
+// recording hasTrustDialogAccepted there would grant an untrusted checkout
+// trusted-project behavior while Claude runs directly against it. AGM does not
+// widen the user's real workspace on their behalf; outside a sandbox the trust
+// dialog appears and the monitor answers it.
+func seedWorkspaceTrust(harness string, sandboxInfo *manifest.SandboxConfig, workDir string) bool {
+	if sandboxInfo == nil || agent.NormalizeHarnessName(harness) != "claude-code" {
 		return false
 	}
 	debug.Phase("Seed Workspace Trust")

@@ -2,6 +2,7 @@ package claudetrust
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,8 +28,21 @@ const mcpApprovalKey = "enableAllProjectMcpServers"
 // never written into a real checkout the user works in.
 func ApproveProjectMcpServers(workDir string) error {
 	settingsPath := filepath.Join(workDir, ".claude", "settings.local.json")
+
+	// The sandbox clone carries whatever the cloned project contained,
+	// symlinks included. Following a linked .claude directory or settings leaf
+	// would write this capability grant through to a user-writable path
+	// outside the sandbox, which is exactly the real checkout this function
+	// promises never to touch. Refuse the link rather than resolving it; the
+	// caller degrades to Claude's own prompt.
+	if err := refuseSymlinkedPath(filepath.Dir(settingsPath)); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return fmt.Errorf("create %q: %w", filepath.Dir(settingsPath), err)
+	}
+	if err := refuseSymlinkedPath(settingsPath); err != nil {
+		return err
 	}
 
 	settings, err := readSettings(settingsPath)
@@ -71,4 +85,20 @@ func readSettings(settingsPath string) (map[string]any, error) {
 		settings = map[string]any{}
 	}
 	return settings, nil
+}
+
+// refuseSymlinkedPath reports an error when path exists and is a symlink. An
+// absent path is fine: it is about to be created inside the sandbox.
+func refuseSymlinkedPath(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect %q: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refuse symlinked %q: a linked path can escape the sandbox", path)
+	}
+	return nil
 }
