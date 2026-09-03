@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -16,6 +17,13 @@ import (
 type createdAuthNode struct {
 	relativePath string
 	info         os.FileInfo
+}
+
+type stagedAuthNode struct {
+	base         string
+	relativePath string
+	info         os.FileInfo
+	ledgerIndex  int
 }
 
 type authProjectionTransaction struct {
@@ -31,6 +39,28 @@ func newAuthProjectionTransaction(
 	home string,
 	expected os.FileInfo,
 ) (*authProjectionTransaction, error) {
+	before, err := validatePreparedSelectedHome(home, expected)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := openProjectionLock(home)
+	if err != nil {
+		return nil, err
+	}
+	root, err := openAuthenticatedProjectionRoot(home, before, lock)
+	if err != nil {
+		return nil, err
+	}
+
+	return &authProjectionTransaction{
+		home:             home,
+		selectedHomeInfo: expected,
+		root:             root,
+		lock:             lock,
+	}, nil
+}
+
+func validatePreparedSelectedHome(home string, expected os.FileInfo) (os.FileInfo, error) {
 	before, err := os.Lstat(home)
 	if err != nil {
 		return nil, authPathError("inspect selected home", ".", err)
@@ -41,7 +71,10 @@ func newAuthProjectionTransaction(
 	if !sameAuthFileState(expected, before) {
 		return nil, errors.New("selected home changed after preparation")
 	}
+	return before, nil
+}
 
+func openProjectionLock(home string) (*os.File, error) {
 	lock, err := os.OpenFile(home, os.O_RDONLY|unix.O_NONBLOCK|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, authPathError("open selected home", ".", err)
@@ -53,7 +86,10 @@ func newAuthProjectionTransaction(
 		}
 		return nil, authPathError("lock selected home", ".", err)
 	}
+	return lock, nil
+}
 
+func openAuthenticatedProjectionRoot(home string, before os.FileInfo, lock *os.File) (*os.Root, error) {
 	root, err := os.OpenRoot(home)
 	if err != nil {
 		return nil, errors.Join(
@@ -63,49 +99,47 @@ func newAuthProjectionTransaction(
 	}
 	opened, err := lock.Stat()
 	if err != nil {
-		_ = root.Close()
-		return nil, errors.Join(
+		return nil, abortProjectionRootSetup(
+			root,
+			lock,
 			authPathError("inspect opened selected home", ".", err),
-			closeProjectionLock(lock),
 		)
 	}
 	rooted, err := root.Stat(".")
 	if err != nil {
-		_ = root.Close()
-		return nil, errors.Join(
+		return nil, abortProjectionRootSetup(
+			root,
+			lock,
 			authPathError("inspect selected home root", ".", err),
-			closeProjectionLock(lock),
 		)
 	}
 	after, err := os.Lstat(home)
 	if err != nil {
-		_ = root.Close()
-		return nil, errors.Join(
+		return nil, abortProjectionRootSetup(
+			root,
+			lock,
 			authPathError("reinspect selected home", ".", err),
-			closeProjectionLock(lock),
 		)
 	}
 	for _, info := range []os.FileInfo{opened, rooted, after} {
 		if err := validateOwnedDirectoryInfo(info, true, "selected home"); err != nil {
-			_ = root.Close()
-			return nil, errors.Join(err, closeProjectionLock(lock))
+			return nil, abortProjectionRootSetup(root, lock, err)
 		}
 	}
 	if !sameAuthFileState(before, opened) || !sameAuthFileState(opened, rooted) ||
 		!sameAuthFileState(rooted, after) {
-		_ = root.Close()
-		return nil, errors.Join(
+		return nil, abortProjectionRootSetup(
+			root,
+			lock,
 			errors.New("selected home changed while opening transaction root"),
-			closeProjectionLock(lock),
 		)
 	}
+	return root, nil
+}
 
-	return &authProjectionTransaction{
-		home:             home,
-		selectedHomeInfo: expected,
-		root:             root,
-		lock:             lock,
-	}, nil
+func abortProjectionRootSetup(root *os.Root, lock *os.File, cause error) error {
+	_ = root.Close()
+	return errors.Join(cause, closeProjectionLock(lock))
 }
 
 func (tx *authProjectionTransaction) preflight(
@@ -210,32 +244,50 @@ func (tx *authProjectionTransaction) verifyRootVisible() error {
 
 func (tx *authProjectionTransaction) ensureDirectory(directory preparedAuthDirectory) error {
 	if directory.existingInfo != nil {
-		info, err := tx.root.Lstat(directory.relativePath)
-		if err != nil {
-			return authPathError("reinspect destination directory", directory.relativePath, err)
-		}
-		if err := validateOwnedDirectoryInfo(info, true, "destination directory "+directory.relativePath); err != nil {
-			return err
-		}
-		if !os.SameFile(directory.existingInfo, info) {
-			return fmt.Errorf("destination directory %s changed after preflight", directory.relativePath)
-		}
-		return nil
+		return tx.verifyExistingDirectory(directory)
 	}
+	return tx.createDirectory(directory.relativePath)
+}
 
-	parentPath := filepath.Dir(directory.relativePath)
+func (tx *authProjectionTransaction) verifyExistingDirectory(directory preparedAuthDirectory) error {
+	info, err := tx.root.Lstat(directory.relativePath)
+	if err != nil {
+		return authPathError("reinspect destination directory", directory.relativePath, err)
+	}
+	if err := validateOwnedDirectoryInfo(info, true, "destination directory "+directory.relativePath); err != nil {
+		return err
+	}
+	if !os.SameFile(directory.existingInfo, info) {
+		return fmt.Errorf("destination directory %s changed after preflight", directory.relativePath)
+	}
+	return nil
+}
+
+func (tx *authProjectionTransaction) createDirectory(relativePath string) error {
+	parentPath := filepath.Dir(relativePath)
 	parent, err := tx.openDestinationParent(parentPath)
 	if err != nil {
 		return err
 	}
 	defer parent.Close()
-	if err := ensureAuthLeafAbsent(tx.root, directory.relativePath); err != nil {
+	if err := ensureAuthLeafAbsent(tx.root, relativePath); err != nil {
 		return err
 	}
 
-	stageBase, err := createStagedDirectory(parent, filepath.Base(directory.relativePath))
+	staged, err := tx.stageDirectory(parent, parentPath, relativePath)
 	if err != nil {
-		return authPathError("stage destination directory", directory.relativePath, err)
+		return err
+	}
+	return tx.installStagedDirectory(parent, relativePath, staged)
+}
+
+func (tx *authProjectionTransaction) stageDirectory(
+	parent *os.File,
+	parentPath, relativePath string,
+) (stagedAuthNode, error) {
+	stageBase, err := createStagedDirectory(parent, filepath.Base(relativePath))
+	if err != nil {
+		return stagedAuthNode{}, authPathError("stage destination directory", relativePath, err)
 	}
 	stagePath := filepath.Join(parentPath, stageBase)
 	openedFD, err := unix.Openat(
@@ -245,86 +297,90 @@ func (tx *authProjectionTransaction) ensureDirectory(directory preparedAuthDirec
 		0,
 	)
 	if err != nil {
-		return cleanupUntrackedAuthNode(
+		return stagedAuthNode{}, cleanupUntrackedAuthNode(
 			parent,
 			stageBase,
 			true,
-			authPathError("open staged destination directory", directory.relativePath, err),
+			authPathError("open staged destination directory", relativePath, err),
 		)
 	}
-	opened := os.NewFile(uintptr(openedFD), directory.relativePath)
+	opened := os.NewFile(uintptr(openedFD), relativePath)
 	if opened == nil {
 		_ = unix.Close(openedFD)
-		return cleanupUntrackedAuthNode(
+		return stagedAuthNode{}, cleanupUntrackedAuthNode(
 			parent,
 			stageBase,
 			true,
-			fmt.Errorf("open staged destination directory %s", directory.relativePath),
+			fmt.Errorf("open staged destination directory %s", relativePath),
 		)
 	}
 	info, statErr := opened.Stat()
 	if statErr != nil {
 		closeErr := opened.Close()
-		return cleanupUntrackedAuthNode(
+		return stagedAuthNode{}, cleanupUntrackedAuthNode(
 			parent,
 			stageBase,
 			true,
 			errors.Join(
-				authPathError("inspect staged destination directory", directory.relativePath, statErr),
-				sanitizeCloseError("close staged destination directory", directory.relativePath, closeErr),
+				authPathError("inspect staged destination directory", relativePath, statErr),
+				sanitizeCloseError("close staged destination directory", relativePath, closeErr),
 			),
 		)
 	}
 	nodeIndex := len(tx.created)
 	tx.created = append(tx.created, createdAuthNode{relativePath: stagePath, info: info})
-	closeErr := opened.Close()
-	if closeErr != nil {
-		return authPathError("close staged destination directory", directory.relativePath, closeErr)
+	staged := stagedAuthNode{
+		base:         stageBase,
+		relativePath: stagePath,
+		info:         info,
+		ledgerIndex:  nodeIndex,
 	}
-	if err := validateOwnedDirectoryInfo(info, true, "destination directory "+directory.relativePath); err != nil {
+	if err := opened.Close(); err != nil {
+		return staged, authPathError("close staged destination directory", relativePath, err)
+	}
+	return staged, nil
+}
+
+func (tx *authProjectionTransaction) installStagedDirectory(
+	parent *os.File,
+	relativePath string,
+	staged stagedAuthNode,
+) error {
+	if err := validateOwnedDirectoryInfo(staged.info, true, "destination directory "+relativePath); err != nil {
 		return err
 	}
-	visible, err := tx.root.Lstat(stagePath)
+	visible, err := tx.root.Lstat(staged.relativePath)
 	if err != nil {
-		return authPathError("inspect staged destination directory", directory.relativePath, err)
+		return authPathError("inspect staged destination directory", relativePath, err)
 	}
-	if !os.SameFile(info, visible) {
-		return fmt.Errorf("staged destination directory %s changed before installation", directory.relativePath)
+	if !os.SameFile(staged.info, visible) {
+		return fmt.Errorf("staged destination directory %s changed before installation", relativePath)
 	}
 
 	if err := renameNoReplace(
-		int(parent.Fd()), stageBase,
-		int(parent.Fd()), filepath.Base(directory.relativePath),
+		int(parent.Fd()), staged.base,
+		int(parent.Fd()), filepath.Base(relativePath),
 	); err != nil {
-		return authPathError("install destination directory", directory.relativePath, err)
+		return authPathError("install destination directory", relativePath, err)
 	}
-	tx.created[nodeIndex].relativePath = directory.relativePath
-	current, err := tx.root.Lstat(directory.relativePath)
+	tx.created[staged.ledgerIndex].relativePath = relativePath
+	current, err := tx.root.Lstat(relativePath)
 	if err != nil {
-		return authPathError("verify destination directory", directory.relativePath, err)
+		return authPathError("verify destination directory", relativePath, err)
 	}
-	if !os.SameFile(info, current) {
-		return fmt.Errorf("destination directory %s changed during installation", directory.relativePath)
+	if !os.SameFile(staged.info, current) {
+		return fmt.Errorf("destination directory %s changed during installation", relativePath)
 	}
-	return validateOwnedDirectoryInfo(current, true, "destination directory "+directory.relativePath)
+	return validateOwnedDirectoryInfo(current, true, "destination directory "+relativePath)
 }
 
 func (tx *authProjectionTransaction) installCredentialLink(
 	hostHome string,
 	link preparedCredentialLink,
 ) error {
-	file, current, present, err := openApprovedAuthSource(hostHome, link.relativePath, true)
+	sourcePath, err := validatePreparedCredentialSource(hostHome, link)
 	if err != nil {
 		return err
-	}
-	if !present {
-		return fmt.Errorf("credential source %s changed after preparation", link.relativePath)
-	}
-	if err := file.Close(); err != nil {
-		return authPathError("close credential source", link.relativePath, err)
-	}
-	if !sameAuthFileState(link.sourceInfo, current) {
-		return fmt.Errorf("credential source %s changed after preparation", link.relativePath)
 	}
 
 	parentPath := filepath.Dir(link.relativePath)
@@ -337,78 +393,117 @@ func (tx *authProjectionTransaction) installCredentialLink(
 		return err
 	}
 
-	sourcePath := filepath.Join(hostHome, link.relativePath)
-	stageBase, err := createStagedSymlink(parent, filepath.Base(link.relativePath), sourcePath)
+	staged, err := tx.stageCredentialLink(parent, parentPath, link.relativePath, sourcePath)
 	if err != nil {
-		return authPathError("stage credential link", link.relativePath, err)
+		return err
+	}
+	return tx.installStagedCredentialLink(parent, link.relativePath, sourcePath, staged)
+}
+
+func validatePreparedCredentialSource(hostHome string, link preparedCredentialLink) (string, error) {
+	file, current, present, err := openApprovedAuthSource(hostHome, link.relativePath, true)
+	if err != nil {
+		return "", err
+	}
+	if !present {
+		return "", fmt.Errorf("credential source %s changed after preparation", link.relativePath)
+	}
+	if err := file.Close(); err != nil {
+		return "", authPathError("close credential source", link.relativePath, err)
+	}
+	if !sameAuthFileState(link.sourceInfo, current) {
+		return "", fmt.Errorf("credential source %s changed after preparation", link.relativePath)
+	}
+	return filepath.Join(hostHome, link.relativePath), nil
+}
+
+func (tx *authProjectionTransaction) stageCredentialLink(
+	parent *os.File,
+	parentPath, relativePath, sourcePath string,
+) (stagedAuthNode, error) {
+	stageBase, err := createStagedSymlink(parent, filepath.Base(relativePath), sourcePath)
+	if err != nil {
+		return stagedAuthNode{}, authPathError("stage credential link", relativePath, err)
 	}
 	stagePath := filepath.Join(parentPath, stageBase)
 	opened, err := openSymlinkAt(int(parent.Fd()), stageBase)
 	if err != nil {
-		return cleanupUntrackedAuthNode(
+		return stagedAuthNode{}, cleanupUntrackedAuthNode(
 			parent,
 			stageBase,
 			false,
-			authPathError("open staged credential link", link.relativePath, err),
+			authPathError("open staged credential link", relativePath, err),
 		)
 	}
 	info, statErr := opened.Stat()
 	if statErr != nil {
 		closeErr := opened.Close()
-		return cleanupUntrackedAuthNode(
+		return stagedAuthNode{}, cleanupUntrackedAuthNode(
 			parent,
 			stageBase,
 			false,
 			errors.Join(
-				authPathError("inspect staged credential link", link.relativePath, statErr),
-				sanitizeCloseError("close staged credential link", link.relativePath, closeErr),
+				authPathError("inspect staged credential link", relativePath, statErr),
+				sanitizeCloseError("close staged credential link", relativePath, closeErr),
 			),
 		)
 	}
 	nodeIndex := len(tx.created)
 	tx.created = append(tx.created, createdAuthNode{relativePath: stagePath, info: info})
-	closeErr := opened.Close()
-	if closeErr != nil {
-		return authPathError("close staged credential link", link.relativePath, closeErr)
+	staged := stagedAuthNode{
+		base:         stageBase,
+		relativePath: stagePath,
+		info:         info,
+		ledgerIndex:  nodeIndex,
+	}
+	if err := opened.Close(); err != nil {
+		return staged, authPathError("close staged credential link", relativePath, err)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("staged credential destination %s is not a link", link.relativePath)
+		return staged, fmt.Errorf("staged credential destination %s is not a link", relativePath)
 	}
 	visible, err := tx.root.Lstat(stagePath)
 	if err != nil {
-		return authPathError("inspect staged credential link", link.relativePath, err)
+		return staged, authPathError("inspect staged credential link", relativePath, err)
 	}
 	if !os.SameFile(info, visible) {
-		return fmt.Errorf("staged credential destination %s changed before installation", link.relativePath)
+		return staged, fmt.Errorf("staged credential destination %s changed before installation", relativePath)
 	}
 	target, err := tx.root.Readlink(stagePath)
 	if err != nil {
-		return authPathError("read staged credential link", link.relativePath, err)
+		return staged, authPathError("read staged credential link", relativePath, err)
 	}
 	if target != sourcePath {
-		return fmt.Errorf("staged credential destination %s has an unexpected target", link.relativePath)
+		return staged, fmt.Errorf("staged credential destination %s has an unexpected target", relativePath)
 	}
+	return staged, nil
+}
 
+func (tx *authProjectionTransaction) installStagedCredentialLink(
+	parent *os.File,
+	relativePath, sourcePath string,
+	staged stagedAuthNode,
+) error {
 	if err := renameNoReplace(
-		int(parent.Fd()), stageBase,
-		int(parent.Fd()), filepath.Base(link.relativePath),
+		int(parent.Fd()), staged.base,
+		int(parent.Fd()), filepath.Base(relativePath),
 	); err != nil {
-		return authPathError("install credential link", link.relativePath, err)
+		return authPathError("install credential link", relativePath, err)
 	}
-	tx.created[nodeIndex].relativePath = link.relativePath
-	currentLink, err := tx.root.Lstat(link.relativePath)
+	tx.created[staged.ledgerIndex].relativePath = relativePath
+	currentLink, err := tx.root.Lstat(relativePath)
 	if err != nil {
-		return authPathError("verify credential link", link.relativePath, err)
+		return authPathError("verify credential link", relativePath, err)
 	}
-	if !os.SameFile(info, currentLink) || currentLink.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("credential destination %s changed during installation", link.relativePath)
+	if !os.SameFile(staged.info, currentLink) || currentLink.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("credential destination %s changed during installation", relativePath)
 	}
-	target, err = tx.root.Readlink(link.relativePath)
+	target, err := tx.root.Readlink(relativePath)
 	if err != nil {
-		return authPathError("read credential link", link.relativePath, err)
+		return authPathError("read credential link", relativePath, err)
 	}
 	if target != sourcePath {
-		return fmt.Errorf("credential destination %s has an unexpected target", link.relativePath)
+		return fmt.Errorf("credential destination %s has an unexpected target", relativePath)
 	}
 	return nil
 }
@@ -497,7 +592,7 @@ func (tx *authProjectionTransaction) openDestinationParent(relativePath string) 
 func (tx *authProjectionTransaction) openRootedDestinationParent(relativePath string) (*os.File, error) {
 	if relativePath != "." {
 		current := ""
-		for _, component := range strings.Split(filepath.ToSlash(relativePath), "/") {
+		for component := range strings.SplitSeq(filepath.ToSlash(relativePath), "/") {
 			current = filepath.Join(current, component)
 			info, err := tx.root.Lstat(current)
 			if err != nil {
@@ -623,8 +718,7 @@ func cleanupUntrackedAuthNode(
 
 func (tx *authProjectionTransaction) rollback() error {
 	var rollbackErr error
-	for index := len(tx.created) - 1; index >= 0; index-- {
-		node := tx.created[index]
+	for _, node := range slices.Backward(tx.created) {
 		if node.info.IsDir() {
 			empty, err := tx.rollbackDirectoryEmpty(node)
 			if err != nil {

@@ -14,6 +14,17 @@ import (
 
 type snapshotReadHook func() error
 
+type configSnapshotReadResult struct {
+	first     []byte
+	second    []byte
+	middle    os.FileInfo
+	after     os.FileInfo
+	readErr   error
+	middleErr error
+	afterErr  error
+	closeErr  error
+}
+
 func openApprovedAuthSource(
 	hostHome, relativePath string,
 	credential bool,
@@ -206,59 +217,83 @@ func prepareConfigSnapshotWithHook(
 		return nil, false, fmt.Errorf("configuration source %s exceeds %d bytes", relativePath, maxAuthConfigBytes)
 	}
 
-	first, readErr := readBoundedAuthSnapshot(file)
-	middle, statErr := file.Stat()
-	if readErr == nil && statErr == nil && hook != nil {
-		readErr = hook()
-	}
-	if readErr == nil && statErr == nil {
-		_, readErr = file.Seek(0, io.SeekStart)
-	}
-	var second []byte
-	if readErr == nil && statErr == nil {
-		second, readErr = readBoundedAuthSnapshot(file)
-	}
-	after, afterErr := file.Stat()
-	closeErr := file.Close()
-	if readErr != nil {
-		return nil, false, authPathError("read configuration source", relativePath, readErr)
-	}
-	if statErr != nil {
-		return nil, false, authPathError("reinspect configuration source", relativePath, statErr)
-	}
-	if afterErr != nil {
-		return nil, false, authPathError("reinspect configuration source", relativePath, afterErr)
-	}
-	if closeErr != nil {
-		return nil, false, authPathError("close configuration source", relativePath, closeErr)
-	}
-	for _, info := range []os.FileInfo{middle, after} {
-		if err := validateAuthLeafInfo(info, false, relativePath); err != nil {
-			return nil, false, err
-		}
-	}
-	if len(first) > int(maxAuthConfigBytes) || len(second) > int(maxAuthConfigBytes) {
-		return nil, false, fmt.Errorf("configuration source %s exceeds %d bytes", relativePath, maxAuthConfigBytes)
-	}
-	if int64(len(first)) != declaredSize || !bytes.Equal(first, second) ||
-		!sameAuthFileState(before, middle) || !sameAuthFileState(middle, after) {
-		return nil, false, fmt.Errorf("configuration source %s changed while reading", relativePath)
-	}
-
-	currentFile, current, currentPresent, err := openApprovedAuthSource(hostHome, relativePath, false)
-	if err != nil {
+	readResult := readConfigSnapshotTwice(file, hook)
+	if err := validateConfigSnapshotRead(readResult, before, declaredSize, relativePath); err != nil {
 		return nil, false, err
 	}
-	if !currentPresent {
-		return nil, false, fmt.Errorf("configuration source %s changed while reading", relativePath)
+
+	if err := reauthenticateConfigSnapshot(hostHome, relativePath, before); err != nil {
+		return nil, false, err
+	}
+	return readResult.first, true, nil
+}
+
+func readConfigSnapshotTwice(file *os.File, hook snapshotReadHook) configSnapshotReadResult {
+	result := configSnapshotReadResult{}
+	result.first, result.readErr = readBoundedAuthSnapshot(file)
+	result.middle, result.middleErr = file.Stat()
+	if result.readErr == nil && result.middleErr == nil && hook != nil {
+		result.readErr = hook()
+	}
+	if result.readErr == nil && result.middleErr == nil {
+		_, result.readErr = file.Seek(0, io.SeekStart)
+	}
+	if result.readErr == nil && result.middleErr == nil {
+		result.second, result.readErr = readBoundedAuthSnapshot(file)
+	}
+	result.after, result.afterErr = file.Stat()
+	result.closeErr = file.Close()
+	return result
+}
+
+func validateConfigSnapshotRead(
+	result configSnapshotReadResult,
+	before os.FileInfo,
+	declaredSize int64,
+	relativePath string,
+) error {
+	if result.readErr != nil {
+		return authPathError("read configuration source", relativePath, result.readErr)
+	}
+	if result.middleErr != nil {
+		return authPathError("reinspect configuration source", relativePath, result.middleErr)
+	}
+	if result.afterErr != nil {
+		return authPathError("reinspect configuration source", relativePath, result.afterErr)
+	}
+	if result.closeErr != nil {
+		return authPathError("close configuration source", relativePath, result.closeErr)
+	}
+	for _, info := range []os.FileInfo{result.middle, result.after} {
+		if err := validateAuthLeafInfo(info, false, relativePath); err != nil {
+			return err
+		}
+	}
+	if len(result.first) > int(maxAuthConfigBytes) || len(result.second) > int(maxAuthConfigBytes) {
+		return fmt.Errorf("configuration source %s exceeds %d bytes", relativePath, maxAuthConfigBytes)
+	}
+	if int64(len(result.first)) != declaredSize || !bytes.Equal(result.first, result.second) ||
+		!sameAuthFileState(before, result.middle) || !sameAuthFileState(result.middle, result.after) {
+		return fmt.Errorf("configuration source %s changed while reading", relativePath)
+	}
+	return nil
+}
+
+func reauthenticateConfigSnapshot(hostHome, relativePath string, before os.FileInfo) error {
+	currentFile, current, present, err := openApprovedAuthSource(hostHome, relativePath, false)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("configuration source %s changed while reading", relativePath)
 	}
 	if err := currentFile.Close(); err != nil {
-		return nil, false, authPathError("close configuration source", relativePath, err)
+		return authPathError("close configuration source", relativePath, err)
 	}
 	if !sameAuthFileState(before, current) {
-		return nil, false, fmt.Errorf("configuration source %s changed while reading", relativePath)
+		return fmt.Errorf("configuration source %s changed while reading", relativePath)
 	}
-	return first, true, nil
+	return nil
 }
 
 func readBoundedAuthSnapshot(file *os.File) ([]byte, error) {

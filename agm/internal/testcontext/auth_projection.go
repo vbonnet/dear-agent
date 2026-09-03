@@ -275,12 +275,10 @@ func allAuthLeafPaths() []string {
 }
 
 func authPathError(operation, relativePath string, err error) error {
-	var pathError *os.PathError
-	if errors.As(err, &pathError) {
+	if pathError, ok := errors.AsType[*os.PathError](err); ok {
 		err = pathError.Err
 	}
-	var linkError *os.LinkError
-	if errors.As(err, &linkError) {
+	if linkError, ok := errors.AsType[*os.LinkError](err); ok {
 		err = linkError.Err
 	}
 	return fmt.Errorf("%s %s: %w", operation, relativePath, err)
