@@ -69,6 +69,33 @@ func TestRunEmitsProgress(t *testing.T) {
 	}
 }
 
+// TestRunProgressWriterIsSerialized pins that the heartbeat goroutine and the
+// terminal line never write to the progress writer at the same time. A fast
+// heartbeat over a short command makes the two collide reliably under -race.
+func TestRunProgressWriterIsSerialized(t *testing.T) {
+	t.Parallel()
+
+	for range 5 {
+		var progress bytes.Buffer
+		res := Command{
+			Label:     "racy heartbeat",
+			Name:      "sh",
+			Args:      []string{"-c", "sleep 0.2"},
+			Timeout:   10 * time.Second,
+			Heartbeat: time.Millisecond,
+			Progress:  &progress,
+		}.Run()
+		if res.Err != nil {
+			t.Fatalf("unexpected error: %v", res.Err)
+		}
+		// Reading the buffer here is only safe because Run waits for the
+		// heartbeat to stop before returning.
+		if !strings.Contains(progress.String(), "completed in") {
+			t.Fatalf("missing terminal line; got:\n%s", progress.String())
+		}
+	}
+}
+
 // TestRunDetachesStdin proves a gate never waits on a terminal that a
 // non-interactive host session does not have.
 func TestRunDetachesStdin(t *testing.T) {

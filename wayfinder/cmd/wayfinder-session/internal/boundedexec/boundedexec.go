@@ -103,10 +103,18 @@ func (c Command) Run() Result {
 
 	start := time.Now()
 	done := make(chan struct{})
-	go c.beat(done, progress, start, heartbeat)
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		c.beat(done, progress, start, heartbeat)
+	}()
 
 	err := cmd.Run()
+	// Close, then wait for the heartbeat to actually stop. Closing alone only
+	// asks it to stop; the terminal line below writes to the same writer, so
+	// the two must not overlap.
 	close(done)
+	<-stopped
 	elapsed := time.Since(start)
 
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
