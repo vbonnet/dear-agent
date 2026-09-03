@@ -3,10 +3,12 @@ schema_version: "2.0"
 project_name: feedback-loop-event-architecture
 project_type: research
 risk_level: S
-current_waypoint: RESEARCH
+current_waypoint: BUILD
 status: planning
 created_at: 2026-09-02T22:20:08.169856-07:00
-updated_at: 2026-09-02T23:35:36.85188-07:00
+updated_at: 2026-09-02T23:36:04.740716-07:00
+beads:
+    - ce-nmu17
 skip_roadmap: true
 skip_phases:
     - DESIGN
@@ -28,6 +30,9 @@ waypoint_history:
       started_at: 2026-09-02T23:35:29.508061-07:00
       completed_at: 2026-09-02T23:35:36.85188-07:00
       outcome: success
+    - name: BUILD
+      status: in-progress
+      started_at: 2026-09-02T23:36:04.740716-07:00
 roadmap:
     phases: []
 ---

@@ -10,3 +10,5 @@
 {"timestamp":"2026-09-02T23:35:07.915585-07:00","type":"phase.completed","phase":"PROBLEM","data":{"outcome":"success"}}
 {"timestamp":"2026-09-02T23:35:29.508367-07:00","type":"phase.started","phase":"RESEARCH"}
 {"timestamp":"2026-09-02T23:35:36.851986-07:00","type":"phase.completed","phase":"RESEARCH","data":{"outcome":"success"}}
+{"timestamp":"2026-09-02T23:35:55.084125-07:00","type":"validation.failed","phase":"SETUP","data":{"error":"cannot start SETUP: phase is configured to be skipped. Fix: Continue with the next required phase instead"}}
+{"timestamp":"2026-09-02T23:36:05.6651-07:00","type":"phase.started","phase":"BUILD"}
