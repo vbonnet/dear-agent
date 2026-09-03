@@ -66,16 +66,21 @@ func (r OAuthResolver) usesDefaultCredentialsPath() bool {
 		filepath.Join(home, claudeCredentialsRelPath))
 }
 
-// primaryIsWorse reports whether the credential the CLI will present is
-// strictly inferior to the one sitting in the fallback store: either it cannot
-// be refreshed at all, or the fallback carries a newer credential that the CLI
-// will never reach. Either way the CLI is authenticating with the wrong
-// credential and refreshing the fallback cannot change that.
-func primaryIsWorse(primary, fallback fullCredentials) bool {
+// primaryUnserviceable reports whether the credential the CLI will present
+// cannot serve a request: it carries no refresh token, or it has already
+// expired. Paired with a usable fallback, that is the split this change exists
+// to catch, because it means the refresher has been rotating the fallback while
+// the store the CLI reads rotted.
+//
+// A primary that is merely a little older than the fallback is NOT flagged. It
+// is still fresh and still refreshable, so raising an alarm there would train
+// the operator to ignore the one message that matters.
+func primaryUnserviceable(primary fullCredentials, now int64) bool {
 	if !usableCredential(primary) {
 		return true
 	}
-	return fallback.ClaudeAIOAuth.ExpiresAt > primary.ClaudeAIOAuth.ExpiresAt
+	exp := primary.ClaudeAIOAuth.ExpiresAt
+	return exp > 0 && exp <= now
 }
 
 // keychainStoreFor builds the keychain store this process's environment maps
@@ -119,7 +124,8 @@ func (r OAuthResolver) resolveStores(keychain CredentialStore) StoreResolution {
 		if kcCreds, ok := keychain.Read(); ok {
 			res.Primary = StoreKeychain
 			res.Effective = kcCreds
-			res.Shadowed = res.FallbackUsable && primaryIsWorse(kcCreds, fileCreds)
+			res.Shadowed = res.FallbackUsable &&
+				primaryUnserviceable(kcCreds, r.nowFn()().UnixMilli())
 			return res
 		}
 	}

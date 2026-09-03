@@ -271,3 +271,17 @@ func TestKeychainStoreNotUsedForNonDefaultPath(t *testing.T) {
 		t.Fatalf("keychainStoreFor() = %v for a non-default path, want nil", store)
 	}
 }
+
+// A primary that is simply a little older than the file, but still fresh and
+// still refreshable, must stay quiet. Alarming here would train the operator to
+// ignore the one message that actually means the session is broken.
+func TestResolveStoreQuietWhenPrimaryOlderButStillFresh(t *testing.T) {
+	dir := t.TempDir()
+	path := writeCredsFile(t, dir, credsWith("file", "file-refresh", time.Now().Add(3*time.Hour).UnixMilli()))
+	r := OAuthResolver{CredentialsPath: path}
+
+	kc := &stubStore{present: true, creds: credsWith("kc", "kc-refresh", time.Now().Add(time.Hour).UnixMilli())}
+	if res := r.resolveStores(kc); res.Shadowed {
+		t.Fatal("Shadowed = true for a fresh, refreshable primary that is merely older than the file")
+	}
+}
