@@ -210,6 +210,66 @@ When using `--test` flag:
 3. **Database:** Not tracked in AGM database (ephemeral)
 4. **Cleanup:** Automatically removed by test infrastructure
 
+### Auth Forwarding Boundary
+
+An isolated `--test` session requests inherited authentication when it creates
+its test home. `agm test-env create` also defaults to inherited authentication;
+test-environment creation can instead select environment-only or
+credential-free operation with its `--auth-mode` option.
+
+Inherited authentication does not link or copy a provider directory. For each
+present approved leaf, AGM creates the needed real private provider directories
+in the selected test home and makes only these credential files available as
+exact symbolic links to the host:
+
+- `.claude/.credentials.json`
+- `.codex/auth.json`
+- `.local/share/opencode/auth.json`
+- `.config/gcloud/application_default_credentials.json`
+
+Each link stays at the provider's native relative path. Replacing a credential
+at that exact host path is therefore visible to the test environment, but no
+sibling file or directory becomes reachable through the link.
+
+The following optional compatibility configuration files are copied once as
+detached `0600` snapshots, each bounded to 1 MiB:
+
+- `.config/gcloud/configurations/config_default`
+- `.config/opencode/opencode.json`
+- `.config/opencode/opencode.jsonc`
+- `.config/opencode/tui.json`
+- `.config/opencode/tui.jsonc`
+
+Later host edits do not change a snapshot. AGM does not discover additional
+configuration recursively or with wildcards. In particular, it does not
+inherit gcloud's `active_config` or nondefault profiles, OpenCode data,
+extensions, or databases, Codex configuration, trust, history, logs, or
+caches, or Claude projects, transcripts, sessions, logs, plugins, hooks, or
+other provider state.
+
+Before creating anything, AGM validates the source leaves and ancestry, the
+selected home, and all existing destination parents. Sources must be real,
+owner-controlled, and not group- or world-writable; credential leaves must
+also be owner-private. The selected home and destination parents must be real
+owner-private directories. Redirected, wrong-owner, non-regular, oversized,
+identity-changing, or conflicting paths fail closed; AGM does not fall back to
+a whole-provider link.
+
+For destination work, AGM retains an opened root for the selected home and an
+advisory lock on that directory. Creation is descriptor-relative, so replacing
+the selected-home pathname cannot redirect transaction writes into a different
+directory. On failure, rollback uses no-replace quarantine renames and deletes
+only a node whose recorded identity still matches. This serializes cooperating
+AGM projectors. It does not make arbitrary code running as the same Unix user
+untrusted—the same user already controls the selected home—but such pathname
+replacement still cannot escape the retained root. Projection itself never
+writes back to the host home.
+
+Tests for this boundary must use synthetic host and selected homes. Run a
+synthetic provider-onboarding helper process and the real Codex trust writer
+with `HOME` set to the synthetic selected home, and assert that synthetic host
+sentinels remain byte-identical; never use real host credentials as fixtures.
+
 ### Pattern Detection
 
 AGM detects test patterns using case-insensitive substring matching:
