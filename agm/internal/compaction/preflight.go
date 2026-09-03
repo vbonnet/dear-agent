@@ -7,13 +7,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
-// PreflightResult holds the outcome of pre-flight checks.
-type PreflightResult struct {
-	OK       bool
-	Errors   []string
-	Warnings []string
-}
-
 // ValidateReady requires positive evidence that the target session is live and
 // ready. Compatibility display states are not readiness authority.
 func ValidateReady(observation session.DetectionResult) error {
@@ -35,26 +28,4 @@ func ValidateReady(observation session.DetectionResult) error {
 	default:
 		return fmt.Errorf("session is not ready for compaction (state: %s)", observation.State)
 	}
-}
-
-// RunPreflight validates that compaction is safe to proceed.
-func RunPreflight(observation session.DetectionResult, compactionState *CompactionState, force bool) *PreflightResult {
-	result := &PreflightResult{OK: true}
-
-	// Check 1: Positive live-ready evidence. Force never bypasses this gate.
-	if err := ValidateReady(observation); err != nil {
-		result.OK = false
-		result.Errors = append(result.Errors, err.Error())
-		return result
-	}
-
-	// Check 2: Anti-loop safety
-	if err := CheckAntiLoop(compactionState, force); err != nil {
-		result.OK = false
-		result.Errors = append(result.Errors, err.Error())
-	} else if force {
-		result.Warnings = append(result.Warnings, "anti-loop safety bypassed with --force")
-	}
-
-	return result
 }

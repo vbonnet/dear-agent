@@ -92,7 +92,6 @@ func agmRunsCompactionDeliveryAuthorizationRegressions(ctx context.Context) erro
 		compactionRegressionGroup{
 			packagePath: "./agm/internal/compaction",
 			testNames: []string{
-				"TestRunPreflight_RequiresPositiveLiveReadyEvidenceEvenWithForce",
 				"TestValidateReadyRejectsCompatibilityDone",
 			},
 		},
