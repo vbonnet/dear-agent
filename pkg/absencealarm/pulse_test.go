@@ -197,3 +197,38 @@ func TestLoadPulseConfig_Valid(t *testing.T) {
 		t.Errorf("window = %s, want 24h", pulses[0].window)
 	}
 }
+
+// A stat on a wedged mount blocks forever. The probe deadline must still
+// return, classifying the pulse UNDETERMINED, so later pulses, notifications,
+// and the heartbeat are not held hostage by one path.
+func TestEvaluatePulseBoundsAWedgedFileStat(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	probes := Probes{
+		StatMtime: func(string) (time.Time, bool, error) {
+			<-release // never returns within the deadline
+			return time.Time{}, false, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) },
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	done := make(chan Result, 1)
+	go func() {
+		done <- EvaluatePulse(ctx, Pulse{
+			Name: "spans", Type: PulseFileMtime, Path: "/mnt/wedged/spans.jsonl", Window: "1h",
+		}, probes, "", nil)
+	}()
+
+	select {
+	case res := <-done:
+		if res.Status != StatusUndetermined {
+			t.Errorf("Status = %q, want UNDETERMINED for a stat that never returns", res.Status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("EvaluatePulse did not return after the probe deadline expired")
+	}
+}

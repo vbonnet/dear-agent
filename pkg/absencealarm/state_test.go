@@ -224,3 +224,30 @@ func TestAppendJournalReportsUnusablePath(t *testing.T) {
 		t.Fatal("AppendJournal() error = nil for a path under a regular file")
 	}
 }
+
+// A clock that jumped forward during an alarming tick and was then corrected
+// leaves the persisted timestamps after now. Every re-notification point is
+// then unreachable, so without a reset a standing alarm stays silent until
+// wall time catches up.
+func TestUpdateAlarmRecoversFromAClockRollback(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	future := now.Add(72 * time.Hour)
+
+	st := AlarmState{Pulses: map[string]PulseAlarm{
+		"spans": {Since: future, LastNotified: future, Misses: 4},
+	}}
+
+	if got := UpdateAlarm(&st, "spans", true, now); got != NotifyAlarm {
+		t.Fatalf("UpdateAlarm() = %v with future timestamps, want NotifyAlarm", got)
+	}
+
+	got := st.Pulses["spans"]
+	if got.Since.After(now) || got.LastNotified.After(now) {
+		t.Errorf("timestamps still in the future: Since=%v LastNotified=%v now=%v", got.Since, got.LastNotified, now)
+	}
+
+	// The cadence resumes rather than re-notifying on every subsequent tick.
+	if next := UpdateAlarm(&st, "spans", true, now.Add(time.Minute)); next != NotifyNone {
+		t.Errorf("UpdateAlarm() = %v one minute later, want NotifyNone", next)
+	}
+}

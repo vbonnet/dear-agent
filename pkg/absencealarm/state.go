@@ -131,6 +131,23 @@ func UpdateAlarm(st *AlarmState, name string, alarming bool, now time.Time) Noti
 		return NotifyAlarm
 	}
 	prev.Misses++
+	// A clock that jumped forward during an alarming tick and was then
+	// corrected leaves Since or LastNotified after now. Every re-notification
+	// point is then unreachable, so reNotifyDue returns false on every tick
+	// and a standing alarm goes silent until wall time catches up, which can
+	// be far longer than the escalation schedule. The state file stays valid
+	// JSON, so LoadAlarmState does not discard it either.
+	//
+	// Rebase the alarm on the corrected clock and notify once, so the cadence
+	// restarts from now instead of stalling. The reset makes Since and
+	// LastNotified equal to now, so the next tick resumes the normal schedule
+	// rather than re-notifying.
+	if prev.Since.After(now) || prev.LastNotified.After(now) {
+		prev.Since = now
+		prev.LastNotified = now
+		st.Pulses[name] = prev
+		return NotifyAlarm
+	}
 	if due := reNotifyDue(prev.Since, prev.LastNotified, now); due {
 		prev.LastNotified = now
 		st.Pulses[name] = prev
