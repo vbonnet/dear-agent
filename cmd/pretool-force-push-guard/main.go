@@ -66,9 +66,9 @@ type hookDecision struct {
 	DenialReason       string `json:"denialReason"`
 }
 
-func main() { os.Exit(run(os.Stdin, os.Stdout, os.Stderr)) }
+func main() { os.Exit(run(context.Background(), os.Stdin, os.Stdout, os.Stderr)) }
 
-func run(in io.Reader, out, errOut io.Writer) int {
+func run(ctx context.Context, in io.Reader, out, errOut io.Writer) int {
 	var env envelope
 	if err := json.NewDecoder(in).Decode(&env); err != nil {
 		return 0 // unparseable envelope -> fail open
@@ -85,11 +85,11 @@ func run(in io.Reader, out, errOut io.Writer) int {
 		if !blocked {
 			continue
 		}
-		if approved(target) {
+		if approved(ctx, target) {
 			continue
 		}
 		msg := refusal(target)
-		emit(out, msg)
+		emit(out, errOut, msg)
 		fmt.Fprintln(errOut, msg)
 		return 2
 	}
@@ -111,12 +111,12 @@ func violation(p fsguard.PushInvocation) (string, bool) {
 
 // approved reports whether the operator has supplied a justification good
 // enough to unlock this layer, recording the attempt either way.
-func approved(target string) bool {
+func approved(ctx context.Context, target string) bool {
 	reason := strings.TrimSpace(os.Getenv(approvalEnv))
 	if reason == "" {
 		return false
 	}
-	err := override.Require(context.Background(), override.Guard{
+	err := override.Require(ctx, override.Guard{
 		Tool: "git push",
 		Flag: "--force",
 		Gate: "the force-push guard on protected branch " + target,
@@ -157,13 +157,17 @@ independently, so it refuses the rewrite whatever this hook decides.`,
 		target, target, approvalEnv, target)
 }
 
-func emit(out io.Writer, msg string) {
+func emit(out, errOut io.Writer, msg string) {
 	var d hookDecision
 	d.HookSpecificOutput.HookEventName = "PreToolUse"
 	d.HookSpecificOutput.AdditionalContext = msg
 	d.PermissionDecision = "deny"
 	d.DenialReason = msg
-	// A failed encode costs the structured half of the decision; the exit code
-	// and the stderr guidance still block the command.
-	_ = json.NewEncoder(out).Encode(d)
+	// A failed encode costs only the structured half of the decision: the exit
+	// code and the stderr guidance still block the command, so this must not
+	// change the verdict. Report it rather than discarding it, so a broken
+	// stdout is visible instead of silently degrading every refusal.
+	if err := json.NewEncoder(out).Encode(d); err != nil {
+		fmt.Fprintf(errOut, "force-push guard: could not write the structured decision: %v\n", err)
+	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -46,7 +47,7 @@ func decide(t *testing.T, command, cwd string) (code int, stderr string) {
 		t.Fatal(err)
 	}
 	var out, errBuf bytes.Buffer
-	code = run(bytes.NewReader(env), &out, &errBuf)
+	code = run(context.Background(), bytes.NewReader(env), &out, &errBuf)
 	return code, errBuf.String()
 }
 
@@ -149,14 +150,14 @@ func TestFailsOpenOnUnusableInput(t *testing.T) {
 		t.Errorf("unparseable command: exit %d, want 0 (fail open)", code)
 	}
 	var out, errBuf bytes.Buffer
-	if code := run(strings.NewReader("not json"), &out, &errBuf); code != 0 {
+	if code := run(context.Background(), strings.NewReader("not json"), &out, &errBuf); code != 0 {
 		t.Errorf("malformed envelope: exit %d, want 0 (fail open)", code)
 	}
 	env, _ := json.Marshal(map[string]any{
 		"tool_name":  "Read",
 		"tool_input": map[string]string{"command": "git push -f origin main"},
 	})
-	if code := run(bytes.NewReader(env), &out, &errBuf); code != 0 {
+	if code := run(context.Background(), bytes.NewReader(env), &out, &errBuf); code != 0 {
 		t.Errorf("non-Bash tool: exit %d, want 0", code)
 	}
 }
