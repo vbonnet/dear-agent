@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -119,4 +120,47 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("close stdout reader: %v", err)
 	}
 	return string(b)
+}
+
+func TestRunSweepAtReportsCensusWhenScanFails(t *testing.T) {
+	store := strings.Join([]string{
+		`{"rule":"bash-20-line-limit","path":"expired.sh","status":"active","reason":"r","approver":"v","sunset":"2026-08-18","added":"2026-08-01"}`,
+		`{"rule":"bash-20-line-limit","path":"waived.sh","status":"active","reason":"r","approver":"v","sunset":"2026-09-14","added":"2026-08-01"}`,
+	}, "\n") + "\n"
+	root := newFixtureRepo(t, store, nil)
+
+	// A long, untested, unwaived script makes report fail the sweep. The
+	// census must survive that error return: LANGPOLICY-CMD-29 keeps the
+	// backlog visible precisely when the verdict is bad.
+	long := "#!/bin/bash\n"
+	for i := 0; i < lineLimit+10; i++ {
+		long += fmt.Sprintf("echo line %d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(root, "long.sh"), []byte(long), 0o755); err != nil {
+		t.Fatalf("WriteFile long.sh: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "short.sh"), []byte("#!/bin/bash\necho short\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile short.sh: %v", err)
+	}
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runSweepAt([]string{
+			"-repo", root, "--github", "long.sh", "short.sh",
+		}, time.Date(2026, 8, 19, 23, 59, 0, 0, time.UTC))
+	})
+	if runErr == nil {
+		t.Fatalf("runSweepAt returned nil for a violating script; output:\n%s", out)
+	}
+	if !strings.Contains(runErr.Error(), "exceed the 20-line limit") {
+		t.Errorf("runSweepAt error = %v, want the line-limit verdict", runErr)
+	}
+
+	wantCensus := "sweep: 2 waiver(s) total, 1 expired, 1 expiring within 30 days, 2 script(s) scanned"
+	if !strings.Contains(out, wantCensus) {
+		t.Errorf("failing sweep output missing census %q:\n%s", wantCensus, out)
+	}
+	if !strings.Contains(out, "::error file=long.sh::") {
+		t.Errorf("failing sweep output missing the violation annotation:\n%s", out)
+	}
 }
