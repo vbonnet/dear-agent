@@ -142,3 +142,26 @@ STUB
     run cat "$PREFLIGHT_GATE_LOG"
     assert_output "tests failed"
 }
+
+# A clean log has no failing tests. Under `set -o pipefail` the name-extraction
+# pipeline must still succeed: a filter that exits non-zero when it matches
+# nothing would make the healthy case look like a gate failure.
+@test "preflight_failing_tests succeeds on a log with no failures" {
+    local log="$BATS_TEST_TMPDIR/clean.log"
+    printf 'ok  \tgithub.com/x/y\t0.10s\n' > "$log"
+
+    run bash -c "set -o pipefail; source '$PROJECT_ROOT/scripts/lib/preflight-gate.sh'; preflight_failing_tests '$log'"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "preflight_failing_tests drops empty names from malformed FAIL lines" {
+    local log="$BATS_TEST_TMPDIR/malformed.log"
+    printf '    --- FAIL: TestReal (0.01s)\n    --- FAIL:  \n' > "$log"
+
+    run bash -c "set -o pipefail; source '$PROJECT_ROOT/scripts/lib/preflight-gate.sh'; preflight_failing_tests '$log'"
+
+    [ "$status" -eq 0 ]
+    [ "$output" = "TestReal" ]
+}

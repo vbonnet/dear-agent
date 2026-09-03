@@ -40,7 +40,7 @@ preflight_failing_tests() {
     {
         sed -n 's/^[[:space:]]*--- FAIL: \([^ ]*\).*/\1/p' "$log"
         sed -n 's/^FAIL[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' "$log"
-    } | grep -v '^$' | sort -u
+    } | sed '/^$/d' | sort -u
 }
 
 # preflight_run_go_tests <gate> <log> <command...>

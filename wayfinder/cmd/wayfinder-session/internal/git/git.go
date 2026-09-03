@@ -251,7 +251,12 @@ func (g *GitIntegrator) isTracked(file string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if _, isExit := errors.AsType[*exec.ExitError](err); isExit {
+	// `git ls-files --error-unmatch` exits 1 for a path that is not in the
+	// index, which is an answer rather than a failure. Any other exit code is
+	// a real error and must not be reported as "untracked". Binding the typed
+	// error instead of discarding it also keeps errcheck and modernize from
+	// contradicting each other on this line.
+	if exitErr, isExit := errors.AsType[*exec.ExitError](err); isExit && exitErr.ExitCode() == 1 {
 		return false, nil
 	}
 	return false, fmt.Errorf("check tracked path %s: %w", file, err)
