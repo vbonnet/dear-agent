@@ -29,6 +29,11 @@ import (
 // 2. Archive behavior persists through the same adapter
 // 3. Archived sessions are excluded from subsequent identifier resolution
 func TestArchiveStoppedSessionStorageContract(t *testing.T) {
+	// Tests that create Engram sessions must declare the isolation protocol
+	// (AGENTS.md) so the fixture cannot depend on ambient test configuration.
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+
 	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteAdapter() error: %v", err)
