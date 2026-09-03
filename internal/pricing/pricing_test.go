@@ -121,3 +121,49 @@ func TestOpusCostsMoreThanSonnet(t *testing.T) {
 			opus.OutputPerMillion, sonnet.OutputPerMillion)
 	}
 }
+
+// TestLookup_NewModels2026_09 pins the rate cards for the two models wired in
+// 2026-09. Fable 5.1 shares Fable 5's base input/output rates (they differ only
+// in cache-read multiplier, which this table does not model); Gemini 3.8 Flash
+// is a new rate that previously fell through to UnknownModel.
+func TestLookup_NewModels2026_09(t *testing.T) {
+	cases := []struct {
+		model string
+		in    float64
+		out   float64
+	}{
+		{"claude-fable-5-1", 10.00, 50.00},
+		{"3.8-flash", 0.75, 3.75},
+		{"gemini-3.8-flash", 0.75, 3.75},
+	}
+	for _, c := range cases {
+		p := Lookup(c.model)
+		if p.InputPerMillion != c.in || p.OutputPerMillion != c.out {
+			t.Errorf("Lookup(%q) = {%f, %f}, want {%f, %f}",
+				c.model, p.InputPerMillion, p.OutputPerMillion, c.in, c.out)
+		}
+	}
+}
+
+// TestGemini38FlashDoesNotShadowOlderFlashRates guards the substring-match
+// fallback: "gemini-3.8-flash" must not collide with the older "3-flash" or
+// "2.5-flash" entries, which are priced differently.
+func TestGemini38FlashDoesNotShadowOlderFlashRates(t *testing.T) {
+	if got := Lookup("gemini-3.5-flash"); got.InputPerMillion == 0.75 {
+		t.Errorf("gemini-3.5-flash wrongly resolved to the 3.8 Flash rate: %+v", got)
+	}
+	if got := Lookup("gemini-3-flash-preview"); got.InputPerMillion != 0.30 {
+		t.Errorf("gemini-3-flash-preview = %+v, want the 3-flash rate 0.30", got)
+	}
+}
+
+// TestNewModelRatesAreSourced enforces PRICING-07's auditability rule for the
+// entries added in 2026-09: a published rate card and an as-of date.
+func TestNewModelRatesAreSourced(t *testing.T) {
+	for _, model := range []string{"claude-fable-5-1", "3.8-flash"} {
+		p := Lookup(model)
+		if p.Source == "" || p.AsOf == "" {
+			t.Errorf("Lookup(%q) = %+v, want a non-empty Source and AsOf", model, p)
+		}
+	}
+}

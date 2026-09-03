@@ -331,3 +331,48 @@ func TestOpenRouterProvidesRequestedOpenModelFamilies(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveModelFullName_NewModels2026_09 pins the two model launches wired
+// in 2026-09: Gemini 3.8 Flash on AGY and Claude Fable 5.1 on Claude Code and
+// Pi. AGY resolution must yield the exact public catalog label (AGP-20); the
+// Anthropic surfaces must yield the API model id verified through
+// GET /v1/models.
+func TestResolveModelFullName_NewModels2026_09(t *testing.T) {
+	tests := []struct {
+		harness  string
+		input    string
+		expected string
+	}{
+		// Claude Fable 5.1: id verified live via the Anthropic Models API.
+		{"claude-code", "fable5.1", "claude-fable-5-1"},
+		{"pi-cli", "fable5.1", "anthropic/claude-fable-5-1"},
+		// Fable 5 stays put: a point release must not silently repoint an
+		// existing alias that callers already pin.
+		{"claude-code", "fable", "claude-fable-5"},
+		{"pi-cli", "fable", "anthropic/claude-fable-5"},
+
+		// Gemini 3.8 Flash: labels verified live via `agy models`.
+		{"agy", "3.8-flash", "Gemini 3.8 Flash (Medium)"},
+		{"agy", "3.8-flash-medium", "Gemini 3.8 Flash (Medium)"},
+		{"agy", "3.8-flash-high", "Gemini 3.8 Flash (High)"},
+		{"agy", "3.8-flash-low", "Gemini 3.8 Flash (Low)"},
+		// Exact public labels pass through unchanged (AGP-20).
+		{"agy", "Gemini 3.8 Flash (High)", "Gemini 3.8 Flash (High)"},
+		{"pi-cli", "gemini-flash-3.8", "google/gemini-3.8-flash"},
+		// The incumbent Flash alias is unchanged.
+		{"agy", "3.5-flash", "Gemini 3.5 Flash (Medium)"},
+	}
+	for _, tt := range tests {
+		if got := ResolveModelFullName(tt.harness, tt.input); got != tt.expected {
+			t.Errorf("ResolveModelFullName(%q, %q) = %q, want %q", tt.harness, tt.input, got, tt.expected)
+		}
+	}
+}
+
+// TestCrossHarnessAliases_Gemini38 keeps the new Gemini alias translatable to a
+// Claude tier so a cross-harness spawn does not fall through as a literal.
+func TestCrossHarnessAliases_Gemini38(t *testing.T) {
+	if got := ResolveModelFullName("claude-code", "3.8-flash"); got != "claude-haiku-4-5" {
+		t.Errorf("cross-harness 3.8-flash = %q, want claude-haiku-4-5", got)
+	}
+}

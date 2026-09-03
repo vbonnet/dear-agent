@@ -33,18 +33,24 @@ var UnknownModel = ModelPrice{InputPerMillion: 0, OutputPerMillion: 0}
 // The map is intentionally flat — model families are small enough that a
 // search over the whole table is cheaper to read than a tree of regexes.
 var table = []ModelPrice{
-	// Anthropic — Claude Fable (Mythos-class, most capable; 1M context, 128k max output)
-	{Model: "fable", InputPerMillion: 10.00, OutputPerMillion: 50.00},
+	// Anthropic Claude Fable. Both generations bill the same base rates; they
+	// differ only in cache-read multiplier (0.025x on 5.1 vs 0.1x on 5), which
+	// this table does not model. The Pro/Max/Team free window on Fable 5 ended
+	// 2026-06-23, so list price is the truthful rate for budgeting.
+	// The 5.1 entry is listed first so an exact "claude-fable-5-1" lookup is
+	// unambiguous even though the "fable" entry would also match it.
+	{Model: "claude-fable-5-1", InputPerMillion: 10.00, OutputPerMillion: 50.00, Source: "https://platform.claude.com/docs/en/about-claude/pricing", AsOf: "2026-09-02"},
+	{Model: "fable", InputPerMillion: 10.00, OutputPerMillion: 50.00, Source: "https://platform.claude.com/docs/en/about-claude/pricing", AsOf: "2026-09-02"},
 
 	// Anthropic — Claude 4.x
 	{Model: "opus", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 	{Model: "sonnet", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 	{Model: "haiku", InputPerMillion: 1.00, OutputPerMillion: 5.00},
-	// Fable 5 — free on Pro/Max/Team through 2026-06-23, list price thereafter.
-	// Priced at list ($10/$50 per M I/O) so budgeting stays truthful post-promo.
-	{Model: "fable", InputPerMillion: 10.00, OutputPerMillion: 50.00},
 
 	// Google — Gemini (best-effort; flash pricing dominated by input for our workload)
+	// Gemini 3.8 Flash carries introductory pricing through 2026-12-31; it
+	// doubles to $1.50/$7.50 on 2027-01-01. Revisit this entry then.
+	{Model: "3.8-flash", InputPerMillion: 0.75, OutputPerMillion: 3.75, Source: "https://ai.google.dev/gemini-api/docs/pricing", AsOf: "2026-09-02"},
 	{Model: "2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00},
 	{Model: "3.1-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00},
 	{Model: "3-flash", InputPerMillion: 0.30, OutputPerMillion: 2.50},

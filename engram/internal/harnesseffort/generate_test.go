@@ -46,8 +46,8 @@ func TestGenerateGemini_DefaultModels(t *testing.T) {
 	// Empty config should fall back to geminiTierModelMap defaults.
 	out := GenerateGemini(HarnessEffortConfig{})
 
-	if !strings.Contains(out, "gemini-3.5-flash") {
-		t.Errorf("expected gemini-3.5-flash in output, got:\n%s", out)
+	if !strings.Contains(out, "gemini-3.8-flash") {
+		t.Errorf("expected gemini-3.8-flash in output, got:\n%s", out)
 	}
 	if !strings.Contains(out, "gemini-2.5-pro") {
 		t.Errorf("expected gemini-2.5-pro in output, got:\n%s", out)
@@ -73,15 +73,15 @@ func TestGenerateGemini_ConfigOverridesModel(t *testing.T) {
 func TestGeminiTierModelFromCfg_FallsBackToMap(t *testing.T) {
 	// Config with no google provider — should return the map default.
 	got := geminiTierModelFromCfg(HarnessEffortConfig{}, "lookup")
-	if got != "gemini-3.5-flash" {
-		t.Errorf("expected gemini-3.5-flash, got %q", got)
+	if got != "gemini-3.8-flash" {
+		t.Errorf("expected gemini-3.8-flash, got %q", got)
 	}
 }
 
 func TestGeminiTierModelFromCfg_FallsBackToFlashForUnknownTier(t *testing.T) {
 	got := geminiTierModelFromCfg(HarnessEffortConfig{}, "nonexistent-tier")
-	if got != "gemini-3.5-flash" {
-		t.Errorf("expected gemini-3.5-flash for unknown tier, got %q", got)
+	if got != "gemini-3.8-flash" {
+		t.Errorf("expected gemini-3.8-flash for unknown tier, got %q", got)
 	}
 }
 

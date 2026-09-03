@@ -14,6 +14,7 @@ var openCodeModelMap = map[string]string{
 	"o4-mini":           "openai/o4-mini",
 	"o3":                "openai/o3",
 	"codex-mini-latest": "openai/codex-mini-latest",
+	"gemini-3.8-flash":  "google/gemini-3.8-flash",
 	"gemini-3.5-flash":  "google/gemini-3.5-flash",
 	"gemini-2.5-pro":    "google/gemini-2.5-pro",
 }

@@ -98,6 +98,36 @@ var (
 		CacheRead:  0.00, // No caching
 	}
 
+	// Claude Fable 5, published rates.
+	// Source: platform.claude.com/docs/en/about-claude/pricing (2026-09-02).
+	ClaudeFable5 = Pricing{
+		Input:      10.00, // $10 per 1M tokens
+		Output:     50.00, // $50 per 1M tokens
+		CacheWrite: 12.50, // $12.50 per 1M tokens (5-minute write, 1.25x input)
+		CacheRead:  1.00,  // $1 per 1M tokens (0.1x input)
+	}
+
+	// Claude Fable 5.1 (2026-08-28) has the same base and cache-write rates as
+	// Fable 5. The one difference is cache reads: Fable 5.1 and Mythos 5.1
+	// price a cache hit at 0.025x input, where every other model uses 0.1x.
+	// Source: platform.claude.com/docs/en/about-claude/pricing (2026-09-02).
+	ClaudeFable5_1 = Pricing{
+		Input:      10.00, // $10 per 1M tokens
+		Output:     50.00, // $50 per 1M tokens
+		CacheWrite: 12.50, // $12.50 per 1M tokens (5-minute write, 1.25x input)
+		CacheRead:  0.25,  // $0.25 per 1M tokens (0.025x input, not the usual 0.1x)
+	}
+
+	// Gemini 3.8 Flash carries introductory pricing through 2026-12-31, doubling to
+	// $1.50 / $7.50 on 2027-01-01. Revisit this entry then.
+	// Source: ai.google.dev/gemini-api/docs/pricing (2026-09-02).
+	Gemini38Flash = Pricing{
+		Input:      0.75, // $0.75 per 1M tokens
+		Output:     3.75, // $3.75 per 1M tokens
+		CacheWrite: 0.00, // Context caching priced separately; sink not yet tracking it
+		CacheRead:  0.00, // Not tracked; see CacheWrite
+	}
+
 	// Gemini 3.5 Flash (GA 2026-05-19 at I/O 2026)
 	// Source: cloud.google.com/vertex-ai/generative-ai/pricing
 	// Standard tier; non-global regions priced higher ($1.65 / $9.90).
@@ -129,7 +159,13 @@ var PricingTable = map[string]Pricing{
 	"claude-sonnet-4-5@20250929": Claude35Sonnet20241022, // Vertex AI naming
 	"gemini-2.0-flash-exp":       Gemini20FlashExp,
 	"gemini-1.5-pro":             Gemini15Pro,
+	"claude-fable-5":             ClaudeFable5,
+	"claude-fable-5-1":           ClaudeFable5_1,
+	"anthropic/claude-fable-5":   ClaudeFable5,   // OpenRouter and Pi provider-qualified naming
+	"anthropic/claude-fable-5-1": ClaudeFable5_1, // OpenRouter and Pi provider-qualified naming
 	"gemini-3.5-flash":           Gemini35Flash,
+	"gemini-3.8-flash":           Gemini38Flash,
+	"google/gemini-3.8-flash":    Gemini38Flash, // Pi provider-qualified naming
 	"local-jaccard-v1":           {}, // Local provider is free
 }
 

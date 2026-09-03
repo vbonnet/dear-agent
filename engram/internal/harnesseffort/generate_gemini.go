@@ -7,9 +7,15 @@ import (
 
 // geminiTierModelMap maps effort tiers to Gemini model names.
 // flash is used for low/medium effort tiers; pro for high effort tiers.
+//
+// The flash tiers moved to Gemini 3.8 Flash on 2026-09-02: it supersedes 3.5
+// Flash on the same tier and is cheaper ($0.75/$3.75 vs $1.50/$9.00 per Mtok),
+// so there is no cost argument for holding the older default. Operators who
+// need the previous model can still pin it per tier through the google
+// provider config, which takes precedence over this map.
 var geminiTierModelMap = map[string]string{
-	"lookup":      "gemini-3.5-flash",
-	"operational": "gemini-3.5-flash",
+	"lookup":      "gemini-3.8-flash",
+	"operational": "gemini-3.8-flash",
 	"analysis":    "gemini-2.5-pro",
 	"deep":        "gemini-2.5-pro",
 }
@@ -45,5 +51,5 @@ func geminiTierModelFromCfg(cfg HarnessEffortConfig, tierName string) string {
 	if model, ok := geminiTierModelMap[tierName]; ok {
 		return model
 	}
-	return "gemini-3.5-flash"
+	return "gemini-3.8-flash"
 }

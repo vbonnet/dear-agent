@@ -260,6 +260,19 @@ models:
     confidence: "MEDIUM"
     last_updated: "2026-03-18T00:00:00Z"
 
+  - model_id: "gemini-3.8-flash"
+    provider: "google"
+    max_context_tokens: 1048576
+    sweet_spot_threshold: 0.50
+    warning_threshold: 0.65
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "Google model documentation (2026-09-02): most intelligent Flash model, aimed at long-horizon software engineering and autonomous agents"
+    notes: "1M input / 65K output, $0.75/$3.75 per MTok through 2026-12-31 then $1.50/$7.50. Supersedes 3.5 Flash at the same tier and costs less. Thresholds carried over from 3.5 Flash pending independent NeedleBench/RULER data."
+    confidence: "MEDIUM"
+    last_updated: "2026-09-02T00:00:00Z"
+
   - model_id: "gemini-3.5-flash"
     provider: "google"
     max_context_tokens: 1048576
