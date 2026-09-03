@@ -701,94 +701,138 @@ func (g *Guard) checkRedirectionsAt(tokens []string, classify func(string) (bool
 // checkSegments runs per-simple-command write analysis, tracking `cd` so a
 // chained `cd ~/src/repo && git commit` is attributed to the right directory.
 func (g *Guard) checkSegments(tokens []string, cwd string, depth int, pol commandPolicy) (allowed bool, message string) {
-	currentDir := g.expand(cwd, cwd)
-	// alsoCheck holds directories a relative target might *also* resolve
-	// against, because a `cd` that would have moved the shell there may not
-	// have run. `false && cd /tmp; rm AGENTS.md` leaves the shell in the
-	// original directory, and tracking only the post-`cd` path would classify
-	// the removal against /tmp and miss the protected file. A `cd` in a
-	// pipeline has the same mismatch: it runs in a subshell.
-	var alsoCheck []string
-	var subshellDirs []string // saved cwd per open `(`
-	classify := func(target string) (bool, string) {
-		if ok, msg := pol.classify(target, currentDir); !ok {
-			return false, msg
-		}
-		for _, dir := range alsoCheck {
-			if ok, msg := pol.classify(target, dir); !ok {
-				return false, msg
-			}
-		}
-		return true, ""
-	}
+	w := &segmentWalker{g: g, pol: pol, currentDir: g.expand(cwd, cwd)}
 	for _, seg := range splitSegments(tokens) {
-		// A `cd` inside `( … )` is undone when the subshell exits, so restore
-		// the caller's directory on `)`; otherwise `(cd /tmp); rm AGENTS.md`
-		// would classify the removal against /tmp while it really runs in cwd.
-		if len(seg.tokens) == 1 && (seg.tokens[0] == "(" || seg.tokens[0] == ")") {
-			if seg.tokens[0] == "(" {
-				subshellDirs = append(subshellDirs, currentDir)
-			} else if n := len(subshellDirs); n > 0 {
-				currentDir = subshellDirs[n-1]
-				subshellDirs = subshellDirs[:n-1]
-				alsoCheck = nil
-			}
+		if w.trackSubshell(seg) {
 			continue
 		}
-		segment := seg.tokens
-		if ok, msg := g.checkRedirectionsAt(segment, classify); !ok {
+		if ok, msg := g.checkRedirectionsAt(seg.tokens, w.classify); !ok {
 			return false, msg
 		}
-		args := stripRunners(realArgs(stripRedirections(segment)))
+		args := stripRunners(realArgs(stripRedirections(seg.tokens)))
 		if len(args) == 0 {
+			continue
+		}
+		if w.trackCD(seg, args) {
 			continue
 		}
 		// Classify by the command's basename so an absolute or PATH-qualified
 		// executable (`/bin/rm`, `/usr/bin/git`) is recognized the same as its
 		// bare name; otherwise `/bin/rm ~/src/f` would slip past every map lookup.
 		cmd := filepath.Base(args[0])
+		if ok, msg := g.checkSimpleCommand(cmd, args, w.currentDir, depth, pol, w.classify); !ok {
+			return false, msg
+		}
+	}
+	return true, ""
+}
 
-		// `cd` is matched on the literal command word, not the basename: only
-		// the shell builtin changes the shell's directory. An external program
-		// that merely happens to be named `cd` (`/tmp/cd /tmp`) cannot change
-		// its parent's cwd, so tracking it would move the guard's idea of the
-		// directory away from where the following commands actually run.
-		if args[0] == "cd" && len(args) > 1 {
-			next := g.expand(args[1], currentDir)
-			if seg.conditional() {
-				// The shell may still be in the previous directory, so keep
-				// it as a candidate rather than replacing it.
-				alsoCheck = append(alsoCheck, currentDir)
-			} else {
-				// An unconditional `cd` definitely ran; earlier uncertainty
-				// is resolved and the candidate set collapses.
-				alsoCheck = nil
-			}
-			currentDir = next
-			continue
+// segmentWalker carries the directory state that `cd` and subshell tracking
+// mutate while checkSegments walks a command. Holding it in one place keeps the
+// walk itself short enough to read, and to stay inside the repository's
+// cyclomatic-complexity budget.
+type segmentWalker struct {
+	g   *Guard
+	pol commandPolicy
+
+	// currentDir is the directory the shell has reached at this point.
+	currentDir string
+	// alsoCheck holds directories a relative target might *also* resolve
+	// against, because a `cd` that would have moved the shell there may not
+	// have run. `false && cd /tmp; rm AGENTS.md` leaves the shell in the
+	// original directory, and tracking only the post-`cd` path would classify
+	// the removal against /tmp and miss the protected file. A `cd` in a
+	// pipeline has the same mismatch: it runs in a subshell.
+	alsoCheck []string
+	// subshellDirs saves the enclosing cwd per open `(`.
+	subshellDirs []string
+}
+
+// classify judges a write target against every directory the shell may be in.
+func (w *segmentWalker) classify(target string) (bool, string) {
+	if ok, msg := w.pol.classify(target, w.currentDir); !ok {
+		return false, msg
+	}
+	for _, dir := range w.alsoCheck {
+		if ok, msg := w.pol.classify(target, dir); !ok {
+			return false, msg
 		}
-		if cmd == "git" {
-			if ok, msg := pol.git(args[1:], currentDir); !ok {
-				return false, msg
-			}
-			continue
+	}
+	return true, ""
+}
+
+// trackSubshell consumes a lone `(` or `)` segment, reporting whether it did.
+// A `cd` inside `( … )` is undone when the subshell exits, so the enclosing
+// directory is restored on `)`; otherwise `(cd /tmp); rm AGENTS.md` would
+// classify the removal against /tmp while it really runs in cwd.
+func (w *segmentWalker) trackSubshell(seg segment) bool {
+	if len(seg.tokens) != 1 {
+		return false
+	}
+	switch seg.tokens[0] {
+	case "(":
+		w.subshellDirs = append(w.subshellDirs, w.currentDir)
+		return true
+	case ")":
+		if n := len(w.subshellDirs); n > 0 {
+			w.currentDir = w.subshellDirs[n-1]
+			w.subshellDirs = w.subshellDirs[:n-1]
+			w.alsoCheck = nil
 		}
-		if cmd == "gh" {
-			if ok, msg := checkGh(args[1:]); !ok {
-				return false, msg
-			}
-			continue
-		}
-		if nested, ok := shellWrapped(cmd, args[1:]); ok {
-			if allowed, msg := g.inspect(nested, currentDir, depth+1, pol); !allowed {
-				return false, msg
-			}
-			continue
-		}
-		for _, target := range writeTargets(cmd, args[1:]) {
-			if ok, msg := classify(target); !ok {
-				return false, msg
-			}
+		return true
+	}
+	return false
+}
+
+// trackCD consumes a `cd` segment, reporting whether it did.
+//
+// `cd` is matched on the literal command word, not the basename: only the shell
+// builtin changes the shell's directory. An external program that merely
+// happens to be named `cd` (`/tmp/cd /tmp`) cannot change its parent's cwd, so
+// tracking it would move the guard's idea of the directory away from where the
+// following commands actually run.
+func (w *segmentWalker) trackCD(seg segment, args []string) bool {
+	if args[0] != "cd" || len(args) < 2 {
+		return false
+	}
+	next := w.g.expand(args[1], w.currentDir)
+	if seg.conditional() {
+		// The shell may still be in the previous directory, so keep it as a
+		// candidate rather than replacing it.
+		w.alsoCheck = append(w.alsoCheck, w.currentDir)
+	} else {
+		// An unconditional `cd` definitely ran; earlier uncertainty is
+		// resolved and the candidate set collapses.
+		w.alsoCheck = nil
+	}
+	w.currentDir = next
+	return true
+}
+
+// checkSimpleCommand applies the per-command rules to one simple command whose
+// runners, redirections, and `cd` handling the caller has already resolved.
+// cmd is args[0]'s basename. Split out of checkSegments so that function stays
+// within the repository's cyclomatic-complexity budget.
+func (g *Guard) checkSimpleCommand(
+	cmd string,
+	args []string,
+	currentDir string,
+	depth int,
+	pol commandPolicy,
+	classify func(string) (bool, string),
+) (allowed bool, message string) {
+	switch cmd {
+	case "git":
+		return pol.git(args[1:], currentDir)
+	case "gh":
+		return checkGh(args[1:])
+	}
+	if nested, ok := shellWrapped(cmd, args[1:]); ok {
+		return g.inspect(nested, currentDir, depth+1, pol)
+	}
+	for _, target := range writeTargets(cmd, args[1:]) {
+		if ok, msg := classify(target); !ok {
+			return false, msg
 		}
 	}
 	return true, ""

@@ -272,10 +272,7 @@ func supervisorGitArgsAreReads(args []string) bool {
 		}
 		// Split --flag=value so the flag is matched on its own; the glued
 		// value needs no separate handling.
-		flag, glued := a, false
-		if j := strings.IndexByte(a, '='); j >= 0 {
-			flag, glued = a[:j], true
-		}
+		flag, _, glued := strings.Cut(a, "=")
 		if supervisorGitReadFlags[flag] {
 			continue
 		}
