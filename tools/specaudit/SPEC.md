@@ -44,7 +44,7 @@ used to obtain those outcomes.
 
 **SPECAUDIT-17** When a user applies a search or verdict filter in a rendered audit artifact, the artifact shall evaluate any non-empty search query against complete card text independently of the card's current hidden state and hide every candidate and keep-separate finding card that does not match the active search and verdict criteria.
 
-**SPECAUDIT-18** When help or inventory emits its own usage, collector, or reproduction command identity, the output shall use the logical `specaudit` command identity without requiring a source checkout path, a Go toolchain invocation, `PATH` lookup, or the caller's working directory.
+**SPECAUDIT-18** When help or inventory emits its own usage, collector, or reproduction command identity, the output shall use `specaudit` as the non-executable logical identity, shall bind executable reproduction guidance to the absolute `bin/specaudit` child of the authenticated distribution-root placeholder and an explicit repository-path placeholder without requiring a source checkout path, Go toolchain, `PATH` lookup, or caller working directory, shall quote the caller-supplied repository label as exactly one POSIX shell argument, and shall reject an empty label, surrounding whitespace, invalid UTF-8, or any non-printable rune.
 
 ## BDD Traceability
 

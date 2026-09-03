@@ -55,6 +55,8 @@ running-image attestation, or maintainer approval.
 
 **SPEC-GOV-27** If the package command successfully stages a distribution but cannot deliver its JSON receipt, then the system shall exit nonzero, leave the valid staged root untouched, and report that exact retained root on standard error for separately authorized lifecycle handling.
 
+**SPEC-GOV-28** When package validation inspects skill Markdown, the system shall accept only the exact versioned payload bytes named by one closed per-file approval registry, and before accepting those bytes shall parse Markdown and JSON to require a closed static POSIX command grammar rooted at the authenticated distribution's `bin/specaudit`, decoded JSON `specaudit` values limited to the declared logical inventory identity or HTTP or HTTPS references, and closed package links; it shall reject every other payload mutation, dynamic or additional shell command, mutated flag or redirection, blockquoted, untyped, or indented executable context, checkout path, case or wrapper alias, unsupported code-block language, raw HTML, and unresolved or escaping package link without copying the approved skills' normative prose into the validator.
+
 ## Bounds
 
 The implementation bounds file count, path depth and length, Markdown file
