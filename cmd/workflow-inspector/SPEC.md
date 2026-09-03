@@ -18,7 +18,7 @@ endpoint without providing state-changing controls.
 
 **WORKFLOW-INSPECTOR-04** When `GET /` or `GET /runs` is requested, the system shall render a read-only HTML list of workflow runs.
 
-**WORKFLOW-INSPECTOR-05** When a `state` query parameter is provided on the list route, the system shall filter listed runs by that workflow state.
+**WORKFLOW-INSPECTOR-05** When a `state` query parameter is provided on the list route, the system shall filter listed runs by that workflow state, and when WFLOW-08 rejects that filter the system shall return HTTP 400 rather than an internal error.
 
 **WORKFLOW-INSPECTOR-06** When `GET /run/<id>` is requested for an existing run, the system shall render run status, node status, and audit events.
 

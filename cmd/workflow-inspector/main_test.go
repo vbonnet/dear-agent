@@ -171,3 +171,21 @@ func TestFmtTime(t *testing.T) {
 		t.Errorf("fmtTime nil ptr = %q", got)
 	}
 }
+
+// An unknown state filter is a bad request, not an internal failure: the API
+// surface answers 400 for the same input, and reporting 500 here would blame
+// the server for the caller's typo.
+func TestServer_RunListRejectsInvalidStateFilter(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "runs.db")
+	_, ss := seedDB(t, dbPath)
+	defer ss.Close()
+
+	srv := NewServer(ss.DB())
+	for _, query := range []string{"/?state=typo", "/?state=running&state=typo"} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, query, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("GET %s status = %d, want 400", query, rec.Code)
+		}
+	}
+}

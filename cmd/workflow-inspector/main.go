@@ -145,7 +145,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) handleList(w http.ResponseWriter, req *http.Request) {
-	stateFilter := workflow.RunState(req.URL.Query().Get("state"))
+	// Parse the filter here rather than passing raw text through: an unknown
+	// spelling is a bad request, and reporting it as an internal failure
+	// would blame the server for the caller's typo.
+	stateFilter, err := workflow.ParseRunStateFilterValues(req.URL.Query()["state"])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	runs, err := workflow.List(req.Context(), s.db, workflow.ListOptions{State: stateFilter, Limit: 100})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
