@@ -53,6 +53,8 @@ the contract model's canonical
 [migration boundary](../spec-governance/skills/write-spec/references/contract-model.md#migration-boundary).
 It defines the required structural guard evidence, stable-ID handling,
 reciprocal BDD links, conformance evidence, and mandatory semantic review.
+For this repository, [`SPEC-GUARD-23`](../internal/specguard/SPEC.md) owns the
+exact conservative relocation evidence and false-positive boundary.
 
 ## Evidence boundary
 

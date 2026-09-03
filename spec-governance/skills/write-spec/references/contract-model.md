@@ -33,9 +33,11 @@ translates or exposes the behavior.
 
 ## Implementation projections
 
-When repository coverage requires an implementation directory to declare its
-contract owner, use `SPEC.owner` with one canonical repository-relative path
-to the neutral product or domain `SPEC.md`, for example:
+When the target repository's discovered governance contract requires an
+implementation directory to project its contract owner through `SPEC.owner`,
+use exactly one canonical repository-relative path to the neutral product or
+domain `SPEC.md`. For example, dear-agent declares this capability and can
+point to:
 
 ```text
 internal/hookparity/SPEC.md
@@ -47,6 +49,11 @@ harness root, cannot coexist with a local `SPEC.md`, and its target must retain
 strict EARS and reciprocal BDD coverage. Use it only when the implementation
 adds no distinct observable contract; a new observable requires an ownership
 decision in the neutral product or domain.
+
+Do not invent `SPEC.owner` in a target repository that does not declare this
+capability. Record the projection layer as unavailable, follow the repository's
+native ownership mechanism when one exists, or stop for a product decision
+when neutral ownership cannot be represented.
 
 ## Shared contract pattern
 
@@ -101,14 +108,13 @@ If implementation source survives, deleting its `SPEC.owner` is blocked unless
 the same directory gains a permitted local `SPEC.md` replacement that passes
 strict neutrality and contract validation.
 
-To prevent ownership from being erased by a relocation, the deterministic
-guard conservatively treats any added implementation blob whose Git object ID
-matches a deleted implementation blob from the directory whose `SPEC.owner`
-edge was deleted as a possible relocation target. Immutable Git snapshots
-encode content identity, not move intent, so the guard also classifies an
-independently added object-identical blob as a possible relocation target;
-modifications and additions with different object IDs do not create that
-content-identity edge.
+When a repository's guard classifies an added directory as a possible
+relocation target, authors must preserve a valid ownership projection or an
+allowed local replacement there before semantic review. That is an
+author-facing admission consequence, not proof of move intent. The exact
+relocation evidence and conservative false-positive boundary belong only in
+the target repository's normative guard contract; discover and follow that
+contract instead of copying its algorithm into this portable model.
 
 ## Capability variation pattern
 
