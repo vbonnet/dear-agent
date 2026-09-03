@@ -461,7 +461,17 @@ func workingTreeIsClean(ctx context.Context, repoDir string, pkgs []string) bool
 // just as surely as a direct child.
 func inTouchedPackage(p string, pkgs []string) bool {
 	for _, pkg := range pkgs {
-		if (pkg == "." && path.Dir(p) == ".") || (pkg != "." && (p == pkg || strings.HasPrefix(p, pkg+"/"))) {
+		// The module root package owns every repository-relative path, not
+		// just its direct children: a root package can reach a nested asset
+		// with `//go:embed assets/*` or a fixture read exactly as any other
+		// package reaches its own subdirectories. Matching only direct
+		// children would score the root package against local content the
+		// head tree does not contain, which is the false "clean" this
+		// function exists to prevent.
+		if pkg == "." {
+			return true
+		}
+		if p == pkg || strings.HasPrefix(p, pkg+"/") {
 			return true
 		}
 	}
