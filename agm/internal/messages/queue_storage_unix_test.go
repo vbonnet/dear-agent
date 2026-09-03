@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -794,4 +795,57 @@ func queueStorageTestEnvironment(overrides map[string]string) []string {
 		environment = append(environment, fmt.Sprintf("%s=%s", key, value))
 	}
 	return environment
+}
+
+// An ordinary resource failure must not claim the trust identity: doing so
+// makes handleQueueConstructionError suppress direct delivery, so a transient
+// descriptor or space outage silently drops the message instead of falling
+// back.
+func TestQueueStorageResourceErrorSeparatesAvailabilityFromTrust(t *testing.T) {
+	availability := []struct {
+		name string
+		err  error
+	}{
+		{"EMFILE", unix.EMFILE},
+		{"ENFILE", unix.ENFILE},
+		{"ENOSPC", unix.ENOSPC},
+		{"EDQUOT", unix.EDQUOT},
+		{"EROFS", unix.EROFS},
+		{"EIO", unix.EIO},
+		{"ENOMEM", unix.ENOMEM},
+		{"EINTR", unix.EINTR},
+	}
+	for _, tc := range availability {
+		t.Run(tc.name, func(t *testing.T) {
+			err := queueStorageResourceError("main database", "could not be admitted", tc.err)
+			if !errors.Is(err, ErrQueueStorageUnavailable) {
+				t.Errorf("%v = %v, want ErrQueueStorageUnavailable", tc.err, err)
+			}
+			if errors.Is(err, ErrUnsafeQueueStorage) {
+				t.Errorf("%v claimed the trust identity and would suppress direct delivery", tc.err)
+			}
+		})
+	}
+
+	// Anything that could indicate a hostile boundary still fails closed.
+	trust := []struct {
+		name string
+		err  error
+	}{
+		{"EACCES", unix.EACCES},
+		{"EPERM", unix.EPERM},
+		{"ELOOP", unix.ELOOP},
+		{"ENOTDIR", unix.ENOTDIR},
+	}
+	for _, tc := range trust {
+		t.Run(tc.name, func(t *testing.T) {
+			err := queueStorageResourceError("main database", "could not be admitted", tc.err)
+			if !errors.Is(err, ErrUnsafeQueueStorage) {
+				t.Errorf("%v = %v, want ErrUnsafeQueueStorage", tc.err, err)
+			}
+			if errors.Is(err, ErrQueueStorageUnavailable) {
+				t.Errorf("%v was treated as a mere availability failure", tc.err)
+			}
+		})
+	}
 }

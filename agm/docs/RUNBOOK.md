@@ -371,18 +371,39 @@ agm session daemon start
 
 **Symptoms**: Database errors in logs, queue commands failing
 
+A SQLite database is a file *set*: the main database plus its `-wal`, `-shm`,
+and rollback-journal sidecars. Queue construction refuses storage where a
+sidecar is present without its main database, so removing only
+`message_queue.db` leaves orphans behind and the queue cannot be recreated.
+Quiesce writers first for the same reason: a live daemon holds the WAL open
+and recreates sidecars underneath the reset.
+
 **Fix**:
 ```bash
-# Backup existing database
-cp ~/.config/agm/message_queue.db ~/.config/agm/message_queue.db.backup
+# 1. Quiesce consumers so nothing recreates a sidecar mid-reset.
+agm session daemon stop
 
-# Check database integrity
+# 2. Back up the complete file set, not just the main database.
+for suffix in "" -wal -shm -journal; do
+  [ -e ~/.config/agm/message_queue.db$suffix ] &&
+    cp ~/.config/agm/message_queue.db$suffix \
+       ~/.config/agm/message_queue.db$suffix.backup
+done
+
+# 3. Check database integrity
 sqlite3 ~/.config/agm/message_queue.db "PRAGMA integrity_check;"
 
-# If corrupted, restore from backup or recreate
+# 4. If corrupted, remove the COMPLETE set. Removing only the main database
+#    leaves orphaned sidecars that queue construction rejects.
 # WARNING: This loses queue state
-rm ~/.config/agm/message_queue.db
+rm -f ~/.config/agm/message_queue.db \
+      ~/.config/agm/message_queue.db-wal \
+      ~/.config/agm/message_queue.db-shm \
+      ~/.config/agm/message_queue.db-journal
+
+# 5. Recreate and resume delivery.
 agm queue init
+agm session daemon start
 ```
 
 ### High Memory Usage

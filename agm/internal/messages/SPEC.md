@@ -59,6 +59,8 @@ retry state, and acknowledgement timeouts.
 
 **MSG-24** When queue-storage trust cannot be established on Darwin or Linux, or when queue construction runs on another operating system, the system shall fail closed with a bounded error preserving `ErrUnsafeQueueStorage` without disclosing symlink targets, message content, session identifiers, row values, raw DDL, or raw SQLite diagnostics.
 
+**MSG-25** When admitting the queue boundary fails for an ordinary resource reason rather than a trust violation, the system shall return an error preserving `ErrQueueStorageUnavailable` and shall not preserve `ErrUnsafeQueueStorage`, so callers keep their direct-delivery fallback for a transient storage outage. A failure that cannot be attributed to resource exhaustion shall remain a trust violation.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

@@ -10,6 +10,14 @@ import (
 // distinguish a security failure from an unavailable SQLite database.
 var ErrUnsafeQueueStorage = errors.New("unsafe message queue storage")
 
+// ErrQueueStorageUnavailable identifies an ordinary resource failure while
+// admitting the queue boundary: descriptor exhaustion, no space, a read-only
+// or failing filesystem. It is deliberately a separate identity from
+// ErrUnsafeQueueStorage, which suppresses the caller's direct-delivery
+// fallback. A transient outage must not silently drop a message, so only an
+// established trust violation may claim that suppression.
+var ErrQueueStorageUnavailable = errors.New("message queue storage unavailable")
+
 const (
 	queueDatabaseLeaf          = "message_queue.db"
 	queueStorageAdmissionLimit = 8
