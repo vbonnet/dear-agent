@@ -357,8 +357,12 @@ func dedupeSameFilesystem(results []DiskMetrics) []DiskMetrics {
 // statfsDisk gets disk usage for a mount point using the statfs syscall.
 func statfsDisk(mount string) (DiskMetrics, error) {
 	var stat unix.Statfs_t
+	// A mount that cannot be stat'ed is absent, not unreadable: a machine
+	// with no /home is the ordinary case. Report a zero-valued metric with
+	// no error so readDiskUsage's TotalGB filter drops it, and reserve the
+	// error return for a measurement that overflowed and must be surfaced.
 	if err := unix.Statfs(mount, &stat); err != nil {
-		return DiskMetrics{Mount: mount}, nil
+		return DiskMetrics{Mount: mount}, nil //nolint:nilerr // an absent mount is not a measurement failure
 	}
 
 	return diskMetricsFromBlockCounts(
