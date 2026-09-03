@@ -7,35 +7,37 @@ Status: Proposed (2026-09-02)
 dear-agent has built pieces of the same shape at least six times, independently: VROOM
 defines decision topic constants and an `Emitter` type
 (`pkg/vroom/vroom/emitter.go`, `topics.go`) with zero production callers; Wayfinder
-emits phase events (`wayfinder/internal/analytics/session_tracker.go`); the trigger
-registry (`pkg/trigger`) matches events to engrams and is genuinely wired to the
-in-process event bus (`pkg/trigger/subscriber.go` subscribes to it), but only on three
-hardcoded topics, with exact-match lookup and a single hardcoded action; the
-absence-alarm (`pkg/absencealarm`, unmerged) models expected-event pulses as a host
-watchdog; the GitHub webhook receiver (`cmd/agm-webhook-receiver`) is explicitly spike
-scaffolding, not wired into a build target; and `pkg/workflow` (ADR-010) runs durable,
-audited, HITL-capable workflows that nothing currently starts from an event.
+emits phase events into a fresh, unsubscribed in-process bus on every CLI invocation
+(`wayfinder/cmd/wayfinder-session/internal/tracker/tracker.go`); the trigger registry
+(`pkg/trigger`) matches events to engrams and has a subscriber implemented and tested
+(`pkg/trigger/subscriber.go`), but with zero production callers outside a CLI that
+evaluates one synthetic event at a time; the absence-alarm (`pkg/absencealarm`,
+committed but unmerged) models expected-event pulses as a host watchdog; the GitHub
+webhook receiver (`cmd/agm-webhook-receiver`) is compiled and tested but has no
+deploy path; and `pkg/workflow` (ADR-010) runs durable, audited, HITL-capable
+workflows, invokable today from the CLI and MCP, but not from an event.
 
 None of these converge, and the concrete, felt cost is the PR-queue throughput problem.
 `internal/mergeloop/driver.go:164-168` correctly detects when open PRs exceed its cap
 and skips the tick with an audited `backpressure` action, but that signal reaches only
 mergeloop's own audit log. Nothing else in the system, an operator, another pipeline, a
-capacity decision, can react to it. The system has the sensor; it has no way to carry
-the signal anywhere else.
+capacity decision, can react to it.
 
-A prior draft of the design this ADR is based on proposed a new `pkg/eventbus`-based
-transport for all of this and a new `pkg/pipeline` runtime to host workflows.
-Adversarial review found that `pkg/eventbus.LocalBus` documents itself as "an
-in-process event bus implementation" (`pkg/eventbus/local_bus.go:17`) and does not
-cross a process boundary; every example flow this design is meant to serve originates
-in a different process than the one that should react to it (mergeloop and
-absence-alarm are separate launchd one-shots, VROOM supervisors are separate harness
-sessions). The repo already has a cross-process durable transport, `agm-bus`
-(`agm/internal/bus`, `agm/cmd/agm-bus`), explicitly designed to carry
-"side-channel observability events from infrastructure code... that originate outside
-any running Claude session" (`agm/internal/bus/emitter.go`). Review also found
-`pkg/workflow` is a strict superset of what a new `pkg/pipeline` package would need to
-provide (durable state, per-transition audit, HITL). This ADR is revised accordingly.
+Two further constraints, found during design review, narrow what this ADR can decide
+today. First, `pkg/eventbus.LocalBus` documents itself as "an in-process event bus
+implementation" (`pkg/eventbus/local_bus.go:17`) and does not cross a process
+boundary; every trigger source this design serves (mergeloop, absence-alarm, VROOM
+supervisors) runs as a separate process from the one that should react to its events.
+`agm-bus` (`agm/internal/bus`, `agm/cmd/agm-bus`) is the repo's durable cross-process
+broker, but its wire protocol has no publish/subscribe frame type today: all nine frame
+types are addressed to a single session id, and the `Emitter.EmitEvent` convenience
+that looks like a broadcast sends a frame the server's own validation rejects. Second,
+`pkg/trigger` lives outside `agm/` in the module's import graph
+(`github.com/vbonnet/dear-agent/pkg/trigger`), so it cannot import `agm/internal/bus`
+directly under Go's internal-package visibility rule. The repo already has the answer
+to that second constraint: `agm/workflowbus/bridge.go` connects `pkg/workflow`, also
+outside `agm/`, to the same broker, and its own doc comment names the exact reason it
+lives under `agm/`.
 
 Full design and diagrams:
 [docs/architecture/feedback-loop-pipelines.md](../architecture/feedback-loop-pipelines.md).
@@ -43,58 +45,68 @@ Full design and diagrams:
 ## Decision
 
 Adopt a shared event and trigger vocabulary across dear-agent, built by extending
-existing infrastructure, not replacing it, and split into what this ADR decides now
-versus what it explicitly defers to its own design review.
+existing infrastructure, not replacing it. This ADR decides the direction; the actual
+protocol and package design for items 4 through 8 below still needs its own review
+before implementation beads get filed against them, exactly as the design document
+scopes it. Item numbers below match the design document's numbering exactly.
 
-Decided now:
+Decided now, on direction:
 
-1. **`agm-bus` is the cross-process transport** for any event that needs to reach a
-   different process than the one that emitted it. No new cross-process bus gets
-   built. `pkg/eventbus` stays as the in-process fan-out layer inside one running
-   process; it is not extended to cross process boundaries.
-2. **`pkg/trigger` is extended, not replaced**: its subscriber's topic list becomes
-   derived from the registry's registered event types instead of hardcoded, and its
-   matcher gains wildcard support aligned with `pkg/eventbus`'s existing pattern
-   matcher, so a registered trigger for a new event type is actually reachable.
-3. **VROOM, Wayfinder, Beads, and mergeloop keep their current ownership and
+0. **Fix the Wayfinder to trigger-registry topic-name drift** as a small, independent
+   first step: pick one naming convention and correct every variant to match. This
+   alone does not make a trigger fire end to end; see item 6.
+1. **Extend `pkg/trigger`'s subscriber to derive its subscription set from the
+   registry**, instead of the hardcoded topics in `pkg/trigger/subscriber.go` today.
+2. **Add wildcard matching to `pkg/trigger/registry.go`**, aligned with
+   `pkg/eventbus`'s existing pattern matcher, so the two components agree on what a
+   subscription pattern means.
+3. **`agm-bus` is the cross-process transport**, once it has a publish/subscribe
+   primitive (item 5). No new cross-process bus gets built. `pkg/eventbus` stays as the
+   in-process fan-out layer inside one running process; it is not extended to cross
+   process boundaries.
+4. **VROOM, Wayfinder, Beads, and mergeloop keep their current ownership and
    mechanics unchanged.** This ADR adds emitted events alongside their existing
    behavior; it does not change who owns roadmap state, dispatch, or merge mechanics.
    ADR-002's "Beads are the roadmap" invariant is explicitly preserved.
-4. **The Wayfinder-to-trigger-registry topic-name mismatch gets fixed as its own
-   small change**: Wayfinder emits `wayfinder.phase.started`, while the documented
-   engram `TriggerSpec.On` value and the registry's exact-match lookup expect
-   `phase.started`. Any engram declared against the bare name is unreachable today.
-   This is real, small, and independently shippable ahead of everything else in this
-   ADR.
+5. **A bridge package under `agm/`, not a new package under `pkg/`, is the pipeline
+   runtime's production home**, following `agm/workflowbus/bridge.go`'s precedent, and
+   `pkg/workflow` (ADR-010), not a new `pkg/pipeline` package, is the durable execution
+   engine it starts runs on.
 
-Explicitly deferred to a follow-up design review, not decided here:
+Deferred to a follow-up design review, not decided in detail here:
 
-5. **An event-triggered `pkg/workflow`**, so a workflow run can start from a trigger
-   match instead of only a CLI invocation, replacing the earlier plan to build a new
-   `pkg/pipeline` package from scratch.
-6. **A unified event envelope**, extending `pkg/eventbus.Event` with provenance and
-   related-ID fields, and a channel-naming convention that does not silently drop
-   proposed event names (`bead.ready`, `paper.posted`, and the rest) into undurable
-   channels the way `ChannelFromType`'s current first-segment rule does.
-7. **A generic backpressure policy package**, generalizing mergeloop's proven
-   cap-and-skip logic so any workflow run can declare a capacity limit the same way.
-8. **A merge decision for benchmark-driven changes** (the "arXiv paper to competing
-   PRs to benchmark to merge decision" flow). This is a governance decision, not a
-   plumbing one, and needs the same scrutiny ADR-030 got, checked against ADR-032's
-   must-reach-human taxonomy and ADR-031's exception-path discipline. It is not
-   pre-authorized by this ADR; this ADR only names where it would plug in.
+6. **The unified event envelope** (design doc item 4) and **the `agm-bus`
+   publish/subscribe wire-protocol addition** (design doc item 5): these are protocol
+   and schema designs, not wiring exercises, and need their own review.
+7. **The `agm/`-rooted bridge package's exact contract** (design doc item 6): the
+   event-to-workflow trigger-action model (input mapping, authorization, idempotency,
+   failure and retry ownership) is not yet an interface, and needs to be one before
+   this is implementable.
+8. **A generic backpressure policy package** (design doc item 7): mergeloop's `cap(N)`
+   is proven; `timeout(D)` and `staleness(D)` are new designs this ADR does not treat
+   as proven.
+9. **A merge decision for benchmark-driven changes** (design doc item 8, the "arXiv
+   paper to competing beads to benchmark to merge decision" flow). This is a
+   governance decision, not a plumbing one, and needs the same scrutiny ADR-030 got,
+   checked against ADR-032's must-reach-human taxonomy and ADR-031's exception-path
+   discipline. It is not pre-authorized by this ADR; this ADR only names where it would
+   plug in.
 
 ## Alternatives considered
 
-- **Build a new in-process-to-cross-process event bus from scratch.** Rejected:
-  `agm-bus` already solves the cross-process case (durable per-session queue, ACL,
-  already used for infrastructure-origin events), and `pkg/eventbus` already solves
-  the in-process case. A new bus would be a seventh independent implementation of a
-  shape this ADR exists to stop reproducing.
+- **Build a new cross-process event bus from scratch, instead of extending
+  `agm-bus`.** Rejected: `agm-bus` already provides the durable per-session queue and
+  ACL a new bus would need to reinvent; the missing piece is one wire-protocol
+  addition (item 6), not a new transport.
+- **Have `pkg/trigger` import `agm/internal/bus` directly.** Rejected: Go's
+  internal-package visibility rule forbids it, since `pkg/trigger` is outside the
+  `agm/` prefix. `agm/workflowbus/bridge.go` already establishes the correct pattern
+  for this exact constraint, and this ADR follows it rather than proposing something
+  the compiler would reject.
 - **Build a new `pkg/pipeline` runtime.** Rejected: `pkg/workflow` (ADR-010) already
-  provides durable state, per-transition audit, and first-class HITL, everything a new
-  runtime would need to reinvent. The gap is narrower than a new package: `pkg/workflow`
-  is not currently startable from an event.
+  provides durable state, per-transition audit, and first-class HITL, and is already
+  invokable from more than the CLI (an MCP tool exists). The gap is narrower than a
+  new package: `pkg/workflow` is not currently startable from an event.
 - **Make beads readiness push-based instead of polled.** Rejected for now: ADR-002 is
   explicit that VROOM does not own roadmap projections, and beads' Dolt-backed store is
   a separate system this repo consumes through the `bd` CLI, not one it controls the
@@ -111,10 +123,15 @@ Explicitly deferred to a follow-up design review, not decided here:
   Rejected: absence-alarm's own SPEC names "the watcher lives inside the thing being
   watched" as the exact anti-pattern it exists to avoid; making it depend on the same
   transport it is meant to watch for silence would reintroduce that failure mode. It
-  should emit onto `agm-bus` for visibility without depending on that transport to
-  function.
-- **Ship the merge decision as part of this ADR.** Rejected: adversarial review found
-  concrete, non-cosmetic gaps in an earlier draft of that decision (the gate's own
+  should emit onto `agm-bus` for visibility once that transport can carry it, not
+  depend on it to function.
+- **Route Flow B's candidate PRs directly from a worker spawn, bypassing beads.**
+  Rejected: the research-pipeline skill's actual Stage 4 output is decomposition into
+  sized beads, not a worker spawn, and routing candidates through beads means VROOM's
+  existing dispatch capacity governs how many candidates are in flight at once, instead
+  of a second, duplicate admission check.
+- **Ship the merge decision as part of this ADR.** Rejected: design review found
+  concrete, non-cosmetic gaps in an earlier version of that decision (the gate's own
   safety constants were not excluded from its own auto-merge class, no requirement
   that the benchmark be independent of the change it measures, no composition with
   ADR-031/ADR-032, no single-winner rule among competing candidates). Each of those is
@@ -125,17 +142,17 @@ Explicitly deferred to a follow-up design review, not decided here:
 ## Consequences
 
 - Mergeloop's existing backpressure signal becomes visible system-wide instead of
-  buried in its own audit log; the PR-queue throughput problem becomes observable at
-  the point of contention.
-- A real, currently-shipping defect (the Wayfinder-to-trigger topic-name mismatch)
-  gets fixed as a direct consequence of writing this design down, independent of
-  everything else in it.
-- The cross-process transport question, previously unasked, is answered: `agm-bus`,
-  not a new bus and not `pkg/eventbus` stretched past its documented scope.
-- New surface area is smaller than an earlier draft proposed: extending `pkg/workflow`
-  and `pkg/trigger` instead of building a new package each.
+  buried in its own audit log, once `agm-bus` gains a publish/subscribe primitive; the
+  PR-queue throughput problem becomes observable at the point of contention.
+- Fixing the Wayfinder to trigger-registry topic-name drift is real, independently
+  useful work, but does not by itself make a trigger fire; production composition
+  (item 5) and the transport addition (item 6) are separate prerequisites.
+- The cross-process transport question, previously unasked, is answered in direction:
+  `agm-bus`, not a new bus, once it has the protocol addition item 6 scopes.
+- New surface area is a bridge package under `agm/` and a protocol addition to
+  `agm/internal/bus`, not a new top-level `pkg/pipeline` package.
 - Event schema versioning and delivery-ordering guarantees remain open questions,
-  deferred to the design review for items 5 through 7 above, not resolved here.
+  deferred to the design review for items 6 through 8, not resolved here.
 - The merge decision, once designed, needs the same scrutiny ADR-030 got; this ADR
   does not pre-authorize it, only names where it would plug in.
 
