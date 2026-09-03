@@ -96,17 +96,18 @@ reciprocal BDD links, record every active member's applicability, and retain
 the source or test evidence for native conformance. Stop for maintainer review
 when ownership or observable semantics are uncertain.
 
-The deterministic source guard admits a same-change relocation or complete
-retirement to that review only when the selected immutable snapshot has no
-surviving reciprocal BDD or implementation ownership edge to the deleted path
-and every replacement passes the ordinary strict checks. That is structural
-graph evidence, not semantic deletion authority; the changed paths and reviewed
-diff must still demonstrate the stable-ID preservation or deliberate retirement
-decision.
+When the target repository declares a deterministic source guard for contract
+migration or retirement, follow that guard's admission contract before asking
+for semantic review. Passing structural checks is not semantic deletion
+authority; the changed paths and reviewed diff must still demonstrate stable-ID
+preservation or a deliberate retirement decision.
 
-If implementation source survives, deleting its `SPEC.owner` is blocked unless
-the same directory gains a permitted local `SPEC.md` replacement that passes
-strict neutrality and contract validation.
+When the target repository declares `SPEC.owner` projection support and
+implementation source survives, preserve its ownership projection or supply an
+allowed local replacement as required by that repository's guard. If either the
+projection or guard capability is absent, record that evidence layer as
+unavailable and follow the repository's native migration checks; do not invent
+guard evidence or import dear-agent's blocking rules.
 
 When a repository's guard classifies an added directory as a possible
 relocation target, authors must preserve a valid ownership projection or an

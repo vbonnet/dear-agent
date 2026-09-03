@@ -51,10 +51,11 @@ authorize a product SPEC migration.
 Before deleting or relocating a governed contract or `SPEC.owner` edge, follow
 the contract model's canonical
 [migration boundary](../spec-governance/skills/write-spec/references/contract-model.md#migration-boundary).
-It defines the required structural guard evidence, stable-ID handling,
-reciprocal BDD links, conformance evidence, and mandatory semantic review.
-For this repository, [`SPEC-GUARD-23`](../internal/specguard/SPEC.md) owns the
-exact conservative relocation evidence and false-positive boundary.
+It defines how to discover and follow structural guard evidence, stable-ID
+handling, reciprocal BDD links, conformance evidence, and mandatory semantic
+review. For this repository, [`SPEC-GUARD-22` and
+`SPEC-GUARD-23`](../internal/specguard/SPEC.md) own the exact retirement and
+relocation admission rules, including the conservative false-positive boundary.
 
 ## Evidence boundary
 
