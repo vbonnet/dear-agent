@@ -58,6 +58,11 @@ const (
 	// serialize into an unbounded tick even though each one respects the probe
 	// budget. Overridable with --tick-timeout.
 	defaultTickTimeout = 5 * time.Minute
+	// notifyTimeout bounds one notification independently of the tick
+	// deadline. An exhausted tick budget IS an alarm condition, so dispatching
+	// on the expired tick context would suppress exactly the notification the
+	// operator needs, along with every transition after it.
+	notifyTimeout = 15 * time.Second
 )
 
 // notifier delivers one alarm or recovery message to the operator.
@@ -247,7 +252,11 @@ func (t *tick) process(ctx context.Context, p absencealarm.Pulse) absencealarm.R
 // dispatch sends one notification; a failure is reported and never changes
 // the exit code (AA-17).
 func (t *tick) dispatch(ctx context.Context, title, body string) {
-	if err := t.notifyFn(ctx, title, body); err != nil {
+	// Detach from the tick deadline, which may already be expired, but stay
+	// bounded so a hung notifier cannot stall the pass indefinitely.
+	notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
+	defer cancel()
+	if err := t.notifyFn(notifyCtx, title, body); err != nil {
 		fmt.Fprintf(t.stderr, "absence-alarm: notify: %v\n", err)
 	}
 }
