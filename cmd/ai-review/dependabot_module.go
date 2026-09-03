@@ -7,11 +7,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 const maxDependabotModuleBlobBytes = 2 * 1024 * 1024
@@ -114,56 +116,89 @@ func dependabotModuleCandidateBlobs(ctx context.Context, mergeBase, head string,
 }
 
 func moduleDependencyVersionLedChange(base, head []byte) (bool, error) {
+	cause, err := moduleDependencyUpdateCause(base, head)
+	return err == nil && cause == "", err
+}
+
+// moduleDependencyUpdateCause returns the empty string when the two manifests
+// differ only by an ordinary dependency version update, and otherwise a short
+// phrase naming the first foundational difference it found. The phrase is
+// governance-facing evidence: it tells a contributor exactly which part of the
+// delta requires maintainer judgment rather than only that one was required.
+func moduleDependencyUpdateCause(base, head []byte) (string, error) {
 	baseModule, err := parseModuleVersionState(base)
 	if err != nil {
-		return false, fmt.Errorf("parse base go.mod: %w", err)
+		return "", fmt.Errorf("parse base go.mod: %w", err)
 	}
 	headModule, err := parseModuleVersionState(head)
 	if err != nil {
-		return false, fmt.Errorf("parse head go.mod: %w", err)
+		return "", fmt.Errorf("parse head go.mod: %w", err)
 	}
-	if baseModule.hasReplace || headModule.hasReplace {
-		return false, nil
+	switch {
+	case baseModule.hasReplace || headModule.hasReplace:
+		return "declares a replace directive", nil
+	case baseModule.goDirective != headModule.goDirective:
+		return "changes the go directive", nil
+	case baseModule.toolchain != headModule.toolchain:
+		return "changes the toolchain directive", nil
+	case !bytes.Equal(baseModule.withoutRequireDirectives, headModule.withoutRequireDirectives):
+		return "changes module identity, an exclude or retract directive, or other non-require syntax", nil
+	case !equalModuleAnnotatedRequireBlocks(baseModule.annotatedRequireBlocks, headModule.annotatedRequireBlocks):
+		return "changes a policy-annotated require block", nil
 	}
-	if !bytes.Equal(baseModule.withoutRequireDirectives, headModule.withoutRequireDirectives) {
-		return false, nil
-	}
-	if !equalModuleAnnotatedRequireBlocks(baseModule.annotatedRequireBlocks, headModule.annotatedRequireBlocks) {
-		return false, nil
-	}
-	return moduleRequirementsVersionLedChange(baseModule.requirements, headModule.requirements), nil
+	return moduleRequirementDeltaCause(baseModule.requirements, headModule.requirements), nil
 }
 
-func moduleRequirementsVersionLedChange(base, head map[string]moduleRequirement) bool {
+// moduleRequirementDeltaCause classifies the require-block delta. Adding or
+// dropping an unannotated indirect requirement is the ordinary consequence of
+// resolving a version bump, so it stays routine; a new or removed direct
+// requirement is a new dependency decision, and a major-version move is an
+// API-surface decision. Both belong to a maintainer.
+func moduleRequirementDeltaCause(base, head map[string]moduleRequirement) string {
 	versionChanged := false
-	for path, baseRequirement := range base {
-		headRequirement, ok := head[path]
-		if !ok {
+	for _, path := range slices.Sorted(maps.Keys(base)) {
+		baseRequirement := base[path]
+		headRequirement, retained := head[path]
+		if !retained {
 			if !baseRequirement.indirect || len(baseRequirement.annotations) != 0 {
-				return false
+				return fmt.Sprintf("removes direct requirement %s", path)
 			}
 			continue
 		}
 		if !slices.Equal(baseRequirement.annotations, headRequirement.annotations) {
-			return false
+			return fmt.Sprintf("changes the annotations on requirement %s", path)
 		}
-		if baseRequirement.version != headRequirement.version {
-			versionChanged = true
+		if baseRequirement.version == headRequirement.version {
+			continue
 		}
+		baseMajor, headMajor := semver.Major(baseRequirement.version), semver.Major(headRequirement.version)
+		if baseMajor == "" || headMajor == "" {
+			return fmt.Sprintf("gives requirement %s a non-canonical version", path)
+		}
+		if baseMajor != headMajor {
+			return fmt.Sprintf("changes the major version of requirement %s", path)
+		}
+		versionChanged = true
 	}
-	for path, headRequirement := range head {
+	for _, path := range slices.Sorted(maps.Keys(head)) {
+		headRequirement := head[path]
 		if _, existed := base[path]; !existed &&
 			(!headRequirement.indirect || len(headRequirement.annotations) != 0) {
-			return false
+			return fmt.Sprintf("adds direct requirement %s", path)
 		}
 	}
-	return versionChanged
+	if !versionChanged {
+		return "changes no existing requirement version"
+	}
+	return ""
 }
 
 type moduleVersionState struct {
 	requirements             map[string]moduleRequirement
 	annotatedRequireBlocks   []moduleAnnotatedRequireBlock
 	withoutRequireDirectives []byte
+	goDirective              string
+	toolchain                string
 	hasReplace               bool
 }
 
@@ -205,6 +240,14 @@ func parseModuleVersionState(raw []byte) (moduleVersionState, error) {
 	state := moduleVersionState{
 		requirements: make(map[string]moduleRequirement, len(file.Require)),
 		hasReplace:   len(file.Replace) != 0,
+	}
+	// Capture both language directives before Cleanup and Format, which are
+	// free to rewrite the syntax tree these fields describe.
+	if file.Go != nil {
+		state.goDirective = file.Go.Version
+	}
+	if file.Toolchain != nil {
+		state.toolchain = file.Toolchain.Name
 	}
 	requirementPaths := make(map[*modfile.Line]string, len(file.Require))
 	for _, requirement := range file.Require {
