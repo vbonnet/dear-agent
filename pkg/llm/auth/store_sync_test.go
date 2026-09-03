@@ -200,3 +200,74 @@ func TestResolveStoreConvergedStoresAreNotShadowed(t *testing.T) {
 		t.Fatal("Shadowed = true for converged stores, want false")
 	}
 }
+
+// After an operator re-login the CLI writes the new family into the keychain
+// and leaves the old credential in the file. A file-sourced refresh would
+// present the dead token and invalid_grant would kill the family that was just
+// created, which is the loop that produced 599 dead-family markers.
+func TestPreferFreshestCredentialTakesKeychainAfterRelogin(t *testing.T) {
+	dir := t.TempDir()
+	stale := time.Now().Add(-78 * 24 * time.Hour).UnixMilli()
+	fresh := time.Now().Add(8 * time.Hour).UnixMilli()
+
+	path := writeCredsFile(t, dir, credsWith("old-access", "dead-refresh", stale))
+	fileCreds, _, ok := (OAuthResolver{CredentialsPath: path}).readFullCredentials()
+	if !ok {
+		t.Fatal("file unreadable")
+	}
+
+	r := OAuthResolver{
+		CredentialsPath:  path,
+		keychainOverride: &stubStore{present: true, creds: credsWith("new-access", "live-refresh", fresh)},
+	}
+	got := r.preferFreshestCredential(fileCreds)
+	if got.ClaudeAIOAuth.RefreshToken != "live-refresh" {
+		t.Fatalf("refreshToken = %q, want live-refresh (the file's token is dead)",
+			got.ClaudeAIOAuth.RefreshToken)
+	}
+}
+
+// The reverse must hold too: a stale keychain must never displace a fresher
+// file, or the refresher would present the very token that is already dead.
+func TestPreferFreshestCredentialKeepsFileWhenKeychainIsStale(t *testing.T) {
+	dir := t.TempDir()
+	stale := time.Now().Add(-78 * 24 * time.Hour).UnixMilli()
+	fresh := time.Now().Add(8 * time.Hour).UnixMilli()
+
+	path := writeCredsFile(t, dir, credsWith("good", "live-refresh", fresh))
+	fileCreds, _, _ := (OAuthResolver{CredentialsPath: path}).readFullCredentials()
+
+	r := OAuthResolver{
+		CredentialsPath:  path,
+		keychainOverride: &stubStore{present: true, creds: credsWith("old", "dead-refresh", stale)},
+	}
+	if got := r.preferFreshestCredential(fileCreds); got.ClaudeAIOAuth.RefreshToken != "live-refresh" {
+		t.Fatalf("refreshToken = %q, want live-refresh", got.ClaudeAIOAuth.RefreshToken)
+	}
+}
+
+// An unusable keychain record must not displace a refreshable file.
+func TestPreferFreshestCredentialIgnoresUnusableKeychain(t *testing.T) {
+	dir := t.TempDir()
+	path := writeCredsFile(t, dir, credsWith("good", "live-refresh", time.Now().Add(time.Hour).UnixMilli()))
+	fileCreds, _, _ := (OAuthResolver{CredentialsPath: path}).readFullCredentials()
+
+	r := OAuthResolver{
+		CredentialsPath:  path,
+		keychainOverride: &stubStore{present: true, creds: credsWith("x", "", 1<<62)},
+	}
+	if got := r.preferFreshestCredential(fileCreds); got.ClaudeAIOAuth.RefreshToken != "live-refresh" {
+		t.Fatalf("refreshToken = %q, want live-refresh", got.ClaudeAIOAuth.RefreshToken)
+	}
+}
+
+// A resolver pointed at a non-default credentials path must never reach the
+// ambient keychain. Beyond being wrong (the keychain item is the peer of the
+// default file, not of an arbitrary path), the earlier version of this change
+// made every unit test read the operator's real login keychain.
+func TestKeychainStoreNotUsedForNonDefaultPath(t *testing.T) {
+	r := OAuthResolver{CredentialsPath: filepath.Join(t.TempDir(), ".credentials.json")}
+	if store := r.keychainStoreFor(); store != nil {
+		t.Fatalf("keychainStoreFor() = %v for a non-default path, want nil", store)
+	}
+}

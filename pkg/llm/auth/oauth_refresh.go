@@ -175,6 +175,11 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 		if !ok {
 			return errors.New("credentials file unreadable under lock")
 		}
+		// Source the refresh token from whichever store holds the newer
+		// credential. Claude Code writes re-logins into the keychain and leaves
+		// the file behind, so a file-only read here presents a dead token and
+		// invalid_grant kills the family the operator just created.
+		creds = r.preferFreshestCredential(creds)
 		if creds.ClaudeAIOAuth.AccessToken != "" && r.fileTokenFresh(creds.ClaudeAIOAuth.ExpiresAt) {
 			token = creds.ClaudeAIOAuth.AccessToken
 			r.log("oauth.refresh.skipped", "reason", "another process already refreshed")

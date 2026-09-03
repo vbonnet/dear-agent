@@ -56,6 +56,10 @@ provider credential handling.
 
 **CTR-25** When mirroring credentials, the system shall refuse to write a credential set that carries no refresh token, so a store holding a refreshable credential is never overwritten with an unrefreshable one.
 
+**CTR-26** When selecting the refresh token to present, the system shall use the credential from whichever store holds the newer refreshable credential, so a refresh never presents a stale token while a fresher one exists in another store.
+
+**CTR-27** While a resolver addresses a credentials path other than the canonical one, the system shall not consult the platform keychain, since that item is the peer of the canonical file alone.
+
 **CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
 
 ## BDD Traceability

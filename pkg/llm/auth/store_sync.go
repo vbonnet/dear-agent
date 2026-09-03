@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 )
 
@@ -54,6 +55,17 @@ func usableCredential(c fullCredentials) bool {
 	return c.ClaudeAIOAuth.RefreshToken != ""
 }
 
+// usesDefaultCredentialsPath reports whether this resolver addresses the
+// canonical ~/.claude/.credentials.json.
+func (r OAuthResolver) usesDefaultCredentialsPath() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	return r.credentialsPath() == canonicalRefreshCredentialsPath(
+		filepath.Join(home, claudeCredentialsRelPath))
+}
+
 // primaryIsWorse reports whether the credential the CLI will present is
 // strictly inferior to the one sitting in the fallback store: either it cannot
 // be refreshed at all, or the fallback carries a newer credential that the CLI
@@ -69,7 +81,18 @@ func primaryIsWorse(primary, fallback fullCredentials) bool {
 // keychainStoreFor builds the keychain store this process's environment maps
 // to, or nil on platforms without one.
 func (r OAuthResolver) keychainStoreFor() CredentialStore {
+	if r.keychainOverride != nil {
+		return r.keychainOverride
+	}
 	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	// The keychain item is the peer of the DEFAULT credentials file, so it is
+	// only meaningful for a resolver addressing that file. A resolver pointed
+	// at some other path describes a different credential set entirely, and
+	// pairing it with the ambient keychain item would both mis-resolve it and
+	// let a unit test read the operator's real login keychain.
+	if !r.usesDefaultCredentialsPath() {
 		return nil
 	}
 	getenv := r.env
@@ -158,4 +181,29 @@ func (r OAuthResolver) mirrorToSecondaryStores(creds fullCredentials) error {
 		return nil
 	}
 	return keychain.Write(creds)
+}
+
+// preferFreshestCredential returns whichever store holds the newer refreshable
+// credential, so a refresh never presents a stale token while a fresher one
+// exists elsewhere.
+//
+// Without this, the first refresh after an operator re-login is fatal: the CLI
+// writes the new family into the keychain and leaves the old credential in the
+// file, so a file-sourced refresh presents an already-dead token and the server
+// answers invalid_grant, killing the family that was just created. That is the
+// loop that produced 599 dead-family markers on this host.
+func (r OAuthResolver) preferFreshestCredential(fileCreds fullCredentials) fullCredentials {
+	keychain := r.keychainStoreFor()
+	if keychain == nil {
+		return fileCreds
+	}
+	kcCreds, ok := keychain.Read()
+	if !ok || !usableCredential(kcCreds) {
+		return fileCreds
+	}
+	if !usableCredential(fileCreds) ||
+		kcCreds.ClaudeAIOAuth.ExpiresAt > fileCreds.ClaudeAIOAuth.ExpiresAt {
+		return kcCreds
+	}
+	return fileCreds
 }

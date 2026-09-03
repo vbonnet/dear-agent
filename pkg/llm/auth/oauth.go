@@ -86,6 +86,10 @@ type OAuthResolver struct {
 	// file and block future refreshes until ClearRefreshProtections is called.
 	QuarantinePath string
 
+	// keychainOverride replaces the platform keychain store. It exists so
+	// tests never touch the operator's real login keychain.
+	keychainOverride CredentialStore
+
 	// Logger, when non-nil, receives structured refresh events (attempt,
 	// success, failure) for OTel/observability. Token values are never logged.
 	// Nil disables logging.
