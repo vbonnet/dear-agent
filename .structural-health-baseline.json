@@ -91,7 +91,6 @@
       "agm/internal/codexhooks/verify.go (2881 lines)",
       "agm/internal/dolt/adapter_test.go (1032 lines)",
       "agm/internal/dolt/sessions.go (1709 lines)",
-      "agm/internal/dolt/sessions_sqlite_test.go (2018 lines)",
       "agm/internal/harnessexec/exec.go (1291 lines)",
       "agm/internal/harnessexec/handoff.go (1733 lines)",
       "agm/internal/harnessexec/handoff_test.go (2194 lines)",
@@ -1023,6 +1022,29 @@
       },
       "reason": "The ACL-reloader goroutine moved again, from line 460 to 471, when watchACLReload was folded into serve to give cmdServe and the tests one shared orchestration. Still five go func sites in the file, still the same four without recover(), and the goroutine-recover total is unchanged at 29. Relocation, not a new finding.",
       "reference": "https://github.com/vbonnet/dear-agent/pull/1352"
+    },
+    {
+      "previous_baseline_sha256": "5d8fec39706f2a71b79fd298e8e370bdec834f6705e2514b537bb4c136e774dc",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions_sqlite_test.go (2018 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
     }
   ]
 }
