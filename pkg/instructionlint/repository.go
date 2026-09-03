@@ -174,7 +174,7 @@ func validateGovernedSymlink(root, absolute, relative string, surfaces []Surface
 	return nil
 }
 
-func instructionSegments(relative string, data []byte) ([]Segment, error) {
+func instructionSegments(relative string, data []byte) ([]segment, error) {
 	extension := strings.ToLower(filepath.Ext(relative))
 	if extension == ".yml" || extension == ".yaml" || extension == ".json" {
 		return parseYAMLSegments(data)

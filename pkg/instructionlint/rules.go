@@ -10,7 +10,7 @@ import (
 type rule struct {
 	id          string
 	replacement string
-	applies     func(SegmentKind) bool
+	applies     func(segmentKind) bool
 	detect      func(string) bool
 }
 
@@ -77,7 +77,7 @@ func knownRule(id string) bool {
 	return false
 }
 
-func evaluateSegment(path string, segment Segment) []Violation {
+func evaluateSegment(path string, segment segment) []Violation {
 	var violations []Violation
 	for _, candidate := range instructionRules {
 		if candidate.applies(segment.Kind) && ruleDetects(candidate, path, segment.Text) {
@@ -111,12 +111,12 @@ func unqualifiedRetiredWayfinderV1(text string) bool {
 	return false
 }
 
-func proseOrShell(kind SegmentKind) bool {
-	return kind == SegmentProse || kind == SegmentShell
+func proseOrShell(kind segmentKind) bool {
+	return kind == segmentProse || kind == segmentShell
 }
 
-func commandSegment(kind SegmentKind) bool {
-	return kind == SegmentInline || kind == SegmentShell
+func commandSegment(kind segmentKind) bool {
+	return kind == segmentInline || kind == segmentShell
 }
 
 func shellText(text string) string {
