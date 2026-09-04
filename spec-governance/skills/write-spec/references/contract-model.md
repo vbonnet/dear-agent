@@ -33,25 +33,18 @@ translates or exposes the behavior.
 
 ## Implementation projections
 
-When the target repository's discovered governance contract requires an
-implementation directory to project its contract owner through `SPEC.owner`,
-use exactly one canonical repository-relative path to the neutral product or
-domain `SPEC.md`. For example, dear-agent declares this capability and can
-point to:
+When the target repository's discovered governance contract declares an
+implementation-owner projection such as `SPEC.owner`, follow that repository's
+normative ownership and coverage contracts for the exact declaration syntax,
+target constraints, and inherited checks. Do not copy those repository-specific
+rules into this portable model.
 
-```text
-internal/hookparity/SPEC.md
-```
-
-The pointer is traceability, not a second normative contract: it cannot target
-a dotted or bare harness configuration, registration, plugin, or grouped
-harness root, and cannot coexist with a local `SPEC.md`. Apply the target
-repository's declared checks to the projection: validate the `SPEC.owner`
-pointer under its declared ownership checks, and validate the canonical target
-under each declared coverage check, such as strict EARS or reciprocal BDD.
-Record every absent evidence layer as unavailable. Use the pointer only when
-the implementation adds no distinct observable contract; a new observable
-requires an ownership decision in the neutral product or domain.
+The projection is traceability, not a second normative contract. Run each
+projection and canonical-target check exactly where that repository's contract
+assigns it, and record every absent evidence layer as unavailable. Use a
+projection only when the implementation adds no distinct observable contract;
+a new observable requires an ownership decision in the neutral product or
+domain.
 
 Do not invent `SPEC.owner` in a target repository that does not declare this
 capability. Record the projection layer as unavailable, follow the repository's
