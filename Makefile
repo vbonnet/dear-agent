@@ -1098,7 +1098,7 @@ build-absence-alarm:
 install-absence-alarm: build-absence-alarm
 	$(call install-go-bin,bin/absence-alarm)
 
-install-absence-alarm-launchagent: install-absence-alarm
+install-absence-alarm-launchagent: install-absence-alarm install-jaeger-health
 	@mkdir -p $(HOME)/Library/LaunchAgents
 	@mkdir -p $(HOME)/.local/state/dear-agent
 	@mkdir -p $(HOME)/.config/dear-agent

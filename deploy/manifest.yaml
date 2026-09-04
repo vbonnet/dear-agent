@@ -164,3 +164,14 @@ artifacts:
     deployed: ~/go/bin/absence-alarm
     mode: "0755"
     remediation: make install-absence-alarm
+
+  # The default pulse registry includes an otel-receiving probe that calls
+  # jaeger-health. Without this entry, `dear-deploy status` reports the stack
+  # current while the probe binary is missing, and the first absence-alarm tick
+  # classifies otel-receiving as UNDETERMINED and alarms spuriously.
+  - name: jaeger-health
+    kind: binary
+    source: cmd/jaeger-health
+    deployed: ~/go/bin/jaeger-health
+    mode: "0755"
+    remediation: make install-jaeger-health
