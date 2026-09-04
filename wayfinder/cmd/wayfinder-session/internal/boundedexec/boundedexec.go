@@ -147,11 +147,15 @@ func (c Command) Run() Result {
 	<-stopped
 	elapsed := time.Since(start)
 
-	// A timeout requires all three: the command failed, cancellation actually
-	// reached the process, and the deadline is what cancelled it. Any weaker
-	// test misreports a success or an ordinary failure at the deadline
-	// boundary, and the gate discards the real diagnostic.
-	timedOut := err != nil && cancelled.Load() && errors.Is(ctx.Err(), context.DeadlineExceeded)
+	// A timeout requires the command to have failed, cancellation to have
+	// actually reached the process, the deadline to be what cancelled it, and
+	// the process not to have exited under its own power anyway. That last
+	// condition matters because the kill can lose the race: a command that
+	// returns its own exit status just as the deadline fires has produced a
+	// real diagnostic, and relabelling it a timeout makes the gate advise
+	// raising the timeout instead of showing the build or test error.
+	timedOut := err != nil && cancelled.Load() &&
+		errors.Is(ctx.Err(), context.DeadlineExceeded) && !exitedUnderOwnPower(err)
 	switch {
 	case timedOut:
 		sink.emit("⏱  %s: timed out after %s\n", c.Label, c.Timeout)
@@ -211,6 +215,14 @@ func (s *progressSink) close() {
 	case <-s.done:
 	case <-time.After(progressDrainGrace):
 	}
+}
+
+// exitedUnderOwnPower reports whether the process finished with its own exit
+// status rather than dying from a signal. A signalled process is one we killed;
+// an exited one told us something, and that something is worth keeping.
+func exitedUnderOwnPower(err error) bool {
+	exitErr, ok := errors.AsType[*exec.ExitError](err)
+	return ok && exitErr.ProcessState != nil && exitErr.Exited()
 }
 
 // beat writes a liveness line every interval until done is closed, so a gate
