@@ -49,9 +49,22 @@ retry state, and acknowledgement timeouts.
 
 **MSG-19** When simultaneous constructors receive a transient typed SQLite busy result before immediate transaction ownership, the system shall schedule retries only for that result while the shared 5000 ms retry deadline remains, honor caller cancellation between retries, and return a bounded error if ownership is not acquired; an in-flight driver connection or busy-handler call is outside the retry scheduler's interruption boundary.
 
+**MSG-20** When the message queue is opened, before SQLite receives the database path, the system shall traverse the current user's home, `.config`, and AGM queue-storage root without following symbolic links; every existing component shall be a directory owned by the current user and shall not be group- or other-writable, every component created by this operation shall use mode `0700`, and an existing safe `.config` directory may retain narrower or read-and-search permissions while the AGM storage root shall be tightened to mode `0700`.
+
+**MSG-21** When any of `message_queue.db`, its WAL, SHM, or rollback-journal sidecar already exists, the system shall admit all existing queue-owned leaves before changing any leaf mode or opening SQLite, require each leaf to be a non-symlink regular file owned by the current user with one link, and reject an orphan sidecar or any wrong-owner, linked, symbolic-link, or non-regular leaf without deleting, truncating, replacing, or otherwise mutating the rejected target.
+
+**MSG-22** When queue-storage admission succeeds, before SQLite opens the database, the system shall atomically create a missing `message_queue.db` with mode `0600` or tighten the admitted database and any existing queue-owned sidecars to mode `0600`, preserve existing database identity and content, and open only the admitted database so SQLite-created WAL and SHM files remain mode `0600`; simultaneous first opens shall converge on the same private database without weakening these invariants.
+
+**MSG-23** When SQLite queue initialization completes, the system shall verify without repair that the retained directory boundary and main-file identity still match and that every present main, WAL, SHM, or rollback-journal leaf satisfies its owner, type, link, and exact private-mode invariants; on failure it shall close the database and return an error preserving the unsafe-storage identity.
+
+**MSG-24** When queue-storage trust cannot be established on Darwin or Linux, or when queue construction runs on another operating system, the system shall fail closed with a bounded error preserving `ErrUnsafeQueueStorage` without disclosing symlink targets, message content, session identifiers, row values, raw DDL, or raw SQLite diagnostics.
+
+**MSG-25** When admitting the queue boundary fails for an ordinary resource reason rather than a trust violation, the system shall return an error preserving `ErrQueueStorageUnavailable` and shall not preserve `ErrUnsafeQueueStorage`, so callers keep their direct-delivery fallback for a transient storage outage. A failure that cannot be attributed to resource exhaustion shall remain a trust violation.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Test consequence: Deterministic package tests in `agm/internal/messages/queue_storage_unix_test.go` prove MSG-20 through MSG-23 and the Darwin/Linux branch of MSG-24 with isolated homes and a permissive process umask: they observe the database plus live WAL and SHM modes, preserve admitted database identity and unrelated same-user AGM configuration while tightening modes, reject unsafe directory and leaf identities without touching their targets, exercise bounded verify-only post-initialization refusal, and cover simultaneous first opens. Unsupported-platform cross-compilation checks that the fail-closed implementation and its focused test are selected and compile, but does not execute the other-operating-system branch of MSG-24. This private POSIX storage-admission seam needs no additional Gherkin scenario.
 - Package tests: `agm/internal/messages/priority_test.go`
 - Package tests: `agm/internal/messages/queue_test.go`
 - Package tests: `agm/internal/messages/queue_schema_test.go`

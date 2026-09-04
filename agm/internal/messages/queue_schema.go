@@ -25,26 +25,74 @@ type queueSQLiteCodeError interface {
 }
 
 // openMessageQueueDB owns every SQLite precondition behind the queue's public
-// constructor: URI escaping, per-connection pragmas, immediate initialization,
-// schema classification, migration, and close-on-error.
-func openMessageQueueDB(ctx context.Context, dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", messageQueueDSN(dbPath))
+// constructor: private-storage admission, URI escaping, per-connection pragmas,
+// immediate initialization, schema classification, migration, post-open
+// verification, and close-on-error. It consumes storage on every return path.
+func openMessageQueueDB(ctx context.Context, storage *messageQueueStorage) (*sql.DB, error) {
+	if err := storage.prepareForSQLite(); err != nil {
+		return nil, errors.Join(err, storage.Close())
+	}
+
+	db, err := sql.Open("sqlite", messageQueueDSN(storage.databasePath()))
 	if err != nil {
-		return nil, fmt.Errorf("open message queue database: %w", errQueueDatabaseOperation)
+		return nil, errors.Join(
+			fmt.Errorf("open message queue database: %w", errQueueDatabaseOperation),
+			storage.Close(),
+		)
+	}
+
+	// sql.Open is lazy, so nothing has touched the filesystem yet. Force the
+	// connection and prove the opened main database is still the admitted
+	// inode BEFORE any DDL runs. Without this, a same-UID process that
+	// replaced message_queue.db between admission and first use would have
+	// schema created or migrated in a file that was never admitted, and the
+	// mismatch would only be reported afterwards, having already written.
+	if err := db.PingContext(ctx); err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("open message queue database: %w", errQueueDatabaseOperation),
+			closeRejectedMessageQueueDB(db),
+			storage.Close(),
+		)
+	}
+	if err := storage.verifyAfterSQLite(); err != nil {
+		return nil, errors.Join(
+			err,
+			closeRejectedMessageQueueDB(db),
+			storage.Close(),
+		)
 	}
 
 	if err := initializeMessageQueueSchema(ctx, db); err != nil {
 		initializationErr := sanitizeQueueInitializationError(err)
-		if closeErr := db.Close(); closeErr != nil {
-			return nil, errors.Join(
-				initializationErr,
-				fmt.Errorf("close rejected message queue database: %w", errQueueDatabaseOperation),
-			)
-		}
-		return nil, initializationErr
+		return nil, errors.Join(
+			initializationErr,
+			closeRejectedMessageQueueDB(db),
+			storage.Close(),
+		)
+	}
+
+	// Re-verify: the pre-DDL check proves what was written to, this one keeps
+	// the existing guarantee that the boundary did not change during
+	// initialization.
+	if err := storage.verifyAfterSQLite(); err != nil {
+		return nil, errors.Join(
+			err,
+			closeRejectedMessageQueueDB(db),
+			storage.Close(),
+		)
+	}
+	if err := storage.Close(); err != nil {
+		return nil, errors.Join(err, closeRejectedMessageQueueDB(db))
 	}
 
 	return db, nil
+}
+
+func closeRejectedMessageQueueDB(db *sql.DB) error {
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("close rejected message queue database: %w", errQueueDatabaseOperation)
+	}
+	return nil
 }
 
 func sanitizeQueueInitializationError(err error) error {
@@ -71,6 +119,7 @@ func messageQueueDSN(dbPath string) string {
 	query.Set("_busy_timeout", strconv.FormatInt(queueBusyTimeout.Milliseconds(), 10))
 	query.Set("_journal_mode", "WAL")
 	query.Set("_txlock", "immediate")
+	query.Set("mode", "rw")
 	query.Add("_pragma", "ignore_check_constraints(OFF)")
 	databaseURL.RawQuery = query.Encode()
 	return databaseURL.String()

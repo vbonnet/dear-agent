@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver keeps authenticated launchers cgo-free
@@ -136,13 +135,12 @@ func NewMessageQueue() (*MessageQueue, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configDir := filepath.Join(homeDir, ".config", "agm")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create config directory: %w", err)
+	storage, err := prepareMessageQueueStorage(homeDir)
+	if err != nil {
+		return nil, err
 	}
 
-	dbPath := filepath.Join(configDir, "message_queue.db")
-	db, err := openMessageQueueDB(context.Background(), dbPath)
+	db, err := openMessageQueueDB(context.Background(), storage)
 	if err != nil {
 		return nil, err
 	}

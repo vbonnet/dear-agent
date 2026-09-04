@@ -113,6 +113,23 @@ func queueStorageEffectiveUID() uint32 {
 	return uint32(os.Geteuid()) //nolint:gosec // guarded by the Unix uid_t contract above
 }
 
+// queueStorageResourceError classifies a raw syscall failure encountered while
+// admitting the boundary. Only unambiguous resource exhaustion becomes an
+// availability error; anything that could indicate a tampered or hostile
+// boundary, including EACCES and EPERM, stays a trust violation and fails
+// closed.
+func queueStorageResourceError(artifact, invariant string, err error) error {
+	switch {
+	case errors.Is(err, unix.EMFILE), errors.Is(err, unix.ENFILE),
+		errors.Is(err, unix.ENOSPC), errors.Is(err, unix.EDQUOT),
+		errors.Is(err, unix.EROFS), errors.Is(err, unix.EIO),
+		errors.Is(err, unix.ENOMEM), errors.Is(err, unix.EINTR):
+		return fmt.Errorf("%w: %s: %w", ErrQueueStorageUnavailable, artifact, err)
+	default:
+		return unsafeQueueStorageError(artifact, invariant)
+	}
+}
+
 func openQueueStorageDirectory(
 	path string,
 	artifact string,
@@ -121,7 +138,7 @@ func openQueueStorageDirectory(
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return queueStorageInvalidFD, queueStorageIdentity{},
-			unsafeQueueStorageError(artifact, "could not be admitted")
+			queueStorageResourceError(artifact, "could not be admitted", err)
 	}
 
 	identity, err := validateQueueStorageDirectoryDescriptor(fd, artifact, expectedUID)
@@ -162,7 +179,7 @@ func openOrCreateQueueStorageChildDirectory(
 		}
 		if !errors.Is(err, unix.ENOENT) {
 			return queueStorageInvalidFD, queueStorageIdentity{},
-				unsafeQueueStorageError(artifact, "could not be admitted")
+				queueStorageResourceError(artifact, "could not be admitted", err)
 		}
 
 		err = unix.Mkdirat(parentFD, name, 0o700)
@@ -172,7 +189,7 @@ func openOrCreateQueueStorageChildDirectory(
 		}
 		if !errors.Is(err, unix.EEXIST) {
 			return queueStorageInvalidFD, queueStorageIdentity{},
-				unsafeQueueStorageError(artifact, "could not be created privately")
+				queueStorageResourceError(artifact, "could not be created privately", err)
 		}
 	}
 
@@ -187,7 +204,7 @@ func validateQueueStorageDirectoryDescriptor(
 ) (queueStorageIdentity, error) {
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
-		return queueStorageIdentity{}, unsafeQueueStorageError(artifact, "metadata could not be read")
+		return queueStorageIdentity{}, queueStorageResourceError(artifact, "metadata could not be read", err)
 	}
 	if err := validateQueueStorageDirectoryStat(artifact, &stat, expectedUID); err != nil {
 		return queueStorageIdentity{}, err

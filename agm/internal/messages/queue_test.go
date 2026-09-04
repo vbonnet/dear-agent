@@ -30,6 +30,12 @@ func TestNewMessageQueue(t *testing.T) {
 	assert.NoError(t, err, "database file should exist")
 }
 
+func TestMessageQueueDSNRequiresPrecreatedDatabase(t *testing.T) {
+	databaseURL, err := url.Parse(messageQueueDSN(filepath.Join(t.TempDir(), "queue ?# database.db")))
+	require.NoError(t, err)
+	assert.Equal(t, "rw", databaseURL.Query().Get("mode"))
+}
+
 // TestEnqueue tests adding messages to queue
 func TestEnqueue(t *testing.T) {
 	queue := setupTestQueue(t)
