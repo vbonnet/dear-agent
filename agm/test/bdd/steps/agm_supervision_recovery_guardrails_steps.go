@@ -109,7 +109,7 @@ func agmValidatesNoCheckProviderCompleteness(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "-v", "-count=1", "-timeout=90s",
-		"-run", `^Test(RequiredCheckNamesForBranch|FetchRequiredChecks|ResolveRequiredChecksByBase|ListOpenPRs|CheckRunNamesForRef|Scan_|RunPRScanNoChecks|PRScanNoChecksBranchFlag|PRScanNoChecksHelp|NoChecksScanResultJSON|PrintNoChecksScanText|ValidateRetriggerSnapshot|RetriggerCI).*$`,
+		"-run", `^Test(GHJSONContext|RequiredCheckNamesForBranch|FetchRequiredChecks|ResolveRequiredChecksByBase|ListOpenPRs|CheckRunNamesForRef|Scan_|RunPRScanNoChecks|PRScanNoChecksBranchFlag|PRScanNoChecksHelp|NoChecksScanResultJSON|PrintNoChecksScanText|ValidateRetriggerSnapshot|RetriggerCI).*$`,
 		"./internal/safegit", "./agm/internal/nochecks", "./agm/cmd/agm")
 	cmd.Dir = packageSpecBDDRepoRoot()
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
@@ -245,6 +245,7 @@ func policyPreflightShouldUseOneTotalDeadline(ctx context.Context) error {
 	return requireNoChecksTestOutput(ctx,
 		"TestResolveRequiredChecksByBaseSharesOneDeadlineAcrossBases",
 		"TestFetchRequiredChecksByBaseWithinOwnsOneTotalDeadline",
+		"TestResolveRequiredChecksByBaseStopsBeforeNextFetchAfterCancellation",
 	)
 }
 
@@ -309,6 +310,7 @@ func callerCancellationShouldStopLaterTriggerCalls(ctx context.Context) error {
 		return err
 	}
 	return requireNoChecksTestOutput(ctx,
+		"TestGHJSONContextReturnsPreCanceledCallerBeforeExecutableLookup",
 		"TestRetriggerCICallerCancellationStopsProviderSequence",
 		"TestRunPRScanNoChecksCancellationStopsLaterRetriggers",
 	)

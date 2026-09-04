@@ -2,11 +2,27 @@ package nochecks
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestGHJSONContextReturnsPreCanceledCallerBeforeExecutableLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	t.Setenv("PATH", t.TempDir())
+
+	got, err := ghJSONContext(ctx, time.Second, []string{"version"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ghJSONContext() = %q, %v; want caller cancellation", got, err)
+	}
+	if got != nil {
+		t.Fatalf("ghJSONContext() returned output %q after caller cancellation", got)
+	}
+}
 
 func TestListOpenPRsCarriesBaseAndOmitsEmptyFilter(t *testing.T) {
 	callLog := filepath.Join(t.TempDir(), "calls")

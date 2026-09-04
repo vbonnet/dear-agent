@@ -268,3 +268,28 @@ func TestResolveRequiredChecksByBaseLaterFailureReturnsUnusableOwner(t *testing.
 		t.Fatalf("later fetch failure leaked partial policies %#v", got.byBase)
 	}
 }
+
+func TestResolveRequiredChecksByBaseStopsBeforeNextFetchAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	prs := []PR{
+		{Number: 2, BaseRefName: "zeta"},
+		{Number: 1, BaseRefName: "alpha"},
+	}
+	var calls []string
+	fetch := func(_ context.Context, base string) (map[string]bool, error) {
+		calls = append(calls, base)
+		cancel()
+		return map[string]bool{"Build": true}, nil
+	}
+
+	got, err := resolveRequiredChecksByBase(ctx, prs, fetch)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("resolveRequiredChecksByBase() = %#v, %v; want caller cancellation", got, err)
+	}
+	if want := []string{"alpha"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("fetch calls = %v, want no fetch after cancellation %v", calls, want)
+	}
+	if got.byBase != nil {
+		t.Fatalf("caller cancellation leaked partial policies %#v", got.byBase)
+	}
+}

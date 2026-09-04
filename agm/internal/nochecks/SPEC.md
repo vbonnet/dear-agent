@@ -43,7 +43,7 @@ guard narrows but cannot atomically eliminate state changes after the read.
 
 **NCK-14** When a scan reports a stuck pull request, the system shall include that pull request's actual base identity in text and structured evidence.
 
-**NCK-15** When a scan resolves required-check policy for multiple bases, the system shall bound all policy reads by one shared total deadline.
+**NCK-15** When a scan resolves required-check policy for multiple bases, the system shall bound all policy reads by one shared total deadline and shall not begin a later base read after that context ends.
 
 **NCK-16** When a pull-request listing contains drafts, the system shall distinguish listed pull requests from eligible non-draft pull requests without claiming unread drafts have healthy CI.
 
@@ -55,7 +55,7 @@ guard narrows but cannot atomically eliminate state changes after the read.
 
 **NCK-20** When trigger-time check revalidation shows that CI has appeared under the captured complete base policy, the system shall report the candidate as no longer stuck and perform no commit creation or ref update.
 
-**NCK-21** When the caller context ends during a trigger sequence, every trigger provider call shall stop through that context and the command shall return before attempting later candidate mutations.
+**NCK-21** When the caller context has ended before provider command setup or ends during a trigger sequence, the system shall return caller cancellation before unnecessary command discovery, stop every trigger provider call through that context, and return before attempting later candidate mutations.
 
 **NCK-22** When trigger-time safety is described, the system shall identify current check and pull-request reads as non-atomic snapshots and shall not claim exclusion of CI arrival or pull-request drift after those observations.
 

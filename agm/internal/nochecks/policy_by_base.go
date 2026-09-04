@@ -72,6 +72,13 @@ func resolveRequiredChecksByBase(
 
 	resolved := RequiredChecksByBase{byBase: make(map[string]map[string]bool, len(ordered))}
 	for _, base := range ordered {
+		if err := ctx.Err(); err != nil {
+			return RequiredChecksByBase{}, fmt.Errorf(
+				"reading required checks for base %q: caller context ended: %w",
+				base,
+				err,
+			)
+		}
 		policy, err := fetch(ctx, base)
 		if err != nil {
 			return RequiredChecksByBase{}, fmt.Errorf("reading required checks for base %q: %w", base, err)

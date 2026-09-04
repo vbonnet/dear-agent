@@ -408,11 +408,14 @@ func ghJSON(timeout time.Duration, args []string) ([]byte, error) {
 }
 
 func ghJSONContext(parent context.Context, timeout time.Duration, args []string) ([]byte, error) {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return nil, fmt.Errorf("gh CLI not found on PATH: %w", err)
-	}
 	if parent == nil {
 		return nil, fmt.Errorf("gh caller context is nil")
+	}
+	if err := parent.Err(); err != nil {
+		return nil, fmt.Errorf("gh caller context ended before command setup: %w", err)
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return nil, fmt.Errorf("gh CLI not found on PATH: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(parent, timeout)
