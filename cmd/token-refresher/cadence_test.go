@@ -862,3 +862,76 @@ func TestNotifyCadenceOnce_PersistsFailedTokenFingerprintEvenIfCredentialsRotate
 		t.Errorf("sentinel recorded fingerprint %q, want failed token fingerprint %q", rec.Fingerprint, fpInitial)
 	}
 }
+
+func TestNotifyCadenceOnce_ClaimsEpisodeAtomicallyConcurrent(t *testing.T) {
+	stateDir := t.TempDir()
+	credsPath := credsWithRefreshToken(t, "rt-concurrent")
+	fp, _ := credentialsFingerprint(credsPath)
+
+	done := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, fp, "dead", "Alert", "Msg")
+			done <- true
+		}()
+	}
+	<-done
+	<-done
+
+	sentinel := filepath.Join(stateDir, deathSentinelName)
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	rec, ok := parseSentinelData(data)
+	if !ok {
+		t.Fatalf("parseSentinelData failed: %s", string(data))
+	}
+	if rec.Fingerprint != fp {
+		t.Errorf("got fingerprint %q, want %q", rec.Fingerprint, fp)
+	}
+}
+
+func TestIsActiveSentinel_SkipsFIFOCredentialsWithoutHanging(t *testing.T) {
+	dir := t.TempDir()
+	fifoPath := filepath.Join(dir, "creds-fifo")
+	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
+		t.Skipf("cannot make FIFO on this platform: %v", err)
+	}
+	sentinel := filepath.Join(dir, deathSentinelName)
+	rec := sentinelRecord{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		CredentialsPath: fifoPath,
+		Fingerprint:     "dummy-fp",
+		Outcome:         "dead",
+	}
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sentinel, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if isActiveSentinel(sentinel) {
+		t.Errorf("isActiveSentinel returned true for FIFO credentials path %s", fifoPath)
+	}
+}
+
+func TestEnsureSecureStateDir_RejectsGroupWritableDirectory(t *testing.T) {
+	dir := t.TempDir()
+	gwDir := filepath.Join(dir, "group-writable")
+	if err := os.Mkdir(gwDir, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(gwDir, 0o770); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ensureSecureStateDir(gwDir)
+	if err == nil {
+		t.Errorf("ensureSecureStateDir should reject group-writable directory %s", gwDir)
+	} else if !strings.Contains(err.Error(), "group- or world-writable") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}

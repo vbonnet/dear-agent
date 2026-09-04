@@ -302,6 +302,10 @@ func isActiveSentinel(target string) bool {
 	if !ok || rec.Fingerprint == "" || rec.CredentialsPath == "" {
 		return false
 	}
+	info, err := os.Lstat(rec.CredentialsPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
 	currentFP, _ := credentialsFingerprint(rec.CredentialsPath)
 	if currentFP == "" || currentFP != rec.Fingerprint {
 		return false
@@ -325,26 +329,55 @@ func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, 
 	}
 	if info, err := os.Lstat(sentinel); err == nil && !info.Mode().IsRegular() {
 		_ = os.Remove(sentinel)
-	} else if rec, ok := readSentinelRecord(sentinel); ok {
-		if sentinelMatchesEpisode(rec, credentialsPath, tokenFP) {
-			now := time.Now()
-			_ = os.Chtimes(sentinel, now, now)
-			return
+	}
+
+	if err := ensureSecureStateDir(stateDir); err != nil {
+		notifyOperator(title, message)
+		return
+	}
+
+	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		notifyOperator(title, message)
+		return
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		notifyOperator(title, message)
+		return
+	}
+
+	data, err := io.ReadAll(f)
+	if err == nil && len(data) > 0 {
+		if rec, ok := parseSentinelData(data); ok {
+			if sentinelMatchesEpisode(rec, credentialsPath, tokenFP) {
+				now := time.Now()
+				_ = os.Chtimes(sentinel, now, now)
+				return
+			}
 		}
 	}
+
+	rec := sentinelRecord{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		QuarantinePath:  quarantinePath,
+		CredentialsPath: credentialsPath,
+		Fingerprint:     tokenFP,
+		Outcome:         outcome,
+	}
+	if payload, err := json.Marshal(rec); err == nil {
+		if err := f.Truncate(0); err == nil {
+			if _, err := f.Seek(0, io.SeekStart); err == nil {
+				_, _ = f.Write(append(payload, '\n'))
+				_ = f.Sync()
+			}
+		}
+	}
+
 	notifyOperator(title, message)
-	if err := ensureSecureStateDir(stateDir); err == nil {
-		rec := sentinelRecord{
-			Timestamp:       time.Now().UTC().Format(time.RFC3339),
-			QuarantinePath:  quarantinePath,
-			CredentialsPath: credentialsPath,
-			Fingerprint:     tokenFP,
-			Outcome:         outcome,
-		}
-		if payload, err := json.Marshal(rec); err == nil {
-			_ = os.WriteFile(sentinel, append(payload, '\n'), 0o600)
-		}
-	}
 }
 
 // notifyNotifyTimeout bounds the osascript call. A launchd job runs without a
@@ -398,6 +431,27 @@ func isWritableDir(dir string) error {
 	return nil
 }
 
+func validateStateDir(clean string, info os.FileInfo) error {
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("state directory %s is not a directory or is a symlink", clean)
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		if int(stat.Uid) != os.Getuid() {
+			return fmt.Errorf("state directory %s is not owned by current user (uid %d, want %d)", clean, stat.Uid, os.Getuid())
+		}
+	}
+	if isFallbackStateDir(clean) && !isSecureStateDir(clean) {
+		return fmt.Errorf("fallback state directory %s has untrusted ownership or permissions", clean)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("state directory %s is group- or world-writable", clean)
+	}
+	if err := isWritableDir(clean); err != nil {
+		return fmt.Errorf("state directory %s is not writable: %w", clean, err)
+	}
+	return nil
+}
+
 func ensureSecureStateDir(stateDir string) error {
 	if stateDir == "" {
 		return errors.New("state directory is empty")
@@ -405,19 +459,7 @@ func ensureSecureStateDir(stateDir string) error {
 	clean := filepath.Clean(stateDir)
 	info, err := os.Lstat(clean)
 	if err == nil {
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("state directory %s is not a directory or is a symlink", clean)
-		}
-		if isFallbackStateDir(clean) && !isSecureStateDir(clean) {
-			return fmt.Errorf("fallback state directory %s has untrusted ownership or permissions", clean)
-		}
-		if info.Mode().Perm()&0o002 != 0 {
-			return fmt.Errorf("state directory %s is world-writable", clean)
-		}
-		if err := isWritableDir(clean); err != nil {
-			return fmt.Errorf("state directory %s is not writable: %w", clean, err)
-		}
-		return nil
+		return validateStateDir(clean, info)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -425,13 +467,13 @@ func ensureSecureStateDir(stateDir string) error {
 	if err := os.MkdirAll(clean, 0o700); err != nil {
 		return err
 	}
-	if isFallbackStateDir(clean) && !isSecureStateDir(clean) {
-		return fmt.Errorf("fallback state directory %s has untrusted ownership or permissions", clean)
+	// #nosec G302 -- state directory requires 0700 permissions.
+	_ = os.Chmod(clean, 0o700)
+	newInfo, err := os.Lstat(clean)
+	if err != nil {
+		return err
 	}
-	if err := isWritableDir(clean); err != nil {
-		return fmt.Errorf("state directory %s is not writable: %w", clean, err)
-	}
-	return nil
+	return validateStateDir(clean, newInfo)
 }
 
 // defaultStateDir is where the sentinel lives, alongside the audit log.
