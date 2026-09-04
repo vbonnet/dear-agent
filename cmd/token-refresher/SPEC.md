@@ -44,7 +44,7 @@ provider credential handling.
 
 **CTR-19** When cadence mode receives a non-persistence error, the system shall report that refreshing stopped only when the credential-scoped refresh-stop marker exists.
 
-**CTR-20** When cadence mode executes, the command shall prune cadence sentinel markers in the state directory whose modification age exceeds the configured maximum age.
+**CTR-20** When cadence mode executes, the command shall bound persistent alert state retention by pruning alert markers from expired failure episodes while preserving active episode alerts.
 
 **CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
 

@@ -145,7 +145,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		Logger:          logger,
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
 	}
-	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath)
+	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath, *stateDir)
 
 	if *clearQuar {
 		if err := clearCadenceSentinel(*stateDir, cadenceSentinelName(*quarPath)); err != nil {
@@ -169,12 +169,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
-			if *sentinelMaxAge > 0 {
-				if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge); err != nil {
-					fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
-				}
-			}
 			if code == exitNotPersisted {
+				if *sentinelMaxAge > 0 {
+					if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, cadenceSentinelName(*quarPath)); err != nil {
+						fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
+					}
+				}
 				sentinelName := cadenceSentinelName(*quarPath)
 				canonicalQuarantine := defaultQuarantinePathForCredentials(resolvedCredPath)
 				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
@@ -371,8 +371,12 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 	}
 }
 
-func clearRefreshProtectionsCommand(credentialsPath, quarantinePath string) string {
-	return fmt.Sprintf("token-refresher -credentials %q -quarantine %q -clear-quarantine", credentialsPath, quarantinePath)
+func clearRefreshProtectionsCommand(credentialsPath, quarantinePath, stateDir string) string {
+	cmd := fmt.Sprintf("token-refresher -credentials %q -quarantine %q", credentialsPath, quarantinePath)
+	if stateDir != "" && stateDir != defaultStateDir() {
+		cmd += fmt.Sprintf(" -state-dir %q", stateDir)
+	}
+	return cmd + " -clear-quarantine"
 }
 
 // fpOrUnknown and credModOrUnknown keep the operator-facing death message
@@ -465,21 +469,21 @@ func writeAudit(path string, rec auditRecord) {
 }
 
 func defaultAuditPath() string {
-	dir := defaultStateDir()
-	if dir == "" {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "token-refresher-audit.jsonl")
+	return filepath.Join(home, ".local", "state", "dear-agent", "token-refresher-audit.jsonl")
 }
 
 // defaultQuarantinePath puts the quarantine marker alongside the audit log and
 // the death sentinel, so all refresher state lives in one directory.
 func defaultQuarantinePath() string {
-	dir := defaultStateDir()
-	if dir == "" {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "refresh-token-quarantine.json")
+	return filepath.Join(home, ".local", "state", "dear-agent", "refresh-token-quarantine.json")
 }
 
 // defaultQuarantinePathForCredentials keeps separate credentials files from

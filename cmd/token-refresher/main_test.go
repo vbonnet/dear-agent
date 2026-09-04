@@ -297,3 +297,16 @@ func TestRun_CadencePrunesStaleSentinelsViaFlag(t *testing.T) {
 		t.Errorf("fresh sentinel %s was unexpectedly removed: %v", freshSentinel, err)
 	}
 }
+
+func TestClearRefreshProtectionsCommand_IncludesCustomStateDir(t *testing.T) {
+	cmdDefault := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", defaultStateDir())
+	if strings.Contains(cmdDefault, "-state-dir") {
+		t.Errorf("default state dir should not be passed explicitly: %s", cmdDefault)
+	}
+
+	customDir := "/custom/state/dir"
+	cmdCustom := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", customDir)
+	if !strings.Contains(cmdCustom, fmt.Sprintf("-state-dir %q", customDir)) {
+		t.Errorf("custom state dir should be included in clear command: %s", cmdCustom)
+	}
+}

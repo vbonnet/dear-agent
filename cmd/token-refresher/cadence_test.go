@@ -155,7 +155,7 @@ func TestPruneCadenceSentinels_RemovesStaleKeepsFresh(t *testing.T) {
 	}
 	_ = os.Chtimes(unrelated, now.Add(-100*time.Hour), now.Add(-100*time.Hour))
 
-	pruned, err := pruneCadenceSentinels(dir, 24*time.Hour)
+	pruned, err := pruneCadenceSentinels(dir, 24*time.Hour, "")
 	if err != nil {
 		t.Fatalf("pruneCadenceSentinels failed: %v", err)
 	}
@@ -177,6 +177,37 @@ func TestPruneCadenceSentinels_RemovesStaleKeepsFresh(t *testing.T) {
 	}
 }
 
+func TestPruneCadenceSentinels_PreservesKeepSentinel(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	activeSentinel := filepath.Join(dir, deathSentinelName)
+	if err := os.WriteFile(activeSentinel, []byte("active\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(activeSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+
+	staleSentinel := filepath.Join(dir, deathSentinelName+"-other12345678")
+	if err := os.WriteFile(staleSentinel, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(staleSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+
+	pruned, err := pruneCadenceSentinels(dir, 24*time.Hour, deathSentinelName)
+	if err != nil {
+		t.Fatalf("prune failed: %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("pruned = %d, want 1", pruned)
+	}
+	if _, err := os.Stat(activeSentinel); err != nil {
+		t.Errorf("active sentinel matching keepSentinel was pruned: %v", err)
+	}
+	if _, err := os.Stat(staleSentinel); !os.IsNotExist(err) {
+		t.Errorf("stale sentinel was not pruned")
+	}
+}
+
 func TestPruneCadenceSentinels_DisabledWhenZeroOrNegative(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
@@ -187,7 +218,7 @@ func TestPruneCadenceSentinels_DisabledWhenZeroOrNegative(t *testing.T) {
 	}
 	_ = os.Chtimes(stale, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
-	pruned, err := pruneCadenceSentinels(dir, 0)
+	pruned, err := pruneCadenceSentinels(dir, 0, "")
 	if err != nil || pruned != 0 {
 		t.Fatalf("expected (0, nil) when disabled, got (%d, %v)", pruned, err)
 	}
@@ -195,7 +226,7 @@ func TestPruneCadenceSentinels_DisabledWhenZeroOrNegative(t *testing.T) {
 		t.Errorf("sentinel should not be pruned when maxAge=0: %v", err)
 	}
 
-	pruned, err = pruneCadenceSentinels(dir, -10*time.Minute)
+	pruned, err = pruneCadenceSentinels(dir, -10*time.Minute, "")
 	if err != nil || pruned != 0 {
 		t.Fatalf("expected (0, nil) when negative, got (%d, %v)", pruned, err)
 	}
@@ -205,7 +236,7 @@ func TestPruneCadenceSentinels_DisabledWhenZeroOrNegative(t *testing.T) {
 }
 
 func TestPruneCadenceSentinels_NonexistentDir(t *testing.T) {
-	pruned, err := pruneCadenceSentinels("/nonexistent/state/dir", 24*time.Hour)
+	pruned, err := pruneCadenceSentinels("/nonexistent/state/dir", 24*time.Hour, "")
 	if err != nil || pruned != 0 {
 		t.Fatalf("expected (0, nil) for nonexistent dir, got (%d, %v)", pruned, err)
 	}
@@ -226,5 +257,32 @@ func TestCadenceExit_PrunesStaleSentinels(t *testing.T) {
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale sentinel survived cadenceExit")
+	}
+}
+
+func TestCadenceExit_PreservesActiveSentinelSpanningMaxAge(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	activeSentinel := filepath.Join(dir, deathSentinelName)
+	if err := os.WriteFile(activeSentinel, []byte("active\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(activeSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+
+	var stderr bytes.Buffer
+	// During an ongoing failure episode, cadenceExit must not delete the sentinel
+	// being handled, which would re-alert the operator every maxAge.
+	code := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr, 24*time.Hour)
+	if code != exitOK {
+		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
+	}
+	if _, err := os.Stat(activeSentinel); err != nil {
+		t.Errorf("active sentinel was pruned: %v", err)
+	}
+	// Sentinel content was not replaced (would indicate re-alerting).
+	content, err := os.ReadFile(activeSentinel)
+	if err != nil || string(content) != "active\n" {
+		t.Errorf("sentinel rewritten during unresolved episode: %q", string(content))
 	}
 }

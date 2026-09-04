@@ -76,7 +76,7 @@ func cadenceStopped(credentialsPath string) (bool, error) {
 // status is flattened, and only for the cadence caller.
 func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer, maxAge time.Duration) int {
 	if maxAge > 0 {
-		if _, err := pruneCadenceSentinels(stateDir, maxAge); err != nil {
+		if _, err := pruneCadenceSentinels(stateDir, maxAge, sentinelName); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
 		}
 	}
@@ -109,9 +109,10 @@ func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer, maxA
 }
 
 // pruneCadenceSentinels removes dead-family sentinels in stateDir that are older
-// than maxAge. If maxAge <= 0, pruning is disabled and returns (0, nil).
+// than maxAge, excluding keepSentinel to preserve alerts for in-progress episodes.
+// If maxAge <= 0, pruning is disabled and returns (0, nil).
 // It returns the count of removed sentinels and the first encountered error.
-func pruneCadenceSentinels(stateDir string, maxAge time.Duration) (int, error) {
+func pruneCadenceSentinels(stateDir string, maxAge time.Duration, keepSentinel string) (int, error) {
 	if maxAge <= 0 || stateDir == "" {
 		return 0, nil
 	}
@@ -120,7 +121,7 @@ func pruneCadenceSentinels(stateDir string, maxAge time.Duration) (int, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, nil
 		}
-		return 0, err
+		return 0, fmt.Errorf("read state directory: %w", err)
 	}
 	cutoff := time.Now().Add(-maxAge)
 	pruned := 0
@@ -130,13 +131,13 @@ func pruneCadenceSentinels(stateDir string, maxAge time.Duration) (int, error) {
 			continue
 		}
 		name := entry.Name()
-		if !isCadenceSentinel(name) {
+		if name == keepSentinel || !isCadenceSentinel(name) {
 			continue
 		}
 		info, err := entry.Info()
 		if err != nil {
 			if firstErr == nil {
-				firstErr = err
+				firstErr = fmt.Errorf("get entry info for %s: %w", name, err)
 			}
 			continue
 		}
@@ -144,7 +145,7 @@ func pruneCadenceSentinels(stateDir string, maxAge time.Duration) (int, error) {
 			target := filepath.Join(stateDir, name)
 			if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
 				if firstErr == nil {
-					firstErr = err
+					firstErr = fmt.Errorf("remove sentinel %s: %w", name, err)
 				}
 			} else {
 				pruned++
@@ -193,9 +194,6 @@ func notifyOperator(title, message string) {
 
 // defaultStateDir is where the sentinel lives, alongside the audit log.
 func defaultStateDir() string {
-	if d := os.Getenv("AGM_STATE_DIR"); d != "" {
-		return d
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return os.TempDir()
