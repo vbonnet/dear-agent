@@ -15,7 +15,7 @@ func TestCadenceExit_TokenFamilyDeathReportsSuccess(t *testing.T) {
 	dir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr, defaultSentinelMaxAge); got != exitOK {
+	if got := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
 		t.Errorf("cadenceExit(family dead) = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(dir, deathSentinelName)); err != nil {
@@ -29,26 +29,26 @@ func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
 	first, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
 	if string(first) != string(second) {
-		t.Error("sentinel rewritten on the second tick — the operator would be re-alerted every 30 minutes")
+		t.Error("sentinel rewritten on the second tick: the operator would be re-alerted every 30 minutes")
 	}
 }
 
 func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 	dir := t.TempDir()
-	notifyCadenceOnce(dir, deathSentinelName, "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "test title", "test message")
 
 	sentinel := filepath.Join(dir, deathSentinelName)
 	first, err := os.ReadFile(sentinel)
@@ -56,7 +56,7 @@ func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	notifyCadenceOnce(dir, deathSentinelName, "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "test title", "test message")
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel after second alert: %v", err)
@@ -72,11 +72,11 @@ func TestCadenceExit_SuccessClearsSentinel(t *testing.T) {
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr, defaultSentinelMaxAge)
-	cadenceExit(exitOK, dir, deathSentinelName, &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitOK, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
 
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
-		t.Error("sentinel survived a successful refresh — the next death would be silent")
+		t.Error("sentinel survived a successful refresh: the next death would be silent")
 	}
 }
 
@@ -119,10 +119,10 @@ func TestCadenceExit_PassesThroughOtherFailures(t *testing.T) {
 	dir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitNotPersisted, dir, deathSentinelName, &stderr, defaultSentinelMaxAge); got != exitNotPersisted {
+	if got := cadenceExit(exitNotPersisted, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge); got != exitNotPersisted {
 		t.Errorf("cadenceExit(not persisted) = %d, want %d", got, exitNotPersisted)
 	}
-	if got := cadenceExit(exitError, dir, deathSentinelName, &stderr, defaultSentinelMaxAge); got != exitError {
+	if got := cadenceExit(exitError, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge); got != exitError {
 		t.Errorf("cadenceExit(generic error) = %d, want %d", got, exitError)
 	}
 }
@@ -187,7 +187,7 @@ func TestPruneCadenceSentinels_PreservesKeepSentinel(t *testing.T) {
 	}
 	_ = os.Chtimes(activeSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
-	staleSentinel := filepath.Join(dir, deathSentinelName+"-other12345678")
+	staleSentinel := filepath.Join(dir, deathSentinelName+"-0123456789abcdef")
 	if err := os.WriteFile(staleSentinel, []byte("stale\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -242,18 +242,63 @@ func TestPruneCadenceSentinels_NonexistentDir(t *testing.T) {
 	}
 }
 
+func TestPruneCadenceSentinels_IgnoresInvalidSentinelNames(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	// Valid sentinel that is stale and should be pruned.
+	validStale := filepath.Join(dir, deathSentinelName+"-0123456789abcdef")
+	if err := os.WriteFile(validStale, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(validStale, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+
+	// Invalid sentinel names that must never be pruned as refresher state.
+	invalidNames := []string{
+		deathSentinelName + "-notes",
+		deathSentinelName + "-12345",
+		deathSentinelName + "-nothexcharacters",
+		deathSentinelName + "-",
+		deathSentinelName + "-0123456789abcdef0",
+	}
+	for _, name := range invalidNames {
+		target := filepath.Join(dir, name)
+		if err := os.WriteFile(target, []byte("preserve\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(target, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+	}
+
+	pruned, err := pruneCadenceSentinels(dir, 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("prune failed: %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("pruned = %d, want 1", pruned)
+	}
+	if _, err := os.Stat(validStale); !os.IsNotExist(err) {
+		t.Errorf("valid stale sentinel was not pruned")
+	}
+	for _, name := range invalidNames {
+		target := filepath.Join(dir, name)
+		if _, err := os.Stat(target); err != nil {
+			t.Errorf("invalid sentinel name %s was incorrectly pruned: %v", name, err)
+		}
+	}
+}
+
 func TestCadenceExit_PrunesStaleSentinels(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 
-	stale := filepath.Join(dir, deathSentinelName+"-stale1234567890")
+	stale := filepath.Join(dir, deathSentinelName+"-0123456789abcdef")
 	if err := os.WriteFile(stale, []byte("stale\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(stale, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
 	var stderr bytes.Buffer
-	cadenceExit(exitOK, dir, deathSentinelName, &stderr, 24*time.Hour)
+	cadenceExit(exitOK, dir, deathSentinelName, "", "", &stderr, 24*time.Hour)
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale sentinel survived cadenceExit")
@@ -273,7 +318,7 @@ func TestCadenceExit_PreservesActiveSentinelSpanningMaxAge(t *testing.T) {
 	var stderr bytes.Buffer
 	// During an ongoing failure episode, cadenceExit must not delete the sentinel
 	// being handled, which would re-alert the operator every maxAge.
-	code := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr, 24*time.Hour)
+	code := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, 24*time.Hour)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
@@ -284,5 +329,95 @@ func TestCadenceExit_PreservesActiveSentinelSpanningMaxAge(t *testing.T) {
 	content, err := os.ReadFile(activeSentinel)
 	if err != nil || string(content) != "active\n" {
 		t.Errorf("sentinel rewritten during unresolved episode: %q", string(content))
+	}
+}
+
+func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
+	stateDir := t.TempDir()
+	quarDir := t.TempDir()
+	now := time.Now()
+
+	// Setup Job 1 quarantine and sentinel.
+	q1 := filepath.Join(quarDir, "job1-quarantine.json")
+	if err := os.WriteFile(q1, []byte(`{"quarantined": true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s1Name := cadenceSentinelName(q1)
+	s1 := filepath.Join(stateDir, s1Name)
+	if err := os.WriteFile(s1, []byte("2026-09-01T00:00:00Z\n"+q1+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(s1, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+
+	// Setup Job 2 quarantine and sentinel.
+	q2 := filepath.Join(quarDir, "job2-quarantine.json")
+	if err := os.WriteFile(q2, []byte(`{"quarantined": true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s2Name := cadenceSentinelName(q2)
+	s2 := filepath.Join(stateDir, s2Name)
+	if err := os.WriteFile(s2, []byte("2026-09-01T00:00:00Z\n"+q2+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(s2, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+
+	// Job 1 runs cadenceExit while both failures remain unresolved.
+	var stderr bytes.Buffer
+	code := cadenceExit(exitQuarantined, stateDir, s1Name, q1, "", &stderr, 24*time.Hour)
+	if code != exitOK {
+		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
+	}
+
+	// S1 must be preserved.
+	if _, err := os.Stat(s1); err != nil {
+		t.Errorf("Job 1 sentinel was pruned: %v", err)
+	}
+	// S2 must ALSO be preserved because Job 2's quarantine remains active on disk.
+	if _, err := os.Stat(s2); err != nil {
+		t.Errorf("Job 2 sentinel was pruned despite active quarantine: %v", err)
+	}
+
+	// Now resolve Job 2 by clearing its quarantine marker.
+	if err := os.Remove(q2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Job 1 runs again: now that Job 2 is resolved, S2 (which is >24h old) should be pruned.
+	code = cadenceExit(exitQuarantined, stateDir, s1Name, q1, "", &stderr, 24*time.Hour)
+	if code != exitOK {
+		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
+	}
+
+	if _, err := os.Stat(s1); err != nil {
+		t.Errorf("Job 1 sentinel was pruned: %v", err)
+	}
+	if _, err := os.Stat(s2); !os.IsNotExist(err) {
+		t.Errorf("Job 2 sentinel survived after its quarantine was cleared")
+	}
+}
+
+func TestNotifyCadenceOnce_RefreshesSentinelModTimeOnActiveEpisode(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	sentinel := filepath.Join(dir, deathSentinelName)
+	if err := os.WriteFile(sentinel, []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := now.Add(-10 * time.Hour)
+	_ = os.Chtimes(sentinel, oldTime, oldTime)
+
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "test title", "test message")
+
+	info, err := os.Stat(sentinel)
+	if err != nil {
+		t.Fatalf("stat sentinel: %v", err)
+	}
+	if !info.ModTime().After(oldTime.Add(9 * time.Hour)) {
+		t.Errorf("sentinel ModTime was not refreshed: %v (wanted close to %v)", info.ModTime(), now)
+	}
+	content, err := os.ReadFile(sentinel)
+	if err != nil || string(content) != "initial\n" {
+		t.Errorf("sentinel content was modified: %q", string(content))
 	}
 }

@@ -169,37 +169,47 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
+			sentinelName := cadenceSentinelName(*quarPath)
 			if code == exitNotPersisted {
-				if *sentinelMaxAge > 0 {
-					if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, cadenceSentinelName(*quarPath)); err != nil {
-						fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
-					}
-				}
-				sentinelName := cadenceSentinelName(*quarPath)
 				canonicalQuarantine := defaultQuarantinePathForCredentials(resolvedCredPath)
 				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
 				if _, _, _, quarantined := r.QuarantineStatus(); quarantined && sharedQuarantine {
-					notifyCadenceOnce(*stateDir, sentinelName,
+					notifyCadenceOnce(*stateDir, sentinelName, *quarPath, resolvedCredPath,
 						"Claude auth AT RISK",
 						"Credential persistence failed; the refresh-token quarantine is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh QUARANTINED until -clear-quarantine re-arms it.")
+					if *sentinelMaxAge > 0 {
+						if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, sentinelName); err != nil {
+							fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
+						}
+					}
 					return exitOK
 				}
 				stopped, stopErr := r.RefreshStopped()
 				if stopErr == nil && stopped {
-					notifyCadenceOnce(*stateDir, sentinelName,
+					notifyCadenceOnce(*stateDir, sentinelName, *quarPath, resolvedCredPath,
 						"Claude auth AT RISK",
 						"Refresh quarantine could not be persisted; the durable refresh stop is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
+					if *sentinelMaxAge > 0 {
+						if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, sentinelName); err != nil {
+							fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
+						}
+					}
 					return exitOK
 				}
-				notifyCadenceOnce(*stateDir, sentinelName,
+				notifyCadenceOnce(*stateDir, sentinelName, *quarPath, resolvedCredPath,
 					"Claude auth AT RISK",
 					"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
 				fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
+				if *sentinelMaxAge > 0 {
+					if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, sentinelName); err != nil {
+						fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
+					}
+				}
 				return exitNotPersisted
 			}
-			return cadenceExit(code, *stateDir, cadenceSentinelName(*quarPath), stderr, *sentinelMaxAge)
+			return cadenceExit(code, *stateDir, sentinelName, *quarPath, resolvedCredPath, stderr, *sentinelMaxAge)
 		}
 		return code
 	}

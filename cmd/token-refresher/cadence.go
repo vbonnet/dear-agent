@@ -74,27 +74,31 @@ func cadenceStopped(credentialsPath string) (bool, error) {
 //
 // The real exit code still reaches the audit log and stderr; only the process
 // status is flattened, and only for the cadence caller.
-func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer, maxAge time.Duration) int {
-	if maxAge > 0 {
-		if _, err := pruneCadenceSentinels(stateDir, maxAge, sentinelName); err != nil {
-			fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
+func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPath string, stderr io.Writer, maxAge time.Duration) int {
+	prune := func(dir string, age time.Duration, keep string) {
+		if age > 0 {
+			if _, err := pruneCadenceSentinels(dir, age, keep); err != nil {
+				fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
+			}
 		}
 	}
 	switch code {
 	case exitTokenFamilyDead:
-		notifyCadenceOnce(stateDir, sentinelName,
+		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath,
 			"Claude auth DOWN", "OAuth token family is dead. Run: claude /login")
-		fmt.Fprintf(stderr, "token-refresher: cadence mode — reporting success so launchd keeps the schedule.\n")
+		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
+		prune(stateDir, maxAge, sentinelName)
 		return exitOK
 
 	case exitQuarantined:
 		// A near-miss, and the alert that matters most: the family is still
 		// alive precisely because we declined to replay the token. Reuse the
 		// death sentinel so one episode raises one notification.
-		notifyCadenceOnce(stateDir, sentinelName,
+		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath,
 			"Claude auth AT RISK",
 			"Refresh outcome unknown; token quarantined to protect the family. Check token-refresher -check")
-		fmt.Fprintf(stderr, "token-refresher: cadence mode — reporting success so launchd keeps the schedule.\n")
+		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
+		prune(stateDir, maxAge, sentinelName)
 		return exitOK
 
 	case exitOK:
@@ -102,9 +106,11 @@ func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer, maxA
 		if err := clearCadenceSentinel(stateDir, sentinelName); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not clear cadence alert state: %v\n", err)
 		}
+		prune(stateDir, maxAge, "")
 		return exitOK
 	}
 
+	prune(stateDir, maxAge, sentinelName)
 	return code
 }
 
@@ -127,50 +133,108 @@ func pruneCadenceSentinels(stateDir string, maxAge time.Duration, keepSentinel s
 	pruned := 0
 	var firstErr error
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+		removed, err := pruneCadenceEntry(stateDir, entry, cutoff, keepSentinel)
+		if err != nil && firstErr == nil {
+			firstErr = err
 		}
-		name := entry.Name()
-		if name == keepSentinel || !isCadenceSentinel(name) {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("get entry info for %s: %w", name, err)
-			}
-			continue
-		}
-		if info.ModTime().Before(cutoff) {
-			target := filepath.Join(stateDir, name)
-			if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("remove sentinel %s: %w", name, err)
-				}
-			} else {
-				pruned++
-			}
+		if removed {
+			pruned++
 		}
 	}
 	return pruned, firstErr
 }
 
+func pruneCadenceEntry(stateDir string, entry os.DirEntry, cutoff time.Time, keepSentinel string) (bool, error) {
+	if entry.IsDir() {
+		return false, nil
+	}
+	name := entry.Name()
+	if name == keepSentinel || !isCadenceSentinel(name) {
+		return false, nil
+	}
+	target := filepath.Join(stateDir, name)
+	info, err := entry.Info()
+	if err != nil {
+		return false, fmt.Errorf("get entry info for %s: %w", name, err)
+	}
+	if !info.ModTime().Before(cutoff) || isActiveSentinel(target) {
+		return false, nil
+	}
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("remove sentinel %s: %w", name, err)
+	}
+	return true, nil
+}
+
 func isCadenceSentinel(name string) bool {
-	return name == deathSentinelName || strings.HasPrefix(name, deathSentinelName+"-")
+	if name == deathSentinelName {
+		return true
+	}
+	prefix := deathSentinelName + "-"
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, prefix)
+	if len(suffix) != 16 {
+		return false
+	}
+	for i := 0; i < len(suffix); i++ {
+		c := suffix[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func isActiveSentinel(target string) bool {
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) >= 2 {
+		quarPath := filepath.Clean(strings.TrimSpace(lines[1]))
+		if quarPath != "" && quarPath != "." {
+			// #nosec G703 -- path was recorded by local token-refresher to track its active quarantine marker.
+			if _, err := os.Stat(quarPath); err == nil {
+				return true
+			}
+		}
+	}
+	var credPath string
+	if len(lines) >= 3 {
+		credPath = strings.TrimSpace(lines[2])
+	}
+	if filepath.Base(target) == deathSentinelName || credPath != "" {
+		if stopped, err := cadenceStopped(credPath); err == nil && stopped {
+			return true
+		}
+	}
+	return false
 }
 
 // notifyCadenceOnce records the episode after its first best-effort alert.
 // Every cadence failure path uses this helper so a durable quarantine/stop does
 // not notify again on every launchd tick.
-func notifyCadenceOnce(stateDir, sentinelName, title, message string) {
+func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, title, message string) {
 	sentinel := filepath.Join(stateDir, sentinelName)
 	if _, err := os.Stat(sentinel); err == nil {
+		now := time.Now()
+		_ = os.Chtimes(sentinel, now, now)
 		return
 	}
 	notifyOperator(title, message)
 	if err := os.MkdirAll(stateDir, 0o700); err == nil {
 		stamp := time.Now().UTC().Format(time.RFC3339)
-		_ = os.WriteFile(sentinel, []byte(stamp+"\n"), 0o600)
+		lines := []string{stamp}
+		if quarantinePath != "" || credentialsPath != "" {
+			lines = append(lines, quarantinePath)
+			if credentialsPath != "" {
+				lines = append(lines, credentialsPath)
+			}
+		}
+		_ = os.WriteFile(sentinel, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 	}
 }
 
@@ -182,7 +246,7 @@ func notifyCadenceOnce(stateDir, sentinelName, title, message string) {
 const notifyTimeout = 5 * time.Second
 
 // notifyOperator raises a macOS notification. Alerting is best-effort: a
-// refresh must never fail — or stall — because the notification did not render.
+// refresh must never fail or stall because the notification did not render.
 func notifyOperator(title, message string) {
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()

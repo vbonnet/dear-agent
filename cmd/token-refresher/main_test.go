@@ -258,13 +258,13 @@ func TestRun_CadencePrunesStaleSentinelsViaFlag(t *testing.T) {
 	stateDir := t.TempDir()
 	now := time.Now()
 
-	staleSentinel := filepath.Join(stateDir, deathSentinelName+"-old0123456789ab")
+	staleSentinel := filepath.Join(stateDir, deathSentinelName+"-0123456789abcdef")
 	if err := os.WriteFile(staleSentinel, []byte("stale\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(staleSentinel, now.Add(-3*time.Hour), now.Add(-3*time.Hour))
 
-	freshSentinel := filepath.Join(stateDir, deathSentinelName+"-new0123456789ab")
+	freshSentinel := filepath.Join(stateDir, deathSentinelName+"-fedcba9876543210")
 	if err := os.WriteFile(freshSentinel, []byte("fresh\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
