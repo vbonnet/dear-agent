@@ -58,7 +58,7 @@ on without opening anything else.
 
 **GHC-08** When threshold flags are supplied, the command shall use them in place of the shipped defaults.
 
-**GHC-09** When a pull request's check rollup has not reported, the command shall mark it unknown and exclude it from the denominator.
+**GHC-09** When a pull request's check rollup has not reported, the command shall mark it unknown and exclude it from the denominator. A rollup that is absent, empty, or carries no context that has reached a terminal conclusion has all not reported: an in-progress queue is not evidence of health, and counting it as evaluated would dilute the denominator and mask an outage.
 
 **GHC-10** When parsing a forge response, the command shall read both modern check runs and legacy status contexts, and treat every terminal conclusion that blocks a merge as failing. `SUCCESS`, `NEUTRAL` and `SKIPPED` pass; a check that has not reached a conclusion counts as neither; every other terminal conclusion, including `CANCELLED`, `TIMED_OUT`, `ACTION_REQUIRED`, `STARTUP_FAILURE` and `STALE`, is failing. This matches the required-check classification the repository already applies in `internal/safegit`.
 

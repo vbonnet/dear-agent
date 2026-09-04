@@ -329,7 +329,7 @@ func TestDefaultConfigWouldHaveCaughtTheGovulncheckDeadlock(t *testing.T) {
 }
 
 func TestDefaultConfigPinsItsExactThresholds(t *testing.T) {
-	// GH-13: the outage regression above proves only that the 2026-09-03 queue
+	// GH-13 (thresholds half): the outage regression above proves only that the 2026-09-03 queue
 	// still reads systemic, which a wide band of thresholds satisfies. Defaults
 	// of MinFraction 0.45 / MinPRs 19 would pass it while consuming all the
 	// headroom, and much lower ones would pass it while making the alarm noisy.

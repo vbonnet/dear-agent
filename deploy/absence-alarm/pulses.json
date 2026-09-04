@@ -31,11 +31,7 @@
     {
       "name": "otel-receiving",
       "type": "command",
-      "command": [
-        "~/go/bin/jaeger-health",
-        "--lookback",
-        "24h"
-      ],
+      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
       "window": "24h",
       "expect": "Jaeger alive and receiving traces within 24h"
     },

@@ -282,7 +282,7 @@ func TestParseRollupCountsEveryTerminalBlockingConclusion(t *testing.T) {
 }
 
 func TestParseRollupTreatsAnUnrecognisedConclusionAsFailing(t *testing.T) {
-	// GHC-12: fail closed. A conclusion GitHub adds after this code was written
+	// GHC-10: fail closed. A conclusion GitHub adds after this code was written
 	// must not be silently read as a passing check, because that is the exact
 	// shape of the blindness this detector exists to end. Passing and pending
 	// states are enumerated; everything else counts as blocking.
@@ -302,7 +302,7 @@ func TestParseRollupTreatsAnUnrecognisedConclusionAsFailing(t *testing.T) {
 }
 
 func TestParseRollupTreatsAnAllPendingRollupAsUnevaluated(t *testing.T) {
-	// GHC-13: a rollup whose contexts are all still running has reported no
+	// GHC-09: a rollup whose contexts are all still running has reported no
 	// terminal result, so it is not evidence of health. Counting it as an
 	// evaluated passing PR lets an in-progress queue dilute the denominator and
 	// mask the outage: five failing PRs beside 25 all-pending ones would read
