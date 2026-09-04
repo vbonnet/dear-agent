@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the local Jaeger v2 collector.
+
+  Keeps a Jaeger all-in-one alive so instrumented dear-agent binaries (agm,
+  engram) always have an OTLP endpoint to export to:
+    - OTLP gRPC :4317   (OTEL_EXPORTER_OTLP_ENDPOINT points here)
+    - OTLP HTTP :4318
+    - Jaeger UI :16686
+
+  Binary path: this job runs the jaeger binary out of the dear-agent cache
+  (<user cache dir>/dear-agent/jaeger/jaeger), which is where `otel-local
+  up --fetch` installs it and the second entry in otel-local's own resolution
+  order (OTEL-LOCAL-03). It deliberately does NOT run it out of ~/go/bin.
+  Jaeger is a checksum-verified DOWNLOAD of a third-party release, not a
+  `go install` target, so it cannot be rebuilt from source. When the whole of
+  ~/go/bin was deleted on 2026-07-15 (bead ce-24f1) every Go-built tool there
+  was restored by rebuilding, but jaeger could not be, and this job then failed
+  with exit 78 for six weeks with nobody noticing. Keeping the binary outside
+  GOBIN removes it from the blast radius of a GOBIN sweep.
+
+  The plist is a TEMPLATE: the install target
+  (make install-jaeger-launchagent) substitutes __HOME__ for the real home
+  directory before staging it into ~/Library/LaunchAgents (launchd does not
+  expand ~ or shell variables).
+
+  Activate (ask-gated host action):
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.jaegertracing.jaeger.plist
+
+  Restart after a config or binary change:
+    launchctl kickstart -k gui/$(id -u)/com.jaegertracing.jaeger
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.jaegertracing.jaeger
+    rm ~/Library/LaunchAgents/com.jaegertracing.jaeger.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jaegertracing.jaeger</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/Library/Caches/dear-agent/jaeger/jaeger</string>
+        <string>--config</string>
+        <string>file://__HOME__/Library/Application Support/Jaeger/config.yaml</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>Nice</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/jaeger.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/jaeger.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PATH</key>
+        <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/ (ce-k414). -->
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+</dict>
+</plist>

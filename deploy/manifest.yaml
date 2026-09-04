@@ -61,6 +61,27 @@ artifacts:
     tokens:
       __HOME__: ${HOME}
 
+  # The always-on Jaeger collector (ce-24f1). Both artifacts are registered so
+  # `dear-deploy sync` stages them atomically and `dear-deploy status` reports
+  # drift; hand-copying either one would let the running collector diverge from
+  # source without the deployment gate noticing. The plist deliberately runs the
+  # jaeger binary from the dear-agent cache, not ~/go/bin, because jaeger is a
+  # checksum-verified download that a GOBIN sweep would unrecoverably delete.
+  # Staging does NOT activate: `launchctl bootstrap` stays an operator action,
+  # and a restaged plist needs `bootout` then `bootstrap` (kickstart only
+  # restarts the definition launchd already holds in memory).
+  - name: com.jaegertracing.jaeger
+    source: deploy/launchd/com.jaegertracing.jaeger.plist
+    deployed: ~/Library/LaunchAgents/com.jaegertracing.jaeger.plist
+    mode: "0644"
+    tokens:
+      __HOME__: ${HOME}
+
+  - name: jaeger-collector-config
+    source: deploy/jaeger/config.yaml
+    deployed: ~/Library/Application Support/Jaeger/config.yaml
+    mode: "0644"
+
   # Hourly sandbox-dir GC (ce-uxju): `agm sandbox gc --reap --json` reaps
   # ~/.agm/sandboxes dirs of archived/dead sessions behind the sandboxgc
   # safety gates (live-session, live-process, mount-inside, path allowlist).

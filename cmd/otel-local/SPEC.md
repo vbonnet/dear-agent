@@ -20,7 +20,9 @@ binaries.
 
 **OTEL-LOCAL-04** When `up` cannot find a Jaeger binary and `--fetch` is not set, the command shall return an install hint for the current platform.
 
-**OTEL-LOCAL-05** When `up --fetch` is used, the command shall download the pinned Jaeger release asset and its checksum, verify SHA-256, extract the `jaeger` binary, and mark it executable.
+**OTEL-LOCAL-05** When `up --fetch` is used, the command shall download the pinned Jaeger release asset and the platform SHA-256 manifest named `jaeger-<version>-<goos>-<goarch>.sha256sum.txt`, extract the `jaeger` binary, verify the extracted binary against its manifest entry, install it only after that check passes, and mark it executable.
+
+**OTEL-LOCAL-12** When the extracted binary fails checksum verification, the command shall not leave a binary at the cache path it resolves and launches.
 
 **OTEL-LOCAL-06** When a collector is already alive on the Jaeger UI port, the command shall reuse it and print the OTLP environment export.
 

@@ -68,3 +68,27 @@ is configured:
   the release's published `*.sha256sum.txt` over TLS. That integrity check
   guards against corrupt/truncated downloads; it is not a substitute for
   verifying the release itself (no GPG `.asc` check is performed).
+- The Jaeger binary is a checksum-verified **download**, not a `go install`
+  target, so it must live outside `~/go/bin`. The launch agent
+  (`make install-jaeger-launchagent`) runs it from the dear-agent cache, because
+  a `GOBIN` sweep removes anything under `~/go/bin` and a download cannot be
+  restored by rebuilding from source (`DECL-LAUNCHD-05`, bead ce-24f1).
+- Every collector listener is loopback-only. `deploy/jaeger/SPEC.md` contracts
+  the receiver, query, and storage bounds; `cmd/otel-local/config_contract_test.go`
+  enforces them against the deployed `deploy/jaeger/config.yaml`.
+- Both the plist and the collector config are registered in
+  `deploy/manifest.yaml`, so `dear-deploy status` reports drift and
+  `dear-deploy sync` is the only supported way to stage them. A restaged plist
+  needs `launchctl bootout` then `bootstrap`; `kickstart` restarts only the job
+  definition launchd already holds in memory.
+
+## Verifying that spans are actually arriving
+
+A collector can be up, reachable, and receiving nothing. Process liveness and a
+port check both pass in that state, so neither is sufficient.
+
+`cmd/jaeger-health` is the check that distinguishes them: it reports `degraded`
+and exits `1` when Jaeger is alive but no traces appear in the lookback window
+(`JAEGER-HEALTH-03`), and `down` with exit `2` when it is unreachable. Run it
+directly, or schedule it through `absence-alarm`, which owns running absence
+probes on an interval and routing their exit codes to a notifier.

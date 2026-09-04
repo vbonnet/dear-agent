@@ -22,7 +22,8 @@
 // Jaeger binary resolution order:
 //
 //  1. $JAEGER_BINARY (explicit override)
-//  2. ~/.cache/dear-agent/jaeger/jaeger (where --fetch installs it)
+//  2. <user cache dir>/dear-agent/jaeger/jaeger (where --fetch installs it):
+//     ~/Library/Caches on macOS, ~/.cache on Linux
 //  3. "jaeger" on $PATH
 //
 // If none is found, otel-local prints the download command for this platform.
@@ -158,7 +159,21 @@ func cmdUp(argv []string) error {
 
 	// bin is an operator-controlled path (JAEGER_BINARY, the dear-agent cache,
 	// or a "jaeger" on PATH), not external/network input.
-	proc := exec.Command(bin)
+	//
+	// Pass the managed config explicitly (OTEL-LOCAL-14). Without --config,
+	// Jaeger falls back to its upstream defaults, which bind 0.0.0.0 on every
+	// listener -- so the quick-start path everyone actually runs would expose
+	// an unauthenticated collector and query API on every interface, while only
+	// the launch agent got the loopback-pinned config. Same bytes, both paths.
+	args := []string{}
+	if cfg, ok := managedConfigPath(); ok {
+		args = append(args, "--config", cfg)
+	} else {
+		fmt.Fprintf(os.Stderr, "otel-local: warning: no managed collector config at %s; "+
+			"Jaeger will use its upstream defaults, which listen on all interfaces. "+
+			"Install it with: make install-jaeger-launchagent\n", managedConfigLocation())
+	}
+	proc := exec.Command(bin, args...)
 	// Jaeger writes its own startup logs to stderr; surface them prefixed so
 	// they don't masquerade as otel-local output.
 	proc.Stdout = prefixWriter{w: os.Stderr, prefix: "jaeger: "}
@@ -260,7 +275,30 @@ func cacheDir() string {
 }
 
 func cacheBinPath() string { return filepath.Join(cacheDir(), "jaeger") }
-func pidfilePath() string  { return filepath.Join(cacheDir(), "jaeger.pid") }
+
+// managedConfigLocation is where dear-deploy stages deploy/jaeger/config.yaml.
+// It is the same path the launch agent's plist passes to --config, so the
+// foreground and launchd collectors run identical configuration.
+func managedConfigLocation() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "Library", "Application Support", "Jaeger", "config.yaml")
+}
+
+// managedConfigPath returns the staged collector config when it is readable.
+func managedConfigPath() (string, bool) {
+	path := managedConfigLocation()
+	if path == "" {
+		return "", false
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return "", false
+	}
+	return path, true
+}
+func pidfilePath() string { return filepath.Join(cacheDir(), "jaeger.pid") }
 
 func fetchHint(ver string) string {
 	asset := assetName(ver, runtime.GOOS, runtime.GOARCH)
@@ -345,6 +383,14 @@ func assetName(version, goos, goarch string) string {
 	return fmt.Sprintf("jaeger-%s-%s-%s.tar.gz", strings.TrimPrefix(version, "v"), goos, goarch)
 }
 
+// checksumAssetName returns the published SHA-256 manifest name for a version +
+// platform. Jaeger names it after the platform tuple with no archive extension
+// (jaeger-2.19.0-darwin-arm64.sha256sum.txt); appending ".sha256sum.txt" to the
+// tarball name instead yields a 404.
+func checksumAssetName(version, goos, goarch string) string {
+	return fmt.Sprintf("jaeger-%s-%s-%s.sha256sum.txt", strings.TrimPrefix(version, "v"), goos, goarch)
+}
+
 func fetchJaeger(ctx context.Context, version string) (string, error) {
 	asset := assetName(version, runtime.GOOS, runtime.GOARCH)
 	base := fmt.Sprintf("https://github.com/jaegertracing/jaeger/releases/download/%s/", version)
@@ -353,32 +399,76 @@ func fetchJaeger(ctx context.Context, version string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("downloading %s: %w", asset, err)
 	}
-	sumFile, err := download(ctx, base+asset+".sha256sum.txt")
+	sumAsset := checksumAssetName(version, runtime.GOOS, runtime.GOARCH)
+	sumFile, err := download(ctx, base+sumAsset)
 	if err != nil {
 		return "", fmt.Errorf("downloading checksum: %w", err)
 	}
 
-	want, err := parseChecksum(string(sumFile), asset)
+	// The published manifest digests the files INSIDE the archive (entries look
+	// like "<hex> *jaeger-2.19.0-darwin-arm64/jaeger"), not the archive itself.
+	// So verify the extracted executable, which is also what we actually run.
+	want, err := parseChecksum(string(sumFile), "jaeger")
 	if err != nil {
 		return "", err
 	}
-	got := sha256.Sum256(tarball)
-	if gotHex := hex.EncodeToString(got[:]); gotHex != want {
-		return "", fmt.Errorf("checksum mismatch for %s: want %s, got %s", asset, want, gotHex)
-	}
 
 	dst := cacheBinPath()
-	if err := os.MkdirAll(cacheDir(), 0o755); err != nil {
-		return "", err
+	if err := installVerified(tarball, want, dst); err != nil {
+		return "", fmt.Errorf("installing jaeger from %s: %w", asset, err)
 	}
-	if err := extractBinary(tarball, "jaeger", dst); err != nil {
-		return "", err
+	return dst, nil
+}
+
+// installVerified extracts the `jaeger` binary from tarball, checks it against
+// the want digest, and only then puts it at dst as an executable.
+//
+// Extraction goes to a sibling temp path first so a checksum failure can never
+// leave an unverified binary at the path otel-local resolves and launches
+// (OTEL-LOCAL-12).
+//
+// The staging path is unique per invocation (OTEL-LOCAL-13). A fixed
+// "<dst>.incoming" name is shared state: two concurrent `otel-local up --fetch`
+// runs would extract into the same inode, so one could verify its bytes and
+// then rename what the other had since rewritten -- reporting success for
+// content it never checked against its own manifest. Even two runs of the same
+// version race, because whichever renames first removes the file the other is
+// still reading.
+func installVerified(tarball []byte, want, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	staged, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".incoming-*")
+	if err != nil {
+		return err
+	}
+	tmp := staged.Name()
+	// extractBinary owns writing tmp; close our handle so it can recreate the
+	// path without leaking a descriptor.
+	if err := staged.Close(); err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp) }()
+	if err := extractBinary(tarball, "jaeger", tmp); err != nil {
+		return err
+	}
+	// tmp is a path only this invocation knows, inside our own cache dir.
+	extracted, err := os.ReadFile(tmp)
+	if err != nil {
+		return err
+	}
+	got := sha256.Sum256(extracted)
+	if gotHex := hex.EncodeToString(got[:]); gotHex != want {
+		return fmt.Errorf("checksum mismatch: want %s, got %s", want, gotHex)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		return err
 	}
 	// The launcher binary must be executable.
 	if err := os.Chmod(dst, 0o755); err != nil { //nolint:gosec // G302: an executable must be 0755
-		return "", err
+		return err
 	}
-	return dst, nil
+	return nil
 }
 
 func download(ctx context.Context, url string) ([]byte, error) {
@@ -409,7 +499,9 @@ func parseChecksum(contents, asset string) (string, error) {
 		if len(fields) < 2 {
 			continue
 		}
-		if filepath.Base(fields[len(fields)-1]) == asset {
+		// sha256sum marks binary-mode entries with a leading "*" on the
+		// filename; strip it so a flat "*jaeger" entry still resolves.
+		if strings.TrimPrefix(filepath.Base(fields[len(fields)-1]), "*") == asset {
 			return fields[0], nil
 		}
 	}

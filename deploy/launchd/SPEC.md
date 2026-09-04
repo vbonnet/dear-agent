@@ -10,6 +10,8 @@
 
 **DECL-LAUNCHD-03** When a launchd guard monitors a directory for deletion, the system shall install that guard's program outside the monitored directory so the guard survives the deletion it detects.
 
+**DECL-LAUNCHD-05** When a launchd service runs a third-party binary that is downloaded rather than built from source, the system shall install that binary outside `GOBIN` so that rebuilding `GOBIN` from source does not silently leave the service unrunnable.
+
 **DECL-LAUNCHD-04** When an operator installs recurring dangerous-override review on macOS, the system shall install a root-owned system LaunchDaemon and root-owned audit executable that runs as the named unprivileged operator and that an unattended same-user agent cannot replace or disable through its GUI launchd domain.
 
 ## BDD Traceability
