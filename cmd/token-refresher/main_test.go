@@ -306,9 +306,14 @@ func TestRun_CadencePrunesStaleSentinelsViaFlag(t *testing.T) {
 }
 
 func TestClearRefreshProtectionsCommand_IncludesCustomStateDir(t *testing.T) {
+	cmdEmpty := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", "")
+	if strings.Contains(cmdEmpty, "-state-dir") {
+		t.Errorf("empty state dir should omit -state-dir flag: %s", cmdEmpty)
+	}
+
 	cmdDefault := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", defaultStateDir())
-	if strings.Contains(cmdDefault, "-state-dir") {
-		t.Errorf("default state dir should not be passed explicitly: %s", cmdDefault)
+	if !strings.Contains(cmdDefault, fmt.Sprintf("-state-dir %s", shellQuote(canonicalStateDir(defaultStateDir())))) {
+		t.Errorf("default state dir should be included in clear command: %s", cmdDefault)
 	}
 
 	customDir := "/custom/state/dir"

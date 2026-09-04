@@ -150,7 +150,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath, resolvedStateDir)
 
 	if *clearQuar {
-		if err := clearCadenceSentinel(resolvedStateDir, cadenceSentinelName(*quarPath)); err != nil {
+		if err := clearCadenceSentinel(resolvedStateDir, cadenceSentinelName(*quarPath, resolvedCredPath)); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
 			return exitError
 		}
@@ -171,7 +171,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
-			sentinelName := cadenceSentinelName(*quarPath)
+			sentinelName := cadenceSentinelName(*quarPath, resolvedCredPath)
 			if code == exitNotPersisted {
 				canonicalQuarantine := defaultQuarantinePathForCredentials(resolvedCredPath)
 				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
@@ -389,10 +389,7 @@ func shellQuote(value string) string {
 func clearRefreshProtectionsCommand(credentialsPath, quarantinePath, stateDir string) string {
 	cmd := fmt.Sprintf("token-refresher -credentials %s -quarantine %s", shellQuote(credentialsPath), shellQuote(quarantinePath))
 	if stateDir != "" {
-		canonicalState := canonicalStateDir(stateDir)
-		if canonicalState != canonicalStateDir(defaultStateDir()) {
-			cmd += fmt.Sprintf(" -state-dir %s", shellQuote(canonicalState))
-		}
+		cmd += fmt.Sprintf(" -state-dir %s", shellQuote(canonicalStateDir(stateDir)))
 	}
 	return cmd + " -clear-quarantine"
 }

@@ -358,26 +358,28 @@ func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
 
 	// Setup Job 1 quarantine and sentinel.
 	c1 := writeCreds(t, "access1", freshMs(), "refresh1")
+	fp1, _ := credentialsFingerprint(c1)
 	q1 := filepath.Join(quarDir, "job1-quarantine.json")
 	if err := writeQuarantineFile(q1, "refresh1"); err != nil {
 		t.Fatal(err)
 	}
-	s1Name := cadenceSentinelName(q1)
+	s1Name := cadenceSentinelName(q1, c1)
 	s1 := filepath.Join(stateDir, s1Name)
-	if err := os.WriteFile(s1, []byte("2026-09-01T00:00:00Z\n"+q1+"\n"+c1+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(s1, []byte("2026-09-01T00:00:00Z\n"+q1+"\n"+c1+"\n"+fp1+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(s1, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
 	// Setup Job 2 quarantine and sentinel.
 	c2 := writeCreds(t, "access2", freshMs(), "refresh2")
+	fp2, _ := credentialsFingerprint(c2)
 	q2 := filepath.Join(quarDir, "job2-quarantine.json")
 	if err := writeQuarantineFile(q2, "refresh2"); err != nil {
 		t.Fatal(err)
 	}
-	s2Name := cadenceSentinelName(q2)
+	s2Name := cadenceSentinelName(q2, c2)
 	s2 := filepath.Join(stateDir, s2Name)
-	if err := os.WriteFile(s2, []byte("2026-09-01T00:00:00Z\n"+q2+"\n"+c2+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(s2, []byte("2026-09-01T00:00:00Z\n"+q2+"\n"+c2+"\n"+fp2+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(s2, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
@@ -616,5 +618,53 @@ func TestNotifyCadenceOnce_SkipsNonRegularFile(t *testing.T) {
 	}
 	if !info.Mode().IsRegular() {
 		t.Errorf("sentinel %s is not regular file: mode %v", fifoPath, info.Mode())
+	}
+}
+
+func TestSentinelMatchesEpisode_LegacyEmptyRecordedFPReturnsFalse(t *testing.T) {
+	credsPath := credsWithRefreshToken(t, "rt-legacy")
+	if sentinelMatchesEpisode(false, "", credsPath) {
+		t.Error("sentinelMatchesEpisode with legacy sentinel (hasFP=false) should return false to trigger upgrade/re-alert")
+	}
+}
+
+func TestCadenceSentinelName_ScopesDisabledQuarantineToCredentials(t *testing.T) {
+	c1 := "/path/to/job1/creds.json"
+	c2 := "/path/to/job2/creds.json"
+	s1 := cadenceSentinelName("", c1)
+	s2 := cadenceSentinelName("", c2)
+	if s1 == s2 {
+		t.Errorf("expected different sentinel names for different credentials under disabled quarantine, got %q", s1)
+	}
+	if !isCadenceSentinel(s1) || !isCadenceSentinel(s2) {
+		t.Errorf("sentinel names must match cadence sentinel pattern: s1=%q s2=%q", s1, s2)
+	}
+}
+
+func TestIsActiveSentinel_DeadFamilyPreservedWhileFingerprintMatches(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, deathSentinelName)
+	credsPath := credsWithRefreshToken(t, "rt-dead")
+	fp, _ := credentialsFingerprint(credsPath)
+
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	lines := []string{stamp, "", credsPath, fp}
+	if err := os.WriteFile(sentinel, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if !isActiveSentinel(sentinel) {
+		t.Error("dead-family sentinel with matching fingerprint must be preserved across transport errors")
+	}
+}
+
+func TestDefaultStateDir_RejectsForeignSquattedDirectory(t *testing.T) {
+	t.Setenv("HOME", "")
+	dir := defaultStateDir()
+	if dir == "" {
+		t.Skip("fallback directory could not be created")
+	}
+	if !isSecureStateDir(dir) {
+		t.Errorf("defaultStateDir returned unverified directory: %s", dir)
 	}
 }

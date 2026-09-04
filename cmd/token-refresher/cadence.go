@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -26,11 +27,16 @@ const (
 // clearCadenceSentinel re-arms the next cadence alert after an operator has
 // explicitly cleared quarantine. A missing sentinel means there is nothing to
 // re-arm and is therefore successful.
-func cadenceSentinelName(quarantinePath string) string {
-	if quarantinePath == "" {
+func cadenceSentinelName(quarantinePath, credentialsPath string) string {
+	if quarantinePath != "" {
+		sum := sha256.Sum256([]byte(quarantinePath))
+		return fmt.Sprintf("%s-%x", deathSentinelName, sum[:8])
+	}
+	canonCreds := canonicalCredentialsPath(credentialsPath)
+	if canonCreds == "" || canonCreds == canonicalCredentialsPath("") {
 		return deathSentinelName
 	}
-	sum := sha256.Sum256([]byte(quarantinePath))
+	sum := sha256.Sum256([]byte(canonCreds))
 	return fmt.Sprintf("%s-%x", deathSentinelName, sum[:8])
 }
 
@@ -193,22 +199,25 @@ func isCadenceSentinel(name string) bool {
 	return true
 }
 
-func sentinelMatchesEpisode(recordedFP, credPath string) bool {
-	if recordedFP == "" {
+func sentinelMatchesEpisode(hasFP bool, recordedFP, credPath string) bool {
+	currentFP, _ := credentialsFingerprint(credPath)
+	if currentFP == "" {
 		return true
 	}
-	currentFP, _ := credentialsFingerprint(credPath)
-	return currentFP == "" || currentFP == recordedFP
+	if !hasFP {
+		return false
+	}
+	return currentFP == recordedFP
 }
 
-func parseSentinelLines(target string) (quarPath, credPath, recordedFP string, ok bool) {
+func parseSentinelLines(target string) (quarPath, credPath, recordedFP string, hasFP bool, ok bool) {
 	info, err := os.Lstat(target)
 	if err != nil || !info.Mode().IsRegular() {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
 	data, err := os.ReadFile(target)
 	if err != nil {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) >= 2 {
@@ -219,8 +228,9 @@ func parseSentinelLines(target string) (quarPath, credPath, recordedFP string, o
 	}
 	if len(lines) >= 4 {
 		recordedFP = strings.TrimSpace(lines[3])
+		hasFP = true
 	}
-	return quarPath, credPath, recordedFP, true
+	return quarPath, credPath, recordedFP, hasFP, true
 }
 
 func isQuarantineActive(quarPath, credPath string) bool {
@@ -248,11 +258,17 @@ func isCadenceStoppedFor(target, credPath string) bool {
 }
 
 func isActiveSentinel(target string) bool {
-	quarPath, credPath, recordedFP, ok := parseSentinelLines(target)
-	if !ok || !sentinelMatchesEpisode(recordedFP, credPath) {
+	quarPath, credPath, recordedFP, hasFP, ok := parseSentinelLines(target)
+	if !ok || !hasFP || recordedFP == "" || credPath == "" {
 		return false
 	}
-	return isQuarantineActive(quarPath, credPath) || isCadenceStoppedFor(target, credPath)
+	if !sentinelMatchesEpisode(hasFP, recordedFP, credPath) {
+		return false
+	}
+	if quarPath != "" && quarPath != "." {
+		return isQuarantineActive(quarPath, credPath) || isCadenceStoppedFor(target, credPath)
+	}
+	return true
 }
 
 // notifyCadenceOnce records the episode after its first best-effort alert.
@@ -267,10 +283,11 @@ func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, 
 		} else if data, err := os.ReadFile(sentinel); err == nil {
 			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 			var recordedFP string
-			if len(lines) >= 4 {
+			hasFP := len(lines) >= 4
+			if hasFP {
 				recordedFP = strings.TrimSpace(lines[3])
 			}
-			if sentinelMatchesEpisode(recordedFP, credentialsPath) {
+			if sentinelMatchesEpisode(hasFP, recordedFP, credentialsPath) {
 				now := time.Now()
 				_ = os.Chtimes(sentinel, now, now)
 				return
@@ -303,11 +320,29 @@ func notifyOperator(title, message string) {
 	_ = cmd.Run()
 }
 
+func isSecureStateDir(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		return int(stat.Uid) == os.Getuid() && info.Mode().Perm() == 0o700
+	}
+	return false
+}
+
 // defaultStateDir is where the sentinel lives, alongside the audit log.
 func defaultStateDir() string {
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d", os.Getuid()))
+	if err == nil {
+		return filepath.Join(home, ".local", "state", "dear-agent")
 	}
-	return filepath.Join(home, ".local", "state", "dear-agent")
+	fallback := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d", os.Getuid()))
+	if isSecureStateDir(fallback) {
+		return fallback
+	}
+	if err := os.Mkdir(fallback, 0o700); err == nil && isSecureStateDir(fallback) {
+		return fallback
+	}
+	return ""
 }
