@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -30,8 +31,8 @@ import (
 var hexShard = regexp.MustCompile(`^[0-9a-f]{2}$`)
 
 // cacheEntryFile matches the content-addressed files a Go-style cache stores
-// inside each shard: a long hex action/output ID with an "-a" or "-d" suffix.
-var cacheEntryFile = regexp.MustCompile(`^[0-9a-f]{32,}-[ad]$`)
+// inside each shard: a 64-hex action/output ID with an "-a" or "-d" suffix.
+var cacheEntryFile = regexp.MustCompile(`^[0-9a-f]{64}-[ad]$`)
 
 // buildCacheFurniture is every entry name a cache root may contain besides
 // its hex shards.
@@ -88,11 +89,24 @@ func isGoBuildCacheRoot(dir string) bool {
 	return shardsHoldOnlyCacheEntries(shards)
 }
 
+func sameDevice(a, b os.FileInfo) bool {
+	sa, oka := a.Sys().(*syscall.Stat_t)
+	sb, okb := b.Sys().(*syscall.Stat_t)
+	if !oka || !okb {
+		return false
+	}
+	return sa.Dev == sb.Dev
+}
+
 // cacheShards returns dir's hex shard directories, reporting ok=false as soon
 // as it sees anything that is neither a shard nor known furniture. A symlink
 // at this level also disqualifies: following one is how a reaper gets steered
 // outside the tree it was pointed at.
 func cacheShards(dir string) (shards []string, ok bool) {
+	rootInfo, err := os.Stat(dir)
+	if err != nil {
+		return nil, false
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, false
@@ -103,10 +117,13 @@ func cacheShards(dir string) (shards []string, ok bool) {
 		if ierr != nil || info.Mode()&os.ModeSymlink != 0 {
 			return nil, false
 		}
+		if !sameDevice(info, rootInfo) {
+			return nil, false
+		}
 		switch {
 		case e.IsDir() && hexShard.MatchString(name):
 			shards = append(shards, filepath.Join(dir, name))
-		case !e.IsDir() && buildCacheFurniture[name]:
+		case buildCacheFurniture[name] && info.Mode().IsRegular():
 			// furniture, fine
 		default:
 			return nil, false
@@ -116,18 +133,54 @@ func cacheShards(dir string) (shards []string, ok bool) {
 }
 
 // shardsHoldOnlyCacheEntries reports whether every given shard contains only
-// content-addressed cache files — or nothing, which is what a trimmed or
-// externally-emptied cache leaves behind. An unreadable shard is a false.
+// content-addressed cache files or Go executable cache directories — or nothing,
+// which is what a trimmed or externally-emptied cache leaves behind. An unreadable shard is a false.
 func shardsHoldOnlyCacheEntries(shards []string) bool {
 	for _, shard := range shards {
-		names, err := os.ReadDir(shard)
-		if err != nil {
+		if !shardHoldsOnlyCacheEntries(shard) {
 			return false
 		}
-		for _, n := range names {
-			if n.IsDir() || !cacheEntryFile.MatchString(n.Name()) {
-				return false
-			}
+	}
+	return true
+}
+
+func shardHoldsOnlyCacheEntries(shard string) bool {
+	shardBase := filepath.Base(shard)
+	names, err := os.ReadDir(shard)
+	if err != nil {
+		return false
+	}
+	for _, n := range names {
+		if !isValidShardEntry(shard, shardBase, n) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidShardEntry(shard, shardBase string, n os.DirEntry) bool {
+	name := n.Name()
+	if !cacheEntryFile.MatchString(name) || len(name) < 2 || name[:2] != shardBase {
+		return false
+	}
+	info, ierr := n.Info()
+	if ierr != nil || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	if !n.IsDir() {
+		return info.Mode().IsRegular()
+	}
+	if !strings.HasSuffix(name, "-d") {
+		return false
+	}
+	execEntries, err := os.ReadDir(filepath.Join(shard, name))
+	if err != nil {
+		return false
+	}
+	for _, ee := range execEntries {
+		einfo, err := ee.Info()
+		if err != nil || !einfo.Mode().IsRegular() {
+			return false
 		}
 	}
 	return true

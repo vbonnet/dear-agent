@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -55,7 +56,17 @@ func listOpenPaths(parent context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(parent, lsofTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "lsof", "-n", "-P", "-F", "n").Output()
+	lsofBin := "lsof"
+	if _, err := exec.LookPath("lsof"); err != nil {
+		for _, fallback := range []string{"/usr/sbin/lsof", "/usr/bin/lsof"} {
+			if _, statErr := os.Stat(fallback); statErr == nil {
+				lsofBin = fallback
+				break
+			}
+		}
+	}
+
+	out, err := exec.CommandContext(ctx, lsofBin, "-n", "-P", "-F", "n").Output()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("lsof: %w", ctxErr)
 	}

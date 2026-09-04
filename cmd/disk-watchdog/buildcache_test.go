@@ -11,9 +11,11 @@ import (
 	"time"
 )
 
-// cacheEntryName is a content-addressed cache filename of the shape Go and
-// golangci-lint write inside each shard.
-const cacheEntryName = "0123456789abcdef0123456789abcdef0123456789abcdef-d"
+// shardEntryName returns a 64-hex content-addressed cache filename whose
+// leading byte matches its parent shard.
+func shardEntryName(shard string) string {
+	return fmt.Sprintf("%s%062x-d", shard, 1)
+}
 
 // mkBuildCache writes a directory that is structurally a Go build cache.
 //
@@ -26,13 +28,13 @@ func mkBuildCache(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	for i := range 256 {
-		shard := filepath.Join(dir, fmt.Sprintf("%02x", i))
+		shardName := fmt.Sprintf("%02x", i)
+		shard := filepath.Join(dir, shardName)
 		if err := os.MkdirAll(shard, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		// A cached artifact in each shard, so size accounting has something
-		// to count and the content check has something to inspect.
-		if err := os.WriteFile(filepath.Join(shard, cacheEntryName), []byte("0123456789"), 0o600); err != nil {
+		// A cached artifact in each shard, matching the shard prefix.
+		if err := os.WriteFile(filepath.Join(shard, shardEntryName(shardName)), []byte("0123456789"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -88,13 +90,52 @@ func TestIsGoBuildCacheRoot_ProofIsByContentNotName(t *testing.T) {
 		// What an external cleanup leaves behind: shards with nothing in them.
 		d := mkBuildCache(t, filepath.Join(base, "skeleton"))
 		for i := range 256 {
-			shard := filepath.Join(d, fmt.Sprintf("%02x", i))
-			if err := os.Remove(filepath.Join(shard, cacheEntryName)); err != nil {
+			shardName := fmt.Sprintf("%02x", i)
+			shard := filepath.Join(d, shardName)
+			if err := os.Remove(filepath.Join(shard, shardEntryName(shardName))); err != nil {
 				t.Fatal(err)
 			}
 		}
 		if !isGoBuildCacheRoot(d) {
 			t.Fatal("an emptied cache skeleton is still a cache and still reclaimable")
+		}
+	})
+
+	t.Run("a shard with mismatched hash prefix is refused", func(t *testing.T) {
+		d := mkBuildCache(t, filepath.Join(base, "mismatched-shard"))
+		// Place a file starting with "ff" inside shard "00"
+		foreignEntry := "ff" + strings.Repeat("0", 62) + "-d"
+		if err := os.WriteFile(filepath.Join(d, "00", foreignEntry), []byte("test"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if isGoBuildCacheRoot(d) {
+			t.Fatal("an entry whose leading hash does not match its shard must be refused")
+		}
+	})
+
+	t.Run("non-64-hex cache entry is refused", func(t *testing.T) {
+		d := mkBuildCache(t, filepath.Join(base, "short-hash"))
+		shortEntry := "00" + strings.Repeat("0", 30) + "-d"
+		if err := os.WriteFile(filepath.Join(d, "00", shortEntry), []byte("test"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if isGoBuildCacheRoot(d) {
+			t.Fatal("a non-64-hex cache entry must be refused")
+		}
+	})
+
+	t.Run("Go 1.24 executable directory layout is recognised", func(t *testing.T) {
+		d := mkBuildCache(t, filepath.Join(base, "exec-cache"))
+		_ = os.Remove(filepath.Join(d, "00", shardEntryName("00")))
+		execDir := filepath.Join(d, "00", "00"+strings.Repeat("a", 62)+"-d")
+		if err := os.MkdirAll(execDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(execDir, "binary"), []byte("elf"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if !isGoBuildCacheRoot(d) {
+			t.Fatal("Go 1.24 executable cache directory layout must be recognised")
 		}
 	})
 
