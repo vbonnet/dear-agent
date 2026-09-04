@@ -112,11 +112,12 @@ func DefaultProbes() Probes {
 		},
 		RunCommand: func(ctx context.Context, argv []string) (int, string, error) {
 			cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-			var stdout strings.Builder
-			cmd.Stdout = &stdout
+			var out strings.Builder
+			cmd.Stdout = &out
+			cmd.Stderr = &out
 			err := cmd.Run()
 			if err == nil {
-				return 0, stdout.String(), nil
+				return 0, out.String(), nil
 			}
 			// A probe killed by its own deadline was never evaluated. Report
 			// that as an evaluation failure (UNDETERMINED, AA-05) rather than
@@ -125,12 +126,12 @@ func DefaultProbes() Probes {
 			// the thing is missing" are different facts, and collapsing them
 			// would blame the monitored subject for the monitor's own timeout.
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return -1, stdout.String(), fmt.Errorf("probe did not finish within its deadline: %w", ctxErr)
+				return -1, out.String(), fmt.Errorf("probe did not finish within its deadline: %w", ctxErr)
 			}
 			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-				return exitErr.ExitCode(), stdout.String(), nil
+				return exitErr.ExitCode(), out.String(), nil
 			}
-			return -1, stdout.String(), err
+			return -1, out.String(), err
 		},
 	}
 }
@@ -340,7 +341,11 @@ func commandReason(argv []string, code int, output string) string {
 		return fmt.Sprintf("%s exited %d", joined, code)
 	}
 	if len(summary) > maxReasonBytes {
-		summary = summary[:maxReasonBytes] + "\n... (truncated)"
+		limit := maxReasonBytes
+		for limit > 0 && (summary[limit]&0xC0 == 0x80) {
+			limit--
+		}
+		summary = summary[:limit] + "\n... (truncated)"
 	}
 	return fmt.Sprintf("%s\n(%s exited %d)", summary, joined, code)
 }

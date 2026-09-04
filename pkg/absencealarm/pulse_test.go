@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var t0 = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -361,5 +362,25 @@ func TestCommandPulseReasonIsBounded(t *testing.T) {
 	}
 	if !strings.Contains(res.Reason, "truncated") {
 		t.Errorf("Reason must mark truncation, got tail: %q", res.Reason[max(0, len(res.Reason)-80):])
+	}
+}
+
+func TestCommandPulseReasonTruncatesOnRuneBoundary(t *testing.T) {
+	// A probe output that exceeds maxReasonBytes must not split a multi-byte
+	// UTF-8 rune in half.
+	prefix := strings.Repeat("a", maxReasonBytes-1)
+	multiByteStr := prefix + "€€€"
+	pr := DefaultProbes()
+	pr.RunCommand = func(_ context.Context, _ []string) (int, string, error) {
+		return 1, multiByteStr, nil
+	}
+	p := Pulse{Name: "utf8", Type: PulseCommand, Command: []string{"utf8-probe"}}
+
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if !utf8.ValidString(res.Reason) {
+		t.Fatalf("Reason contains invalid UTF-8: %q", res.Reason)
+	}
+	if !strings.Contains(res.Reason, "truncated") {
+		t.Errorf("Reason must mark truncation: %q", res.Reason)
 	}
 }

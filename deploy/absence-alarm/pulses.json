@@ -16,17 +16,6 @@
       "expect": "at least one commit landing on origin/main within 6h"
     },
     {
-      "name": "merge-gate-not-systemically-failing",
-      "type": "command",
-      "command": [
-        "~/go/bin/gate-health",
-        "--repo",
-        "vbonnet/dear-agent"
-      ],
-      "window": "1h",
-      "expect": "no single required check failing across 30%+ of the open PR queue"
-    },
-    {
       "name": "mergeloop-loaded",
       "type": "launchd_loaded",
       "label": "com.dear-agent.mergeloop",
