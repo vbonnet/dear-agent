@@ -4,7 +4,15 @@ package boundedexec
 
 import "os/exec"
 
-// isolateProcessGroup is a no-op where process groups are unavailable. The
-// wall-clock bound still holds through WaitDelay; only descendant reaping is
-// lost, so a killed launcher's children may outlive the gate.
-func isolateProcessGroup(_ *exec.Cmd) {}
+// configureProcessGroup is a no-op where process groups are unavailable.
+func configureProcessGroup(_ *exec.Cmd) {}
+
+// killProcessTree falls back to killing the direct child only. The wall-clock
+// bound still holds through WaitDelay; only descendant reaping is lost, so a
+// killed launcher's children may outlive the gate.
+func killProcessTree(cmd *exec.Cmd) error {
+	if cmd.Process == nil {
+		return nil
+	}
+	return cmd.Process.Kill()
+}

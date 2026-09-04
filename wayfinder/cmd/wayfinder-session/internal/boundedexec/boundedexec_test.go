@@ -3,11 +3,11 @@ package boundedexec
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -285,16 +285,101 @@ func TestRunKillsDescendantsOnTimeout(t *testing.T) {
 		t.Fatalf("parse descendant pid %q: %v", raw, err)
 	}
 
-	// Signal 0 probes liveness without delivering anything. The descendant is
-	// given a moment to actually die before the probe.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if err := syscall.Kill(pid, 0); err != nil {
-			return // the descendant is gone, which is the point
+		if !descendantIsRunning(t, pid) {
+			return // the descendant is gone or defunct, which is the point
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("descendant pid %d survived the timeout: the process group was not killed", pid)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// descendantIsRunning reports whether pid is still executing.
+//
+// It deliberately does not use signal 0: where PID 1 does not promptly reap
+// orphans (common in containers), a killed descendant lingers as a zombie and
+// signal 0 still succeeds for it. That would make this test fail on a correct
+// process-group kill. A zombie has already been terminated, so it counts as
+// gone.
+func descendantIsRunning(t *testing.T, pid int) bool {
+	t.Helper()
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false // ps exits non-zero once the pid is gone entirely
+	}
+	state := strings.TrimSpace(string(out))
+	return state != "" && !strings.HasPrefix(state, "Z")
+}
+
+// blockingWriter models Wayfinder's stderr redirected into a full, undrained
+// pipe: the write never returns.
+type blockingWriter struct{ release chan struct{} }
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	<-w.release
+	return len(p), nil
+}
+
+// TestRunReturnsWhenProgressWriterBlocks guards against this package
+// reintroducing the very hang it exists to prevent. The progress path is new
+// code on the critical path of every gate; if a blocked writer can hold the
+// heartbeat goroutine inside a write, then joining that goroutine holds
+// complete-phase open regardless of the command timeout or WaitDelay.
+func TestRunReturnsWhenProgressWriterBlocks(t *testing.T) {
+	t.Parallel()
+
+	writer := &blockingWriter{release: make(chan struct{})}
+	defer close(writer.release) // let the stuck writer go at test end
+
+	done := make(chan Result, 1)
+	go func() {
+		done <- Command{
+			Label:     "blocked progress writer",
+			Name:      "sh",
+			Args:      []string{"-c", "exit 3"},
+			Timeout:   10 * time.Second,
+			Heartbeat: time.Millisecond,
+			Progress:  writer,
+		}.Run()
+	}()
+
+	select {
+	case res := <-done:
+		if res.ExitCode() != 3 {
+			t.Fatalf("command result was lost: %+v", res)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run did not return: a blocked progress writer can hang the gate")
+	}
+}
+
+// TestOrdinaryFailureIsNotReportedAsTimeout pins the classification contract at
+// the deadline boundary. A command that failed on its own must keep its exit
+// code and diagnostic: if it is relabelled a timeout merely because the context
+// also expired, Gate 9 discards the real build or test error and advises
+// raising the timeout instead. The deadline here is short enough that it
+// expires around the time the command exits, which is the window that matters.
+func TestOrdinaryFailureIsNotReportedAsTimeout(t *testing.T) {
+	t.Parallel()
+
+	for range 40 {
+		res := Command{
+			Label:     "boundary failure",
+			Name:      "sh",
+			Args:      []string{"-c", "exit 3"},
+			Timeout:   15 * time.Millisecond,
+			Heartbeat: time.Hour,
+			Progress:  &bytes.Buffer{},
+		}.Run()
+
+		if res.ExitCode() == 3 && res.TimedOut {
+			t.Fatalf("ordinary exit 3 was misclassified as a timeout: %+v", res)
+		}
+		if res.Err == nil && res.TimedOut {
+			t.Fatalf("successful command was misclassified as a timeout: %+v", res)
+		}
 	}
 }
