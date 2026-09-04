@@ -128,6 +128,10 @@ func run(args []string, stdout, stderr io.Writer, pr absencealarm.Probes, notify
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "absence-alarm: unexpected positional argument(s): %v\n", fs.Args())
+		return 2
+	}
 	if *probeBudget <= 0 || *tickBudget <= 0 {
 		fmt.Fprintf(stderr, "absence-alarm: --probe-timeout and --tick-timeout must be positive\n")
 		return 2
@@ -298,6 +302,12 @@ func emitReport(stdout, stderr io.Writer, rep report, jsonOut bool) {
 	fmt.Fprintf(stdout, "absence-alarm report (%s)\n", rep.TickTime.Format(time.RFC3339))
 	for _, r := range rep.Results {
 		line := fmt.Sprintf("  %-14s %s", r.Status, r.Name)
+		if r.Window != "" {
+			line += fmt.Sprintf(" (window %s)", r.Window)
+		}
+		if !r.Evidence.IsZero() {
+			line += fmt.Sprintf(" [evidence %s]", r.Evidence.Format(time.RFC3339))
+		}
 		if r.Reason != "" {
 			line += " - " + r.Reason
 		}

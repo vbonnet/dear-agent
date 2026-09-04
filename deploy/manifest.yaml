@@ -87,9 +87,9 @@ artifacts:
       __HOME__: ${HOME}
 
   # The absence alarm (ce-23lf7 / ce-o3g5t): a 10-minute launchd tick that
-  # alarms on the ABSENCE of expected positive events (a merge on main,
-  # mergeloop loaded + ticking, Jaeger receiving traces, the disk-watchdog
-  # tick, the gobin-guard heartbeat, the absence-alarm's own heartbeat)
+  # alarms on the ABSENCE of expected positive events (mergeloop loaded +
+  # ticking, Jaeger receiving traces, the disk-watchdog tick, the gobin-guard
+  # heartbeat, the absence-alarm's own heartbeat)
   # instead of the presence of errors. Independent of the mesh by design:
   # a dead mesh is exactly what it exists to notice. Staging does NOT
   # activate: activation is an ask-gated `launchctl bootstrap` (see the
@@ -104,6 +104,8 @@ artifacts:
     mode: "0644"
     tokens:
       __HOME__: ${HOME}
+    create-dirs:
+      - ~/.local/state/dear-agent
 
   - name: absence-alarm-pulses
     source: deploy/absence-alarm/pulses.json

@@ -196,3 +196,37 @@ func TestStatus_SourceMissing(t *testing.T) {
 		t.Fatalf("state = %q, want source-missing", s.State)
 	}
 }
+
+func TestStatus_AbsentOnlyPreservesOK(t *testing.T) {
+	a, opts := fixture(t, Artifact{Name: "cfg", Source: "src/cfg", Deployed: "~/cfg", AbsentOnly: true}, "default\n")
+	if _, err := Deploy(a, opts); err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if s := Status(a, opts); s.State != StateOK {
+		t.Fatalf("state = %q, want ok", s.State)
+	}
+	// Tamper: custom operator config should remain StateOK when AbsentOnly is true.
+	if err := os.WriteFile(a.DeployedPath(opts.Home), []byte("customized\n"), 0o644); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	if s := Status(a, opts); s.State != StateOK {
+		t.Fatalf("state = %q, want ok for customized absent-only artifact", s.State)
+	}
+}
+
+func TestDeploy_CreatesRuntimeDirs(t *testing.T) {
+	a, opts := fixture(t, Artifact{
+		Name:       "p",
+		Source:     "src/p",
+		Deployed:   "~/p",
+		CreateDirs: []string{"~/.local/state/custom"},
+	}, "content\n")
+	if _, err := Deploy(a, opts); err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	customDir := filepath.Join(opts.Home, ".local", "state", "custom")
+	info, err := os.Stat(customDir)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("runtime dir not created: %v", err)
+	}
+}

@@ -86,6 +86,9 @@ type Artifact struct {
 	// surfaced when the source is missing so the operator knows the prerequisite
 	// (e.g. "make build-write-guards").
 	Remediation string `yaml:"remediation,omitempty"`
+	// CreateDirs lists runtime directories that must exist on the host for this
+	// artifact to function (e.g. log output directories).
+	CreateDirs []string `yaml:"create-dirs,omitempty"`
 }
 
 // Manifest is the set of artifacts dear-deploy knows how to deploy.

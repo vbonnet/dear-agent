@@ -252,6 +252,10 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 	res := Result{Name: p.Name, Expect: p.Expect, Window: p.Window}
 	switch p.Type {
 	case PulseFileMtime:
+		// Evidence defaults to the moment the file was probed (AA-09),
+		// ensuring missing or error records carry an observation timestamp.
+		// If the file exists, it is updated below to the actual mtime.
+		res.Evidence = pr.Now()
 		mtime, exists, err := statMtimeBounded(ctx, pr.StatMtime, p.Path)
 		if err != nil {
 			res.Status = StatusUndetermined

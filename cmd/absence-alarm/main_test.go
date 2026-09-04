@@ -376,3 +376,30 @@ func TestRun_NotificationSurvivesAnExpiredTickBudget(t *testing.T) {
 		t.Errorf("exit code = 0, want non-zero for an alarming pulse")
 	}
 }
+
+// Unexpected positional arguments before or after flags exit 2.
+func TestRun_UnexpectedPositionalExits2(t *testing.T) {
+	e := stalePulseEnv(t)
+	var out, errb bytes.Buffer
+	args := append([]string{"accidental"}, e.args()...)
+	if code := run(args, &out, &errb, absencealarm.DefaultProbes(), e.notifier()); code != 2 {
+		t.Fatalf("exit = %d, want 2 for unexpected positionals", code)
+	}
+	if !strings.Contains(errb.String(), "unexpected positional argument") {
+		t.Errorf("stderr = %q, want unexpected positional error", errb.String())
+	}
+}
+
+// AA-21: Human report includes window and evidence when populated.
+func TestRun_HumanReportIncludesWindowAndEvidence(t *testing.T) {
+	e := stalePulseEnv(t)
+	var out, errb bytes.Buffer
+	run(e.args(), &out, &errb, absencealarm.DefaultProbes(), e.notifier())
+	reportStr := out.String()
+	if !strings.Contains(reportStr, "window 1h") {
+		t.Errorf("human report missing window: %s", reportStr)
+	}
+	if !strings.Contains(reportStr, "[evidence") {
+		t.Errorf("human report missing evidence: %s", reportStr)
+	}
+}

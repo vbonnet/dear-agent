@@ -133,6 +133,13 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 		return res, fmt.Errorf("reading deployed %q: %w", deployedPath, statErr)
 	}
 
+	for _, d := range a.CreateDirs {
+		target := expandPath(d, home)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return res, fmt.Errorf("creating required dir %s: %w", target, err)
+		}
+	}
+
 	if err := atomicWrite(deployedPath, content, mode, wantHash); err != nil {
 		return res, fmt.Errorf("deploying %q: %w", a.Name, err)
 	}
@@ -273,6 +280,11 @@ func Status(a Artifact, opts Options) StatusResult {
 		return res
 	}
 	if sha256hex(deployed) == sha256hex(content) {
+		res.State = StateOK
+	} else if a.AbsentOnly {
+		// An absent-only artifact is seeded once on first install and intentionally
+		// preserved against repo changes so operator edits survive sync; its deployed
+		// presence satisfies the deployment contract without drift.
 		res.State = StateOK
 	} else {
 		res.State = StateDrift

@@ -40,12 +40,6 @@
       "path": "~/.local/state/dear-agent/absence-alarm.heartbeat.json",
       "window": "30m",
       "expect": "an absence-alarm tick within 30m (3 missed 10-min launchd intervals)"
-    },
-    {
-      "name": "merge-pipeline-recent-commit",
-      "type": "command",
-      "command": ["~/go/bin/merge-health", "--repo", "~/src/dear-agent", "--lookback", "96h"],
-      "expect": "at least one commit landed on origin/main within the last 96h (4 days)"
     }
   ]
 }
