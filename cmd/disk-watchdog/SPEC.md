@@ -101,7 +101,7 @@ place, so counting either would let a broken reaper suppress its own alarm.
 
 **DW-28** When the widening scan reaches its hard byte cap without proof of a completed sweep and without reading back past the reaper-liveness window, the system shall classify the reaper as stale and shall report the condition as undetermined liveness rather than as a reaper that never completed a sweep, because absent and could-not-determine are different findings with different causes.
 
-**DW-29** When evaluating reaper liveness, the system shall ignore sandbox-GC records this watchdog's own remediation produced (identified by the producer tag it sets on the sweeps it invokes), and shall evaluate liveness before invoking remediation on the same tick, so that a remediating watchdog cannot accept its own sweep as proof that the scheduled reaper is alive. A record with no producer tag is not attributed to this watchdog.
+**DW-29** When evaluating reaper liveness, the system shall ignore every sandbox-GC record this watchdog's own remediation produced, including per-candidate reap receipts (identified by the producer tag it sets on the sweep), and shall evaluate liveness before invoking remediation on the same tick, so that a remediating watchdog cannot accept its own sweep as proof that the scheduled reaper is alive. A record with no producer tag is not attributed to this watchdog.
 
 **DW-30** When remediation invokes `agm sandbox gc --reap` and the sweep reports that the requested reap was refused or downgraded to a scan, the system shall treat the remediation as failed — it deleted nothing and its reap count means would-reap — and shall therefore engage the admission brake under DW-11.
 
@@ -109,7 +109,7 @@ place, so counting either would let a broken reaper suppress its own alarm.
 
 **DW-31** When the configured reaper-liveness window is negative, the system shall reject it as a usage error and exit 2 rather than disabling the check, so a typo cannot leave a dead reaper unmonitored while every tick reports OK. Only zero disables the check (DW-20).
 
-**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors and zero probe failures as proof of a completed sweep. It may accept sandbox reap records only from logs that contain no completion records.
+**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors and zero probe failures as proof of a completed sweep. It may accept a sandbox reap record as legacy proof only when the log contains no completion record and no sandbox-GC error at or after that reap, so an aborted modern sweep cannot manufacture health through its partial-mutation receipt.
 
 **DW-24** When a sandbox-GC completion record reports probe failures (a safety gate such as lsof, the mount table, or the session store could not be evaluated, as distinct from a gate that positively found a sandbox in use), the system shall treat that record the same as a record with reap errors: not proof of a completed sweep, so a reaper whose probes are systematically broken cannot suppress its own staleness alarm by reporting "kept" with zero errors.
 

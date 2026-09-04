@@ -12,8 +12,9 @@
 //   - refuses to run when the session store is unreachable or empty (an empty
 //     store is indistinguishable from a broken one — fail closed)
 //   - skips sandboxes younger than MinAge to avoid racing session creation
-//   - per-entry refusals are reported, never escalated to run failures; non-git
-//     and partial dirs are ordinary reapable content (ce-nd1z)
+//   - safety-gate refusals are reported per entry; caller cancellation aborts
+//     the sweep with a partial result so it can never look like healthy work
+//   - non-git and partial dirs are ordinary reapable content (ce-nd1z)
 package ops
 
 import (
@@ -50,6 +51,9 @@ type SandboxGCRequest struct {
 	// workspace database that does not exist. Warnings are surfaced in JSON and
 	// text output; they do not authorize deleting without a live-session source.
 	Warnings []string `json:"warnings,omitempty"`
+	// Source identifies the runner on every durable record produced by this
+	// sweep. It is observational metadata, never deletion authority.
+	Source string `json:"-"`
 }
 
 // SandboxGCEntry records the decision for one sandbox dir.
@@ -110,14 +114,25 @@ func sandboxGCWithChecker(ctx context.Context, req *SandboxGCRequest, base strin
 		minAge = DefaultSandboxMinAge
 	}
 
+	if err := sandboxGCContextError(ctx, "before live-session inventory"); err != nil {
+		return nil, err
+	}
+
 	// Fail closed on storage health BEFORE touching the filesystem. An
 	// unreachable or empty session store must abort the sweep: with no live-ID
 	// set every sandbox would look orphaned.
 	if checker.LiveSessionIDs == nil {
 		return nil, fmt.Errorf("sandbox gc requires a live-session source; refusing to sweep without one")
 	}
-	if _, err := checker.LiveSessionIDs(); err != nil {
-		return nil, fmt.Errorf("session store unreachable, refusing to sweep: %w", err)
+	_, inventoryErr := checker.LiveSessionIDs()
+	if ctxErr := sandboxGCContextError(ctx, "after live-session inventory"); ctxErr != nil {
+		if inventoryErr != nil {
+			return nil, errors.Join(ctxErr, fmt.Errorf("session store unreachable, refusing to sweep: %w", inventoryErr))
+		}
+		return nil, ctxErr
+	}
+	if inventoryErr != nil {
+		return nil, fmt.Errorf("session store unreachable, refusing to sweep: %w", inventoryErr)
 	}
 
 	result := &SandboxGCResult{
@@ -126,84 +141,167 @@ func sandboxGCWithChecker(ctx context.Context, req *SandboxGCRequest, base strin
 		Warnings:  append([]string(nil), req.Warnings...),
 	}
 
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		if os.IsNotExist(err) {
+	entries, readErr := os.ReadDir(base)
+	if ctxErr := sandboxGCContextError(ctx, "after reading the sandbox base"); ctxErr != nil {
+		if readErr != nil {
+			return result, errors.Join(ctxErr, fmt.Errorf("reading sandbox base %s: %w", base, readErr))
+		}
+		return result, ctxErr
+	}
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
 			return result, nil
 		}
-		return nil, fmt.Errorf("reading sandbox base %s: %w", base, err)
+		return nil, fmt.Errorf("reading sandbox base %s: %w", base, readErr)
 	}
 
 	now := time.Now()
 	for _, entry := range entries {
-		result.Scanned++
-		name := entry.Name()
-		dir := filepath.Join(base, name)
-
-		// Age gate: never touch fresh entries (racing session creation).
-		if info, err := entry.Info(); err == nil && now.Sub(info.ModTime()) < minAge {
-			result.Kept++
-			result.Entries = append(result.Entries, SandboxGCEntry{
-				Name: name, Action: "kept",
-				Reason: fmt.Sprintf("younger than %s", minAge),
-			})
-			continue
+		if err := sweepSandboxGCEntry(ctx, req, base, minAge, now, entry, checker, result); err != nil {
+			return result, err
 		}
-
-		// Non-directories directly under the base (stray files, dead
-		// symlinks, partial provisioning debris) go through the same gates;
-		// they are reapable content, not errors (ce-nd1z).
-
-		if !req.Reap {
-			// Dry run: classify only (Reap would re-run these gates itself;
-			// running them once per entry avoids duplicate lsof/mount scans).
-			if err := checker.CheckReapableContext(ctx, dir); err != nil {
-				result.Kept++
-				if isProbeFailure(err) {
-					result.ProbeFailures++
-				}
-				result.Entries = append(result.Entries, SandboxGCEntry{
-					Name: name, Action: "kept", Reason: refusalReason(err),
-				})
-				continue
-			}
-			result.Reaped++
-			result.Entries = append(result.Entries, SandboxGCEntry{
-				Name: name, Action: "would-reap",
-			})
-			continue
-		}
-
-		if err := checker.ReapContext(ctx, dir); err != nil {
-			var refusal *sandboxgc.RefusalError
-			if errors.As(err, &refusal) {
-				result.Kept++
-				if refusal.ProbeFailure {
-					result.ProbeFailures++
-				}
-				result.Entries = append(result.Entries, SandboxGCEntry{
-					Name: name, Action: "kept", Reason: refusalReason(err),
-				})
-			} else {
-				result.Errors++
-				result.Entries = append(result.Entries, SandboxGCEntry{
-					Name: name, Action: "error", Reason: err.Error(),
-				})
-			}
-			continue
-		}
-
-		result.Reaped++
-		result.Entries = append(result.Entries, SandboxGCEntry{Name: name, Action: "reaped"})
-		logGCEntry(gclog.Entry{
-			Operation:      "sandbox_gc_reap",
-			SessionID:      name,
-			SandboxRemoved: dir,
-		})
 	}
 
 	sort.Slice(result.Entries, func(i, j int) bool { return result.Entries[i].Name < result.Entries[j].Name })
+	if err := sandboxGCContextError(ctx, "before reporting completion"); err != nil {
+		return result, err
+	}
 	return result, nil
+}
+
+func sweepSandboxGCEntry(
+	ctx context.Context,
+	req *SandboxGCRequest,
+	base string,
+	minAge time.Duration,
+	now time.Time,
+	entry os.DirEntry,
+	checker *sandboxgc.Checker,
+	result *SandboxGCResult,
+) error {
+	if err := sandboxGCContextError(ctx, "before the next sandbox candidate"); err != nil {
+		return err
+	}
+	result.Scanned++
+	name := entry.Name()
+	dir := filepath.Join(base, name)
+
+	// Age gate: never touch fresh entries (racing session creation).
+	info, infoErr := entry.Info()
+	if ctxErr := sandboxGCContextError(ctx, "after inspecting sandbox "+name); ctxErr != nil {
+		return joinSandboxGCOperationError(ctxErr, wrapSandboxGCEntryError(name, "inspecting", infoErr))
+	}
+	if infoErr == nil && now.Sub(info.ModTime()) < minAge {
+		result.Kept++
+		result.Entries = append(result.Entries, SandboxGCEntry{
+			Name: name, Action: "kept", Reason: fmt.Sprintf("younger than %s", minAge),
+		})
+		return nil
+	}
+
+	// Non-directories directly under the base (stray files, dead symlinks, and
+	// partial provisioning debris) go through the same gates. They are reapable
+	// content, not errors (ce-nd1z).
+	if !req.Reap {
+		return classifySandboxGCDryRunCandidate(ctx, name, dir, checker, result)
+	}
+	return reapSandboxGCCandidate(ctx, name, dir, req.Source, checker, result)
+}
+
+func classifySandboxGCDryRunCandidate(
+	ctx context.Context,
+	name string,
+	dir string,
+	checker *sandboxgc.Checker,
+	result *SandboxGCResult,
+) error {
+	// Reap would re-run these gates itself; one classification per entry avoids
+	// duplicate lsof and mount scans in preview mode.
+	checkErr := checker.CheckReapableContext(ctx, dir)
+	if ctxErr := sandboxGCContextError(ctx, "while checking sandbox "+name); ctxErr != nil {
+		return joinSandboxGCOperationError(ctxErr, checkErr)
+	}
+	if checkErr != nil {
+		recordSandboxGCRefusal(result, name, checkErr)
+		return nil
+	}
+	result.Reaped++
+	result.Entries = append(result.Entries, SandboxGCEntry{Name: name, Action: "would-reap"})
+	return nil
+}
+
+func reapSandboxGCCandidate(
+	ctx context.Context,
+	name string,
+	dir string,
+	source string,
+	checker *sandboxgc.Checker,
+	result *SandboxGCResult,
+) error {
+	reapErr := checker.ReapContext(ctx, dir)
+	if reapErr != nil {
+		if ctxErr := sandboxGCContextError(ctx, "while reaping sandbox "+name); ctxErr != nil {
+			if _, refused := errors.AsType[*sandboxgc.RefusalError](reapErr); !refused {
+				// Removal was attempted and may have partially mutated the tree.
+				recordSandboxGCRemovalError(result, name, reapErr)
+			}
+			return errors.Join(ctxErr, reapErr)
+		}
+		if _, refused := errors.AsType[*sandboxgc.RefusalError](reapErr); refused {
+			recordSandboxGCRefusal(result, name, reapErr)
+		} else {
+			recordSandboxGCRemovalError(result, name, reapErr)
+		}
+		return nil
+	}
+
+	result.Reaped++
+	result.Entries = append(result.Entries, SandboxGCEntry{Name: name, Action: "reaped"})
+	logGCEntry(gclog.Entry{
+		Operation:      "sandbox_gc_reap",
+		Source:         source,
+		SessionID:      name,
+		SandboxRemoved: dir,
+	})
+	return sandboxGCContextError(ctx, "after reaping sandbox "+name)
+}
+
+func recordSandboxGCRefusal(result *SandboxGCResult, name string, err error) {
+	result.Kept++
+	if isProbeFailure(err) {
+		result.ProbeFailures++
+	}
+	result.Entries = append(result.Entries, SandboxGCEntry{
+		Name: name, Action: "kept", Reason: refusalReason(err),
+	})
+}
+
+func recordSandboxGCRemovalError(result *SandboxGCResult, name string, err error) {
+	result.Errors++
+	result.Entries = append(result.Entries, SandboxGCEntry{
+		Name: name, Action: "error", Reason: err.Error(),
+	})
+}
+
+func wrapSandboxGCEntryError(name, operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s sandbox %s: %w", operation, name, err)
+}
+
+func joinSandboxGCOperationError(contextErr, operationErr error) error {
+	if operationErr == nil {
+		return contextErr
+	}
+	return errors.Join(contextErr, operationErr)
+}
+
+func sandboxGCContextError(ctx context.Context, phase string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("sandbox gc context ended %s: %w", phase, err)
+	}
+	return nil
 }
 
 // liveSessionIDsFromStorage returns a closure yielding the IDs of all
@@ -254,8 +352,7 @@ func queryLiveSessionIDs(ctx *OpContext) (map[string]bool, error) {
 
 // refusalReason renders a compact reason for report entries.
 func refusalReason(err error) string {
-	var ref *sandboxgc.RefusalError
-	if errors.As(err, &ref) {
+	if ref, ok := errors.AsType[*sandboxgc.RefusalError](err); ok {
 		return fmt.Sprintf("%s: %s", ref.Reason, ref.Detail)
 	}
 	return err.Error()
@@ -265,6 +362,6 @@ func refusalReason(err error) string {
 // safety gate could not be evaluated, as opposed to one that positively
 // detected a live session/process/mount.
 func isProbeFailure(err error) bool {
-	var ref *sandboxgc.RefusalError
-	return errors.As(err, &ref) && ref.ProbeFailure
+	ref, ok := errors.AsType[*sandboxgc.RefusalError](err)
+	return ok && ref.ProbeFailure
 }
