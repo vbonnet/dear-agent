@@ -2,6 +2,7 @@ package ops
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -465,7 +466,14 @@ func (RealSweepDeps) Discover(base string) ([]DiscoveredWorktree, error) {
 			// if they are genuine linked worktrees.
 			if strings.HasPrefix(ch.Name(), ".") {
 				gitPath := filepath.Join(probe, ".git")
-				if fi, err := os.Stat(gitPath); err != nil || fi.IsDir() {
+				fi, err := os.Stat(gitPath)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						continue
+					}
+					return nil, fmt.Errorf("stat %s: %w", gitPath, err)
+				}
+				if fi.IsDir() {
 					continue
 				}
 			}
