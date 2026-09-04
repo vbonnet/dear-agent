@@ -42,7 +42,7 @@ func credentialsFingerprint(path string) (fp string, modTime string) {
 	}
 
 	info, err := os.Stat(path)
-	if err != nil {
+	if err != nil || !info.Mode().IsRegular() {
 		return "", ""
 	}
 	modTime = info.ModTime().UTC().Format("2006-01-02T15:04:05Z")

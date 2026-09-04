@@ -9,13 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
-func writeCreds(t *testing.T, accessToken string, expiresAt int64, refreshToken string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "credentials.json")
+func writeCredsFile(path, accessToken string, expiresAt int64, refreshToken string) error {
 	body := map[string]any{
 		"claudeAiOauth": map[string]any{
 			"accessToken":  accessToken,
@@ -23,8 +24,17 @@ func writeCreds(t *testing.T, accessToken string, expiresAt int64, refreshToken 
 			"refreshToken": refreshToken,
 		},
 	}
-	data, _ := json.MarshalIndent(body, "", "  ")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	data, err := json.MarshalIndent(body, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func writeCreds(t *testing.T, accessToken string, expiresAt int64, refreshToken string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	if err := writeCredsFile(path, accessToken, expiresAt, refreshToken); err != nil {
 		t.Fatalf("write creds: %v", err)
 	}
 	return path
@@ -240,5 +250,236 @@ func TestRun_CheckModeReportsStatusNoNetwork(t *testing.T) {
 	// Audit line written.
 	if data, _ := os.ReadFile(audit); !strings.Contains(string(data), `"mode":"check"`) {
 		t.Errorf("audit log missing check record: %s", data)
+	}
+}
+
+func TestRun_NegativeSentinelMaxAgeRejects(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-sentinel-max-age", "-1s"}, &stdout, &stderr)
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr.String(), "-sentinel-max-age cannot be negative") {
+		t.Errorf("stderr missing validation message: %s", stderr.String())
+	}
+}
+
+func TestRun_CadencePrunesStaleSentinelsViaFlag(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Now()
+
+	staleSentinel := filepath.Join(stateDir, deathSentinelName+"-0123456789abcdef")
+	if err := os.WriteFile(staleSentinel, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(staleSentinel, now.Add(-3*time.Hour), now.Add(-3*time.Hour))
+
+	freshSentinel := filepath.Join(stateDir, deathSentinelName+"-fedcba9876543210")
+	if err := os.WriteFile(freshSentinel, []byte("fresh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(freshSentinel, now.Add(-5*time.Minute), now.Add(-5*time.Minute))
+
+	srv := okTokenServer(t, "new-access", "new-refresh")
+	defer srv.Close()
+
+	creds := writeCreds(t, "fresh-tok", freshMs(), "fresh-rt")
+	audit := filepath.Join(stateDir, "audit.jsonl")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-cadence",
+		"-credentials", creds,
+		"-endpoint", srv.URL,
+		"-audit-log", audit,
+		"-state-dir", stateDir,
+		"-sentinel-max-age", "1h",
+		"-quarantine", filepath.Join(stateDir, "quar.json"),
+	}, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if _, err := os.Stat(staleSentinel); !os.IsNotExist(err) {
+		t.Errorf("stale sentinel %s was not pruned", staleSentinel)
+	}
+	if _, err := os.Stat(freshSentinel); err != nil {
+		t.Errorf("fresh sentinel %s was unexpectedly removed: %v", freshSentinel, err)
+	}
+}
+
+func TestClearRefreshProtectionsCommand_IncludesCustomStateDir(t *testing.T) {
+	cmdEmpty := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", "")
+	if strings.Contains(cmdEmpty, "-state-dir") {
+		t.Errorf("empty state dir should omit -state-dir flag: %s", cmdEmpty)
+	}
+
+	cmdDefault := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", defaultStateDir())
+	if !strings.Contains(cmdDefault, fmt.Sprintf("-state-dir %s", shellQuote(canonicalStateDir(defaultStateDir())))) {
+		t.Errorf("default state dir should be included in clear command: %s", cmdDefault)
+	}
+
+	customDir := "/custom/state/dir"
+	cmdCustom := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", customDir)
+	if !strings.Contains(cmdCustom, fmt.Sprintf("-state-dir %s", shellQuote(customDir))) {
+		t.Errorf("custom state dir should be included in clear command: %s", cmdCustom)
+	}
+
+	relDir := "relative/state/dir"
+	expectedAbs, _ := filepath.Abs(relDir)
+	cmdRel := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", relDir)
+	if !strings.Contains(cmdRel, fmt.Sprintf("-state-dir %s", shellQuote(filepath.Clean(expectedAbs)))) {
+		t.Errorf("relative state dir should be canonicalized to absolute in clear command: %s", cmdRel)
+	}
+}
+
+func TestClearRefreshProtectionsCommand_ShellQuotesMetacharacters(t *testing.T) {
+	creds := "/path/with space/$VAR/`id`/creds.json"
+	quar := "/path/with'quote/quar.json"
+	state := "/custom/state'dir/with spaces and $SIG"
+
+	cmd := clearRefreshProtectionsCommand(creds, quar, state)
+	expectedCreds := shellQuote(creds)
+	expectedQuar := shellQuote(quar)
+	expectedState := shellQuote(canonicalStateDir(state))
+
+	if !strings.Contains(cmd, expectedCreds) {
+		t.Errorf("credentials path not shell-quoted: %s", cmd)
+	}
+	if !strings.Contains(cmd, expectedQuar) {
+		t.Errorf("quarantine path not shell-quoted: %s", cmd)
+	}
+	if !strings.Contains(cmd, expectedState) {
+		t.Errorf("state dir not shell-quoted: %s", cmd)
+	}
+}
+
+func TestRun_CadenceRejectsInsecureFallbackStateDir(t *testing.T) {
+	insecureDir := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d-insecure-main-%d", os.Getuid(), time.Now().UnixNano()))
+	if err := os.Mkdir(insecureDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(insecureDir)
+	if err := os.Chmod(insecureDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-cadence", "-state-dir", insecureDir}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "state directory unavailable") {
+		t.Errorf("expected 'state directory unavailable' in stderr, got: %s", stderr.String())
+	}
+}
+
+func TestRun_CheckAndCadenceMutuallyExclusive(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	nonExistentStateDir := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-sideeffect-%d", time.Now().UnixNano()))
+	code := run([]string{"-check", "-cadence", "-state-dir", nonExistentStateDir}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "-check and -cadence are mutually exclusive") {
+		t.Errorf("expected mutual exclusion error in stderr, got: %s", stderr.String())
+	}
+	if _, err := os.Lstat(nonExistentStateDir); !os.IsNotExist(err) {
+		t.Errorf("combined check and cadence created state directory on disk: %s", nonExistentStateDir)
+	}
+}
+
+func TestRun_CadenceRejectsReadOnlyStateDir(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping chmod-based write denial test when running as root")
+	}
+	roDir := t.TempDir()
+	if err := os.Chmod(roDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chmod(roDir, 0o700)
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-cadence", "-state-dir", roDir}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "state directory unavailable") {
+		t.Errorf("expected 'state directory unavailable' in stderr, got: %s", stderr.String())
+	}
+}
+
+func TestRun_CadenceFingerprintsUnderLockAttemptedToken(t *testing.T) {
+	credDir := t.TempDir()
+	credPath := filepath.Join(credDir, ".credentials.json")
+	lockPath := filepath.Join(credDir, ".credentials.lock")
+	stateDir := t.TempDir()
+
+	if err := writeCredsFile(credPath, "stale-access", staleMs(), "token-A"); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer server.Close()
+
+	lockF, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lockF.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan int, 1)
+	var stdout, stderr bytes.Buffer
+	go func() {
+		quarPath := filepath.Join(stateDir, "quar.json")
+		code := run([]string{
+			"-cadence",
+			"-force",
+			"-credentials", credPath,
+			"-state-dir", stateDir,
+			"-quarantine", quarPath,
+			"-endpoint", server.URL,
+		}, &stdout, &stderr)
+		done <- code
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if err := writeCredsFile(credPath, "stale-access", staleMs(), "token-B"); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = syscall.Flock(int(lockF.Fd()), syscall.LOCK_UN)
+	_ = lockF.Close()
+
+	select {
+	case code := <-done:
+		if code != exitOK {
+			t.Fatalf("expected cadence exitOK (0), got %d; stderr: %s", code, stderr.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for run to complete")
+	}
+
+	quarPath := filepath.Join(stateDir, "quar.json")
+	sentinelPath := filepath.Join(stateDir, cadenceSentinelName(quarPath, credPath))
+	data, err := os.ReadFile(sentinelPath)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	rec, ok := parseSentinelData(data)
+	if !ok {
+		t.Fatalf("parse sentinel record: %s", string(data))
+	}
+	wantFP := auth.RefreshTokenFingerprint("token-B")
+	if rec.Fingerprint != wantFP {
+		t.Errorf("sentinel recorded fingerprint %q, want %q (under-lock attempted token)", rec.Fingerprint, wantFP)
 	}
 }
