@@ -13,6 +13,8 @@
   the refusal and producer-tag wire contracts is pinned in
   `agm/internal/ops/sandbox_gc_test.go` and `agm/internal/gclog/gclog_test.go`
   (SGC-17), since `cmd/` cannot import `agm/internal/...`.
+- Build-cache reaper evidence: `cmd/disk-watchdog/buildcache_test.go` (DW-32..DW-38).
+- E2E-cache reaper evidence: `cmd/disk-watchdog/e2ecache_test.go` (DW-39..DW-42).
 
 <!-- Last audited at: 2026-08-14 -->
 
@@ -128,3 +130,11 @@ place, so counting either would let a broken reaper suppress its own alarm.
 **DW-37** When the configured build-cache age gate is not positive while the reaper is enabled, the system shall reject it as a usage error and exit 2, because a zero or negative window would make a cache an in-flight build is writing immediately eligible. Passing empty scan roots is the supported way to disable the reaper.
 
 **DW-38** When a configured build-cache scan root does not exist, the system shall treat it as an empty result rather than a failure, so a host without that directory still completes a healthy tick.
+
+**DW-39** The system shall reap abandoned E2E test fixture directories under the configured E2E cache directory on every tick, regardless of whether any disk threshold is breached.
+
+**DW-40** When identifying an E2E test fixture directory, the system shall verify that its name matches the prefix "agm-", that it is owned by the current user, that it is not a symlink, and that its contents contain only expected fixture files ("agm", "agm.lock", or "agm-build-*"). A directory containing any foreign entry shall be kept.
+
+**DW-41** When an E2E test fixture directory is within the configured max-entries bound and newer than the configured age gate, when a process holds a file open inside it, or when its liveness probe cannot be evaluated, the system shall keep the fixture directory and shall record the reason it was kept.
+
+**DW-42** When the configured E2E cache age gate is not positive while the E2E reaper is enabled, the system shall reject it as a usage error and exit 2. Passing an empty E2E cache directory is the supported way to disable the E2E reaper.
