@@ -7,6 +7,7 @@
 # RELATED-SPEC: cmd/otel-local/SPEC.md
 # RELATED-SPEC: cmd/jaeger-health/SPEC.md
 # RELATED-SPEC: pkg/absencealarm/SPEC.md
+# RELATED-SPEC: cmd/merge-health/SPEC.md
 Feature: Observability package guardrails
   Observability packages must keep executable SPEC traceability because quota,
   drift, trace, and agent-runtime monitoring need the same contracts across
@@ -21,6 +22,7 @@ Feature: Observability package guardrails
       | package                       |
       | cmd/jaeger-health             |
       | pkg/absencealarm              |
+      | cmd/merge-health              |
       | cmd/otel-local                |
       | internal/metrics              |
       | internal/telemetry/agent      |
@@ -37,6 +39,7 @@ Feature: Observability package guardrails
     Examples:
       | package                     | requirement    | contract                |
       | pkg/absencealarm            | AA-05          | cannot be evaluated     |
+      | cmd/merge-health            | MH-05          | in the future           |
       | internal/telemetry/analysis | TEL-ANALYSIS-01 | context is canceled     |
       | pkg/otelsetup               | OTELSETUP-07   | revision is shorter     |
       | cmd/jaeger-health           | JAEGER-HEALTH-02 | times out              |
