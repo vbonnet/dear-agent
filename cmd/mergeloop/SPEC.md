@@ -13,7 +13,7 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-02** When pull-request checks are normalized, the command shall consume the shared safegit effective required-check projection and shall exclude advisory rollup history from repair classification.
 
-**MLC-03** When a pull request is behind, the command shall prefer `safe-rebase` and use GitHub update-branch only as a compatibility fallback.
+**MLC-03** When a pull request is behind, the command shall bring it up to date through GitHub's update-branch rebase, and shall not invoke a local rebase wrapper that requires a checkout the command does not have.
 
 **MLC-04** When a green pull request is merged, the command shall delegate irreversible execution to the shared safe-merge library.
 
@@ -44,6 +44,8 @@ session operations to the persistent merge-loop policy engine.
 **MLC-17** When the independent review-thread merge gate cannot be evaluated, the command shall refuse the merge and audit the refusal, and shall never treat an unavailable gate as an absence of findings.
 
 **MLC-18** When invoked with the `threads` mode, the command shall report how one pull request's review threads classify and whether the merge gate would refuse, and shall perform no mutation.
+
+**MLC-19** When a child command fails, the command shall include that child's own error output in the reported error, and shall not report an exit status alone.
 
 ## BDD Traceability
 

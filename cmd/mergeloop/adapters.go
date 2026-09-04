@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -165,21 +166,42 @@ func ghJSON(ctx context.Context, timeout time.Duration, args []string) ([]byte, 
 	return stdout.Bytes(), nil
 }
 
-// ---- safe-rebase backed rebaser ----
+// ---- GitHub-side rebaser ----
 
 type safeRebaser struct{ dryRun bool }
+
+// rebaseCommand builds the argv that brings a PR branch up to date with its
+// base. The rebase happens GitHub-side, which is the only option that fits
+// where this runs.
+//
+// ce-00u1: this used to prefer `safe-rebase --pr <n> --repo <owner/name>`
+// whenever exec.LookPath found the binary. safe-rebase has no --pr and no
+// --repo; it takes -C, --base, --auto, --dry-run, --timeout, and it rebases
+// THE CURRENT BRANCH inside a repository directory. mergeloop runs from $HOME
+// (WorkingDirectory in the launchd plist) with no per-PR checkout, so there was
+// no current branch to rebase. The mismatch was structural, not a typo, and
+// because LookPath succeeds on any host that has the wrapper installed, the
+// broken path was taken every single time. Every BEHIND PR failed instantly
+// with `unknown flag "--pr"` and the queue could never drain.
+//
+// Do not reintroduce a safe-rebase preference here. If a deterministic local
+// rebase is ever wanted, it needs a checkout of the PR branch first, which is a
+// different design.
+func rebaseCommand(repo string, pr int) (string, []string) {
+	args := []string{"pr", "update-branch", "--rebase", strconv.Itoa(pr)}
+	if repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	return "gh", args
+}
 
 func (s *safeRebaser) Rebase(ctx context.Context, repo string, pr int) error {
 	if s.dryRun {
 		fmt.Printf("  [dry-run] would rebase PR #%d\n", pr)
 		return nil
 	}
-	// Prefer the deterministic safe-rebase wrapper once it lands on main
-	// (PR #465); fall back to gh's update-branch --rebase until then.
-	if path, err := exec.LookPath("safe-rebase"); err == nil {
-		return runStreaming(ctx, 90*time.Second, path, "--pr", strconv.Itoa(pr), "--repo", repo)
-	}
-	return runStreaming(ctx, 90*time.Second, "gh", "pr", "update-branch", "--rebase", strconv.Itoa(pr), "--repo", repo)
+	name, args := rebaseCommand(repo, pr)
+	return runStreaming(ctx, 90*time.Second, name, args...)
 }
 
 // ---- safe-merge backed merger ----
@@ -293,14 +315,38 @@ func runStreaming(ctx context.Context, timeout time.Duration, name string, args 
 	cmd := exec.CommandContext(cctx, name, args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Tee stderr: it still streams to the log, and a bounded copy is folded
+	// into the returned error so the audit record names the actual failure.
+	// Without this the audit said only "safe-rebase: exit status 1" while the
+	// real message, `unknown flag "--pr"`, went to stderr alone. An exit code
+	// with no cause is what let ce-00u1 sit undiagnosed.
+	var errTail strings.Builder
+	cmd.Stderr = io.MultiWriter(os.Stderr, &errTail)
 	if err := cmd.Run(); err != nil {
 		if cctx.Err() != nil {
 			return fmt.Errorf("%s timed out after %s", name, timeout)
 		}
-		return fmt.Errorf("%s: %w", name, err)
+		return commandError(name, err, errTail.String())
 	}
 	return nil
+}
+
+// maxStderrInError bounds how much subprocess stderr is folded into an error,
+// so one runaway command cannot write an unbounded audit line.
+const maxStderrInError = 500
+
+// commandError joins a subprocess's exit status with what it actually said.
+func commandError(name string, runErr error, stderr string) error {
+	msg := strings.TrimSpace(stderr)
+	if msg == "" {
+		return fmt.Errorf("%s: %w", name, runErr)
+	}
+	if len(msg) > maxStderrInError {
+		msg = msg[:maxStderrInError] + "..."
+	}
+	// Collapse to one line: the audit log is JSONL and reads better unwrapped.
+	msg = strings.Join(strings.Fields(msg), " ")
+	return fmt.Errorf("%s: %w: %s", name, runErr, msg)
 }
 
 func detectRepo() (string, error) {
