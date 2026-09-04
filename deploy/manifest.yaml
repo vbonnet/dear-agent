@@ -89,19 +89,28 @@ artifacts:
   # The absence alarm (ce-23lf7 / ce-o3g5t): a 10-minute launchd tick that
   # alarms on the ABSENCE of expected positive events (a merge on main,
   # mergeloop loaded + ticking, Jaeger receiving traces, the disk-watchdog
-  # tick, OAuth freshness, the gobin-guard heartbeat) instead of the presence
-  # of errors. Independent of the mesh by design: a dead mesh is exactly what
-  # it exists to notice. Staging does NOT activate: activation is an
-  # ask-gated `launchctl bootstrap` (see the plist header). The pulse config
-  # is deployed only if absent so operator edits are never clobbered
-  # (optional + absent-only is approximated by keeping it out of sync scope;
-  # the Makefile installer copies it only when missing).
+  # tick, the gobin-guard heartbeat, the absence-alarm's own heartbeat)
+  # instead of the presence of errors. Independent of the mesh by design:
+  # a dead mesh is exactly what it exists to notice. Staging does NOT
+  # activate: activation is an ask-gated `launchctl bootstrap` (see the
+  # plist header).
+
+  # The pulse config is seeded absent-only: dear-deploy writes it on first
+  # install but leaves an already-deployed copy alone so operator edits
+  # (snoozed pulses, custom probe windows) survive every `dear-deploy sync`.
   - name: com.dear-agent.absence-alarm
     source: deploy/launchd/com.dear-agent.absence-alarm.plist
     deployed: ~/Library/LaunchAgents/com.dear-agent.absence-alarm.plist
     mode: "0644"
     tokens:
       __HOME__: ${HOME}
+
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    absent-only: true
+    remediation: make install-absence-alarm-launchagent
 
   # --- Claude Code PreToolUse write-guard hooks ------------------------------
   # Compiled binaries built by `make build-write-guards` into bin/. They are

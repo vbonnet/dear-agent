@@ -118,6 +118,10 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 	// Decide install vs update vs unchanged from the current host state.
 	existing, statErr := os.ReadFile(deployedPath)
 	switch {
+	case statErr == nil && a.AbsentOnly && !opts.Force:
+		// Absent-only: already deployed, preserve operator edits unconditionally.
+		res.Action = ActionUnchanged
+		return res, nil
 	case statErr == nil && sha256hex(existing) == wantHash && !opts.Force:
 		res.Action = ActionUnchanged
 		return res, nil
