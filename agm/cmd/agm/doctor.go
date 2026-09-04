@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/freshness"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -29,17 +30,36 @@ var (
 
 // getDoctorSessionsDir returns the sessions directory based on test mode
 func getDoctorSessionsDir() string {
+	homeDir, _ := os.UserHomeDir()
+	return getDoctorSessionsDirAtHome(homeDir)
+}
+
+func getDoctorSessionsDirAtHome(homeDir string) string {
 	// Test mode overrides config
 	if doctorTestMode {
-		homeDir, _ := os.UserHomeDir()
-		return homeDir + "/sessions-test"
+		return filepath.Join(homeDir, "sessions-test")
 	}
 	if cfg != nil && cfg.SessionsDir != "" {
 		return cfg.SessionsDir
 	}
 	// Default to ~/sessions
-	homeDir, _ := os.UserHomeDir()
-	return homeDir + "/sessions"
+	return filepath.Join(homeDir, "sessions")
+}
+
+func resolveDoctorHomePath(snapshot *config.Config) (string, error) {
+	authority, err := snapshot.RuntimeAuthority()
+	if err != nil {
+		return "", fmt.Errorf("doctor runtime authority: %w", err)
+	}
+	home, err := authority.Home()
+	if err != nil {
+		return "", fmt.Errorf("doctor HOME authority: %w", err)
+	}
+	path, err := home.Path()
+	if err != nil {
+		return "", fmt.Errorf("doctor HOME path: %w", err)
+	}
+	return path, nil
 }
 
 var doctorCmd = &cobra.Command{
@@ -95,12 +115,15 @@ Examples:
 		fmt.Println(ui.Blue("=== Claude Session Manager Health Check ===\n"))
 
 		allHealthy := true
+		homeDir, err := resolveDoctorHomePath(cfg)
+		if err != nil {
+			return err
+		}
 
 		// Get sessions directory (test mode or production)
-		sessionsDir := getDoctorSessionsDir()
+		sessionsDir := getDoctorSessionsDirAtHome(homeDir)
 
 		// Check Claude installation (verify history.jsonl exists)
-		homeDir, _ := os.UserHomeDir()
 		historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
 		if _, err := os.Stat(historyPath); err != nil {
 			ui.PrintError(err, "Claude history not found", "  • Install Claude from https://claude.com\n  • Run Claude at least once")
@@ -231,7 +254,7 @@ Examples:
 		}
 
 		// Run installation checks (binaries, hooks, settings, config, Go version)
-		if !runInstallChecks() {
+		if !runInstallChecks(homeDir) {
 			allHealthy = false
 		}
 
@@ -390,7 +413,7 @@ Examples:
 
 			// 6. Per-harness health (gated by the harness each session uses)
 			fmt.Println(ui.Blue("\n--- Checking per-harness health ---"))
-			if !checkHarnessHealth(manifests) {
+			if !checkHarnessHealth(manifests, homeDir) {
 				allHealthy = false
 			}
 
@@ -499,7 +522,7 @@ func detectDuplicateSessionDirs(sessionsDir string) []DuplicateSessionDir {
 // references it, so the Claude path is never skipped. Returns false (failing
 // the overall health check) only when a harness with at least one live session
 // is unhealthy; the always-on default check is informational.
-func checkHarnessHealth(manifests []*manifest.Manifest) bool {
+func checkHarnessHealth(manifests []*manifest.Manifest, homeDir string) bool {
 	inUse := map[string]int{}
 	for _, m := range manifests {
 		h := m.Harness
@@ -524,7 +547,7 @@ func checkHarnessHealth(manifests []*manifest.Manifest) bool {
 		count := inUse[name]
 		// A harness with no live sessions is informational only — never fail
 		// the overall check on it.
-		if !reportHarnessHealth(name, count) && count > 0 {
+		if !reportHarnessHealth(name, count, homeDir) && count > 0 {
 			healthy = false
 		}
 	}
@@ -534,8 +557,8 @@ func checkHarnessHealth(manifests []*manifest.Manifest) bool {
 // reportHarnessHealth prints the health of a single harness and returns whether
 // it is healthy. count is the number of live sessions using it (0 for the
 // always-on default check).
-func reportHarnessHealth(name string, count int) bool {
-	hh := agent.CheckHarnessHealth(name)
+func reportHarnessHealth(name string, count int, homeDir string) bool {
+	hh := agent.CheckHarnessHealthAtHome(name, homeDir)
 
 	var label string
 	if count > 0 {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -292,6 +293,49 @@ func TestValidateHarnessAvailability_BinaryOnPath(t *testing.T) {
 			t.Error("Expected error for gemini-cli without binary or key")
 		}
 	})
+}
+
+func TestValidateHarnessAvailabilityAtHomeUsesExplicitCodexOAuth(t *testing.T) {
+	clearClaudeEnv(t)
+	mockLookPath(t, map[string]bool{})
+	t.Setenv("OPENAI_API_KEY", "")
+
+	retainedHome := t.TempDir()
+	driftHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(retainedHome, ".codex"), 0o700); err != nil {
+		t.Fatalf("create retained Codex directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(retainedHome, ".codex", "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("create retained Codex credentials: %v", err)
+	}
+	t.Setenv("HOME", driftHome)
+	t.Setenv("USERPROFILE", driftHome)
+
+	if err := validateHarnessAvailabilityAtHome("codex-cli", retainedHome); err != nil {
+		t.Fatalf("retained Codex OAuth was ignored: %v", err)
+	}
+	if err := ValidateHarnessAvailability("codex-cli"); err == nil {
+		t.Fatal("compatibility wrapper unexpectedly used credentials outside the live HOME")
+	}
+}
+
+func TestCodexOAuthAtHomeRejectsRelativePaths(t *testing.T) {
+	originalStat := statPath
+	statCalls := 0
+	statPath = func(string) (os.FileInfo, error) {
+		statCalls++
+		return nil, os.ErrNotExist
+	}
+	t.Cleanup(func() { statPath = originalStat })
+
+	for _, home := range []string{"", "."} {
+		if isCodexOAuthConfiguredAtHome(home) {
+			t.Errorf("isCodexOAuthConfiguredAtHome(%q) = true, want false for a non-absolute HOME", home)
+		}
+	}
+	if statCalls != 0 {
+		t.Fatalf("non-absolute HOME triggered %d filesystem lookup(s), want none", statCalls)
+	}
 }
 
 func TestIsHarnessBinaryOnPath(t *testing.T) {
