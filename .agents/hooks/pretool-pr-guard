@@ -1,70 +1,16 @@
 #!/usr/bin/env bash
-# PreToolUse hook: wayfinder-only PR lifecycle enforcement.
-# AGY harness port of .claude/hooks/pretool-pr-guard.
-#
-# Denies raw `gh pr create|close|reopen` and routes agents through safe-pr.
-# Fails OPEN on unparseable input so it can never wedge a session.
+# AGY adapter for the canonical repository PR-lifecycle guard.
+# The canonical guidance includes `agm escalate ask --session <registered-session>`
+# and tells unregistered callers to ask the current user directly.
 
 set -uo pipefail
 
-input="$(cat)"
-tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
-[ "$tool" = "Bash" ] || exit 0
-cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
-[ -n "$cmd" ] || exit 0
-cmd="${cmd//\\$'\n'/ }"
-
-verb="$(printf '%s' "$cmd" | tr ';|&\n' '\n\n\n\n' | awk '
-  function base(p){ sub(/.*\//,"",p); return p }
-  {
-    prog=""; progat=0; launched=0
-    for (i=1; i<=NF; i++) {
-      if ($i ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
-      b=base($i)
-      if (b ~ /^(gtimeout|timeout|env|command|sudo|nohup|time|nice|caffeinate|stdbuf|xargs)$/)
-        { launched=1; continue }
-      if (launched && ($i ~ /^-/ || $i ~ /^[0-9]+[smhd]?$/)) continue
-      prog=b; progat=i; break
-    }
-    if (prog != "gh") next
-    sub_seen=0
-    for (i=progat+1; i<=NF; i++) {
-      if (!sub_seen) {
-        if ($i=="-R" || $i=="--repo" || $i=="--hostname") { i++; continue }
-        if ($i ~ /^(-R|--repo|--hostname)=/) continue
-        if ($i=="pr") { sub_seen=1; continue }
-        break
-      }
-      if ($i ~ /^(create|close|reopen)$/) { print $i; exit }
-      break
-    }
-  }')"
-[ -n "$verb" ] || exit 0
-
-if [ "$verb" = "reopen" ]; then
-  guidance='Reopening a closed PR has no sanctioned automated path — it is a human
-decision. Ask the supervisor/user to reopen it (and say why), or escalate.'
-else
-  guidance="  safe-pr create --wayfinder <wayfinder-project-dir> --title \"...\" --body \"...\" [gh flags]
-  safe-pr close  --wayfinder <wayfinder-project-dir> <number|url>
-
-(or set WAYFINDER_PROJECT_DIR; from outside AGM, run
-\`agm escalate ask --session <registered-session> \"Please perform the blocked PR lifecycle action: $verb\"\`;
-if no registered session exists, ask the current user directly).
-Install once with \`make install-safe-pr\` if not on PATH."
+project_root="${CLAUDE_PROJECT_DIR:-${PI_PROJECT_DIR:-}}"
+if [ -z "$project_root" ]; then
+  hook_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)" || exit 0
+  project_root="$(CDPATH= cd -- "$hook_dir/../.." && pwd -P)" || exit 0
 fi
 
-cat >&2 <<EOF
-You're trying to run \`gh pr $verb\` directly. PR open/close must go through
-the safe-pr wrapper so every PR carries a wayfinder session trace:
-
-$guidance
-
-Why: raw PRs have no wayfinder/plan attribution and no telemetry, and PR spray
-has repeatedly outrun the serial merge pipeline, burning CI and review quota
-(AGENTS.md §PR Lifecycle, principle 9 — atomic action wrappers).
-
-If you need this permission to complete your task, escalate by reporting:
-'PERMISSION_ESCALATION: I need [specific permission] because [reason]'.
-EOF
-exit 2
+guard="$project_root/.claude/hooks/pretool-pr-guard"
+[ -x "$guard" ] || exit 0
+exec "$guard"

@@ -5,12 +5,24 @@ on:
     branches: [main, develop]
     paths:
       - '**/*.sh'
+      - '.agents/hooks/**'
+      - '.claude/hooks/**'
+      - '.codex/hooks/**'
+      - '.opencode/hooks/**'
+      - '.pi/guardrails/**'
+      - 'scripts/pretool-pr-guard'
       - 'tests/bats/**'
       - '.github/workflows/shell-matrix.yml'
   pull_request:
     branches: [main, develop]
     paths:
       - '**/*.sh'
+      - '.agents/hooks/**'
+      - '.claude/hooks/**'
+      - '.codex/hooks/**'
+      - '.opencode/hooks/**'
+      - '.pi/guardrails/**'
+      - 'scripts/pretool-pr-guard'
       - 'tests/bats/**'
       - '.github/workflows/shell-matrix.yml'
 
@@ -49,15 +61,15 @@ jobs:
     steps:
       - name: Install dependencies (Alpine)
         if: matrix.image == 'alpine:latest'
-        run: apk add --no-cache git bash bats coreutils ${{ matrix.shell == 'zsh' && 'zsh' || '' }}
+        run: apk add --no-cache git bash bats coreutils jq ${{ matrix.shell == 'zsh' && 'zsh' || '' }}
 
       - name: Install dependencies (Debian)
         if: matrix.image == 'debian:bookworm-slim'
-        run: apt-get update && apt-get install -y git bash bats coreutils
+        run: apt-get update && apt-get install -y git bash bats coreutils jq
 
       - name: Install dependencies (Bash image)
         if: startsWith(matrix.image, 'bash:')
-        run: apk add --no-cache git bats coreutils
+        run: apk add --no-cache git bats coreutils jq
 
       - name: Checkout
         uses: actions/checkout@v7

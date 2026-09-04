@@ -1,23 +1,14 @@
 #!/bin/bash
-# Codex JSON adapter for the canonical repository PR-lifecycle guard.
-# The attested path uses the operator-owned JSON helper and committed hook root.
-# Canonical guidance includes `agm escalate ask --session <registered-session>`
-# and tells unregistered callers to ask the current user directly.
+# Canonical command classifier and guidance for repository PR-lifecycle hooks.
+#
+# Input is a decoded Bash command on stdin. The classifier intentionally covers
+# cooperative literal command forms, including common command runners. It is a
+# shift-left workflow guard, not a shell security boundary, and fails open on
+# empty or unrecognized input.
 
 set -uo pipefail
 
-if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
-  [ -x /usr/local/libexec/dear-agent-codex-hook-json ] || exit 0
-  hook_json() { /usr/local/libexec/dear-agent-codex-hook-json "$@"; }
-else
-  command -v jq >/dev/null 2>&1 || exit 0
-  hook_json() { jq "$@"; }
-fi
-
-input="$(cat)"
-tool="$(printf '%s' "$input" | hook_json -r '.tool_name // empty' 2>/dev/null || true)"
-[ "$tool" = "Bash" ] || exit 0
-cmd="$(printf '%s' "$input" | hook_json -r '.tool_input.command // empty' 2>/dev/null || true)"
+cmd="$(cat)"
 [ -n "$cmd" ] || exit 0
 
 # BEGIN CANONICAL PR GUARD CORE
