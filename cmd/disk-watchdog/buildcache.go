@@ -78,7 +78,7 @@ const shardSampleSize = 32
 //
 // Every failure path returns false, so an unreadable directory is kept.
 func isGoBuildCacheRoot(dir string) bool {
-	shards, ok := cacheShards(dir)
+	shards, rootInfo, ok := cacheShards(dir)
 	if !ok || len(shards) < minHexShards {
 		return false
 	}
@@ -86,7 +86,7 @@ func isGoBuildCacheRoot(dir string) bool {
 	if len(shards) > shardSampleSize {
 		shards = shards[:shardSampleSize]
 	}
-	return shardsHoldOnlyCacheEntries(shards)
+	return shardsHoldOnlyCacheEntries(shards, rootInfo)
 }
 
 func sameDevice(a, b os.FileInfo) bool {
@@ -98,27 +98,39 @@ func sameDevice(a, b os.FileInfo) bool {
 	return sa.Dev == sb.Dev
 }
 
+func isOwner(fi os.FileInfo, euid int64) bool {
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	return int64(stat.Uid) == euid
+}
+
 // cacheShards returns dir's hex shard directories, reporting ok=false as soon
 // as it sees anything that is neither a shard nor known furniture. A symlink
 // at this level also disqualifies: following one is how a reaper gets steered
 // outside the tree it was pointed at.
-func cacheShards(dir string) (shards []string, ok bool) {
+func cacheShards(dir string) (shards []string, rootInfo os.FileInfo, ok bool) {
 	rootInfo, err := os.Stat(dir)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
+	}
+	euid := int64(os.Geteuid())
+	if !isOwner(rootInfo, euid) {
+		return nil, nil, false
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	for _, e := range entries {
 		name := e.Name()
 		info, ierr := e.Info()
 		if ierr != nil || info.Mode()&os.ModeSymlink != 0 {
-			return nil, false
+			return nil, nil, false
 		}
-		if !sameDevice(info, rootInfo) {
-			return nil, false
+		if !sameDevice(info, rootInfo) || !isOwner(info, euid) {
+			return nil, nil, false
 		}
 		switch {
 		case e.IsDir() && hexShard.MatchString(name):
@@ -126,39 +138,40 @@ func cacheShards(dir string) (shards []string, ok bool) {
 		case buildCacheFurniture[name] && info.Mode().IsRegular():
 			// furniture, fine
 		default:
-			return nil, false
+			return nil, nil, false
 		}
 	}
-	return shards, true
+	return shards, rootInfo, true
 }
 
 // shardsHoldOnlyCacheEntries reports whether every given shard contains only
 // content-addressed cache files or Go executable cache directories — or nothing,
 // which is what a trimmed or externally-emptied cache leaves behind. An unreadable shard is a false.
-func shardsHoldOnlyCacheEntries(shards []string) bool {
+func shardsHoldOnlyCacheEntries(shards []string, rootInfo os.FileInfo) bool {
+	euid := int64(os.Geteuid())
 	for _, shard := range shards {
-		if !shardHoldsOnlyCacheEntries(shard) {
+		if !shardHoldsOnlyCacheEntries(shard, rootInfo, euid) {
 			return false
 		}
 	}
 	return true
 }
 
-func shardHoldsOnlyCacheEntries(shard string) bool {
+func shardHoldsOnlyCacheEntries(shard string, rootInfo os.FileInfo, euid int64) bool {
 	shardBase := filepath.Base(shard)
 	names, err := os.ReadDir(shard)
 	if err != nil {
 		return false
 	}
 	for _, n := range names {
-		if !isValidShardEntry(shard, shardBase, n) {
+		if !isValidShardEntry(shard, shardBase, n, rootInfo, euid) {
 			return false
 		}
 	}
 	return true
 }
 
-func isValidShardEntry(shard, shardBase string, n os.DirEntry) bool {
+func isValidShardEntry(shard, shardBase string, n os.DirEntry, rootInfo os.FileInfo, euid int64) bool {
 	name := n.Name()
 	if !cacheEntryFile.MatchString(name) || len(name) < 2 || name[:2] != shardBase {
 		return false
@@ -167,19 +180,26 @@ func isValidShardEntry(shard, shardBase string, n os.DirEntry) bool {
 	if ierr != nil || info.Mode()&os.ModeSymlink != 0 {
 		return false
 	}
+	if !sameDevice(info, rootInfo) || !isOwner(info, euid) {
+		return false
+	}
 	if !n.IsDir() {
 		return info.Mode().IsRegular()
 	}
 	if !strings.HasSuffix(name, "-d") {
 		return false
 	}
-	execEntries, err := os.ReadDir(filepath.Join(shard, name))
+	return isValidExecDirEntry(filepath.Join(shard, name), rootInfo, euid)
+}
+
+func isValidExecDirEntry(execDir string, rootInfo os.FileInfo, euid int64) bool {
+	execEntries, err := os.ReadDir(execDir)
 	if err != nil {
 		return false
 	}
 	for _, ee := range execEntries {
 		einfo, err := ee.Info()
-		if err != nil || !einfo.Mode().IsRegular() {
+		if err != nil || !einfo.Mode().IsRegular() || !sameDevice(einfo, rootInfo) || !isOwner(einfo, euid) {
 			return false
 		}
 	}
