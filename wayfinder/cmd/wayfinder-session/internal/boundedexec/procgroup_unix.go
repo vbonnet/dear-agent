@@ -4,6 +4,7 @@ package boundedexec
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -34,4 +35,11 @@ func killProcessTree(cmd *exec.Cmd) error {
 		return nil // already gone, which is the outcome we wanted
 	}
 	return err
+}
+
+// endedByCancellation reports whether the process died from a signal, which is
+// what a cancellation kill looks like here. Unix distinguishes an exited status
+// from a signalled one, so the recorded state answers this on its own.
+func endedByCancellation(state *os.ProcessState, _ bool) bool {
+	return !state.Exited()
 }

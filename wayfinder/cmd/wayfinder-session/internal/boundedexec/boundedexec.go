@@ -20,8 +20,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -87,7 +89,13 @@ func (c Command) Run() Result {
 		waitDelay = DefaultWaitDelay
 	}
 
-	ctx := context.Background()
+	// Setpgid takes the command out of Wayfinder's foreground process group, so
+	// a terminal Ctrl-C no longer reaches it. Without this, interrupting a gate
+	// would kill Wayfinder and leave the build or test running orphaned. Making
+	// the context signal-aware routes the interrupt back through Cancel, which
+	// kills the whole group.
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	cancel := context.CancelFunc(func() {})
 	if c.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
@@ -220,14 +228,25 @@ func (s *progressSink) close() {
 // successful build stays successful, and a real failure keeps its exit code and
 // its diagnostic instead of being relabelled a timeout.
 func classifyOutcome(state *os.ProcessState, err error, cancelled bool, ctxErr error) (timedOut bool, outcome error) {
-	if state != nil && state.Exited() {
+	// A launcher can exit cleanly while a descendant still holds the output
+	// pipes, and Wait then gives up after WaitDelay. The command's own status
+	// says success, but the gate never received its output and the descendant is
+	// still running, so this must not be laundered into a pass.
+	//
+	// The process group is deliberately not killed here: Wait has already reaped
+	// the child, so its PID no longer reliably names that group and could name
+	// somebody else's.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return false, err
+	}
+	if state != nil && !endedByCancellation(state, cancelled) {
 		if state.Success() {
 			return false, nil
 		}
-		if _, ok := errors.AsType[*exec.ExitError](err); !ok {
-			err = &exec.ExitError{ProcessState: state}
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			return false, exitErr
 		}
-		return false, err
+		return false, &exec.ExitError{ProcessState: state}
 	}
 	// No normal exit: the process was signalled, never started, or Wait gave up
 	// on descendants holding the pipes. Only now can the deadline own the result.

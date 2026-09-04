@@ -3,6 +3,7 @@ package boundedexec
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -441,4 +442,33 @@ func TestClassifyOutcomePrefersProcessStateOverContextError(t *testing.T) {
 			t.Fatal("cancellation without a deadline was reported as a timeout")
 		}
 	})
+}
+
+// TestWaitDelayFailureIsNotLaunderedIntoSuccess covers the launcher that exits
+// cleanly while a descendant keeps the output pipes open, for example an
+// `npm run build` that backgrounds a worker. Wait gives up after WaitDelay, and
+// the command's own status says success. Trusting that status alone would pass
+// the gate on output it never received, with the descendant still running.
+func TestWaitDelayFailureIsNotLaunderedIntoSuccess(t *testing.T) {
+	t.Parallel()
+
+	res := Command{
+		Label:     "clean launcher, lingering descendant",
+		Name:      "sh",
+		Args:      []string{"-c", "sleep 30 & exit 0"},
+		Timeout:   30 * time.Second, // generous: the deadline must not be involved
+		WaitDelay: 300 * time.Millisecond,
+		Heartbeat: time.Hour,
+		Progress:  &bytes.Buffer{},
+	}.Run()
+
+	if res.TimedOut {
+		t.Fatalf("no deadline fired, so this is not a timeout: %+v", res)
+	}
+	if res.Err == nil {
+		t.Fatal("a launcher whose output was cut off short was reported as a clean pass")
+	}
+	if !errors.Is(res.Err, exec.ErrWaitDelay) {
+		t.Fatalf("expected ErrWaitDelay, got %v", res.Err)
+	}
 }

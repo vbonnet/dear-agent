@@ -2,7 +2,10 @@
 
 package boundedexec
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+)
 
 // configureProcessGroup is a no-op where process groups are unavailable.
 func configureProcessGroup(_ *exec.Cmd) {}
@@ -15,4 +18,12 @@ func killProcessTree(cmd *exec.Cmd) error {
 		return nil
 	}
 	return cmd.Process.Kill()
+}
+
+// endedByCancellation falls back to whether cancellation ran, because Windows
+// reports every reaped process as Exited, including one killed at the deadline.
+// The state cannot separate a deadline kill from an ordinary exit there, so a
+// timeout would otherwise be reported as a plain build or test failure.
+func endedByCancellation(_ *os.ProcessState, cancelled bool) bool {
+	return cancelled
 }
