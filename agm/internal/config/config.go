@@ -447,36 +447,69 @@ func resolveConfigHome() (string, error) {
 	return resolved, nil
 }
 
+type setNonblockFunc func(fd int, nonblocking bool) error
+
+// readReadyConfigFile is a same-descriptor regular-file observation whose
+// temporary nonblocking open state has been cleared before os.File sees it.
+type readReadyConfigFile struct {
+	file         *os.File
+	declaredSize int64
+}
+
 // readConfigFile authenticates and snapshots one bounded regular-file source.
-// Nonblocking open prevents FIFOs from hanging command initialization.
+// Nonblocking open prevents FIFOs from hanging command initialization; only a
+// checked transition of that same authenticated descriptor reaches the reader.
 func readConfigFile(path string) ([]byte, error) {
+	return readConfigFileWithSetNonblock(path, unix.SetNonblock)
+}
+
+func readConfigFileWithSetNonblock(path string, setNonblock setNonblockFunc) ([]byte, error) {
+	source, err := openReadReadyConfigFile(path, setNonblock)
+	if err != nil {
+		return nil, err
+	}
+	defer source.file.Close()
+
+	return readBoundedConfig(source.file, source.declaredSize)
+}
+
+func openReadReadyConfigFile(path string, setNonblock setNonblockFunc) (*readReadyConfigFile, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), path)
-	if file == nil {
-		_ = unix.Close(fd)
-		return nil, errors.New("open config source")
-	}
-	defer file.Close()
+	ownsFD := true
+	defer func() {
+		if ownsFD {
+			_ = unix.Close(fd)
+		}
+	}()
 
-	info, err := file.Stat()
-	if err != nil {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, fmt.Errorf("stat config source: %w", err)
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return nil, fmt.Errorf("configuration source must be a regular file (mode %#o)", stat.Mode)
+	}
+	if err := validateConfigDeclaredSize(stat.Size); err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("configuration source must be a regular file (mode %s)", info.Mode())
+	if err := setNonblock(fd, false); err != nil {
+		return nil, fmt.Errorf("make authenticated configuration source read-ready: %w", err)
 	}
-	return readBoundedConfig(file, info.Size())
+
+	file := os.NewFile(uintptr(fd), path)
+	if file == nil {
+		return nil, errors.New("open config source")
+	}
+	ownsFD = false
+	return &readReadyConfigFile{file: file, declaredSize: stat.Size}, nil
 }
 
 func readBoundedConfig(reader io.Reader, declaredSize int64) ([]byte, error) {
-	if declaredSize < 0 {
-		return nil, errors.New("configuration source reported a negative size")
-	}
-	if declaredSize > maxConfigBytes {
-		return nil, fmt.Errorf("configuration source exceeds %d bytes", maxConfigBytes)
+	if err := validateConfigDeclaredSize(declaredSize); err != nil {
+		return nil, err
 	}
 	data, err := io.ReadAll(io.LimitReader(reader, maxConfigBytes+1))
 	if err != nil {
@@ -492,6 +525,16 @@ func readBoundedConfig(reader io.Reader, declaredSize int64) ([]byte, error) {
 		)
 	}
 	return data, nil
+}
+
+func validateConfigDeclaredSize(declaredSize int64) error {
+	if declaredSize < 0 {
+		return errors.New("configuration source reported a negative size")
+	}
+	if declaredSize > maxConfigBytes {
+		return fmt.Errorf("configuration source exceeds %d bytes", maxConfigBytes)
+	}
+	return nil
 }
 
 // configPathAbsent distinguishes an ordinary missing path from ENOENT caused
