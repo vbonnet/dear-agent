@@ -312,7 +312,8 @@ func processExists(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return proc.Signal(syscall.Signal(0)) == nil
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // isLockedError reports whether an error from git worktree remove indicates a locked worktree.
