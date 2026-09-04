@@ -145,10 +145,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		Logger:          logger,
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
 	}
-	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath, *stateDir)
+	resolvedStateDir := canonicalStateDir(*stateDir)
+	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath, resolvedStateDir)
 
 	if *clearQuar {
-		if err := clearCadenceSentinel(*stateDir, cadenceSentinelName(*quarPath)); err != nil {
+		if err := clearCadenceSentinel(resolvedStateDir, cadenceSentinelName(*quarPath)); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
 			return exitError
 		}
@@ -173,43 +174,29 @@ func run(args []string, stdout, stderr io.Writer) int {
 			if code == exitNotPersisted {
 				canonicalQuarantine := defaultQuarantinePathForCredentials(resolvedCredPath)
 				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
+				retCode := exitNotPersisted
 				if _, _, _, quarantined := r.QuarantineStatus(); quarantined && sharedQuarantine {
-					notifyCadenceOnce(*stateDir, sentinelName, *quarPath, resolvedCredPath,
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath,
 						"Claude auth AT RISK",
 						"Credential persistence failed; the refresh-token quarantine is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh QUARANTINED until -clear-quarantine re-arms it.")
-					if *sentinelMaxAge > 0 {
-						if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, sentinelName); err != nil {
-							fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
-						}
-					}
-					return exitOK
-				}
-				stopped, stopErr := r.RefreshStopped()
-				if stopErr == nil && stopped {
-					notifyCadenceOnce(*stateDir, sentinelName, *quarPath, resolvedCredPath,
+					retCode = exitOK
+				} else if stopped, stopErr := r.RefreshStopped(); stopErr == nil && stopped {
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath,
 						"Claude auth AT RISK",
 						"Refresh quarantine could not be persisted; the durable refresh stop is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
-					if *sentinelMaxAge > 0 {
-						if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, sentinelName); err != nil {
-							fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
-						}
-					}
-					return exitOK
+					retCode = exitOK
+				} else {
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath,
+						"Claude auth AT RISK",
+						"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
+					fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
 				}
-				notifyCadenceOnce(*stateDir, sentinelName, *quarPath, resolvedCredPath,
-					"Claude auth AT RISK",
-					"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
-				fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
-				if *sentinelMaxAge > 0 {
-					if _, err := pruneCadenceSentinels(*stateDir, *sentinelMaxAge, sentinelName); err != nil {
-						fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
-					}
-				}
-				return exitNotPersisted
+				pruneCadenceAlerts(resolvedStateDir, *sentinelMaxAge, sentinelName, stderr)
+				return retCode
 			}
-			return cadenceExit(code, *stateDir, sentinelName, *quarPath, resolvedCredPath, stderr, *sentinelMaxAge)
+			return cadenceExit(code, resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, stderr, *sentinelMaxAge)
 		}
 		return code
 	}
@@ -381,10 +368,24 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 	}
 }
 
+func canonicalStateDir(dir string) string {
+	if dir == "" {
+		return defaultStateDir()
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return filepath.Clean(dir)
+	}
+	return filepath.Clean(abs)
+}
+
 func clearRefreshProtectionsCommand(credentialsPath, quarantinePath, stateDir string) string {
 	cmd := fmt.Sprintf("token-refresher -credentials %q -quarantine %q", credentialsPath, quarantinePath)
-	if stateDir != "" && stateDir != defaultStateDir() {
-		cmd += fmt.Sprintf(" -state-dir %q", stateDir)
+	if stateDir != "" {
+		canonicalState := canonicalStateDir(stateDir)
+		if canonicalState != canonicalStateDir(defaultStateDir()) {
+			cmd += fmt.Sprintf(" -state-dir %q", canonicalState)
+		}
 	}
 	return cmd + " -clear-quarantine"
 }

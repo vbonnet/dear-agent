@@ -74,20 +74,22 @@ func cadenceStopped(credentialsPath string) (bool, error) {
 //
 // The real exit code still reaches the audit log and stderr; only the process
 // status is flattened, and only for the cadence caller.
-func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPath string, stderr io.Writer, maxAge time.Duration) int {
-	prune := func(dir string, age time.Duration, keep string) {
-		if age > 0 {
-			if _, err := pruneCadenceSentinels(dir, age, keep); err != nil {
-				fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
-			}
+// pruneCadenceAlerts encapsulates the maxAge check, pruning, and stderr reporting.
+func pruneCadenceAlerts(stateDir string, maxAge time.Duration, keepSentinel string, stderr io.Writer) {
+	if maxAge > 0 {
+		if _, err := pruneCadenceSentinels(stateDir, maxAge, keepSentinel); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
 		}
 	}
+}
+
+func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPath string, stderr io.Writer, maxAge time.Duration) int {
 	switch code {
 	case exitTokenFamilyDead:
 		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath,
 			"Claude auth DOWN", "OAuth token family is dead. Run: claude /login")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
-		prune(stateDir, maxAge, sentinelName)
+		pruneCadenceAlerts(stateDir, maxAge, sentinelName, stderr)
 		return exitOK
 
 	case exitQuarantined:
@@ -98,7 +100,7 @@ func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPa
 			"Claude auth AT RISK",
 			"Refresh outcome unknown; token quarantined to protect the family. Check token-refresher -check")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
-		prune(stateDir, maxAge, sentinelName)
+		pruneCadenceAlerts(stateDir, maxAge, sentinelName, stderr)
 		return exitOK
 
 	case exitOK:
@@ -106,11 +108,11 @@ func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPa
 		if err := clearCadenceSentinel(stateDir, sentinelName); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not clear cadence alert state: %v\n", err)
 		}
-		prune(stateDir, maxAge, "")
+		pruneCadenceAlerts(stateDir, maxAge, "", stderr)
 		return exitOK
 	}
 
-	prune(stateDir, maxAge, sentinelName)
+	pruneCadenceAlerts(stateDir, maxAge, sentinelName, stderr)
 	return code
 }
 
@@ -193,18 +195,24 @@ func isActiveSentinel(target string) bool {
 		return false
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var quarPath, credPath string
 	if len(lines) >= 2 {
-		quarPath := filepath.Clean(strings.TrimSpace(lines[1]))
-		if quarPath != "" && quarPath != "." {
-			// #nosec G703 -- path was recorded by local token-refresher to track its active quarantine marker.
-			if _, err := os.Stat(quarPath); err == nil {
+		quarPath = filepath.Clean(strings.TrimSpace(lines[1]))
+	}
+	if len(lines) >= 3 {
+		credPath = strings.TrimSpace(lines[2])
+	}
+	if quarPath != "" && quarPath != "." {
+		// #nosec G703 -- path was recorded by local token-refresher to track its active quarantine marker.
+		if _, err := os.Stat(quarPath); err == nil {
+			resolver := auth.OAuthResolver{
+				CredentialsPath: canonicalCredentialsPath(credPath),
+				QuarantinePath:  quarPath,
+			}
+			if _, _, _, active := resolver.QuarantineStatus(); active {
 				return true
 			}
 		}
-	}
-	var credPath string
-	if len(lines) >= 3 {
-		credPath = strings.TrimSpace(lines[2])
 	}
 	if filepath.Base(target) == deathSentinelName || credPath != "" {
 		if stopped, err := cadenceStopped(credPath); err == nil && stopped {

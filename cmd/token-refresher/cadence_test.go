@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // The bug this guards: after the family died, the launchd job exited 2 every
@@ -332,38 +335,53 @@ func TestCadenceExit_PreservesActiveSentinelSpanningMaxAge(t *testing.T) {
 	}
 }
 
+func writeQuarantineFile(path, token string) error {
+	rec := map[string]any{
+		"refresh_token_fp": auth.RefreshTokenFingerprint(token),
+		"quarantined_at":   "2026-09-01T00:00:00Z",
+		"reason":           "test",
+	}
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
+}
+
 func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
 	stateDir := t.TempDir()
 	quarDir := t.TempDir()
 	now := time.Now()
 
 	// Setup Job 1 quarantine and sentinel.
+	c1 := writeCreds(t, "access1", freshMs(), "refresh1")
 	q1 := filepath.Join(quarDir, "job1-quarantine.json")
-	if err := os.WriteFile(q1, []byte(`{"quarantined": true}`), 0o600); err != nil {
+	if err := writeQuarantineFile(q1, "refresh1"); err != nil {
 		t.Fatal(err)
 	}
 	s1Name := cadenceSentinelName(q1)
 	s1 := filepath.Join(stateDir, s1Name)
-	if err := os.WriteFile(s1, []byte("2026-09-01T00:00:00Z\n"+q1+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(s1, []byte("2026-09-01T00:00:00Z\n"+q1+"\n"+c1+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(s1, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
 	// Setup Job 2 quarantine and sentinel.
+	c2 := writeCreds(t, "access2", freshMs(), "refresh2")
 	q2 := filepath.Join(quarDir, "job2-quarantine.json")
-	if err := os.WriteFile(q2, []byte(`{"quarantined": true}`), 0o600); err != nil {
+	if err := writeQuarantineFile(q2, "refresh2"); err != nil {
 		t.Fatal(err)
 	}
 	s2Name := cadenceSentinelName(q2)
 	s2 := filepath.Join(stateDir, s2Name)
-	if err := os.WriteFile(s2, []byte("2026-09-01T00:00:00Z\n"+q2+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(s2, []byte("2026-09-01T00:00:00Z\n"+q2+"\n"+c2+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(s2, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
 	// Job 1 runs cadenceExit while both failures remain unresolved.
 	var stderr bytes.Buffer
-	code := cadenceExit(exitQuarantined, stateDir, s1Name, q1, "", &stderr, 24*time.Hour)
+	code := cadenceExit(exitQuarantined, stateDir, s1Name, q1, c1, &stderr, 24*time.Hour)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
@@ -377,13 +395,11 @@ func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
 		t.Errorf("Job 2 sentinel was pruned despite active quarantine: %v", err)
 	}
 
-	// Now resolve Job 2 by clearing its quarantine marker.
-	if err := os.Remove(q2); err != nil {
-		t.Fatal(err)
-	}
+	// Now simulate Job 2's token rotating on disk so its quarantine marker becomes stale (inactive).
+	_ = writeCredsFile(c2, "access2-rotated", freshMs(), "refresh2-rotated")
 
-	// Job 1 runs again: now that Job 2 is resolved, S2 (which is >24h old) should be pruned.
-	code = cadenceExit(exitQuarantined, stateDir, s1Name, q1, "", &stderr, 24*time.Hour)
+	// Job 1 runs again: now that Job 2's quarantine is inactive/stale, S2 should be pruned.
+	code = cadenceExit(exitQuarantined, stateDir, s1Name, q1, c1, &stderr, 24*time.Hour)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
@@ -392,7 +408,7 @@ func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
 		t.Errorf("Job 1 sentinel was pruned: %v", err)
 	}
 	if _, err := os.Stat(s2); !os.IsNotExist(err) {
-		t.Errorf("Job 2 sentinel survived after its quarantine was cleared")
+		t.Errorf("Job 2 sentinel survived after its quarantine became stale/inactive")
 	}
 }
 

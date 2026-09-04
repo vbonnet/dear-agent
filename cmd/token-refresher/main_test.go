@@ -13,9 +13,7 @@ import (
 	"time"
 )
 
-func writeCreds(t *testing.T, accessToken string, expiresAt int64, refreshToken string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "credentials.json")
+func writeCredsFile(path, accessToken string, expiresAt int64, refreshToken string) error {
 	body := map[string]any{
 		"claudeAiOauth": map[string]any{
 			"accessToken":  accessToken,
@@ -23,8 +21,17 @@ func writeCreds(t *testing.T, accessToken string, expiresAt int64, refreshToken 
 			"refreshToken": refreshToken,
 		},
 	}
-	data, _ := json.MarshalIndent(body, "", "  ")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	data, err := json.MarshalIndent(body, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func writeCreds(t *testing.T, accessToken string, expiresAt int64, refreshToken string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	if err := writeCredsFile(path, accessToken, expiresAt, refreshToken); err != nil {
 		t.Fatalf("write creds: %v", err)
 	}
 	return path
@@ -308,5 +315,12 @@ func TestClearRefreshProtectionsCommand_IncludesCustomStateDir(t *testing.T) {
 	cmdCustom := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", customDir)
 	if !strings.Contains(cmdCustom, fmt.Sprintf("-state-dir %q", customDir)) {
 		t.Errorf("custom state dir should be included in clear command: %s", cmdCustom)
+	}
+
+	relDir := "relative/state/dir"
+	expectedAbs, _ := filepath.Abs(relDir)
+	cmdRel := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", relDir)
+	if !strings.Contains(cmdRel, fmt.Sprintf("-state-dir %q", filepath.Clean(expectedAbs))) {
+		t.Errorf("relative state dir should be canonicalized to absolute in clear command: %s", cmdRel)
 	}
 }
