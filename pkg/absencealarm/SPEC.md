@@ -1,21 +1,24 @@
 # Absence Alarm Specification
 
-<!-- Last audited at: 2026-09-03 -->
-<!-- Audit scope: the domain helpers pkg/absencealarm ships at this revision,
-     and only those. Audited and covered by pkg/absencealarm/*_test.go:
-     AA-01 through AA-06 (pulse classification), AA-09 (journal record),
-     AA-11 (re-dispatch interval decision), AA-14 (snooze rejection),
-     AA-18 (unreadable alarm state), and AA-19 (configuration loading).
+<!-- Last audited at: 2026-09-04 -->
+<!-- Audit scope: pkg/absencealarm (domain) + cmd/absence-alarm (CLI), both
+     present at this revision. cmd/absence-alarm/SPEC.owner delegates here.
 
-     NOT audited, because nothing at this revision implements them: AA-07 and
-     AA-08 (exit-code selection), AA-10, AA-12 and AA-17 (notification
-     dispatch and its failure reporting), AA-13 and AA-15 (applying a snooze
-     to produce SNOOZED or an expired-snooze reason -- StatusSnoozed is
-     declared here but never assigned), AA-16 (heartbeat on tick completion),
-     AA-20 (dry-run enforcement), AA-21 and AA-22 (report emission and JSON
-     output), and AA-23 (the system-level response to a persistence failure).
-     Those behaviors belong to cmd/absence-alarm, which does not exist at this
-     revision and is audited by the slice that introduces it. -->
+     Domain (pkg/absencealarm/*_test.go):
+       AA-01 through AA-06 (pulse classification), AA-09 (journal record),
+       AA-11 (re-dispatch interval decision), AA-14 (snooze rejection),
+       AA-18 (unreadable alarm state), AA-19 (configuration loading),
+       AA-25 (deadline → UNDETERMINED).
+
+     CLI (cmd/absence-alarm/main_test.go):
+       AA-07 (exit 1 when absent/undetermined), AA-08 (exit 0 when healthy),
+       AA-10 (notify on transition), AA-12 (recovery notification),
+       AA-13 (snooze applied → SNOOZED), AA-15 (expired snooze re-alarms),
+       AA-16 (heartbeat written on tick completion),
+       AA-17 (notification dispatch failure reported on stderr),
+       AA-20 (dry-run: no writes, no notifications),
+       AA-21 (report emitted to stdout), AA-22 (--json flag),
+       AA-23 (persistence failure reported, exit code unchanged). -->
 
 ## Purpose
 
@@ -150,7 +153,5 @@ the absence alarm itself.
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Package tests: `pkg/absencealarm/*_test.go` (domain)
 
-The CLI's executable coverage (`cmd/absence-alarm/*_test.go`) lands with the
-CLI slice. It is deliberately not listed as current evidence: `cmd/absence-alarm`
-does not exist at this revision, so citing it here would let the audit stamp
-certify paths that cannot have been checked.
+- CLI tests: `cmd/absence-alarm/main_test.go` (AA-07, AA-08, AA-10, AA-12,
+  AA-13, AA-15, AA-16, AA-17, AA-20, AA-21, AA-22, AA-23)

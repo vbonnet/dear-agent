@@ -33,6 +33,13 @@
       "path": "~/.local/state/dear-agent/gobin-guard.heartbeat",
       "window": "15m",
       "expect": "a gobin-guard heartbeat within 15m"
+    },
+    {
+      "name": "absence-alarm-heartbeat",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/absence-alarm.heartbeat.json",
+      "window": "30m",
+      "expect": "an absence-alarm tick within 30m (3 missed 10-min launchd intervals)"
     }
   ]
 }
