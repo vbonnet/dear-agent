@@ -168,14 +168,22 @@ func run(args []string, stdout, stderr io.Writer, pr absencealarm.Probes, notify
 		probeTimeout: *probeBudget,
 	}
 	// One launchd listing shared by every launchd pulse, bounded like any
-	// other probe.
+	// other probe. Skip the fetch entirely when every launchd_loaded pulse is
+	// snoozed: AA-13 says a snoozed pulse must not be probed, and launchctl
+	// list can delay a whole tick when launchd is wedged or slow.
+	needsLaunchdListing := false
 	for _, p := range pulses {
 		if p.Type == absencealarm.PulseLaunchdLoaded {
-			listCtx, cancel := context.WithTimeout(ctx, *probeBudget)
-			tk.launchdListing, tk.launchdErr = pr.LaunchdList(listCtx)
-			cancel()
-			break
+			if _, snoozed := snoozes[p.Name]; !snoozed {
+				needsLaunchdListing = true
+				break
+			}
 		}
+	}
+	if needsLaunchdListing {
+		listCtx, cancel := context.WithTimeout(ctx, *probeBudget)
+		tk.launchdListing, tk.launchdErr = pr.LaunchdList(listCtx)
+		cancel()
 	}
 
 	rep := report{TickTime: now}
