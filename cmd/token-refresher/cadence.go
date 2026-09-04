@@ -112,7 +112,7 @@ func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPa
 		return exitOK
 	}
 
-	pruneCadenceAlerts(stateDir, maxAge, sentinelName, stderr)
+	pruneCadenceAlerts(stateDir, maxAge, "", stderr)
 	return code
 }
 
@@ -202,7 +202,7 @@ func sentinelMatchesEpisode(recordedFP, credPath string) bool {
 }
 
 func parseSentinelLines(target string) (quarPath, credPath, recordedFP string, ok bool) {
-	info, err := os.Stat(target)
+	info, err := os.Lstat(target)
 	if err != nil || !info.Mode().IsRegular() {
 		return "", "", "", false
 	}
@@ -261,16 +261,20 @@ func isActiveSentinel(target string) bool {
 func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, title, message string) {
 	sentinel := filepath.Join(stateDir, sentinelName)
 	currentFP, _ := credentialsFingerprint(credentialsPath)
-	if data, err := os.ReadFile(sentinel); err == nil {
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		var recordedFP string
-		if len(lines) >= 4 {
-			recordedFP = strings.TrimSpace(lines[3])
-		}
-		if sentinelMatchesEpisode(recordedFP, credentialsPath) {
-			now := time.Now()
-			_ = os.Chtimes(sentinel, now, now)
-			return
+	if info, err := os.Lstat(sentinel); err == nil {
+		if !info.Mode().IsRegular() {
+			_ = os.Remove(sentinel)
+		} else if data, err := os.ReadFile(sentinel); err == nil {
+			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+			var recordedFP string
+			if len(lines) >= 4 {
+				recordedFP = strings.TrimSpace(lines[3])
+			}
+			if sentinelMatchesEpisode(recordedFP, credentialsPath) {
+				now := time.Now()
+				_ = os.Chtimes(sentinel, now, now)
+				return
+			}
 		}
 	}
 	notifyOperator(title, message)
@@ -303,7 +307,7 @@ func notifyOperator(title, message string) {
 func defaultStateDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "dear-agent")
+		return filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d", os.Getuid()))
 	}
 	return filepath.Join(home, ".local", "state", "dear-agent")
 }

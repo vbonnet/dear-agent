@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -567,5 +568,53 @@ func TestIsActiveSentinel_ExpiredEpisodeWithRotatedFingerprintReturnsFalse(t *te
 
 	if !isActiveSentinel(sentinel) {
 		t.Error("isActiveSentinel = false for sentinel with current matching fingerprint, want true")
+	}
+}
+
+func TestDefaultStateDir_ScopedPerUserFallback(t *testing.T) {
+	t.Setenv("HOME", "")
+	dir := defaultStateDir()
+	expectedSubdir := fmt.Sprintf("dear-agent-%d", os.Getuid())
+	if !strings.Contains(dir, expectedSubdir) {
+		t.Errorf("defaultStateDir fallback %q does not contain expected UID scoped subdir %q", dir, expectedSubdir)
+	}
+}
+
+func TestCadenceExit_UnrelatedErrorPrunesStaleExpiredSentinel(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	var stderr bytes.Buffer
+
+	staleSentinel := filepath.Join(dir, deathSentinelName)
+	if err := os.WriteFile(staleSentinel, []byte("2020-01-01T00:00:00Z\n\n/nonexistent\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(staleSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+
+	got := cadenceExit(exitError, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
+	if got != exitError {
+		t.Fatalf("cadenceExit = %d, want %d", got, exitError)
+	}
+
+	if _, err := os.Stat(staleSentinel); !os.IsNotExist(err) {
+		t.Errorf("stale sentinel %s was not pruned on unrelated error: %v", staleSentinel, err)
+	}
+}
+
+func TestNotifyCadenceOnce_SkipsNonRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	fifoPath := filepath.Join(dir, "cadence-fifo")
+	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
+		t.Skipf("cannot make FIFO on this platform: %v", err)
+	}
+
+	notifyCadenceOnce(dir, "cadence-fifo", "", "", "title", "message")
+
+	info, err := os.Lstat(fifoPath)
+	if err != nil {
+		t.Fatalf("stat after notifyCadenceOnce: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("sentinel %s is not regular file: mode %v", fifoPath, info.Mode())
 	}
 }
