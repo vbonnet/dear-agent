@@ -935,3 +935,80 @@ func TestEnsureSecureStateDir_RejectsGroupWritableDirectory(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestIsActiveSentinel_PreservesDisabledQuarantineWithActiveStop(t *testing.T) {
+	dir := t.TempDir()
+	credsPath := credsWithRefreshToken(t, "rt-disabled-quar")
+	fp, _ := credentialsFingerprint(credsPath)
+
+	stopPath := credsPath + ".refresh-stop"
+	if err := os.WriteFile(stopPath, []byte("durable stop active\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sentinel := filepath.Join(dir, deathSentinelName)
+	rec := sentinelRecord{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		CredentialsPath: credsPath,
+		QuarantinePath:  "",
+		Fingerprint:     fp,
+		Outcome:         "quarantined",
+	}
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sentinel, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if !isActiveSentinel(sentinel) {
+		t.Error("isActiveSentinel should return true for disabled-quarantine job with active durable stop")
+	}
+}
+
+func TestEnsureSecureStateDir_RejectsSymlinkFallbackWithoutFollowing(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "target")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(dir, "symlink-to-target")
+	if err := os.Symlink(targetDir, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ensureSecureStateDir(symlinkPath)
+	if err == nil {
+		t.Errorf("ensureSecureStateDir should reject symlink state directory: %s", symlinkPath)
+	}
+
+	targetInfo, err := os.Lstat(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetInfo.Mode().Perm() != 0o755 {
+		t.Errorf("target directory permissions were changed to %v; ensureSecureStateDir followed symlink", targetInfo.Mode().Perm())
+	}
+}
+
+func TestNotifyCadenceOnce_CanonicalizesRelativeQuarantinePath(t *testing.T) {
+	stateDir := t.TempDir()
+	credsPath := credsWithRefreshToken(t, "rt-relative-quar")
+	fp, _ := credentialsFingerprint(credsPath)
+
+	notifyCadenceOnce(stateDir, deathSentinelName, "relative/quar.json", credsPath, fp, "quarantined", "Title", "Msg")
+
+	sentinel := filepath.Join(stateDir, deathSentinelName)
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	rec, ok := parseSentinelData(data)
+	if !ok {
+		t.Fatalf("parseSentinelData failed on payload: %s", string(data))
+	}
+	if !filepath.IsAbs(rec.QuarantinePath) {
+		t.Errorf("expected absolute quarantine path in sentinel, got %q", rec.QuarantinePath)
+	}
+}

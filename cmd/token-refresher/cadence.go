@@ -27,10 +27,20 @@ const (
 
 // clearCadenceSentinel re-arms the next cadence alert after an operator has
 // explicitly cleared quarantine. A missing sentinel means there is nothing to
-// re-arm and is therefore successful.
+func canonicalQuarantinePath(path string) string {
+	if path == "" || path == "." {
+		return path
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(abs)
+}
+
 func cadenceSentinelName(quarantinePath, credentialsPath string) string {
-	if quarantinePath != "" {
-		sum := sha256.Sum256([]byte(quarantinePath))
+	if quarantinePath != "" && quarantinePath != "." {
+		sum := sha256.Sum256([]byte(canonicalQuarantinePath(quarantinePath)))
 		return fmt.Sprintf("%s-%x", deathSentinelName, sum[:8])
 	}
 	canonCreds := canonicalCredentialsPath(credentialsPath)
@@ -320,41 +330,26 @@ func isActiveSentinel(target string) bool {
 	if isDeadSentinel(rec) {
 		return true
 	}
+	if isCadenceStoppedFor(target, rec.CredentialsPath) {
+		return true
+	}
 	if rec.QuarantinePath != "" && rec.QuarantinePath != "." {
-		return isQuarantineActive(rec.QuarantinePath, rec.CredentialsPath) || isCadenceStoppedFor(target, rec.CredentialsPath)
+		return isQuarantineActive(rec.QuarantinePath, rec.CredentialsPath)
 	}
 	return false
 }
 
-// notifyCadenceOnce records the episode after its first best-effort alert.
-// Every cadence failure path uses this helper so a durable quarantine/stop does
-// not notify again on every launchd tick.
-func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, tokenFP, outcome, title, message string) {
-	sentinel := filepath.Join(stateDir, sentinelName)
-	if tokenFP == "" {
-		tokenFP, _ = credentialsFingerprint(credentialsPath)
-	}
-	if info, err := os.Lstat(sentinel); err == nil && !info.Mode().IsRegular() {
-		_ = os.Remove(sentinel)
-	}
-
-	if err := ensureSecureStateDir(stateDir); err != nil {
-		notifyOperator(title, message)
-		return
-	}
-
+func claimOrTouchSentinel(sentinel, credentialsPath, tokenFP, quarantinePath, outcome string) bool {
 	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		notifyOperator(title, message)
-		return
+		return false
 	}
 	defer func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		_ = f.Close()
 	}()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		notifyOperator(title, message)
-		return
+		return false
 	}
 
 	data, err := io.ReadAll(f)
@@ -363,7 +358,7 @@ func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, 
 			if sentinelMatchesEpisode(rec, credentialsPath, tokenFP) {
 				now := time.Now()
 				_ = os.Chtimes(sentinel, now, now)
-				return
+				return true
 			}
 		}
 	}
@@ -383,8 +378,35 @@ func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, 
 			}
 		}
 	}
+	return false
+}
 
-	notifyOperator(title, message)
+// notifyCadenceOnce records the episode after its first best-effort alert.
+// Every cadence failure path uses this helper so a durable quarantine/stop does
+// not notify again on every launchd tick.
+func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, tokenFP, outcome, title, message string) {
+	if quarantinePath != "" && quarantinePath != "." {
+		quarantinePath = canonicalQuarantinePath(quarantinePath)
+	}
+	if credentialsPath != "" {
+		credentialsPath = canonicalCredentialsPath(credentialsPath)
+	}
+	sentinel := filepath.Join(stateDir, sentinelName)
+	if tokenFP == "" {
+		tokenFP, _ = credentialsFingerprint(credentialsPath)
+	}
+	if info, err := os.Lstat(sentinel); err == nil && !info.Mode().IsRegular() {
+		_ = os.Remove(sentinel)
+	}
+
+	if err := ensureSecureStateDir(stateDir); err != nil {
+		notifyOperator(title, message)
+		return
+	}
+
+	if alreadyAlerted := claimOrTouchSentinel(sentinel, credentialsPath, tokenFP, quarantinePath, outcome); !alreadyAlerted {
+		notifyOperator(title, message)
+	}
 }
 
 // notifyNotifyTimeout bounds the osascript call. A launchd job runs without a
@@ -471,16 +493,23 @@ func ensureSecureStateDir(stateDir string) error {
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.MkdirAll(clean, 0o700); err != nil {
+	parent := filepath.Dir(clean)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return err
 	}
-	// #nosec G302 -- state directory requires 0700 permissions.
-	_ = os.Chmod(clean, 0o700)
+	if err := os.Mkdir(clean, 0o700); err != nil {
+		return err
+	}
 	newInfo, err := os.Lstat(clean)
 	if err != nil {
 		return err
 	}
-	return validateStateDir(clean, newInfo)
+	if err := validateStateDir(clean, newInfo); err != nil {
+		return err
+	}
+	// #nosec G302 -- state directory requires 0700 permissions.
+	_ = os.Chmod(clean, 0o700)
+	return nil
 }
 
 // defaultStateDir is where the sentinel lives, alongside the audit log.
