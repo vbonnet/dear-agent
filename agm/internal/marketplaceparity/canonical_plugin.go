@@ -1,6 +1,7 @@
 package marketplaceparity
 
 import (
+	"bytes"
 	"fmt"
 	"path"
 	"slices"
@@ -16,6 +17,8 @@ const (
 	canonicalPluginLicense     = "Apache-2.0"
 	canonicalPluginAuthor      = "dear-agent"
 	canonicalPluginOwner       = "agm/internal/marketplaceparity/SPEC.md\n"
+	canonicalRepositoryLicense = "LICENSE"
+	canonicalPackagedLicense   = "LICENSE"
 	maxCanonicalTreeEntries    = 64
 	maxCanonicalFileBytes      = 1 << 20
 )
@@ -33,18 +36,31 @@ var allowedCanonicalDirectories = map[string]bool{
 }
 
 var forbiddenClaudeDefaultComponentPaths = map[string]bool{
-	".lsp.json":     true,
-	".mcp.json":     true,
-	"agents":        true,
-	"bin":           true,
-	"channels":      true,
-	"commands":      true,
-	"hooks":         true,
-	"monitors":      true,
-	"output-styles": true,
-	"settings.json": true,
-	"themes":        true,
-	"workflows":     true,
+	".lsp.json":           true,
+	".mcp.json":           true,
+	"agents":              true,
+	"bin":                 true,
+	"bun.lock":            true,
+	"bun.lockb":           true,
+	"channels":            true,
+	"commands":            true,
+	"hooks":               true,
+	"monitors":            true,
+	"npm-shrinkwrap.json": true,
+	"output-styles":       true,
+	"package-lock.json":   true,
+	"package.json":        true,
+	"pnpm-lock.yaml":      true,
+	"settings.json":       true,
+	"themes":              true,
+	"workflows":           true,
+	"yarn.lock":           true,
+}
+
+var allowedCanonicalTopLevelFiles = map[string]bool{
+	"LICENSE":   true,
+	"README.md": true,
+	"SPEC.md":   true,
 }
 
 func validateCanonicalCatalogEntry(plugin PluginEntry) error {
@@ -117,6 +133,10 @@ func canonicalPluginSnapshot(root string, plugin PluginEntry) ([]exportedSkill, 
 	if err := validateCanonicalCatalogEntry(plugin); err != nil {
 		return nil, err
 	}
+	repositoryLicense, err := readAnchoredRegular(root, canonicalRepositoryLicense, maxCanonicalFileBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read canonical repository license: %w", err)
+	}
 	entries, err := readAnchoredTree(root, strings.TrimPrefix(canonicalPluginSource, "./"), maxCanonicalTreeEntries, maxCanonicalFileBytes)
 	if err != nil {
 		return nil, err
@@ -124,17 +144,56 @@ func canonicalPluginSnapshot(root string, plugin PluginEntry) ([]exportedSkill, 
 	byPath := make(map[string]anchoredTreeEntry, len(entries))
 	for _, entry := range entries {
 		byPath[entry.Path] = entry
-		if !strings.Contains(entry.Path, "/") && forbiddenClaudeDefaultComponentPaths[entry.Path] {
+		if isForbiddenClaudeDefaultComponent(entry.Path) {
 			return nil, fmt.Errorf("provider-default component surface %q is forbidden", entry.Path)
 		}
 	}
-	if err := validateCanonicalMetadataTree(byPath, plugin); err != nil {
+	if err := validateCanonicalMetadataTree(byPath, plugin, repositoryLicense); err != nil {
 		return nil, err
 	}
 	return validateCanonicalSkillTree(byPath)
 }
 
-func validateCanonicalMetadataTree(entries map[string]anchoredTreeEntry, plugin PluginEntry) error {
+func isForbiddenClaudeDefaultComponent(entryPath string) bool {
+	if strings.Contains(entryPath, "/") {
+		return false
+	}
+	for forbidden := range forbiddenClaudeDefaultComponentPaths {
+		// Claude opens these provider-default paths by their canonical spelling.
+		// Case-insensitive filesystems resolve case aliases to the same object, so
+		// the source projection must reject aliases as behavior-bearing too.
+		if strings.EqualFold(entryPath, forbidden) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateCanonicalMetadataTree(entries map[string]anchoredTreeEntry, plugin PluginEntry, repositoryLicense []byte) error {
+	if err := validateCanonicalPackagedLicense(entries, repositoryLicense); err != nil {
+		return err
+	}
+	if err := validateCanonicalManifestFile(entries, plugin); err != nil {
+		return err
+	}
+	if err := validateCanonicalOwnerFile(entries); err != nil {
+		return err
+	}
+	return validateCanonicalMetadataInventory(entries)
+}
+
+func validateCanonicalPackagedLicense(entries map[string]anchoredTreeEntry, repositoryLicense []byte) error {
+	packagedLicense, ok := entries[canonicalPackagedLicense]
+	if !ok || packagedLicense.Directory {
+		return fmt.Errorf("plugin LICENSE must be a regular file")
+	}
+	if !bytes.Equal(packagedLicense.Data, repositoryLicense) {
+		return fmt.Errorf("plugin LICENSE bytes do not exactly match repository LICENSE")
+	}
+	return nil
+}
+
+func validateCanonicalManifestFile(entries map[string]anchoredTreeEntry, plugin PluginEntry) error {
 	manifest, ok := entries[".claude-plugin/plugin.json"]
 	if !ok || manifest.Directory {
 		return fmt.Errorf("plugin manifest must be a regular file")
@@ -149,6 +208,10 @@ func validateCanonicalMetadataTree(entries map[string]anchoredTreeEntry, plugin 
 	if err := validateCanonicalManifest(plugin, decoded); err != nil {
 		return err
 	}
+	return nil
+}
+
+func validateCanonicalOwnerFile(entries map[string]anchoredTreeEntry) error {
 	owner, ok := entries[".claude-plugin/SPEC.owner"]
 	if !ok || owner.Directory {
 		return fmt.Errorf("plugin SPEC.owner must be a regular file")
@@ -156,6 +219,10 @@ func validateCanonicalMetadataTree(entries map[string]anchoredTreeEntry, plugin 
 	if string(owner.Data) != canonicalPluginOwner {
 		return fmt.Errorf("plugin SPEC.owner = %q, want %q", string(owner.Data), canonicalPluginOwner)
 	}
+	return nil
+}
+
+func validateCanonicalMetadataInventory(entries map[string]anchoredTreeEntry) error {
 	for entryPath := range entries {
 		if strings.HasPrefix(entryPath, ".claude-plugin/") && entryPath != ".claude-plugin/plugin.json" && entryPath != ".claude-plugin/SPEC.owner" {
 			return fmt.Errorf("plugin metadata directory contains unexpected entry %q", entryPath)
@@ -165,19 +232,57 @@ func validateCanonicalMetadataTree(entries map[string]anchoredTreeEntry, plugin 
 }
 
 func validateCanonicalSkillTree(entries map[string]anchoredTreeEntry) ([]exportedSkill, error) {
+	skillDirs, skillFiles, err := collectCanonicalSkillInventory(entries)
+	if err != nil {
+		return nil, err
+	}
+	wantSkillFiles, err := validateCanonicalSkillInventory(skillDirs, skillFiles)
+	if err != nil {
+		return nil, err
+	}
+	return loadCanonicalSkillExports(entries, wantSkillFiles)
+}
+
+func collectCanonicalSkillInventory(entries map[string]anchoredTreeEntry) ([]string, []string, error) {
 	var skillDirs []string
 	var skillFiles []string
 	for entryPath, entry := range entries {
-		if entry.Directory && !allowedCanonicalDirectories[entryPath] {
-			return nil, fmt.Errorf("canonical plugin contains unexpected directory %q", entryPath)
+		if err := validateCanonicalTreeEntry(entryPath, entry); err != nil {
+			return nil, nil, err
 		}
-		if entry.Directory && strings.HasPrefix(entryPath, "skills/") && !strings.Contains(strings.TrimPrefix(entryPath, "skills/"), "/") {
-			skillDirs = append(skillDirs, strings.TrimPrefix(entryPath, "skills/"))
+		if skillDir, ok := canonicalSkillDirectory(entryPath, entry); ok {
+			skillDirs = append(skillDirs, skillDir)
 		}
-		if !entry.Directory && path.Base(entryPath) == "SKILL.md" {
+		if isCanonicalSkillEntrypoint(entryPath, entry) {
 			skillFiles = append(skillFiles, entryPath)
 		}
 	}
+	return skillDirs, skillFiles, nil
+}
+
+func validateCanonicalTreeEntry(entryPath string, entry anchoredTreeEntry) error {
+	if entry.Directory && !allowedCanonicalDirectories[entryPath] {
+		return fmt.Errorf("canonical plugin contains unexpected directory %q", entryPath)
+	}
+	if !entry.Directory && !strings.Contains(entryPath, "/") && !allowedCanonicalTopLevelFiles[entryPath] {
+		return fmt.Errorf("canonical plugin contains unexpected top-level file %q", entryPath)
+	}
+	return nil
+}
+
+func canonicalSkillDirectory(entryPath string, entry anchoredTreeEntry) (string, bool) {
+	if !entry.Directory || !strings.HasPrefix(entryPath, "skills/") {
+		return "", false
+	}
+	name := strings.TrimPrefix(entryPath, "skills/")
+	return name, !strings.Contains(name, "/")
+}
+
+func isCanonicalSkillEntrypoint(entryPath string, entry anchoredTreeEntry) bool {
+	return !entry.Directory && path.Base(entryPath) == "SKILL.md"
+}
+
+func validateCanonicalSkillInventory(skillDirs, skillFiles []string) ([]string, error) {
 	slices.Sort(skillDirs)
 	wantDirs := slices.Clone(requiredPluginSkills)
 	slices.Sort(wantDirs)
@@ -189,8 +294,12 @@ func validateCanonicalSkillTree(entries map[string]anchoredTreeEntry) ([]exporte
 	if !slices.Equal(skillFiles, wantSkillFiles) {
 		return nil, fmt.Errorf("provider-effective SKILL.md inventory = %v, want exactly %v", skillFiles, wantSkillFiles)
 	}
-	exported := make([]exportedSkill, 0, len(wantSkillFiles))
-	for _, entryPath := range wantSkillFiles {
+	return wantSkillFiles, nil
+}
+
+func loadCanonicalSkillExports(entries map[string]anchoredTreeEntry, skillFiles []string) ([]exportedSkill, error) {
+	exported := make([]exportedSkill, 0, len(skillFiles))
+	for _, entryPath := range skillFiles {
 		entry := entries[entryPath]
 		name, err := readSkillNameFromData(entryPath, entry.Data)
 		if err != nil {

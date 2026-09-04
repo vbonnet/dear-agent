@@ -23,13 +23,12 @@ const (
 	ClaudeCatalogPath = ".claude-plugin/marketplace.json"
 )
 
-var requiredPluginNames = []string{"agm", "wayfinder", "youtube", "research-pipeline", "spec-governance"}
-var requiredPluginCapabilities = map[string][]string{
+var requiredNeutralPluginNames = []string{"agm", "wayfinder", "youtube", "research-pipeline"}
+var requiredNeutralPluginCapabilities = map[string][]string{
 	"agm":               {"commands", "skills"},
 	"wayfinder":         {"skills"},
 	"youtube":           {"commands"},
 	"research-pipeline": {"skills"},
-	"spec-governance":   {"skills"},
 }
 var canonicalFollowWeakening = regexp.MustCompile(
 	`(?:\b(?:do not|don't|never|not)\s+(?:follow|enforce|apply|honou?r|obey|use|require)\b[^.;]*(?:workflow|gates?|requirements?)|` +
@@ -104,6 +103,10 @@ func ValidateCatalog(root string) error {
 	if err != nil {
 		return err
 	}
+	return validateCatalogSnapshot(root, catalog)
+}
+
+func validateCatalogSnapshot(root string, catalog Catalog) error {
 	if catalog.SchemaVersion != "dear-agent.marketplace/v1" {
 		return fmt.Errorf("marketplace schema_version = %q, want dear-agent.marketplace/v1", catalog.SchemaVersion)
 	}
@@ -121,7 +124,7 @@ func ValidateCatalog(root string) error {
 			return err
 		}
 	}
-	return ValidateHarnessSurfaces(root)
+	return validateHarnessSurfacesSnapshot(root, catalog)
 }
 
 func validateRequiredPlugins(catalog Catalog) error {
@@ -129,19 +132,17 @@ func validateRequiredPlugins(catalog Catalog) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range requiredPluginNames {
+	if _, advertised := present[canonicalPluginName]; advertised {
+		return fmt.Errorf("neutral marketplace must not advertise Claude-only plugin %q", canonicalPluginName)
+	}
+	for _, name := range requiredNeutralPluginNames {
 		plugin, ok := present[name]
 		if !ok {
 			return fmt.Errorf("marketplace catalog missing required plugin %q", name)
 		}
-		for _, capability := range requiredPluginCapabilities[name] {
+		for _, capability := range requiredNeutralPluginCapabilities[name] {
 			if !slices.Contains(plugin.Capabilities, capability) {
 				return fmt.Errorf("marketplace catalog required plugin %q missing capability %q", name, capability)
-			}
-		}
-		if name == canonicalPluginName {
-			if err := validateCanonicalCatalogEntry(plugin); err != nil {
-				return err
 			}
 		}
 	}
@@ -166,6 +167,10 @@ func ValidateHarnessSurfaces(root string) error {
 	if err != nil {
 		return err
 	}
+	return validateHarnessSurfacesSnapshot(root, catalog)
+}
+
+func validateHarnessSurfacesSnapshot(root string, catalog Catalog) error {
 	for _, harness := range agent.ActiveHarnesses() {
 		surface, ok := SurfaceForHarness(catalog, harness)
 		if !ok {

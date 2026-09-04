@@ -138,8 +138,8 @@ var claudeCanonicalFieldNames = []string{
 	"userConfig", "version", "workflows",
 }
 
-// ValidateClaudeMarketplaceMirror verifies the native Claude marketplace is an
-// exact source projection of the harness-neutral catalog.
+// ValidateClaudeMarketplaceMirror verifies the native Claude marketplace
+// contains every harness-neutral plugin plus the one Claude-only extension.
 func ValidateClaudeMarketplaceMirror(root string) error {
 	neutral, err := LoadCatalog(root)
 	if err != nil {
@@ -161,6 +161,9 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 		if _, duplicate := claudeByName[plugin.Name]; duplicate {
 			return fmt.Errorf("claude marketplace contains duplicate plugin %q", plugin.Name)
 		}
+		if err := validateAllowedFields("claude marketplace entry", plugin.fields, claudeMarketplaceEntryAllowedFields); err != nil {
+			return err
+		}
 		if plugin.Name == canonicalPluginName {
 			if err := validateCanonicalClaudeEntry(plugin); err != nil {
 				return err
@@ -169,9 +172,13 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 		claudeByName[plugin.Name] = plugin
 	}
 	neutralNames := sortedPluginNames(neutralByName)
+	expectedClaudeNames, err := expectedClaudePluginNames(neutralByName)
+	if err != nil {
+		return err
+	}
 	claudeNames := sortedClaudePluginNames(claudeByName)
-	if !slices.Equal(claudeNames, neutralNames) {
-		return fmt.Errorf("claude marketplace plugin inventory = %v, want exactly %v", claudeNames, neutralNames)
+	if !slices.Equal(claudeNames, expectedClaudeNames) {
+		return fmt.Errorf("claude marketplace plugin inventory = %v, want exactly %v", claudeNames, expectedClaudeNames)
 	}
 	for _, name := range neutralNames {
 		plugin := neutralByName[name]
@@ -183,13 +190,33 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 			return fmt.Errorf("claude marketplace plugin %q version = %q, want %q", plugin.Name, claudePlugin.Version, plugin.Version)
 		}
 	}
-	return nil
+	return validateCanonicalClaudeSource(root, claudeByName[canonicalPluginName])
+}
+
+func expectedClaudePluginNames(neutral map[string]PluginEntry) ([]string, error) {
+	if _, advertised := neutral[canonicalPluginName]; advertised {
+		return nil, fmt.Errorf("neutral marketplace must not advertise Claude-only plugin %q", canonicalPluginName)
+	}
+	names := sortedPluginNames(neutral)
+	names = append(names, canonicalPluginName)
+	slices.Sort(names)
+	return names, nil
+}
+
+func validateCanonicalClaudeSource(root string, plugin claudePluginEntry) error {
+	// Claude discovers this package natively, so its marketplace entry does not
+	// carry the neutral catalog's capabilities field. The source contract is the
+	// same skills-only contract enforced by the canonical snapshot validator.
+	sourcePlugin := plugin.PluginEntry
+	sourcePlugin.Capabilities = []string{"skills"}
+	exported, err := loadCanonicalExportedSkills(root, sourcePlugin)
+	if err != nil {
+		return fmt.Errorf("claude marketplace plugin %q canonical source: %w", plugin.Name, err)
+	}
+	return validateRequiredSkillInventory(plugin.Name, exported)
 }
 
 func validateCanonicalClaudeEntry(plugin claudePluginEntry) error {
-	if err := validateAllowedFields("claude marketplace entry", plugin.fields, claudeMarketplaceEntryAllowedFields); err != nil {
-		return err
-	}
 	raw, present := plugin.fields["strict"]
 	if !present {
 		return fmt.Errorf("claude marketplace plugin %q must set strict=true", plugin.Name)

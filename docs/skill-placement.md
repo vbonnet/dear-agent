@@ -100,11 +100,12 @@ two divergent copies of a skill.
 
 `spec-governance/skills/{write-spec,audit-specs}/SKILL.md` are the only authored
 SPEC-governance workflow bodies. This repository does not copy them into
-harness directories. If a harness later requires a discovery projection, it
-must be mechanically derived from the canonical source, checked for exact
-drift, and reported only as source projection evidence. A projection still
-does not prove that a harness discovers, installs, or invokes the skill; keep
-those states separate and verify each claimed runtime independently.
+harness directories. The Claude source catalog has one native projection; the
+harness-neutral catalog deliberately has none. Any later projection must be
+mechanically derived from the canonical source, checked for exact drift, and
+reported only as source projection evidence. A projection still does not prove
+that a harness discovers, installs, or invokes the skill; keep those states
+separate and verify each claimed runtime independently.
 
 ### Version skew is real
 

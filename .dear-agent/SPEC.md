@@ -1,6 +1,6 @@
 # Dear Agent Neutral Marketplace Specification
 
-<!-- Last audited at: 2026-09-04 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Overview
 
@@ -21,8 +21,6 @@ for plugins, capabilities, and fallback discovery surfaces.
 **DEAR-MARKET-05** When Claude Code consumes marketplace data, the system shall declare the native Claude catalog path as `.claude-plugin/marketplace.json`.
 
 **DEAR-MARKET-06** When Pi consumes marketplace data, the system shall declare `pi-cli` in the neutral catalog and combine that catalog with native `.pi/settings.json` skill discovery.
-
-**DEAR-MARKET-07** When the neutral marketplace declares the SPEC-governance package, the system shall include its canonical source, version, description, repository, license, author, and skills capability without adding harness-specific behavior metadata.
 
 ## BDD Traceability
 

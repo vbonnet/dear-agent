@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,6 +23,23 @@ func repoRoot(t *testing.T) string {
 func TestValidateCatalog(t *testing.T) {
 	if err := ValidateCatalog(repoRoot(t)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestValidateCatalogSnapshotDoesNotReloadNeutralCatalog(t *testing.T) {
+	fixture := newProjectionTestFixture(t)
+	catalog, err := LoadCatalog(fixture.root)
+	if err != nil {
+		t.Fatalf("LoadCatalog(): %v", err)
+	}
+	if err := os.WriteFile(fixture.neutralPath, []byte("{\n"), 0o644); err != nil {
+		t.Fatalf("replace neutral catalog after snapshot: %v", err)
+	}
+	if err := validateCatalogSnapshot(fixture.root, catalog); err != nil {
+		t.Fatalf("validateCatalogSnapshot() reloaded or mixed neutral catalog state: %v", err)
+	}
+	if err := ValidateCatalog(fixture.root); err == nil {
+		t.Fatal("ValidateCatalog() accepted the malformed catalog present before its own snapshot")
 	}
 }
 
@@ -46,6 +64,40 @@ func TestValidateRequiredPluginsRejectsMissingRequiredCapability(t *testing.T) {
 	err := validateRequiredPlugins(catalog)
 	if err == nil || !strings.Contains(err.Error(), `"research-pipeline" missing capability "skills"`) {
 		t.Fatalf("validateRequiredPlugins() error = %v, want missing skills capability", err)
+	}
+}
+
+func TestValidateRequiredPluginsAcceptsFourNeutralPlugins(t *testing.T) {
+	catalog := Catalog{Plugins: []PluginEntry{
+		{Name: "agm", Capabilities: []string{"commands", "skills"}},
+		{Name: "wayfinder", Capabilities: []string{"skills"}},
+		{Name: "youtube", Capabilities: []string{"commands"}},
+		{Name: "research-pipeline", Capabilities: []string{"skills"}},
+	}}
+	if err := validateRequiredPlugins(catalog); err != nil {
+		t.Fatalf("validateRequiredPlugins() rejected the four-plugin neutral inventory: %v", err)
+	}
+}
+
+func TestExpectedClaudePluginNamesAddsExactlyOneClaudeOnlyExtension(t *testing.T) {
+	neutral := map[string]PluginEntry{
+		"agm":               {Name: "agm"},
+		"wayfinder":         {Name: "wayfinder"},
+		"youtube":           {Name: "youtube"},
+		"research-pipeline": {Name: "research-pipeline"},
+	}
+	got, err := expectedClaudePluginNames(neutral)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"agm", "research-pipeline", "spec-governance", "wayfinder", "youtube"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("expectedClaudePluginNames() = %v, want %v", got, want)
+	}
+
+	neutral[canonicalPluginName] = PluginEntry{Name: canonicalPluginName}
+	if _, err := expectedClaudePluginNames(neutral); err == nil {
+		t.Fatal("expectedClaudePluginNames() accepted the Claude-only extension in the neutral inventory")
 	}
 }
 

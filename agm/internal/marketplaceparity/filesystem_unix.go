@@ -40,7 +40,15 @@ type anchoredStat struct {
 	mode     uint32
 	links    uint64
 	size     int64
+	changed  anchoredTimestamp
 }
+
+type anchoredTimestamp struct {
+	seconds     int64
+	nanoseconds int64
+}
+
+type anchoredReadCheckpoint func() error
 
 type openedDirectory struct {
 	file       *os.File
@@ -51,6 +59,14 @@ type openedDirectory struct {
 }
 
 func readAnchoredRegular(rootPath, relative string, maximum int64) (data []byte, result error) {
+	return readAnchoredRegularAtCheckpoint(rootPath, relative, maximum, nil)
+}
+
+func readAnchoredRegularAtCheckpoint(
+	rootPath, relative string,
+	maximum int64,
+	checkpoint anchoredReadCheckpoint,
+) (data []byte, result error) {
 	if err := validateReadBound(maximum); err != nil {
 		return nil, err
 	}
@@ -70,11 +86,12 @@ func readAnchoredRegular(rootPath, relative string, maximum int64) (data []byte,
 	}
 	defer func() { result = errors.Join(result, closeOpenedDirectories(directories)) }()
 
-	data, err = readStableRegularAt(
+	data, err = readStableRegularAtCheckpoint(
 		directories[len(directories)-1].file,
 		components[len(components)-1],
 		relative,
 		maximum,
+		checkpoint,
 	)
 	if err != nil {
 		return nil, err
@@ -292,6 +309,9 @@ func inspectOpenedDirectory(directory *os.File, relative string) (openedDirector
 }
 
 func openChildDirectory(parent *os.File, name, relative string) (openedDirectory, error) {
+	if err := requireExactVisibleName(parent, name, relative); err != nil {
+		return openedDirectory{}, err
+	}
 	var before unix.Stat_t
 	if err := unix.Fstatat(int(parent.Fd()), name, &before, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return openedDirectory{}, fmt.Errorf("inspect marketplace directory %q: %w", relative, err)
@@ -321,6 +341,49 @@ func openChildDirectory(parent *os.File, name, relative string) (openedDirectory
 		return openedDirectory{}, errors.Join(fmt.Errorf("marketplace directory %q changed while it was opened", relative), directory.Close())
 	}
 	return opened, nil
+}
+
+func requireExactVisibleName(parent *os.File, name, relative string) (result error) {
+	fd, err := unix.Openat(
+		int(parent.Fd()),
+		".",
+		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("reopen parent directory for marketplace path %q: %w", relative, err)
+	}
+	directory, err := fileFromDescriptor(fd, relative+" parent")
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, directory.Close()) }()
+
+	var alias string
+	for {
+		entries, readErr := directory.ReadDir(64)
+		for _, entry := range entries {
+			if entry.Name() == name {
+				return nil
+			}
+			if alias == "" && strings.EqualFold(entry.Name(), name) {
+				alias = entry.Name()
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("enumerate parent directory for marketplace path %q: %w", relative, readErr)
+		}
+		if len(entries) == 0 {
+			return fmt.Errorf("enumerate parent directory for marketplace path %q returned no entries without EOF", relative)
+		}
+	}
+	if alias != "" {
+		return fmt.Errorf("marketplace path %q uses on-disk case alias %q; want exact component %q", relative, alias, name)
+	}
+	return fmt.Errorf("marketplace path %q has no exact on-disk component %q", relative, name)
 }
 
 func closeOpenedDirectories(directories []openedDirectory) error {
@@ -363,6 +426,9 @@ func verifyOpenedDirectory(directory openedDirectory, parent *os.File) error {
 	}
 	if parent == nil {
 		return nil
+	}
+	if err := requireExactVisibleName(parent, directory.name, directory.relative); err != nil {
+		return err
 	}
 	var visible unix.Stat_t
 	if err := unix.Fstatat(int(parent.Fd()), directory.name, &visible, unix.AT_SYMLINK_NOFOLLOW); err != nil {
@@ -445,6 +511,18 @@ func walkAnchoredTreeEntry(parent *os.File, relative, name string, maximumEntrie
 }
 
 func readStableRegularAt(parent *os.File, name, relative string, maximum int64) ([]byte, error) {
+	return readStableRegularAtCheckpoint(parent, name, relative, maximum, nil)
+}
+
+func readStableRegularAtCheckpoint(
+	parent *os.File,
+	name, relative string,
+	maximum int64,
+	checkpoint anchoredReadCheckpoint,
+) ([]byte, error) {
+	if err := requireExactVisibleName(parent, name, relative); err != nil {
+		return nil, err
+	}
 	var before unix.Stat_t
 	if err := unix.Fstatat(int(parent.Fd()), name, &before, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return nil, fmt.Errorf("inspect marketplace file %q: %w", relative, err)
@@ -487,6 +565,11 @@ func readStableRegularAt(parent *os.File, name, relative string, maximum int64) 
 	if int64(len(data)) > maximum {
 		return nil, fmt.Errorf("marketplace file %q exceeds the %d-byte bound", relative, maximum)
 	}
+	if checkpoint != nil {
+		if err := checkpoint(); err != nil {
+			return nil, fmt.Errorf("marketplace file %q read checkpoint: %w", relative, err)
+		}
+	}
 	if err := verifyStableRegularAfterRead(parent, file, name, relative, snapshotAnchoredStat(&opened), openedInfo.ModTime().UnixNano(), data, maximum); err != nil {
 		return nil, err
 	}
@@ -511,6 +594,9 @@ func verifyStableRegularAfterRead(
 	finalInfo, err := file.Stat()
 	if err != nil {
 		return fmt.Errorf("read final marketplace file state %q: %w", relative, err)
+	}
+	if err := requireExactVisibleName(parent, name, relative); err != nil {
+		return err
 	}
 	var visible unix.Stat_t
 	if err := unix.Fstatat(int(parent.Fd()), name, &visible, unix.AT_SYMLINK_NOFOLLOW); err != nil {
@@ -570,6 +656,7 @@ func snapshotAnchoredStat(stat *unix.Stat_t) anchoredStat {
 		mode:     uint32(stat.Mode),
 		links:    uint64(stat.Nlink),
 		size:     stat.Size,
+		changed:  anchoredChangeTime(stat),
 	}
 }
 
