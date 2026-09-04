@@ -101,7 +101,7 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 		`/usr/bin/codesign -f -s - --options runtime "$$agm_staging"`,
 		`root_installer_path="$$repo_root/scripts/install-override-ledger-root.sh"`,
 		`test "$$confirmed_installer_hash" = "$$expected_installer_hash"`,
-		"CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm ",
+		"CGO_ENABLED=0 GOWORK=off go build $(BUILD_STAMP_FLAGS) -o bin/agm ",
 		"CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm-mcp-server ",
 		"darwin-cdhash:",
 		"linux-sha256:",

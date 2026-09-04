@@ -55,6 +55,12 @@ jobs:
           cache: true
           cache-dependency-path: 'go.sum'
 
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+
       - name: Install tmux (macOS)
         if: matrix.os == 'macos-latest'
         run: brew install tmux

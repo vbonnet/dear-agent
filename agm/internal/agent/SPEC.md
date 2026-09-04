@@ -183,6 +183,7 @@ compatibility.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/harness_config_surface_guardrails.feature`
 - Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`, `agm/internal/agent/gemini_import_history_test.go`, `agm/internal/agent/gemini_cli_adapter_test.go`
 
 ### No-BDD rationale for AGP-63 through AGP-69

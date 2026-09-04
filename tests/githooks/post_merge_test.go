@@ -395,13 +395,13 @@ func revParse(t *testing.T, dir, ref string) string {
 func newRebuildRepo(t *testing.T) string {
 	t.Helper()
 	repo := newRepo(t)
-	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "wayfinder/cmd/wayfinder", "pkg/llm/auth", "internal/x", "docs"} {
+	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/spec-contract-hook", "cmd/vroom-dispatch", "wayfinder/cmd/wayfinder", "pkg/llm/auth", "internal/x", "docs"} {
 		if err := os.MkdirAll(filepath.Join(repo, p), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Seed each package dir with a tracked file so later diffs are meaningful.
-	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "wayfinder/cmd/wayfinder/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
+	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/spec-contract-hook/main.go", "cmd/vroom-dispatch/main.go", "wayfinder/cmd/wayfinder/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
 		if err := os.WriteFile(filepath.Join(repo, f), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -660,9 +660,7 @@ func TestRebuild_AGMPairActivationIsSerializedAcrossHookProcesses(t *testing.T) 
 	case <-ctx.Done():
 		t.Fatalf("contending hook did not reacquire deployment lock: %v\n%s", ctx.Err(), secondOutput.String())
 	}
-	if got := installRecords(t, record); len(got) != 4 {
-		t.Fatalf("concurrent hooks staged %d builds, want two serialized coherent pairs: %v", len(got), got)
-	}
+	requireCoherentAGMDeployments(t, installRecords(t, record), revParse(t, repo, "HEAD"), revParse(t, repo, "HEAD"))
 }
 
 func TestRebuild_AGMPairRefreshesTrunkAfterWaitingForLock(t *testing.T) {
@@ -753,15 +751,7 @@ func TestRebuild_AGMPairRefreshesTrunkAfterWaitingForLock(t *testing.T) {
 		t.Fatalf("newer hook did not deploy after lock release: %v\n%s", ctx.Err(), secondOutput.String())
 	}
 
-	records := installRecords(t, record)
-	if len(records) != 4 {
-		t.Fatalf("serialized hooks staged %d builds, want two coherent pairs: %v", len(records), records)
-	}
-	for i, want := range []string{firstRevision, firstRevision, secondRevision, secondRevision} {
-		if records[i].commit != want {
-			t.Fatalf("build %d used revision %s, want %s (records: %+v)", i, records[i].commit, want, records)
-		}
-	}
+	requireCoherentAGMDeployments(t, installRecords(t, record), firstRevision, secondRevision)
 }
 
 func TestRebuild_AGMPairRecoversLegacyLockDirectories(t *testing.T) {
@@ -776,6 +766,7 @@ func TestRebuild_AGMPairRecoversLegacyLockDirectories(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newRebuildRepo(t)
 			mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+			wantRevision := revParse(t, repo, "HEAD")
 			gobin := t.TempDir()
 			lockDir := filepath.Join(gobin, ".agm-pair-install.lock")
 			if err := os.Mkdir(lockDir, 0o700); err != nil {
@@ -800,9 +791,7 @@ func TestRebuild_AGMPairRecoversLegacyLockDirectories(t *testing.T) {
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("hook failed with %s legacy lock: %v\n%s", tc.name, err, output)
 			}
-			if got := installRecords(t, record); len(got) != 2 {
-				t.Fatalf("hook staged %d builds, want one coherent pair: %v", len(got), got)
-			}
+			requireCoherentAGMDeployments(t, installRecords(t, record), wantRevision)
 		})
 	}
 }

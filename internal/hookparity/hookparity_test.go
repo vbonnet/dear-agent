@@ -1,6 +1,7 @@
 package hookparity_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -23,101 +24,145 @@ type hookGroup struct {
 type hookEntry struct {
 	Command string `json:"command"`
 	Type    string `json:"type"`
+	Timeout int    `json:"timeout"`
 }
 
-func TestHookHarnessesExposeRequiredGuardrails(t *testing.T) {
-	root := repoRoot(t)
-	harnesses := map[string]string{
-		"claude-code":  filepath.Join(root, ".claude", "settings.json"),
-		"codex-cli":    filepath.Join(root, ".codex", "hooks.json"),
-		"agy":          filepath.Join(root, ".agents", "hooks.json"),
-		"opencode-cli": filepath.Join(root, ".opencode", "hooks.json"),
-		"pi-cli":       filepath.Join(root, ".pi", "hooks.json"),
-	}
-
-	for harness, manifestPath := range harnesses {
-		t.Run(harness, func(t *testing.T) {
-			settings := readHookSettings(t, manifestPath)
-			commands := allCommands(settings)
-
-			for _, required := range []string{
-				"pretool-spawn-routing",
-				"pretool-bead-close-guard",
-				"pretool-bypass-guard",
-				"pretool-pr-guard",
-			} {
-				if !hasCommandContaining(commands, required) {
-					t.Fatalf("%s missing PreToolUse guardrail %q in %s", harness, required, manifestPath)
-				}
-			}
-
-			for _, event := range []string{"Stop", "SubagentStop"} {
-				if !eventHasCommandContaining(settings, event, "stop-guardrail-feedback") {
-					t.Fatalf("%s missing %s stop guardrail feedback hook", harness, event)
-				}
-			}
-		})
-	}
-}
-
-func TestNonClaudeHookHarnessesExposeBeadsLifecycleHooks(t *testing.T) {
+func TestNativeSPECContractTransportsUseTheirProviderSchemas(t *testing.T) {
 	root := repoRoot(t)
 	harnesses := map[string]struct {
-		path   string
-		prefix string
+		path     string
+		provider string
 	}{
-		"codex-cli":    {path: filepath.Join(root, ".codex", "hooks.json"), prefix: "codex"},
-		"agy":          {path: filepath.Join(root, ".agents", "hooks.json"), prefix: "antigravity"},
-		"opencode-cli": {path: filepath.Join(root, ".opencode", "hooks.json"), prefix: "opencode"},
-		// Beads does not yet publish pi-hook; the managed Pi extension projects
-		// the same lifecycle events through the stable Codex adapter.
-		"pi-cli": {path: filepath.Join(root, ".pi", "hooks.json"), prefix: "codex"},
+		"claude-code": {path: filepath.Join(root, ".claude", "settings.json"), provider: "claude"},
+		"codex-cli":   {path: filepath.Join(root, ".codex", "hooks.json"), provider: "codex"},
+		"pi-cli":      {path: filepath.Join(root, ".pi", "hooks.json"), provider: "pi"},
+	}
+	for harness, config := range harnesses {
+		t.Run(harness, func(t *testing.T) {
+			settings := readHookSettings(t, config.path)
+			for _, event := range []string{"Stop", "SubagentStop"} {
+				commands := eventCommands(settings, event)
+				adapters := matchingCommands(commands, "cmd/spec-contract-hook")
+				if len(adapters) != 1 {
+					t.Fatalf("%s must expose exactly one cooperative native SPEC guard adapter for %s, got %v", harness, event, adapters)
+				}
+				siblings := matchingCommands(commands, "stop-guardrail-feedback")
+				if len(commands) != 2 || len(siblings) != 1 {
+					t.Fatalf("%s %s terminal chain = %v, want one SPEC adapter and one sibling guardrail independent of order", harness, event, commands)
+				}
+				arguments := strings.Fields(adapters[0])
+				if argumentValue(arguments, "--provider") != config.provider || argumentValue(arguments, "--event") != event || argumentValue(arguments, "--root") == "" {
+					t.Fatalf("%s %s adapter does not bind the provider protocol, root, and event: %q", harness, event, adapters[0])
+				}
+			}
+		})
 	}
 
-	for harness, cfg := range harnesses {
-		t.Run(harness, func(t *testing.T) {
-			settings := readHookSettings(t, cfg.path)
-			for event, suffix := range map[string]string{
-				"SessionStart":     "SessionStart",
-				"UserPromptSubmit": "UserPromptSubmit",
-				"PreCompact":       "PreCompact",
-				"PostCompact":      "PostCompact",
-			} {
-				want := "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on " + cfg.prefix + "-hook " + suffix
-				if !eventHasCommandContaining(settings, event, want) {
-					t.Fatalf("%s missing %s Beads hook command %q", harness, event, want)
-				}
+	claude := readHookSettings(t, filepath.Join(root, ".claude", "settings.json"))
+	resets := eventCommands(claude, "UserPromptSubmit")
+	if len(resets) != 1 || len(matchingCommands(resets, "cmd/spec-contract-hook")) != 1 {
+		t.Fatalf("Claude UserPromptSubmit chain = %v, want exactly one SPEC feedback reset adapter", resets)
+	}
+	arguments := strings.Fields(resets[0])
+	if argumentValue(arguments, "--provider") != "claude" || argumentValue(arguments, "--event") != "UserPromptSubmit" || argumentValue(arguments, "--root") == "" {
+		t.Fatalf("Claude user-turn reset does not bind the provider protocol, root, and native event: %q", resets[0])
+	}
+}
+
+func TestCodexSourceSPECContractTransportResolvesRootFromNestedCWD(t *testing.T) {
+	root := repoRoot(t)
+	settings := readHookSettings(t, filepath.Join(root, ".codex", "hooks.json"))
+	for _, event := range []string{"Stop", "SubagentStop"} {
+		t.Run(event, func(t *testing.T) {
+			adapters := matchingCommands(eventCommands(settings, event), "cmd/spec-contract-hook")
+			if len(adapters) != 1 {
+				t.Fatalf("Codex %s adapters = %v, want exactly one", event, adapters)
+			}
+			command := exec.Command("/bin/sh", "-c", adapters[0])
+			command.Dir = filepath.Join(root, "agm")
+			command.Env = append(environmentWithout(os.Environ(), "AGM_CODEX_HOOK_ROOT", "CLAUDE_PROJECT_DIR"), "DEAR_AGENT_HOOK_STATE_DIR="+t.TempDir())
+			command.Stdin = strings.NewReader(`{"hook_event_name":"` + event + `","session_id":"nested-codex","turn_id":"nested-codex-turn","stop_hook_active":false}`)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			if err := command.Run(); err != nil {
+				t.Fatalf("run Codex %s adapter from nested cwd: %v\nstdout=%s\nstderr=%s", event, err, stdout.String(), stderr.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("decode Codex %s response %q: %v; stderr=%s", event, stdout.String(), err, stderr.String())
 			}
 		})
 	}
 }
 
-func TestHookManifestLocalScriptsExistAndAreExecutable(t *testing.T) {
+func TestAntigravityUsesNamedStopHookSchema(t *testing.T) {
 	root := repoRoot(t)
-	for _, manifestPath := range []string{
-		filepath.Join(root, ".claude", "settings.json"),
-		filepath.Join(root, ".codex", "hooks.json"),
-		filepath.Join(root, ".agents", "hooks.json"),
-		filepath.Join(root, ".opencode", "hooks.json"),
-		filepath.Join(root, ".pi", "hooks.json"),
-	} {
-		t.Run(filepath.ToSlash(strings.TrimPrefix(manifestPath, root+string(os.PathSeparator))), func(t *testing.T) {
-			settings := readHookSettings(t, manifestPath)
-			for _, command := range allCommands(settings) {
-				if !strings.Contains(command, "${CLAUDE_PROJECT_DIR}/.") && !strings.Contains(command, "${PI_PROJECT_DIR}/.") {
-					continue
-				}
-				localPath := strings.Replace(command, "${CLAUDE_PROJECT_DIR}", root, 1)
-				localPath = strings.Replace(localPath, "${PI_PROJECT_DIR}", root, 1)
-				info, err := os.Stat(localPath)
-				if err != nil {
-					t.Fatalf("hook command %q points to missing script %s: %v", command, localPath, err)
-				}
-				if info.Mode()&0o111 == 0 {
-					t.Fatalf("hook command %q script %s is not executable: mode %v", command, localPath, info.Mode())
-				}
-			}
-		})
+	data, err := os.ReadFile(filepath.Join(root, ".agents", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]map[string][]hookEntry
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if _, legacy := manifest["hooks"]; legacy || len(manifest) != 1 {
+		t.Fatalf("Antigravity manifest must be a named-hook map, got keys %#v", mapKeys(manifest))
+	}
+	guard := manifest["spec-contract-guard"]
+	if len(guard) != 1 || len(guard["Stop"]) != 1 || guard["SubagentStop"] != nil {
+		t.Fatalf("Antigravity guard event map = %#v, want one Stop handler and no SubagentStop", guard)
+	}
+	handler := guard["Stop"][0]
+	const wantCommand = "/usr/local/libexec/dear-agent-spec-contract-hook --root-from-workspace-stdin --provider antigravity --event Stop"
+	if handler.Type != "command" || handler.Timeout != 60 || handler.Command != wantCommand {
+		t.Fatalf("Antigravity Stop handler = %#v", handler)
+	}
+	if strings.Contains(handler.Command, "go run") || strings.Contains(handler.Command, "./cmd/") || strings.Contains(handler.Command, "--root .") {
+		t.Fatalf("Antigravity Stop handler must not depend on checkout source or CWD: %q", handler.Command)
+	}
+
+	// Exercise an independently built absolute artifact from a CWD outside the
+	// repository. The real installation is intentionally operator-owned and is
+	// not required for repository tests.
+	helper := filepath.Join(t.TempDir(), "dear-agent-spec-contract-hook")
+	build := exec.Command("go", "build", "-o", helper, "./cmd/spec-contract-hook")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build Antigravity helper: %v\n%s", err, output)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"conversationId": "external-cwd",
+		"executionNum":   1,
+		"workspacePaths": []string{root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(helper, "--root-from-workspace-stdin", "--provider", "antigravity", "--event", "Stop")
+	command.Dir = t.TempDir()
+	stateDirectory := t.TempDir()
+	if err := os.Chmod(stateDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command.Env = append(os.Environ(), "DEAR_AGENT_HOOK_STATE_DIR="+stateDirectory)
+	command.Stdin = strings.NewReader(string(payload))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Antigravity Stop helper from external CWD: %v\n%s", err, output)
+	}
+	var response struct {
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		t.Fatalf("decode Antigravity Stop response %q: %v", output, err)
+	}
+	if response.Decision != "allow" && response.Decision != "continue" {
+		t.Fatalf("Antigravity Stop response = %#v, want native response after workspace resolution", response)
+	}
+	if strings.Contains(response.Reason, "must supply exactly one valid absolute Git workspace root") {
+		t.Fatalf("Antigravity Stop helper did not use its native workspace root: %#v", response)
 	}
 }
 
@@ -211,17 +256,13 @@ func TestOpenCodeHookParserRegressions(t *testing.T) {
 			wantCode: 0,
 		},
 		{
+			// PR #1203 narrowed this guard to the protected branch: a force
+			// push to a PR branch is allowed, and only main is blocked.
 			name:       "bypass guard blocks short force push to main",
 			script:     ".opencode/hooks/pretool-bypass-guard",
 			command:    "git push -f origin main",
 			wantCode:   2,
 			wantOutput: "git push --force",
-		},
-		{
-			name:     "bypass guard allows short force push to feature branch",
-			script:   ".opencode/hooks/pretool-bypass-guard",
-			command:  "git push -f origin feat/harness-model-parity",
-			wantCode: 0,
 		},
 		{
 			name:       "pr guard catches repo flag before create",
@@ -317,6 +358,43 @@ func eventHasCommandContaining(settings hookSettings, event, substr string) bool
 	return false
 }
 
+func eventCommands(settings hookSettings, event string) []string {
+	commands := []string{}
+	for _, group := range settings.Hooks[event] {
+		for _, hook := range group.Hooks {
+			commands = append(commands, hook.Command)
+		}
+	}
+	return commands
+}
+
+func matchingCommands(commands []string, needle string) []string {
+	result := []string{}
+	for _, command := range commands {
+		if strings.Contains(command, needle) {
+			result = append(result, command)
+		}
+	}
+	return result
+}
+
+func argumentValue(arguments []string, flag string) string {
+	for index := 0; index+1 < len(arguments); index++ {
+		if arguments[index] == flag {
+			return arguments[index+1]
+		}
+	}
+	return ""
+}
+
+func mapKeys(values map[string]map[string][]hookEntry) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 func hasCommandContaining(commands []string, substr string) bool {
 	for _, command := range commands {
 		if strings.Contains(command, substr) {
@@ -324,6 +402,23 @@ func hasCommandContaining(commands []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+func environmentWithout(environment []string, names ...string) []string {
+	filtered := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		keep := true
+		for _, name := range names {
+			if strings.HasPrefix(entry, name+"=") {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func repoRoot(t *testing.T) string {

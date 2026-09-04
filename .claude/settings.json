@@ -47,9 +47,25 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go run \"${CLAUDE_PROJECT_DIR}/cmd/spec-contract-hook\" --root \"${CLAUDE_PROJECT_DIR}\" --provider claude --event UserPromptSubmit",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "go run \"${CLAUDE_PROJECT_DIR}/cmd/spec-contract-hook\" --root \"${CLAUDE_PROJECT_DIR}\" --provider claude --event Stop",
+            "timeout": 60
+          },
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-guardrail-feedback",
@@ -61,6 +77,11 @@
     "SubagentStop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "go run \"${CLAUDE_PROJECT_DIR}/cmd/spec-contract-hook\" --root \"${CLAUDE_PROJECT_DIR}\" --provider claude --event SubagentStop",
+            "timeout": 60
+          },
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-guardrail-feedback",

@@ -1,6 +1,6 @@
 # Codex Hook Attestation Specification
 
-<!-- Last audited at: 2026-07-30 -->
+<!-- Last audited at: 2026-08-08 -->
 
 ## Overview
 
@@ -47,6 +47,8 @@ descendant script's later process execution and is not treated as that control.
 **CHOOK-15** When an operator approves a Codex hook-trust source, the system shall resolve and display the canonical repository, full current commit, and committed hook-byte digest without trusting mutable working-tree bytes, and every private executor shall revalidate that exact persisted identity, materialization, and sandbox asset set before launch.
 
 **CHOOK-16** When AGM builds the hook configuration for an approved Codex launch, the system shall load every materialized asset into one in-memory snapshot, require the complete snapshot to match the approved digest, embed each enabled hook script's verified bytes under its validated absolute interpreter into the session configuration, never execute that script through its same-user-owned materialized path, and reject a generated single argument above the conservative cross-platform safety limit before any override reservation can be committed.
+
+**CHOOK-17** When the governed AGM build enables unattended projection of the terminal SPEC adapter, it shall first build the helper with ambient Go workspace mode disabled, embed that exact artifact's SHA-256 into AGM, resolve and validate the trusted no-clobber helper path suffixed by that digest, and generate the session command with exactly the returned content-addressed path so later stable-path replacement cannot change the session executable; the private executor shall reject a missing, malformed, stale, replaced, or otherwise untrusted digest leaf, and an unstamped standalone AGM build shall fail closed for this projection.
 
 ## BDD Traceability
 

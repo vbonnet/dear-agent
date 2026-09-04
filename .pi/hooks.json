@@ -20,12 +20,18 @@
     ],
     "Stop": [
       {
-        "hooks": [{"command": "${PI_PROJECT_DIR}/.pi/guardrails/stop-guardrail-feedback", "timeout": 120, "type": "command"}]
+        "hooks": [
+          {"command": "go run \"${PI_PROJECT_DIR}/cmd/spec-contract-hook\" --root \"${PI_PROJECT_DIR}\" --provider pi --event Stop", "timeout": 60, "type": "command"},
+          {"command": "${PI_PROJECT_DIR}/.pi/guardrails/stop-guardrail-feedback", "timeout": 120, "type": "command"}
+        ]
       }
     ],
     "SubagentStop": [
       {
-        "hooks": [{"command": "${PI_PROJECT_DIR}/.pi/guardrails/stop-guardrail-feedback", "timeout": 120, "type": "command"}]
+        "hooks": [
+          {"command": "go run \"${PI_PROJECT_DIR}/cmd/spec-contract-hook\" --root \"${PI_PROJECT_DIR}\" --provider pi --event SubagentStop", "timeout": 60, "type": "command"},
+          {"command": "${PI_PROJECT_DIR}/.pi/guardrails/stop-guardrail-feedback", "timeout": 120, "type": "command"}
+        ]
       }
     ],
     "SessionStart": [
