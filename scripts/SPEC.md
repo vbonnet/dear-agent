@@ -18,8 +18,11 @@
 
 **REPO-SCRIPT-08** When preflight runs in isolated mode, the system shall provision scratch roots under a dedicated cache directory with owner-only permissions and shall register cleanup handlers to remove the isolated scratch on exit or failure.
 
+**REPO-SCRIPT-09** When full preflight runs, the system shall acquire an exclusive host-scoped advisory lease before dependency download, compilation, lint, and test execution, serialize concurrent executions across worktrees, report owner information upon contention, timeout, or cancellation without terminating the active leaseholder, and release the lease upon process termination.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 - Feature: `tests/bats/isolated-preflight.bats` (REPO-SCRIPT-08)
+- Feature: `tests/bats/preflight-lease.bats` (REPO-SCRIPT-09)
