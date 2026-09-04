@@ -455,14 +455,25 @@ func (RealSweepDeps) Discover(base string) ([]DiscoveredWorktree, error) {
 			continue
 		}
 		for _, ch := range children {
-			if !ch.IsDir() || strings.HasPrefix(ch.Name(), ".") {
+			if !ch.IsDir() {
 				continue
 			}
 			probe := filepath.Join(repoDir, ch.Name())
-			if resolvedProbe, rerr := filepath.EvalSymlinks(probe); rerr == nil && seen[resolvedProbe] {
-				continue
+			// Dot-prefixed children may be linked worktrees (which contain a
+			// .git file) or standalone clones/husks (which contain a .git
+			// directory or no git metadata). Only probe dot-prefixed children
+			// if they are genuine linked worktrees.
+			if strings.HasPrefix(ch.Name(), ".") {
+				gitPath := filepath.Join(probe, ".git")
+				if fi, err := os.Stat(gitPath); err != nil || fi.IsDir() {
+					continue
+				}
 			}
-			if seen[probe] {
+			resolvedProbe := probe
+			if resolved, rerr := filepath.EvalSymlinks(probe); rerr == nil {
+				resolvedProbe = resolved
+			}
+			if seen[resolvedProbe] {
 				continue
 			}
 			wts, err := gitpkg.ListWorktrees(probe)
