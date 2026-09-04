@@ -23,6 +23,12 @@ inspection plus guarded manifest commits and cleanup operations.
 
 **GIT-07** When a caller supplies a directory inside a Git worktree, the system shall resolve the containing worktree root before inventory, removal, or ownership comparison.
 
+**GIT-08** When listing worktrees, the system shall parse and preserve worktree lock state and lock reason from Git porcelain output.
+
+**GIT-09** When unlocking a worktree, the system shall execute Git worktree unlock and succeed idempotently if the worktree is not locked.
+
+**GIT-10** When locking a worktree, the system shall execute Git worktree lock with any requested reason and propagate Git failures.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_diagnostics_package_guardrails.feature`

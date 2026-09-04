@@ -2,6 +2,8 @@ package ops
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 )
@@ -42,6 +44,8 @@ type fakeSweepDeps struct {
 	awaiting       map[string]bool   // keyed by worktree path
 	awaitingDetail map[string]string // keyed by worktree path
 
+	unlockErr  map[string]error
+	unlocked   []string
 	removeErr  map[string]error
 	deleteErr  map[string]error
 	removed    []string
@@ -108,6 +112,13 @@ func (f *fakeSweepDeps) AwaitingInput(p string) (bool, string) {
 		d = "test"
 	}
 	return f.awaiting[p], d
+}
+func (f *fakeSweepDeps) UnlockWorktree(_, p string) error {
+	if err := f.unlockErr[p]; err != nil {
+		return err
+	}
+	f.unlocked = append(f.unlocked, p)
+	return nil
 }
 func (f *fakeSweepDeps) RemoveWorktree(_, p string, force bool) error {
 	if err := f.removeErr[p]; err != nil {
@@ -576,5 +587,224 @@ func TestSweep_DryRunStillClassifiesWhenActiveSetIsUnknown(t *testing.T) {
 	}
 	if len(f.removed) != 0 || len(f.delBranch) != 0 {
 		t.Fatalf("dry-run must not mutate: removed=%v delBranch=%v", f.removed, f.delBranch)
+	}
+}
+
+func TestClassify_LockedActiveSessionIsActive(t *testing.T) {
+	f := &fakeSweepDeps{
+		ancestor: map[string]bool{"branch-a": true},
+	}
+	opts := SweepOptions{
+		ActiveSessions: map[string]bool{"session-123": true},
+	}
+	dw := DiscoveredWorktree{
+		Path:       "/wt/locked-active",
+		Repo:       "repo",
+		Branch:     "branch-a",
+		Locked:     true,
+		LockReason: "session:session-123",
+	}
+	st := classifyOne(opts, f, dw)
+	if st.Class != ClassActive {
+		t.Errorf("got Class %s, want %s", st.Class, ClassActive)
+	}
+	if st.Reason != "locked-active-session" {
+		t.Errorf("got Reason %s, want locked-active-session", st.Reason)
+	}
+	if !st.Locked || st.LockReason != "session:session-123" {
+		t.Errorf("expected Locked=true LockReason='session:session-123', got Locked=%v Reason=%q", st.Locked, st.LockReason)
+	}
+}
+
+func TestClassify_LockedArchivedSessionIsMerged(t *testing.T) {
+	f := &fakeSweepDeps{
+		ancestor: map[string]bool{"branch-a": true},
+	}
+	opts := SweepOptions{
+		ActiveSessions: map[string]bool{"other-session": true},
+	}
+	dw := DiscoveredWorktree{
+		Path:       "/wt/locked-archived",
+		Repo:       "repo",
+		Branch:     "branch-a",
+		Locked:     true,
+		LockReason: "session:archived-session",
+	}
+	st := classifyOne(opts, f, dw)
+	if st.Class != ClassMerged {
+		t.Errorf("got Class %s, want %s", st.Class, ClassMerged)
+	}
+	if !st.Locked || st.LockReason != "session:archived-session" {
+		t.Errorf("expected Locked=true LockReason='session:archived-session', got Locked=%v Reason=%q", st.Locked, st.LockReason)
+	}
+}
+
+func TestClassify_BlanketLockIsMerged(t *testing.T) {
+	f := &fakeSweepDeps{
+		ancestor: map[string]bool{"branch-a": true},
+	}
+	opts := SweepOptions{
+		ActiveSessions: map[string]bool{"session-123": true},
+	}
+	// Case 1: "added with --lock"
+	dw1 := DiscoveredWorktree{
+		Path:       "/wt/blanket-1",
+		Repo:       "repo",
+		Branch:     "branch-a",
+		Locked:     true,
+		LockReason: "added with --lock",
+	}
+	st1 := classifyOne(opts, f, dw1)
+	if st1.Class != ClassMerged {
+		t.Errorf("got Class %s, want %s", st1.Class, ClassMerged)
+	}
+
+	// Case 2: locked with empty reason
+	dw2 := DiscoveredWorktree{
+		Path:       "/wt/blanket-2",
+		Repo:       "repo",
+		Branch:     "branch-a",
+		Locked:     true,
+		LockReason: "",
+	}
+	st2 := classifyOne(opts, f, dw2)
+	if st2.Class != ClassMerged {
+		t.Errorf("got Class %s, want %s", st2.Class, ClassMerged)
+	}
+}
+
+func TestClassify_ExplicitPreserveLockIsUnknown(t *testing.T) {
+	f := &fakeSweepDeps{
+		ancestor: map[string]bool{"branch-a": true},
+	}
+	opts := SweepOptions{
+		ActiveSessions: map[string]bool{},
+	}
+	cases := []string{
+		"preserve: debug failure",
+		"keep-until-review",
+		"hold for qa",
+		"pin",
+		"manual",
+		"do-not-reap",
+		"do_not_reap",
+		"wip: in progress test",
+	}
+	for _, reason := range cases {
+		dw := DiscoveredWorktree{
+			Path:       "/wt/preserved",
+			Repo:       "repo",
+			Branch:     "branch-a",
+			Locked:     true,
+			LockReason: reason,
+		}
+		st := classifyOne(opts, f, dw)
+		if st.Class != ClassUnknown {
+			t.Errorf("reason %q: got Class %s, want %s", reason, st.Class, ClassUnknown)
+		}
+		if st.Reason != "locked-preserved:"+reason {
+			t.Errorf("reason %q: got Reason %s, want %s", reason, st.Reason, "locked-preserved:"+reason)
+		}
+	}
+}
+
+func TestClassify_SafePROwnedLock(t *testing.T) {
+	f := &fakeSweepDeps{
+		ancestor: map[string]bool{"branch-a": true},
+	}
+	opts := SweepOptions{}
+
+	// Live PID: current test process
+	livePID := os.Getpid()
+	dwLive := DiscoveredWorktree{
+		Path:       "/wt/safe-pr-live",
+		Repo:       "repo",
+		Branch:     "branch-a",
+		Locked:     true,
+		LockReason: fmt.Sprintf("safe-pr-owned:%d:build", livePID),
+	}
+	stLive := classifyOne(opts, f, dwLive)
+	if stLive.Class != ClassActive {
+		t.Errorf("live PID %d: got Class %s, want %s", livePID, stLive.Class, ClassActive)
+	}
+
+	// Dead PID (e.g. 99999999)
+	dwDead := DiscoveredWorktree{
+		Path:       "/wt/safe-pr-dead",
+		Repo:       "repo",
+		Branch:     "branch-a",
+		Locked:     true,
+		LockReason: "safe-pr-owned:99999999:build",
+	}
+	stDead := classifyOne(opts, f, dwDead)
+	if stDead.Class != ClassMerged {
+		t.Errorf("dead PID: got Class %s, want %s", stDead.Class, ClassMerged)
+	}
+}
+
+func TestSweep_ExecuteUnlocksAndRemovesLockedMerged(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{
+			{
+				Path:       "/wt/locked-merged",
+				Repo:       "repo",
+				Branch:     "claude/m",
+				Locked:     true,
+				LockReason: "added with --lock",
+			},
+		},
+		ancestor: map[string]bool{"claude/m": true},
+		mainRepo: map[string]string{"/wt/locked-merged": "/repo"},
+	}
+
+	res, err := Sweep(SweepOptions{Execute: true, ActiveSessionsKnown: true}, f, nil)
+	if err != nil {
+		t.Fatalf("Sweep failed: %v", err)
+	}
+	if len(res.Removed) != 1 || res.Removed[0] != "/wt/locked-merged" {
+		t.Fatalf("Removed = %v, want [/wt/locked-merged]", res.Removed)
+	}
+	if len(f.unlocked) != 1 || f.unlocked[0] != "/wt/locked-merged" {
+		t.Fatalf("Unlocked = %v, want [/wt/locked-merged]", f.unlocked)
+	}
+	if len(f.removed) != 1 || f.removed[0] != "/wt/locked-merged" {
+		t.Fatalf("Removed calls = %v, want [/wt/locked-merged]", f.removed)
+	}
+	if len(f.delBranch) != 1 || f.delBranch[0] != "claude/m" {
+		t.Fatalf("Deleted branches = %v, want [claude/m]", f.delBranch)
+	}
+}
+
+func TestSweep_UnlockFailurePreservesWorktree(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{
+			{
+				Path:       "/wt/locked-fail",
+				Repo:       "repo",
+				Branch:     "claude/m",
+				Locked:     true,
+				LockReason: "added with --lock",
+			},
+		},
+		ancestor:  map[string]bool{"claude/m": true},
+		mainRepo:  map[string]string{"/wt/locked-fail": "/repo"},
+		unlockErr: map[string]error{"/wt/locked-fail": errors.New("permission denied")},
+	}
+
+	res, err := Sweep(SweepOptions{Execute: true, ActiveSessionsKnown: true}, f, nil)
+	if err != nil {
+		t.Fatalf("Sweep failed: %v", err)
+	}
+	if len(res.Removed) != 0 {
+		t.Fatalf("Removed = %v, want empty", res.Removed)
+	}
+	if len(f.removed) != 0 {
+		t.Fatalf("Removed calls = %v, want none", f.removed)
+	}
+	if len(f.delBranch) != 0 {
+		t.Fatalf("Deleted branches = %v, want none", f.delBranch)
+	}
+	if res.Failed["/wt/locked-fail"] == "" {
+		t.Fatalf("Expected failure recorded in res.Failed, got %+v", res.Failed)
 	}
 }
