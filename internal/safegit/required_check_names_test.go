@@ -82,6 +82,24 @@ esac
 	}
 }
 
+func TestRequiredCheckNamesForBranchRejectsMalformedClassicPolicy(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  *rules/branches*) printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Ruleset"}]}}]]' ;;
+  *protection/required_status_checks*) printf '%s\n' '{not-json' ;;
+  *) printf '%s\n' 'unexpected gh invocation' >&2; exit 2 ;;
+esac
+`)
+
+	names, err := RequiredCheckNamesForBranch(context.Background(), "owner/repo", "main")
+	if err == nil || !strings.Contains(err.Error(), "parsing classic required checks") {
+		t.Fatalf("RequiredCheckNamesForBranch() = %#v, %v; want classic parse error", names, err)
+	}
+	if names != nil {
+		t.Fatalf("malformed classic policy returned names %#v, want nil", names)
+	}
+}
+
 func TestRequiredCheckNamesForBranchRejectsUnsupportedIdentity(t *testing.T) {
 	cases := []struct {
 		name  string
