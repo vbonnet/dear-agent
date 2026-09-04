@@ -306,6 +306,7 @@ func TestRun_HealthyTickReleasesAStaleBrake(t *testing.T) {
 		"--brake", path,
 		"--trail", filepath.Join(t.TempDir(), "trail.jsonl"),
 		"--agm", filepath.Join(t.TempDir(), "no-such-agm"),
+		"--e2e-cache-dir", t.TempDir(),
 		// Hermetic: do not consult the real ~/.agm/logs/gc.jsonl.
 		"--gc-max-age", "0",
 		"--free-warn-gb", "0.0001",

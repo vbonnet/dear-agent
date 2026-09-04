@@ -149,6 +149,7 @@ func hermeticRunArgs(t *testing.T, gcLog, gcMaxAge string) []string {
 		"--agm", filepath.Join(t.TempDir(), "no-such-agm"),
 		"--gc-log", gcLog,
 		"--gc-max-age", gcMaxAge,
+		"--e2e-cache-dir", t.TempDir(),
 		"--free-warn-gb", "0.0001",
 		"--free-critical-gb", "0.0001",
 		"--inode-warn", "0.999999",

@@ -328,7 +328,7 @@ func shouldEvictE2EFixture(index, maxEntries int, age, maxAge time.Duration) boo
 
 func tryRemoveE2EFixtureDir(dirPath string) {
 	lockPath := filepath.Join(dirPath, "agm.lock")
-	lockFile, err := os.Open(lockPath)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return
 	}
@@ -369,7 +369,10 @@ func touchE2ECacheDir(dir, dest string) {
 }
 
 func pruneDefaultE2EBuildCache(currentDirName string) {
-	baseDir := filepath.Dir(e2eBuildCacheDir())
+	if os.Getenv("AGM_E2E_BUILD_CACHE_DIR") != "" {
+		return
+	}
+	baseDir := e2eCacheBaseDir()
 	maxEntries := defaultE2ECacheMaxEntries
 	if v := os.Getenv("AGM_E2E_CACHE_MAX_ENTRIES"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {

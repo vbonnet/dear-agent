@@ -205,3 +205,15 @@ func TestTouchE2ECacheDir(t *testing.T) {
 		t.Errorf("expected dest modTime to be refreshed, got %v", destInfo.ModTime())
 	}
 }
+
+func TestPruneDefaultE2EBuildCache_SkipsCustomOverride(t *testing.T) {
+	tempCache := filepath.Join(t.TempDir(), "custom", "agm-custom")
+	if err := os.MkdirAll(tempCache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGM_E2E_BUILD_CACHE_DIR", tempCache)
+
+	// pruneDefaultE2EBuildCache must return immediately without inspecting or pruning
+	// anything when a custom per-build cache directory override is active.
+	pruneDefaultE2EBuildCache("agm-custom")
+}

@@ -87,9 +87,9 @@ func (cfg e2eCacheConfig) withDefaults() e2eCacheGates {
 
 func removeE2EFixtureDir(path string) (err error) {
 	lockPath := filepath.Join(path, "agm.lock")
-	lockFile, oerr := os.Open(lockPath)
+	lockFile, oerr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if oerr != nil {
-		return os.RemoveAll(path)
+		return oerr
 	}
 	defer func() {
 		if cerr := lockFile.Close(); cerr != nil && err == nil {
