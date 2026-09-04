@@ -21,6 +21,8 @@ documented ten-minute gate timeout became an indefinite hang in
 
 **WAYFINDER-BOUNDEDEXEC-02** When a wall-clock timeout is configured and expires, the system shall return within a bounded wait delay even if a descendant process still holds the output pipes.
 
+**WAYFINDER-BOUNDEDEXEC-07** When a command's wall-clock timeout expires, the system shall terminate the command's descendant processes and not only the process it started directly.
+
 **WAYFINDER-BOUNDEDEXEC-03** When a command is still running, the system shall emit a progress line at a fixed interval naming the command and the elapsed time.
 
 **WAYFINDER-BOUNDEDEXEC-04** When a command exits non-zero, the system shall report the exit code and the captured combined output.

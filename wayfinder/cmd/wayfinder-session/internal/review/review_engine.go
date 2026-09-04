@@ -11,8 +11,9 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
-// lintTimeout bounds the external maintainability linter.
-const lintTimeout = 5 * time.Minute
+// defaultLintTimeout bounds the external maintainability linter when the engine
+// carries no review-execution budget of its own.
+const defaultLintTimeout = 5 * time.Minute
 
 // ReviewEngine orchestrates multi-persona reviews with risk-adaptive strategies
 type ReviewEngine struct {
@@ -378,6 +379,17 @@ func (e *ReviewEngine) tryExternalReviewTool(persona PersonaType, files []string
 	return PersonaResult{}, fmt.Errorf("no external tool available for %s", persona)
 }
 
+// lintTimeout derives the linter's bound from the engine's configured review
+// budget, so the review timeout keeps a single owner. golangci-lint is the only
+// external review command, and a second hardcoded constant would silently
+// override whatever the caller configured.
+func (e *ReviewEngine) lintTimeout() time.Duration {
+	if e.config.ReviewExecutionSeconds > 0 {
+		return time.Duration(e.config.ReviewExecutionSeconds) * time.Second
+	}
+	return defaultLintTimeout
+}
+
 // runGolangciLint executes golangci-lint for maintainability checks
 func (e *ReviewEngine) runGolangciLint(_ []string) (PersonaResult, error) {
 	// golangci-lint takes a global cache lock, so an unbounded run can block on
@@ -387,7 +399,7 @@ func (e *ReviewEngine) runGolangciLint(_ []string) (PersonaResult, error) {
 		Label:   "maintainability lint",
 		Name:    "golangci-lint",
 		Args:    []string{"run", "./..."},
-		Timeout: lintTimeout,
+		Timeout: e.lintTimeout(),
 	}.Run()
 	output, err := []byte(res.Output), res.Err
 

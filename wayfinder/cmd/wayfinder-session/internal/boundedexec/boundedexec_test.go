@@ -2,8 +2,12 @@ package boundedexec
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -246,5 +250,51 @@ func TestRunSurvivesPanickingProgressWriter(t *testing.T) {
 	}
 	if !strings.Contains(progress.String(), "running `sh -c exit 0`") {
 		t.Fatalf("missing start line; got:\n%s", progress.String())
+	}
+}
+
+// TestRunKillsDescendantsOnTimeout is the regression test for the leak that
+// bounding the wait alone leaves behind: CommandContext signals only the direct
+// child, so a backgrounded descendant keeps running after the gate has reported
+// failure. Repeated gate runs then accumulate concurrent test suites that go on
+// mutating build caches and artifacts. The descendant must die with its group.
+func TestRunKillsDescendantsOnTimeout(t *testing.T) {
+	t.Parallel()
+
+	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
+	res := Command{
+		Label:     "descendant reaping",
+		Name:      "sh",
+		Args:      []string{"-c", "sleep 30 & echo $! > " + pidFile + "; sleep 30"},
+		Timeout:   300 * time.Millisecond,
+		WaitDelay: 300 * time.Millisecond,
+		Heartbeat: time.Hour,
+		Progress:  &bytes.Buffer{},
+	}.Run()
+
+	if !res.TimedOut {
+		t.Fatalf("expected TimedOut, got %+v", res)
+	}
+
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error: %v", pidFile, err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("parse descendant pid %q: %v", raw, err)
+	}
+
+	// Signal 0 probes liveness without delivering anything. The descendant is
+	// given a moment to actually die before the probe.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return // the descendant is gone, which is the point
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("descendant pid %d survived the timeout: the process group was not killed", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -91,6 +91,9 @@ func (c Command) Run() Result {
 	// Explicitly detach stdin. A gate must never block waiting on a terminal
 	// that a non-interactive host session does not have.
 	cmd.Stdin = nil
+	// Kill the whole process group on cancellation, not just the launcher we
+	// started, so descendants do not outlive the gate that gave up on them.
+	isolateProcessGroup(cmd)
 	// Release Wait once the child is killed, even if a descendant still holds
 	// the pipes. This is the difference between a bounded gate and a hang.
 	cmd.WaitDelay = waitDelay
@@ -132,7 +135,10 @@ func (c Command) Run() Result {
 		}
 	}
 
-	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	// The deadline can fire after a command has already succeeded, in the gap
+	// before this check. Reporting that as a timeout would reject a build or
+	// test that actually passed, so a timeout needs the command to have failed.
+	timedOut := err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)
 	switch {
 	case timedOut:
 		fmt.Fprintf(progress, "⏱  %s: timed out after %s\n", c.Label, c.Timeout)

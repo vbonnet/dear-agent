@@ -175,7 +175,15 @@ func runBuild(projectDir, lang string) *CompilationResult {
 		cmd.Name, cmd.Args = "go", []string{"build", "./..."}
 	case "python":
 		// Python syntax check over the project's top-level modules.
-		pyFiles, _ := filepath.Glob(filepath.Join(projectDir, "*.py"))
+		// A project directory containing an unclosed bracket makes the joined
+		// pattern malformed, so this error is reachable and not decoration.
+		pyFiles, err := filepath.Glob(filepath.Join(projectDir, "*.py"))
+		if err != nil {
+			return &CompilationResult{
+				Success:      false,
+				ErrorMessage: fmt.Sprintf("cannot enumerate Python sources in %s: %v", projectDir, err),
+			}
+		}
 		if len(pyFiles) == 0 {
 			return &CompilationResult{Success: true}
 		}
