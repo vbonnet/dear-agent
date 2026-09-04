@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +85,7 @@ const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:Str
         nodes{
           id
           isResolved
-          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } } }
+          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } body } }
         }
       }
     }
@@ -95,51 +96,204 @@ const threadResolveMutation = `mutation($threadId:ID!){
   resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
 }`
 
-// botThread is a single unresolved review thread attributed to a known bot.
+// threadComment is one comment on a review thread.
+type threadComment struct {
+	author string
+	body   string
+}
+
+// reviewThread is one PR review thread as fetched from GraphQL.
+type reviewThread struct {
+	id         string
+	isResolved bool
+	comments   []threadComment
+	// truncated reports that the thread has more comments than one page
+	// fetched, so its comment list cannot be trusted to be complete.
+	truncated bool
+}
+
+// botThread is a single review thread the loop may auto-resolve.
 type botThread struct {
 	id     string
 	author string
 }
 
-// ResolveBotThreads resolves every unresolved review thread authored by a known
-// bot on the PR and returns the number resolved. Human threads are left alone.
-// In dry-run it reports what it would resolve without mutating anything.
-func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, pr int) (int, error) {
+// logins returns the comment authors in order.
+func (t reviewThread) logins() []string {
+	out := make([]string, len(t.comments))
+	for i, c := range t.comments {
+		out[i] = c.author
+	}
+	return out
+}
+
+// bodies returns the comment bodies in order.
+func (t reviewThread) bodies() []string {
+	out := make([]string, len(t.comments))
+	for i, c := range t.comments {
+		out[i] = c.body
+	}
+	return out
+}
+
+// hasHumanComment reports whether any comment on the thread was written by
+// someone other than an allowlisted bot. A human in the thread means a person
+// engaged with the finding, so the merge gate treats it as addressed.
+func (t reviewThread) hasHumanComment() bool {
+	for _, c := range t.comments {
+		if !isKnownBotAuthor(c.author) {
+			return true
+		}
+	}
+	return false
+}
+
+// partitionResolvable splits fetched threads into the ones the loop may
+// auto-resolve and a count of bot threads deliberately withheld.
+//
+// A thread is resolvable only when ALL of these hold:
+//   - it is currently unresolved (nothing else to do otherwise),
+//   - its comment list is complete (a truncated thread might hide a human reply
+//     past the page boundary, MLC-05),
+//   - every comment is from an allowlisted bot (MLC-05: a human reply anywhere
+//     in the thread makes it human feedback),
+//   - and every comment carries a RECOGNISED ADVISORY severity marker.
+//
+// That last condition is ce-lr7j. Resolving by author identity alone released
+// required_review_thread_resolution over 30 P1 findings. Anything blocking or
+// unrecognised is withheld, which leaves the thread open and lets GitHub's own
+// gate keep blocking the merge.
+func partitionResolvable(threads []reviewThread) ([]botThread, int) {
+	var resolvable []botThread
+	withheld := 0
+	for _, t := range threads {
+		if t.isResolved || len(t.comments) == 0 || t.truncated {
+			continue
+		}
+		if !allCommentsFromKnownBots(t.logins()) {
+			continue // human thread: never touched, and never counted as withheld
+		}
+		if mergeloop.ThreadSeverityOf(t.bodies()).BlocksResolution() {
+			withheld++
+			continue
+		}
+		resolvable = append(resolvable, botThread{id: t.id, author: t.comments[0].author})
+	}
+	return resolvable, withheld
+}
+
+// blockingFindingsIn returns every bot finding that must stop a merge.
+//
+// This is the independent half of the fix and it deliberately ignores
+// isResolved. A blocking finding that was auto-resolved is exactly the case
+// GitHub's gate can no longer catch, so this looks at resolved threads too.
+//
+// A thread with any human comment is treated as addressed: a person engaged
+// with the finding, and it is not this gate's job to second-guess them.
+// Truncated threads are judged on what is visible, which is fail-closed: a
+// visible blocking comment blocks even if the rest of the page is unseen.
+func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
+	var out []mergeloop.BlockingFinding
+	for _, t := range threads {
+		if len(t.comments) == 0 || t.hasHumanComment() {
+			continue
+		}
+		sev := mergeloop.ThreadSeverityOf(t.bodies())
+		if sev != mergeloop.SeverityBlocking {
+			// Unknown severity on an unresolved thread is already blocked by
+			// GitHub. Flagging it here too would deadlock every PR carrying
+			// ordinary bot prose.
+			continue
+		}
+		out = append(out, mergeloop.BlockingFinding{
+			ThreadID: t.id,
+			Author:   t.comments[0].author,
+			Severity: sev,
+			Excerpt:  excerptFinding(t.comments),
+		})
+	}
+	return out
+}
+
+// excerptFinding pulls a short human-readable title out of a bot finding so the
+// audit record says what is blocking rather than just that something is.
+func excerptFinding(comments []threadComment) string {
+	for _, c := range comments {
+		if mergeloop.ClassifyCommentSeverity(c.body) != mergeloop.SeverityBlocking {
+			continue
+		}
+		// Codex puts the finding title in bold after the badge; Gemini starts
+		// its prose on the line after. Take the first non-empty line with the
+		// markdown noise stripped.
+		for line := range strings.SplitSeq(c.body, "\n") {
+			line = strings.TrimSpace(badgeNoise.ReplaceAllString(line, ""))
+			line = strings.Trim(line, "*_ ")
+			if len(line) > 8 {
+				// Truncate by rune, not byte: a bot finding can be non-ASCII
+				// and a byte slice would sever a multi-byte rune, putting
+				// invalid UTF-8 into the audit record.
+				if runes := []rune(line); len(runes) > 120 {
+					line = string(runes[:120]) + "..."
+				}
+				return line
+			}
+		}
+	}
+	return "(no excerpt)"
+}
+
+// badgeNoise strips inline badge images so an excerpt reads as prose.
+var badgeNoise = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)|</?sub>`)
+
+// ResolveBotThreads resolves every unresolved review thread on the PR that is
+// bot-authored AND carries a recognised advisory severity marker, returning
+// what it did. Human threads, blocking findings, and threads whose severity
+// this code does not recognise are all left alone.
+func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, pr int) (mergeloop.ThreadResolution, error) {
 	owner, name, ok := splitOwnerRepo(repo)
 	if !ok {
-		return 0, fmt.Errorf("invalid repo %q (want owner/name)", repo)
+		return mergeloop.ThreadResolution{}, fmt.Errorf("invalid repo %q (want owner/name)", repo)
 	}
-	threads, err := r.listBotThreads(ctx, owner, name, pr)
+	threads, err := r.listThreads(ctx, owner, name, pr)
 	if err != nil {
-		return 0, err
+		return mergeloop.ThreadResolution{}, err
 	}
-	resolved := 0
-	for _, t := range threads {
+	resolvable, withheld := partitionResolvable(threads)
+	out := mergeloop.ThreadResolution{Withheld: withheld}
+	for _, t := range resolvable {
 		if r.dryRun {
-			fmt.Printf("  [dry-run] would resolve thread %s by %s on PR #%d\n", t.id, t.author, pr)
-			resolved++
+			fmt.Printf("  [dry-run] would resolve advisory thread %s by %s on PR #%d\n", t.id, t.author, pr)
+			out.Resolved++
 			continue
 		}
 		if err := r.resolveThread(ctx, t.id); err != nil {
-			// Surface the partial count so the caller can audit progress.
-			return resolved, fmt.Errorf("resolving thread %s by %s: %w", t.id, t.author, err)
+			return out, fmt.Errorf("resolving thread %s by %s: %w", t.id, t.author, err)
 		}
 		emitThreadResolutionEvent(pr, t.id, t.author)
-		resolved++
+		out.Resolved++
 	}
-	return resolved, nil
+	return out, nil
 }
 
-// listBotThreads pages through the PR's review threads and returns the
-// unresolved ones where every comment — not just the first — is authored by
-// a known bot. A bot opening a thread that a human later replies to must
-// never be auto-resolved (MLC-05); checking only the first comment would miss
-// that reply entirely and silently discard human feedback the moment this
-// PR's own review-thread finding illustrates it does (ce-hz14 follow-up). A
-// thread with more comments than a single page fetches is left unresolved
-// rather than risk missing a human reply past the page boundary.
-func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name string, pr int) ([]botThread, error) {
-	var out []botThread
+// BlockingFindings re-queries the PR and reports bot findings that must stop a
+// merge. It shares no state with ResolveBotThreads: the fetch is fresh and the
+// verdict is recomputed, so a resolver bug cannot suppress it.
+func (r *ghThreadResolver) BlockingFindings(ctx context.Context, repo string, pr int) ([]mergeloop.BlockingFinding, error) {
+	owner, name, ok := splitOwnerRepo(repo)
+	if !ok {
+		return nil, fmt.Errorf("invalid repo %q (want owner/name)", repo)
+	}
+	threads, err := r.listThreads(ctx, owner, name, pr)
+	if err != nil {
+		return nil, err
+	}
+	return blockingFindingsIn(threads), nil
+}
+
+// listThreads pages through every review thread on the PR, resolved or not,
+// with each comment's author and body.
+func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, pr int) ([]reviewThread, error) {
+	var out []reviewThread
 	cursor := ""
 	for {
 		args := []string{"api", "graphql",
@@ -175,6 +329,7 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 										Author struct {
 											Login string `json:"login"`
 										} `json:"author"`
+										Body string `json:"body"`
 									} `json:"nodes"`
 								} `json:"comments"`
 							} `json:"nodes"`
@@ -188,17 +343,15 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 		}
 		rt := resp.Data.Repository.PullRequest.ReviewThreads
 		for _, n := range rt.Nodes {
-			if n.IsResolved || len(n.Comments.Nodes) == 0 || n.Comments.PageInfo.HasNextPage {
-				continue
+			t := reviewThread{
+				id:         n.ID,
+				isResolved: n.IsResolved,
+				truncated:  n.Comments.PageInfo.HasNextPage,
 			}
-			logins := make([]string, len(n.Comments.Nodes))
-			for i, c := range n.Comments.Nodes {
-				logins[i] = c.Author.Login
+			for _, c := range n.Comments.Nodes {
+				t.comments = append(t.comments, threadComment{author: c.Author.Login, body: c.Body})
 			}
-			if !allCommentsFromKnownBots(logins) {
-				continue
-			}
-			out = append(out, botThread{id: n.ID, author: logins[0]})
+			out = append(out, t)
 		}
 		if !rt.PageInfo.HasNextPage {
 			break

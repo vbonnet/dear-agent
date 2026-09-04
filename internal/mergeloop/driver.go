@@ -47,9 +47,37 @@ type AgentSpawner interface {
 // interface lets the mergeloop resolve them before attempting the merge.
 type ThreadResolver interface {
 	// ResolveBotThreads resolves unresolved review threads authored by known
-	// bot accounts on the given PR. Returns the number of threads resolved.
-	// Human-authored threads are never touched.
-	ResolveBotThreads(ctx context.Context, repo string, pr int) (int, error)
+	// bot accounts on the given PR, EXCEPT those carrying a blocking or
+	// unrecognised severity marker. Human-authored threads are never touched.
+	ResolveBotThreads(ctx context.Context, repo string, pr int) (ThreadResolution, error)
+
+	// BlockingFindings re-reads the PR's review threads and returns every bot
+	// finding that must stop a merge. It is the independent half of the
+	// ce-lr7j fix: it runs at merge time, queries GitHub afresh, and does not
+	// trust whatever ResolveBotThreads decided earlier in the same tick. A
+	// severity classifier that mis-reads a future badge format therefore still
+	// cannot land a blocking finding, because the merge is refused here.
+	BlockingFindings(ctx context.Context, repo string, pr int) ([]BlockingFinding, error)
+}
+
+// ThreadResolution reports what one ResolveBotThreads pass did.
+type ThreadResolution struct {
+	// Resolved counts threads auto-resolved because every comment was an
+	// allowlisted bot AND carried a recognised advisory severity marker.
+	Resolved int
+	// Withheld counts bot threads deliberately left unresolved because at
+	// least one comment was blocking-severity or carried no marker this code
+	// recognises. Withholding is the safe outcome: the thread stays open and
+	// GitHub's required_review_thread_resolution keeps blocking the merge.
+	Withheld int
+}
+
+// BlockingFinding is one review thread that must prevent a merge.
+type BlockingFinding struct {
+	ThreadID string
+	Author   string
+	Severity ThreadSeverity
+	Excerpt  string
 }
 
 // AgentKind distinguishes the two code-editing tasks the loop delegates.
@@ -153,7 +181,7 @@ func (d *Driver) Tick(ctx context.Context) (TickResult, error) {
 	res := TickResult{Actions: map[State]int{}}
 	maxOpen := d.Cap
 	if maxOpen <= 0 {
-		maxOpen = 50
+		maxOpen = DefaultCap
 	}
 	prs, err := d.Deps.Lister.ListOpen(ctx, d.Repo, maxOpen)
 	if err != nil {
@@ -288,19 +316,68 @@ func (d *Driver) resolveBotThreads(ctx context.Context, pr PR) {
 	if d.Deps.Threads == nil {
 		return
 	}
-	resolved, err := d.Deps.Threads.ResolveBotThreads(ctx, d.Repo, pr.Number)
+	out, err := d.Deps.Threads.ResolveBotThreads(ctx, d.Repo, pr.Number)
 	if err != nil {
 		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "thread_resolve_error", Detail: err.Error()})
 		return
 	}
-	if resolved > 0 {
+	if out.Resolved > 0 {
 		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "bot_threads_resolved",
-			Detail: fmt.Sprintf("resolved %d bot review thread(s)", resolved)})
+			Detail: fmt.Sprintf("resolved %d advisory bot review thread(s)", out.Resolved)})
 	}
+	// ce-lr7j DoD item 6: withholding must be observable. Silence here is what
+	// let 30 P1 findings pass unnoticed.
+	if out.Withheld > 0 {
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "bot_threads_withheld",
+			Detail: fmt.Sprintf("left %d bot review thread(s) unresolved: blocking or unrecognised severity", out.Withheld)})
+	}
+}
+
+// blockingFindingsGate is the independent at-merge-time review-thread check. It
+// returns true when the merge may proceed.
+//
+// Fail closed in both directions: findings present means no merge, and a gate
+// that cannot be evaluated also means no merge. An unreachable gate must never
+// be read as "no findings" — that is the fail-open shape this whole bead exists
+// to remove.
+func (d *Driver) blockingFindingsGate(ctx context.Context, pr PR) bool {
+	if d.Deps.Threads == nil {
+		// No resolver wired means nothing auto-resolved anything, so GitHub's
+		// own required_review_thread_resolution is still the live gate.
+		return true
+	}
+	findings, err := d.Deps.Threads.BlockingFindings(ctx, d.Repo, pr.Number)
+	if err != nil {
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "thread_gate_error",
+			Detail: "refusing merge: cannot evaluate review-thread gate: " + err.Error()})
+		return false
+	}
+	if len(findings) > 0 {
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merge_blocked_findings",
+			Detail: describeFindings(findings)})
+		return false
+	}
+	return true
+}
+
+// describeFindings renders findings for the audit trail, most severe first.
+func describeFindings(findings []BlockingFinding) string {
+	parts := make([]string, 0, len(findings))
+	for _, f := range findings {
+		parts = append(parts, fmt.Sprintf("%s/%s: %s", f.Author, f.Severity, f.Excerpt))
+	}
+	return fmt.Sprintf("%d unaddressed bot finding(s) block this merge: %s",
+		len(findings), strings.Join(parts, "; "))
 }
 
 func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickResult) {
 	if d.Deps.Merger == nil {
+		return
+	}
+	// Independent of whatever resolveBotThreads decided a moment ago.
+	if !d.blockingFindingsGate(ctx, pr) {
+		d.Tracker.RecordAction(pr.Number, StateGreen, now)
+		res.Escalated++
 		return
 	}
 	err := d.Deps.Merger.Merge(ctx, d.Repo, pr.Number)

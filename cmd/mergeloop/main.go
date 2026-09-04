@@ -55,13 +55,17 @@ func run(argv []string) error {
 	}
 	mode := argv[0]
 	if mode == "-h" || mode == "--help" {
-		fmt.Println("mergeloop <tick|run> [flags] — persistent PR-merge loop (ADR-029)")
-		fmt.Println("  tick   one idempotent pass over all open PRs")
-		fmt.Println("  run    daemon: tick, sleep --interval, repeat")
+		fmt.Println("mergeloop <tick|run|threads> [flags] — persistent PR-merge loop (ADR-029)")
+		fmt.Println("  tick     one idempotent pass over all open PRs")
+		fmt.Println("  run      daemon: tick, sleep --interval, repeat")
+		fmt.Println("  threads  read-only: show how one PR's review threads classify")
 		return nil
 	}
+	if mode == "threads" {
+		return runThreadsReport(argv[1:])
+	}
 	if mode != "tick" && mode != "run" {
-		return fmt.Errorf("unknown mode %q (want tick or run)", mode)
+		return fmt.Errorf("unknown mode %q (want tick, run, or threads)", mode)
 	}
 
 	opts := options{mode: mode}
@@ -140,7 +144,7 @@ func newMergeLoopFlagSet(mode string, opts *options) *flag.FlagSet {
 	fs := flag.NewFlagSet("mergeloop "+mode, flag.ContinueOnError)
 	fs.StringVar(&opts.repo, "repo", "", "GitHub repo owner/name (auto-detected if empty)")
 	fs.DurationVar(&opts.interval, "interval", 10*time.Minute, "run mode: delay between ticks")
-	fs.IntVar(&opts.cap, "cap", 50, "backpressure: skip the tick above this many open PRs")
+	fs.IntVar(&opts.cap, "cap", mergeloop.DefaultCap, "backpressure: skip the tick above this many open PRs")
 	fs.IntVar(&opts.maxAttempts, "max-attempts", mergeloop.DefaultMaxAgentAttempts, "max agent fix attempts per PR before escalation")
 	fs.DurationVar(&opts.stallThreshold, "stall-threshold", time.Hour, "a PR actionable but untouched longer than this is counted as stalled")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "classify and report; perform no rebases/merges/spawns")
