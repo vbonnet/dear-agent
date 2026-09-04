@@ -15,6 +15,7 @@
   (SGC-17), since `cmd/` cannot import `agm/internal/...`.
 - Build-cache reaper evidence: `cmd/disk-watchdog/buildcache_test.go` (DW-32..DW-38).
 - E2E-cache reaper evidence: `cmd/disk-watchdog/e2ecache_test.go` (DW-39..DW-42).
+- Preflight-scratch reaper evidence: `cmd/disk-watchdog/preflight_scratch_test.go` (DW-43..DW-47).
 
 <!-- Last audited at: 2026-08-14 -->
 
@@ -138,3 +139,13 @@ place, so counting either would let a broken reaper suppress its own alarm.
 **DW-41** When an E2E test fixture directory is within the configured max-entries bound and newer than the configured age gate, when a process holds a file open inside it, or when its liveness probe cannot be evaluated, the system shall keep the fixture directory and shall record the reason it was kept.
 
 **DW-42** When the configured E2E cache age gate is not positive while the E2E reaper is enabled, the system shall reject it as a usage error and exit 2. Passing an empty E2E cache directory is the supported way to disable the E2E reaper.
+
+**DW-43** The system shall reap abandoned preflight scratch directories across configured preflight scratch roots on every tick, regardless of whether any disk threshold is breached.
+
+**DW-44** When identifying candidate preflight scratch directories, the system shall discover directories under `${XDG_CACHE_HOME:-$HOME/.cache}/dear-agent/preflight-tmp` and `${XDG_CACHE_HOME:-$HOME/.cache}/dear-agent/preflight-runs`, as well as legacy preflight directories matching `.preflight-home-*`, `.preflight-*`, `ce*-preflight*`, `.ce[0-9]*`, and `.tmp` under `$HOME`, and `ce*-preflight*`, `dear-agent-preflight-*`, and `ce-*-host-tmp*` under `~/.cache`.
+
+**DW-45** When identifying a candidate preflight scratch directory, the system shall verify that the candidate is owned by the current user EUID, is a regular directory and not a symbolic link, is older than the configured preflight scratch age gate (default 24h), and has no active processes holding files open inside it. A directory failing any safety check or whose liveness probe cannot be evaluated shall be kept.
+
+**DW-46** While dry-run mode is set, the system shall scan for abandoned preflight scratch directories and report reclaimable bytes but shall delete nothing.
+
+**DW-47** When the configured preflight scratch age gate is not positive while the preflight reaper is enabled, the system shall reject it as a usage error and exit 2. Passing empty preflight scratch roots is the supported way to disable the preflight scratch reaper.
