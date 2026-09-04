@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var t0 = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -120,13 +121,13 @@ func TestLaunchdPulse_ListErrorIsUndetermined(t *testing.T) {
 // AA-04: non-zero exit is ABSENT with the exit status; zero exit is PRESENT.
 func TestCommandPulse(t *testing.T) {
 	pr := fixedProbes()
-	pr.RunCommand = func(_ context.Context, argv []string) (int, error) { return 1, nil }
+	pr.RunCommand = func(_ context.Context, argv []string) (int, string, error) { return 1, "", nil }
 	p := Pulse{Name: "main-merge", Type: PulseCommand, Command: []string{"check-merge"}}
 	res := EvaluatePulse(context.Background(), p, pr, "", nil)
 	if res.Status != StatusAbsent || !strings.Contains(res.Reason, "exited 1") {
 		t.Fatalf("got %s %q, want absent exited-1", res.Status, res.Reason)
 	}
-	pr.RunCommand = func(_ context.Context, argv []string) (int, error) { return 0, nil }
+	pr.RunCommand = func(_ context.Context, argv []string) (int, string, error) { return 0, "", nil }
 	if res := EvaluatePulse(context.Background(), p, pr, "", nil); res.Status != StatusPresent {
 		t.Fatalf("zero exit: status = %s, want present", res.Status)
 	}
@@ -135,7 +136,9 @@ func TestCommandPulse(t *testing.T) {
 // AA-05: a command that cannot start is UNDETERMINED.
 func TestCommandPulse_StartErrorIsUndetermined(t *testing.T) {
 	pr := fixedProbes()
-	pr.RunCommand = func(_ context.Context, argv []string) (int, error) { return -1, errors.New("no such binary") }
+	pr.RunCommand = func(_ context.Context, argv []string) (int, string, error) {
+		return -1, "", errors.New("no such binary")
+	}
 	p := Pulse{Name: "main-merge", Type: PulseCommand, Command: []string{"check-merge"}}
 	if res := EvaluatePulse(context.Background(), p, pr, "", nil); res.Status != StatusUndetermined {
 		t.Fatalf("status = %s, want undetermined", res.Status)
@@ -301,5 +304,83 @@ func TestLoadPulseConfig_UnloadableRefuses(t *testing.T) {
 				t.Errorf("pulses = %v, want nil so no tick treats this as all-clear", pulses)
 			}
 		})
+	}
+}
+
+func TestCommandPulseCarriesProbeOutputIntoTheReason(t *testing.T) {
+	// AA-16: a command probe already knows why it is unhappy, and its stdout is
+	// written to be read by a responder. Reporting only "exited 1" throws that
+	// away and reproduces, inside the alarm itself, the failure this whole
+	// package exists to end: a monitor that says something is wrong without
+	// saying what. The reason must carry the probe's own summary.
+	pr := DefaultProbes()
+	pr.RunCommand = func(_ context.Context, _ []string) (int, string, error) {
+		return 1, "gate-health: SYSTEMIC GATE FAILURE\n  check:  govulncheck\n  likely fix: bump x/crypto\n", nil
+	}
+	p := Pulse{Name: "gate", Type: PulseCommand, Command: []string{"gate-health"}, Expect: "no systemic gate failure"}
+
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusAbsent {
+		t.Fatalf("status = %q, want %q", res.Status, StatusAbsent)
+	}
+	for _, want := range []string{"govulncheck", "bump x/crypto"} {
+		if !strings.Contains(res.Reason, want) {
+			t.Errorf("Reason missing %q, got:\n%s", want, res.Reason)
+		}
+	}
+}
+
+func TestCommandPulseReasonFallsBackToExitCodeWhenSilent(t *testing.T) {
+	// AA-17: a probe that fails without saying anything still yields a reason
+	// naming the command and its exit code.
+	pr := DefaultProbes()
+	pr.RunCommand = func(_ context.Context, _ []string) (int, string, error) { return 3, "   \n", nil }
+	p := Pulse{Name: "quiet", Type: PulseCommand, Command: []string{"quiet-probe", "--json"}}
+
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusAbsent {
+		t.Fatalf("status = %q, want %q", res.Status, StatusAbsent)
+	}
+	if !strings.Contains(res.Reason, "quiet-probe --json") || !strings.Contains(res.Reason, "3") {
+		t.Errorf("Reason = %q, want the command and exit code", res.Reason)
+	}
+}
+
+func TestCommandPulseReasonIsBounded(t *testing.T) {
+	// AA-18: probe output is untrusted in length. A runaway probe must not push
+	// a megabyte into the escalation journal or a desktop notification, so the
+	// captured summary is truncated with a marker rather than dropped.
+	pr := DefaultProbes()
+	pr.RunCommand = func(_ context.Context, _ []string) (int, string, error) {
+		return 1, strings.Repeat("x", 10_000), nil
+	}
+	p := Pulse{Name: "loud", Type: PulseCommand, Command: []string{"loud-probe"}}
+
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if len(res.Reason) > maxReasonBytes+200 {
+		t.Fatalf("Reason is %d bytes, want it bounded near %d", len(res.Reason), maxReasonBytes)
+	}
+	if !strings.Contains(res.Reason, "truncated") {
+		t.Errorf("Reason must mark truncation, got tail: %q", res.Reason[max(0, len(res.Reason)-80):])
+	}
+}
+
+func TestCommandPulseReasonTruncatesOnRuneBoundary(t *testing.T) {
+	// A probe output that exceeds maxReasonBytes must not split a multi-byte
+	// UTF-8 rune in half.
+	prefix := strings.Repeat("a", maxReasonBytes-1)
+	multiByteStr := prefix + "€€€"
+	pr := DefaultProbes()
+	pr.RunCommand = func(_ context.Context, _ []string) (int, string, error) {
+		return 1, multiByteStr, nil
+	}
+	p := Pulse{Name: "utf8", Type: PulseCommand, Command: []string{"utf8-probe"}}
+
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if !utf8.ValidString(res.Reason) {
+		t.Fatalf("Reason contains invalid UTF-8: %q", res.Reason)
+	}
+	if !strings.Contains(res.Reason, "truncated") {
+		t.Errorf("Reason must mark truncation: %q", res.Reason)
 	}
 }

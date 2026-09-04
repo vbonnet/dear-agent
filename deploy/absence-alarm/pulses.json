@@ -1,6 +1,21 @@
 {
   "pulses": [
     {
+      "name": "merge-pipeline-landing",
+      "type": "command",
+      "command": [
+        "~/go/bin/merge-health",
+        "--repo",
+        "~/src/dear-agent",
+        "--ref",
+        "origin/main",
+        "--lookback",
+        "6h"
+      ],
+      "window": "6h",
+      "expect": "at least one commit landing on origin/main within 6h"
+    },
+    {
       "name": "mergeloop-loaded",
       "type": "launchd_loaded",
       "label": "com.dear-agent.mergeloop",
@@ -16,7 +31,11 @@
     {
       "name": "otel-receiving",
       "type": "command",
-      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
+      "command": [
+        "~/go/bin/jaeger-health",
+        "--lookback",
+        "24h"
+      ],
       "window": "24h",
       "expect": "Jaeger alive and receiving traces within 24h"
     },

@@ -36,12 +36,13 @@ last-fetch age so a responder can tell the two apart at a glance.
 
 The status vocabulary, exit codes, and JSON envelope in MH-01..MH-08 are not
 merge-specific: they are the generic absence-probe interface a scheduler
-consumes. `pkg/absencealarm/SPEC.md` owns that interface (PULSE-01..PULSE-04 —
-exit 0 healthy, 1 degraded, 2 down, 3 usage, and the JSON report shape). The
-requirements below are the merge-applicability scoping of it: what counts as
-the positive event, what the lookback means for this pipeline, and what the
-last-fetch age adds. A change to the shared vocabulary belongs in the
-absence-alarm contract, not here, so the sibling probes cannot drift apart.
+consumes. `pkg/absencealarm/SPEC.md` and `cmd/jaeger-health/SPEC.md` define
+that shared exit contract: exit 0 healthy, 1 degraded, 2 down, 3 usage, and
+a single JSON report shape. The requirements below are the merge-applicability
+scoping of it: what counts as the positive event, what the lookback means
+for this pipeline, and what the last-fetch age adds. A change to the shared
+vocabulary belongs in the absence-alarm contract, not here, so the sibling
+probes cannot drift apart.
 
 ## EARS Requirements
 

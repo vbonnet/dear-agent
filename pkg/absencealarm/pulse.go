@@ -83,7 +83,10 @@ type Probes struct {
 	Now         func() time.Time
 	StatMtime   func(path string) (mtime time.Time, exists bool, err error)
 	LaunchdList func(ctx context.Context) (string, error)
-	RunCommand  func(ctx context.Context, argv []string) (exitCode int, err error)
+	// RunCommand runs a probe and returns its exit code and captured stdout.
+	// The output is carried because a probe that failed already knows why, and
+	// its summary is written to be read by whoever gets the escalation.
+	RunCommand func(ctx context.Context, argv []string) (exitCode int, output string, err error)
 }
 
 // DefaultProbes returns the real host observations used outside tests.
@@ -107,11 +110,14 @@ func DefaultProbes() Probes {
 			}
 			return string(out), nil
 		},
-		RunCommand: func(ctx context.Context, argv []string) (int, error) {
+		RunCommand: func(ctx context.Context, argv []string) (int, string, error) {
 			cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+			var out strings.Builder
+			cmd.Stdout = &out
+			cmd.Stderr = &out
 			err := cmd.Run()
 			if err == nil {
-				return 0, nil
+				return 0, out.String(), nil
 			}
 			// A probe killed by its own deadline was never evaluated. Report
 			// that as an evaluation failure (UNDETERMINED, AA-05) rather than
@@ -120,12 +126,12 @@ func DefaultProbes() Probes {
 			// the thing is missing" are different facts, and collapsing them
 			// would blame the monitored subject for the monitor's own timeout.
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return -1, fmt.Errorf("probe did not finish within its deadline: %w", ctxErr)
+				return -1, out.String(), fmt.Errorf("probe did not finish within its deadline: %w", ctxErr)
 			}
 			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-				return exitErr.ExitCode(), nil
+				return exitErr.ExitCode(), out.String(), nil
 			}
-			return -1, err
+			return -1, out.String(), err
 		},
 	}
 }
@@ -296,7 +302,7 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 		}
 		res.Status = StatusPresent
 	case PulseCommand:
-		code, err := pr.RunCommand(ctx, p.Command)
+		code, output, err := pr.RunCommand(ctx, p.Command)
 		// Evidence = the moment the command returned (AA-09); set before any
 		// early return so timeout/error records also carry an observation timestamp.
 		res.Evidence = pr.Now()
@@ -307,12 +313,41 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 		}
 		if code != 0 {
 			res.Status = StatusAbsent
-			res.Reason = fmt.Sprintf("%s exited %d", strings.Join(p.Command, " "), code)
+			res.Reason = commandReason(p.Command, code, output)
 			return res
 		}
 		res.Status = StatusPresent
 	}
 	return res
+}
+
+// maxReasonBytes bounds how much probe output is carried into an escalation.
+// Probe output is untrusted in length, and this text ends up in a desktop
+// notification and an append-only journal, so a runaway probe must not be able
+// to flood either. The limit is generous enough for a full probe summary.
+const maxReasonBytes = 1200
+
+// commandReason builds the escalation text for a failing command pulse.
+//
+// It prefers the probe's own stdout over a bare exit code. A probe that failed
+// already knows which check broke and what to do about it, and discarding that
+// reproduces inside the alarm the exact failure this package exists to end: a
+// monitor that reports something is wrong without saying what. The command and
+// exit code are still appended so the reason stays self-locating.
+func commandReason(argv []string, code int, output string) string {
+	joined := strings.Join(argv, " ")
+	summary := strings.TrimSpace(output)
+	if summary == "" {
+		return fmt.Sprintf("%s exited %d", joined, code)
+	}
+	if len(summary) > maxReasonBytes {
+		limit := maxReasonBytes
+		for limit > 0 && (summary[limit]&0xC0 == 0x80) {
+			limit--
+		}
+		summary = summary[:limit] + "\n... (truncated)"
+	}
+	return fmt.Sprintf("%s\n(%s exited %d)", summary, joined, code)
 }
 
 // launchdListingContains reports whether a `launchctl list` output line names
