@@ -46,7 +46,7 @@ func TestSweepMergedWorktrees_RefusedReapIsARemediationFailure(t *testing.T) {
 			if !strings.Contains(got.Error, tt.wantSub) {
 				t.Fatalf("remediation error = %q, want it to mention %q", got.Error, tt.wantSub)
 			}
-			if d := decideBrake(true, got); !d.Engage {
+			if d := decideBrake(true, got, 0); !d.Engage {
 				t.Errorf("a breached tick whose reap was refused must latch the brake, got %+v", d)
 			}
 		})
@@ -66,7 +66,7 @@ func TestSweepMergedWorktrees_CompletedReapIsNotAFailure(t *testing.T) {
 	if got.Error != "" {
 		t.Fatalf("a completed reap must not be an error, got %q", got.Error)
 	}
-	if d := decideBrake(true, got); d.Engage {
+	if d := decideBrake(true, got, 0); d.Engage {
 		t.Errorf("a successful reap must not latch the brake, got %+v", d)
 	}
 }

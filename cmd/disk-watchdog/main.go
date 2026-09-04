@@ -22,6 +22,22 @@
 // process, mount, path, and age gates; the worktree sweep removes only
 // provably-MERGED, clean worktrees. No new destructive cleanup is invented here.
 //
+// Those hooks reclaim husks. They do not reclaim the largest thing on this
+// host. On 2026-09-04 the disk hit 97% used with 12 GiB free and writes
+// failing; the dominant consumer was the canonical Go build cache at 48 GB,
+// grown by a Codex desktop re-run of `make test-bdd`, and a human reclaimed
+// ~44 GiB with `go clean -cache`. The watchdog could not: its build-cache
+// reaper scans /tmp and $TMPDIR for *abandoned* caches, and the canonical
+// cache is neither under those roots nor abandoned. So a breached tick now
+// also trims an over-budget canonical cache (see gocache.go): size-gated,
+// pressure-gated, and structurally proven before anything is deleted.
+//
+// And a breached tick that reclaims nothing now escalates (see escalate.go).
+// It previously did not: across 2549 consecutive failing ticks the watchdog
+// latched a brake, appended to a trail with no reader, and exited 1 into
+// launchd, which discards exit codes. That is the silent-monitor failure class,
+// and it is why a human was the remediation of last resort every time.
+//
 // Usage:
 //
 //	disk-watchdog                        # human-readable report; remediate if breached
@@ -36,6 +52,10 @@
 //	disk-watchdog --brake-ttl 45m        # how long an engaged brake blocks spawns
 //	disk-watchdog --gc-max-age 2h        # reaper-staleness window (0 disables)
 //	disk-watchdog --gc-log /path/gc.jsonl   # sandbox-GC log to read liveness from
+//	disk-watchdog --go-cache-dirs D1,D2  # canonical Go caches to trim under pressure
+//	disk-watchdog --go-cache-max-gb 20   # per-cache size budget before trimming
+//	disk-watchdog --escalation-journal P # stall journal (JSONL, append)
+//	disk-watchdog --escalation-state P   # notification-backoff state
 //
 // # Reaper liveness
 //
@@ -74,7 +94,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
@@ -128,6 +150,26 @@ type config struct {
 	e2eCacheMinAge     time.Duration
 	e2eCacheMaxEntries int
 
+	// The canonical Go build cache is the opposite case to the abandoned ones
+	// above, and needs the opposite gate. It is never stale, because every
+	// build touches it, so age cannot bound it, and it is worth its disk right up
+	// until it is the reason writes fail. So the gate is size, and the trim
+	// runs only when a disk threshold is actually breached. On 2026-09-04 this
+	// cache was 48 GB while the host had 12 GiB free, and nothing in this
+	// watchdog could see it: it lives under os.UserCacheDir, outside every
+	// build-cache scan root.
+	goCacheDirs     string
+	goCacheMaxBytes int64
+
+	// Escalation for a breached tick that reclaimed nothing. Without it, a
+	// remediation that cannot reclaim loops silently: historically 2549
+	// consecutive failures produced no escalation at all.
+	escalationJournal string
+	escalationState   string
+
+	// notify is the escalation dispatch seam; nil = the real desktop notifier.
+	notify notifier
+
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
 	// so tests can observe the sweep invocation without spawning a process.
 	runCommand func(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -137,7 +179,7 @@ func run(args []string, out io.Writer) (int, error) {
 	fs := flag.NewFlagSet("disk-watchdog", flag.ContinueOnError)
 	fs.SetOutput(out)
 	cfg := config{}
-	var freeWarnGB, freeCriticalGB float64
+	var freeWarnGB, freeCriticalGB, goCacheMaxGB float64
 	fs.BoolVar(&cfg.jsonOutput, "json", false, "emit JSON instead of a human-readable report")
 	fs.BoolVar(&cfg.dryRun, "dry-run", false, "detect and log, but do not reap any worktrees")
 	fs.StringVar(&cfg.path, "path", "/", "filesystem path to measure")
@@ -163,6 +205,14 @@ func run(args []string, out io.Writer) (int, error) {
 		"only reap E2E fixture directories whose mtime is older than this")
 	fs.IntVar(&cfg.e2eCacheMaxEntries, "e2e-cache-max-entries", defaultE2ECacheMaxEntries,
 		"maximum number of recent E2E fixture directories to retain")
+	fs.StringVar(&cfg.goCacheDirs, "go-cache-dirs", defaultGoCacheDirs(),
+		"canonical Go build caches trimmed when over budget under disk pressure; empty disables the trim")
+	fs.Float64Var(&goCacheMaxGB, "go-cache-max-gb", defaultGoCacheMaxGB,
+		"size budget (GiB) for each canonical Go build cache; an over-budget cache is emptied on a breached tick")
+	fs.StringVar(&cfg.escalationJournal, "escalation-journal", defaultEscalationJournal(),
+		"JSONL journal appended on every tick whose remediation reclaimed nothing")
+	fs.StringVar(&cfg.escalationState, "escalation-state", defaultEscalationState(),
+		"notification-backoff state for the stall escalation; empty disables escalation")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -176,6 +226,13 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 	cfg.thresholds.FreeWarnBytes = uint64(freeWarnGB * supervisor.GiB)
 	cfg.thresholds.FreeCriticalBytes = uint64(freeCriticalGB * supervisor.GiB)
+	// A negative budget is a typo, and silently accepting one would disable
+	// the only lever that reclaims real space on this host. Zero is a valid
+	// choice: it means "empty the cache on any breached tick".
+	if goCacheMaxGB < 0 {
+		return 2, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget cannot be negative (pass an empty -go-cache-dirs to disable the trim)", goCacheMaxGB)
+	}
+	cfg.goCacheMaxBytes = int64(goCacheMaxGB * supervisor.GiB)
 	// Only zero disables the liveness check (DW-20). A negative duration parses
 	// happily, and silently disabling on it would let one typo in a launchd
 	// plist leave a dead reaper unmonitored while every tick still reports OK —
@@ -235,7 +292,20 @@ func run(args []string, out io.Writer) (int, error) {
 		remediation = r
 	}
 
-	updateAdmissionBrake(cfg, diskBreached, remediation)
+	// Trim the canonical cache only now that a threshold is known to be
+	// breached, and before the brake decision: on 2026-09-04 this was the only
+	// remediation that could have reclaimed anything, and a tick that frees
+	// 44 GiB must not be recorded as a failed remediation because a different
+	// leg was killed.
+	goCaches := trimOversizedCanonicalCaches(cfg, diskBreached)
+	reclaimed := reclaimedBytes(remediation, buildCaches, e2eCaches, goCaches)
+
+	updateAdmissionBrake(cfg, diskBreached, remediation, reclaimed)
+
+	// A breached tick that reclaimed nothing is the silent-loop condition.
+	// Escalate it loudly rather than latching a brake nobody reads.
+	stalled := remediationStalled(diskBreached, remediation, reclaimed)
+	escalateStall(cfg, stalled, stallReason(snap, level, remediation, goCaches), time.Now())
 
 	// A dead reaper is an alarm in its own right, at whatever free space happens
 	// to be. Folding it into the same level/reasons the disk thresholds produce
@@ -257,7 +327,7 @@ func run(args []string, out io.Writer) (int, error) {
 	// write is timeout-bounded because I/O on an exhausted disk can stall.
 	if breached {
 		logCtx, logCancel := context.WithTimeout(context.Background(), trailTimeout)
-		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc, buildCaches, e2eCaches)
+		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc, buildCaches, e2eCaches, goCaches)
 		logCancel()
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: trail append failed: %v\n", lerr)
@@ -265,11 +335,11 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	if cfg.jsonOutput {
-		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches); err != nil {
+		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches, goCaches); err != nil {
 			return 2, err
 		}
 	} else {
-		emitReport(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches)
+		emitReport(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches, goCaches)
 	}
 
 	if breached {
@@ -446,23 +516,77 @@ type brakeDecision struct {
 // A breached tick whose remediation *succeeded* deliberately leaves an existing
 // brake alone rather than clearing it: one successful sweep under an active
 // alarm is not evidence the host is healthy. Only an unbreached tick releases.
-func decideBrake(breached bool, rem *sweepResult) brakeDecision {
+// A failed leg that nonetheless reclaimed space is not a wedged host. On
+// 2026-09-04 the worktree sweep was killed by the exhaustion it existed to
+// relieve while the canonical build cache still held 44 GiB of reclaimable
+// bytes; a tick that frees those has helped, and halting every spawn over the
+// killed leg would be the wrong call.
+func decideBrake(breached bool, rem *sweepResult, reclaimed int64) brakeDecision {
 	switch {
 	case !breached:
 		return brakeDecision{Release: true}
-	case rem != nil && rem.Error != "":
+	case rem != nil && rem.Error != "" && reclaimed <= 0:
 		return brakeDecision{
 			Engage: true,
-			Reason: fmt.Sprintf("worktree-sweep remediation failed: %s", rem.Error),
+			Reason: fmt.Sprintf("worktree-sweep remediation failed and the tick reclaimed nothing: %s", rem.Error),
 		}
 	default:
 		return brakeDecision{}
 	}
 }
 
+// reclaimedBytes totals what this tick actually freed across every reclaim
+// path. Only deleted bytes count: a would-reap or a dry-run measurement must
+// never read as space returned to the filesystem.
+func reclaimedBytes(rem *sweepResult, build *buildCacheReapResult,
+	e2e *e2eCacheReapResult, goCaches *canonicalCacheTrimResult) int64 {
+	var total int64
+	if build != nil {
+		total += build.BytesReclaimed
+	}
+	if e2e != nil {
+		total += e2e.BytesReclaimed
+	}
+	if goCaches != nil {
+		total += goCaches.BytesReclaimed
+	}
+	// The worktree sweep reports paths rather than bytes. A removed worktree is
+	// real reclaim, so count it as progress without inventing a byte figure.
+	if rem != nil && len(rem.Removed) > 0 {
+		total += int64(len(rem.Removed))
+	}
+	return total
+}
+
+// stallReason renders what a responder needs in one line: how bad it is, and
+// what the tick tried. It is the body of the escalation, so it has to stand
+// alone in a notification with no other context.
+func stallReason(snap supervisor.ResourceSnapshot, level supervisor.PressureLevel,
+	rem *sweepResult, goCaches *canonicalCacheTrimResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: %.1f GiB free (%.1f%% used); remediation reclaimed nothing",
+		level, float64(snap.DiskFreeBytes)/supervisor.GiB, snap.DiskUsedFraction*100)
+	if rem != nil && rem.Error != "" {
+		fmt.Fprintf(&b, "; sweep: %s", rem.Error)
+	}
+	if goCaches != nil {
+		// Sorted, so the same stall renders the same line on every tick and a
+		// responder comparing two escalations is seeing a real change.
+		dirs := make([]string, 0, len(goCaches.Skipped))
+		for dir := range goCaches.Skipped {
+			dirs = append(dirs, dir)
+		}
+		sort.Strings(dirs)
+		for _, dir := range dirs {
+			fmt.Fprintf(&b, "; go cache %s: %s", dir, goCaches.Skipped[dir])
+		}
+	}
+	return b.String()
+}
+
 // updateAdmissionBrake applies the tick's brake decision.
-func updateAdmissionBrake(cfg config, breached bool, rem *sweepResult) {
-	d := decideBrake(breached, rem)
+func updateAdmissionBrake(cfg config, breached bool, rem *sweepResult, reclaimed int64) {
+	d := decideBrake(breached, rem, reclaimed)
 	switch {
 	case d.Engage:
 		applyBrake(cfg, true, d.Reason)
@@ -498,7 +622,7 @@ func applyBrake(cfg config, engage bool, reason string) {
 // logAlarm appends one watchdog.disk.alarm record to the decision trail.
 func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, gc *gcHealth,
-	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) error {
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult, goCaches *canonicalCacheTrimResult) error {
 	trail, err := decisiontrail.OpenJSONL(cfg.trailPath)
 	if err != nil {
 		return err
@@ -548,6 +672,9 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 		}
 		payload["sandbox_gc"] = sandboxGC
 	}
+	if goCaches != nil {
+		payload["go_caches"] = goCaches
+	}
 	if buildCaches != nil {
 		payload["build_caches"] = buildCaches
 	}
@@ -564,7 +691,7 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 
 func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
-	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) error {
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult, goCaches *canonicalCacheTrimResult) error {
 	type gcReport struct {
 		Stale       bool   `json:"stale"`
 		LastSuccess string `json:"last_success,omitempty"`
@@ -587,6 +714,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Remediation       *sweepResult                   `json:"remediation,omitempty"`
 		SandboxGC         *gcReport                      `json:"sandbox_gc,omitempty"`
 		BuildCaches       *buildCacheReapResult          `json:"build_caches,omitempty"`
+		GoCaches          *canonicalCacheTrimResult      `json:"go_caches,omitempty"`
 		E2ECaches         *e2eCacheReapResult            `json:"e2e_caches,omitempty"`
 		OK                bool                           `json:"ok"`
 	}
@@ -611,6 +739,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Remediation:       rem,
 		SandboxGC:         gcr,
 		BuildCaches:       buildCaches,
+		GoCaches:          goCaches,
 		E2ECaches:         e2eCaches,
 		OK:                level == supervisor.PressureNone,
 	})
@@ -618,7 +747,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 
 func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
-	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) {
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult, goCaches *canonicalCacheTrimResult) {
 	fmt.Fprintln(out, "disk-watchdog report")
 	fmt.Fprintf(out, "  path        : %s\n", cfg.path)
 	fmt.Fprintf(out, "  disk free   : %.1f GiB  [warn < %.0f GiB, critical < %.0f GiB]\n",
@@ -642,6 +771,9 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 			fmt.Fprintf(out, "  sandbox GC  : %s, last sweep %s ago  [max age %s]\n",
 				state, gc.Age.Round(time.Minute), cfg.gcMaxAge)
 		}
+	}
+	if goCaches != nil {
+		fmt.Fprintf(out, "  %s\n", summarizeCanonicalCacheTrim(*goCaches))
 	}
 	if buildCaches != nil {
 		fmt.Fprintf(out, "  %s\n", summarizeBuildCacheReap(*buildCaches))

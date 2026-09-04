@@ -81,7 +81,7 @@ func TestEmitReport_HealthyAndAlarm(t *testing.T) {
 
 	var healthy bytes.Buffer
 	emitReport(&healthy, supervisor.ResourceSnapshot{DiskFreeBytes: 500 * supervisor.GiB, DiskUsedFraction: 0.4},
-		supervisor.PressureNone, nil, nil, cfg, nil, nil, nil)
+		supervisor.PressureNone, nil, nil, cfg, nil, nil, nil, nil)
 	if !strings.Contains(healthy.String(), "Status: OK") {
 		t.Errorf("healthy report missing OK status:\n%s", healthy.String())
 	}
@@ -89,7 +89,7 @@ func TestEmitReport_HealthyAndAlarm(t *testing.T) {
 	var alarm bytes.Buffer
 	emitReport(&alarm, supervisor.ResourceSnapshot{DiskFreeBytes: 2 * supervisor.GiB, DiskUsedFraction: 0.99},
 		supervisor.PressureCritical, []string{"disk free 2.0GiB < 5GiB (critical)"},
-		&sweepResult{Removed: []string{"/x/a"}}, cfg, nil, nil, nil)
+		&sweepResult{Removed: []string{"/x/a"}}, cfg, nil, nil, nil, nil)
 	got := alarm.String()
 	if !strings.Contains(got, "Status: ALARM (critical)") {
 		t.Errorf("alarm report missing status:\n%s", got)
@@ -103,7 +103,7 @@ func TestEmitJSON_Shape(t *testing.T) {
 	cfg := config{path: "/", thresholds: supervisor.DefaultDiskAlertThresholds}
 	var buf bytes.Buffer
 	err := emitJSON(&buf, supervisor.ResourceSnapshot{DiskFreeBytes: 10 * supervisor.GiB, DiskUsedFraction: 0.9},
-		supervisor.PressureWarn, []string{"disk free 10.0GiB < 20GiB (warn)"}, nil, cfg, nil, nil, nil)
+		supervisor.PressureWarn, []string{"disk free 10.0GiB < 20GiB (warn)"}, nil, cfg, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("emitJSON: %v", err)
 	}
@@ -183,9 +183,9 @@ func TestDecideBrake(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := decideBrake(tt.breached, tt.rem)
+			got := decideBrake(tt.breached, tt.rem, 0)
 			if got.Engage != tt.wantEngage || got.Release != tt.wantRelease {
-				t.Errorf("decideBrake(%v, %+v) = {engage:%v release:%v}, want {engage:%v release:%v}",
+				t.Errorf("decideBrake(%v, %+v, 0) = {engage:%v release:%v}, want {engage:%v release:%v}",
 					tt.breached, tt.rem, got.Engage, got.Release, tt.wantEngage, tt.wantRelease)
 			}
 		})
@@ -193,7 +193,7 @@ func TestDecideBrake(t *testing.T) {
 }
 
 func TestDecideBrake_ReasonCarriesTheRemediationError(t *testing.T) {
-	d := decideBrake(true, &sweepResult{Error: "agm worktree sweep --execute: signal: killed"})
+	d := decideBrake(true, &sweepResult{Error: "agm worktree sweep --execute: signal: killed"}, 0)
 	if !d.Engage {
 		t.Fatal("a failed remediation must engage the brake")
 	}
@@ -206,7 +206,7 @@ func TestUpdateAdmissionBrake_EngagesAndReleases(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "admission-brake.json")
 	cfg := config{brakePath: path, brakeTTL: time.Hour}
 
-	updateAdmissionBrake(cfg, true, &sweepResult{Error: "signal: killed"})
+	updateAdmissionBrake(cfg, true, &sweepResult{Error: "signal: killed"}, 0)
 	brake, err := admission.Read(path)
 	if err != nil {
 		t.Fatalf("Read after engage: %v", err)
@@ -220,7 +220,7 @@ func TestUpdateAdmissionBrake_EngagesAndReleases(t *testing.T) {
 		t.Errorf("Reason = %q, want the remediation error", brake.Reason)
 	}
 
-	updateAdmissionBrake(cfg, false, nil)
+	updateAdmissionBrake(cfg, false, nil, 0)
 	brake, err = admission.Read(path)
 	if err != nil {
 		t.Fatalf("Read after release: %v", err)
@@ -237,7 +237,7 @@ func TestUpdateAdmissionBrake_SuccessfulRemediationLeavesBrakeInPlace(t *testing
 	if err := admission.Engage(path, brakeSource, "earlier failure", time.Hour); err != nil {
 		t.Fatalf("Engage: %v", err)
 	}
-	updateAdmissionBrake(cfg, true, &sweepResult{Removed: []string{"/w/a"}})
+	updateAdmissionBrake(cfg, true, &sweepResult{Removed: []string{"/w/a"}}, 0)
 
 	brake, err := admission.Read(path)
 	if err != nil {

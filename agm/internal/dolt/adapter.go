@@ -397,7 +397,6 @@ func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*C
 	if err != nil {
 		return nil, err
 	}
-	_, sharedPortExplicit := lookupEnv("DOLT_PORT")
 	explicitDatabase, databaseIsExplicit := lookupEnv("DOLT_DATABASE")
 	databaseIsExplicit = databaseIsExplicit && explicitDatabase != ""
 	seen := make(map[string]bool, len(enabled))
@@ -410,10 +409,15 @@ func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*C
 		workspaceConfig := *base
 		workspaceConfig.Workspace = workspace
 		endpoint := endpoints[workspace]
+		// A workspace with no dolt.port of its own inherits the base endpoint,
+		// which is the explicit DOLT_PORT when one is set and the conventional
+		// default otherwise. Refusing the whole inventory in that state, the
+		// behaviour before this, cost `agm sandbox gc` its only run path on a
+		// host at 97% used, and bought nothing: cross-workspace isolation here
+		// is by database name, which stays one-per-workspace below, not by
+		// port. Workspaces that genuinely run on separate ports still say so
+		// in the registry and still win, per-workspace, over the shared base.
 		applyWorkspaceDoltEndpoint(&workspaceConfig, endpoint)
-		if endpoint.Port == "" && len(enabled) > 1 && !sharedPortExplicit {
-			return
-		}
 		if databaseIsExplicit {
 			workspaceConfig.Database = explicitDatabase
 		} else if endpoints[workspace].Database == "" {
@@ -424,8 +428,12 @@ func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*C
 	for _, workspace := range enabled {
 		add(workspace)
 	}
+	// Every named workspace must have produced exactly one config. Anything
+	// else means the registry named a workspace twice, and a short inventory
+	// cannot prove a complete cross-workspace active-session set.
 	if len(configs) != len(enabled) {
-		return nil, fmt.Errorf("multiple enabled workspaces require either an explicit shared DOLT_PORT or a per-workspace dolt.port in the AGM registry")
+		return nil, fmt.Errorf("AGM workspace registry names %d workspaces but resolved %d distinct stores; check for duplicate workspace names",
+			len(enabled), len(configs))
 	}
 	return validateConfiguredWorkspaceConfigs(configs, base, explicitDatabase, databaseIsExplicit)
 }

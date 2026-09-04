@@ -138,3 +138,23 @@ place, so counting either would let a broken reaper suppress its own alarm.
 **DW-41** When an E2E test fixture directory is within the configured max-entries bound and newer than the configured age gate, when a process holds a file open inside it, or when its liveness probe cannot be evaluated, the system shall keep the fixture directory and shall record the reason it was kept.
 
 **DW-42** When the configured E2E cache age gate is not positive while the E2E reaper is enabled, the system shall reject it as a usage error and exit 2. Passing an empty E2E cache directory is the supported way to disable the E2E reaper.
+
+**DW-43** When a disk threshold is breached, the system shall trim every configured canonical Go build cache (GOCACHE, GOLANGCI_LINT_CACHE) whose size exceeds the configured budget, by removing its shard directories while leaving the cache root and its furniture in place.
+
+**DW-44** While no disk threshold is breached, the system shall not walk or trim any canonical Go build cache, because the cache is worth its disk until it is the reason writes fail and measuring it costs a walk of hundreds of thousands of files.
+
+**DW-45** When trimming a canonical Go build cache, the system shall require the same structural proof it requires of an abandoned cache (DW-33) and shall never rely on the directory's name, so a GOCACHE mis-set to a source tree reclaims nothing.
+
+**DW-46** When identifying a canonical Go build cache, the system shall apply no age or liveness gate, because every build touches the canonical cache and a content-addressed entry removed under a running build is a cache miss rather than a corruption.
+
+**DW-47** When a shard directory cannot be removed, the system shall record it as an error and shall not count its bytes as reclaimed, so a still-full disk is never reported as remediated.
+
+**DW-48** When the configured canonical-cache budget is negative, the system shall reject it as a usage error and exit 2. Zero is a valid budget meaning "trim on any breached tick"; passing empty cache directories is the supported way to disable the trim.
+
+**DW-49** When a threshold is breached and the tick reclaimed no bytes by any path, the system shall append a stall record to the escalation journal and shall dispatch a notification on the escalating cadence of pkg/absencealarm (first stall, then 1h, 6h, 24h, then daily), because 2549 consecutive fail-closed remediations previously produced no escalation of any kind.
+
+**DW-50** When a threshold is breached and the tick reclaimed bytes by any path, the system shall not escalate and shall not engage the admission brake, even if one remediation leg failed, because a tick that freed space has remediated.
+
+**DW-51** When escalation cannot dispatch its notification, the system shall still append the stall record to the escalation journal, so a broken notification channel cannot also cost the durable evidence.
+
+**DW-52** While dry-run mode is set, the system shall neither append escalation records nor dispatch notifications nor mutate the escalation backoff state.
