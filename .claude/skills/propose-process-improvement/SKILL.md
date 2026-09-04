@@ -52,6 +52,12 @@ and keep working, don't stop to write a report.
 5. Continue the task you were on. Filing the bead is the deliverable; it is
    not a reason to stop and wait.
 
+## Verification
+
+- A bead ID was printed by `bd create` or `bd comment`. That is the deliverable — the task you were on continues.
+- If `bd list --status=open` was run and a matching bead already existed, a `+1` comment was added instead of a duplicate.
+- The session you were in has not stalled: you returned to the original task immediately after filing.
+
 ## Traps this skill kills
 
 - **Silent duplication.** Filing a fresh bead every time the same friction
