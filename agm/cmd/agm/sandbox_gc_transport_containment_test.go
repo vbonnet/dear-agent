@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -187,5 +188,150 @@ func TestSandboxGCDryRunRemainsAvailable(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"dry_run": true`) {
 		t.Fatalf("dry-run output = %q, want dry_run=true", out.String())
+	}
+}
+
+func TestSandboxGCPreCanceledDryRunSkipsInventoryAndSweep(t *testing.T) {
+	restoreSandboxGCDepsForTest(t)
+	sandboxGCReap = false
+	t.Setenv("AGM_DB_PATH", "")
+
+	var configCalls, openCalls, sweepCalls, logCalls int
+	sandboxGCStoreConfigs = func() ([]*dolt.Config, error) {
+		configCalls++
+		return []*dolt.Config{{Workspace: "test", Database: "test"}}, nil
+	}
+	openSandboxGCStore = func(*dolt.Config) (sandboxGCSessionStore, error) {
+		openCalls++
+		return &fakeSandboxGCStore{}, nil
+	}
+	runSandboxGCSweep = func(*ops.OpContext, *ops.SandboxGCRequest) (*ops.SandboxGCResult, error) {
+		sweepCalls++
+		return &ops.SandboxGCResult{}, nil
+	}
+	logSandboxGCEntry = func(gclog.Entry) { logCalls++ }
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+	err := runSandboxGC(cmd, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runSandboxGC error = %v, want context cancellation", err)
+	}
+	if configCalls != 0 || openCalls != 0 || sweepCalls != 0 || logCalls != 0 {
+		t.Fatalf("pre-canceled calls = config:%d open:%d sweep:%d log:%d, want all zero",
+			configCalls, openCalls, sweepCalls, logCalls)
+	}
+}
+
+func TestSandboxGCPreCanceledDryRunRefusesBeforeRootPreRun(t *testing.T) {
+	restoreCommandTreeFlagsForTest(t, rootCmd)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AGM_DB_PATH", "")
+
+	oldCfg := cfg
+	oldContext := rootCmd.Context()
+	oldGCContext := sandboxGCCmd.Context()
+	oldSilenceErrors := rootCmd.SilenceErrors
+	oldSilenceUsage := rootCmd.SilenceUsage
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cfg = nil
+	// The process executes once, but package tests reuse this global tree and
+	// Cobra retains a previously assigned child context between executions.
+	sandboxGCCmd.SetContext(ctx)
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
+	rootCmd.SetArgs([]string{"sandbox", "gc", "--json"})
+	t.Cleanup(func() {
+		cfg = oldCfg
+		rootCmd.SetContext(oldContext)
+		sandboxGCCmd.SetContext(oldGCContext)
+		rootCmd.SilenceErrors = oldSilenceErrors
+		rootCmd.SilenceUsage = oldSilenceUsage
+		rootCmd.SetArgs(nil)
+	})
+
+	err := rootCmd.ExecuteContext(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("root command error = %v, want context cancellation", err)
+	}
+	if cfg != nil {
+		t.Fatal("root persistent pre-run loaded configuration for a pre-canceled command")
+	}
+	if _, statErr := os.Lstat(filepath.Join(home, ".agm")); !os.IsNotExist(statErr) {
+		t.Fatalf("root pre-run touched HOME/.agm before cancellation refusal: %v", statErr)
+	}
+}
+
+func TestSandboxGCCancellationBeforeCompletionCommitLogsOnlyError(t *testing.T) {
+	restoreSandboxGCDepsForTest(t)
+	sandboxGCReap = false
+	sandboxGCJSON = true
+	t.Setenv("AGM_DB_PATH", "")
+	t.Setenv(sandboxGCSourceEnv, "disk-watchdog")
+	sandboxGCStoreConfigs = func() ([]*dolt.Config, error) {
+		return []*dolt.Config{{Workspace: "test", Database: "test"}}, nil
+	}
+	openSandboxGCStore = func(*dolt.Config) (sandboxGCSessionStore, error) {
+		return &fakeSandboxGCStore{sessions: []*manifest.Manifest{{SessionID: "live"}}}, nil
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	runSandboxGCSweep = func(opCtx *ops.OpContext, req *ops.SandboxGCRequest) (*ops.SandboxGCResult, error) {
+		if opCtx.Context != ctx {
+			t.Fatalf("operation context = %v, want command context %v", opCtx.Context, ctx)
+		}
+		if req.Source != "disk-watchdog" {
+			t.Fatalf("sweep source = %q, want disk-watchdog", req.Source)
+		}
+		cancel()
+		return &ops.SandboxGCResult{
+			Operation: "sandbox_gc",
+			DryRun:    true,
+			Scanned:   2,
+			Reaped:    1,
+			Errors:    1,
+			Entries: []ops.SandboxGCEntry{
+				{Name: "reaped", Action: "reaped"},
+				{Name: "partial", Action: "error", Reason: "partial recursive removal"},
+			},
+		}, nil
+	}
+	var logs []gclog.Entry
+	logSandboxGCEntry = func(entry gclog.Entry) { logs = append(logs, entry) }
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+	err := runSandboxGC(cmd, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runSandboxGC error = %v, want context cancellation", err)
+	}
+	var candidateErrorRecords, terminalErrorRecords int
+	for _, entry := range logs {
+		switch entry.Operation {
+		case "sandbox_gc_completed":
+			t.Fatalf("canceled sweep logged a healthy completion: %+v", entry)
+		case "sandbox_gc_error":
+			switch entry.Reason {
+			case "candidate_removal_failed":
+				candidateErrorRecords++
+				if entry.SessionID != "partial" || !strings.Contains(entry.Error, "partial recursive removal") {
+					t.Fatalf("candidate error receipt = %+v, want partial removal details", entry)
+				}
+			case "request_context_ended":
+				terminalErrorRecords++
+				if entry.Errors != 1 {
+					t.Fatalf("terminal error receipt = %+v, want one prior removal failure", entry)
+				}
+			}
+		}
+	}
+	if candidateErrorRecords != 1 || terminalErrorRecords != 1 {
+		t.Fatalf("sandbox GC error records = candidate:%d terminal:%d, want 1/1; logs=%+v",
+			candidateErrorRecords, terminalErrorRecords, logs)
 	}
 }

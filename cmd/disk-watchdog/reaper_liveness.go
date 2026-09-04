@@ -421,7 +421,7 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 	// treating a failing GC's own error records as evidence it is alive would
 	// mask exactly the failure this check exists to catch.
 	last, viaFallback := summary.LastSuccess, false
-	if !summary.HasCompletion && summary.LastReap.After(last) {
+	if !summary.HasCompletion && summary.LastReap.After(last) && summary.LastReap.After(summary.LastErrorAt) {
 		last, viaFallback = summary.LastReap, true
 	}
 

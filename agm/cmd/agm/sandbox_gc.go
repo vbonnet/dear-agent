@@ -94,8 +94,11 @@ Examples:
 	RunE: runSandboxGC,
 }
 
-func validateSandboxGCArgs(_ *cobra.Command, _ []string) error {
-	return requireSandboxGCReapAuthority()
+func validateSandboxGCArgs(cmd *cobra.Command, _ []string) error {
+	if err := requireSandboxGCReapAuthority(); err != nil {
+		return err
+	}
+	return sandboxGCCommandContextError(cmd, "before command setup")
 }
 
 func requireSandboxGCReapAuthority() error {
@@ -114,6 +117,9 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	// pre-run hooks; this check keeps direct callers fail-closed as defense in
 	// depth. Process-global package initialization is outside this command seam.
 	if err := requireSandboxGCReapAuthority(); err != nil {
+		return err
+	}
+	if err := sandboxGCCommandContextError(cmd, "before live-session inventory"); err != nil {
 		return err
 	}
 
@@ -139,13 +145,26 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 				ui.PrintWarning(warning)
 			}
 		}
+		inventoryErr := fmt.Errorf("failed to build live-session inventory: %w", err)
+		if ctxErr := sandboxGCCommandContextError(cmd, "while building live-session inventory"); ctxErr != nil {
+			inventoryErr = errors.Join(ctxErr, inventoryErr)
+		}
 		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "live_session_inventory_failed",
+			Error:     inventoryErr.Error(),
+			DryRun:    !sandboxGCReap,
+		})
+		return inventoryErr
+	}
+	if err := sandboxGCCommandContextError(cmd, "after building live-session inventory"); err != nil {
+		logSandboxGCEntryTagged(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "request_context_ended",
 			Error:     err.Error(),
 			DryRun:    !sandboxGCReap,
 		})
-		return fmt.Errorf("failed to build live-session inventory: %w", err)
+		return err
 	}
 	for _, warning := range warnings {
 		logSandboxGCEntryTagged(gclog.Entry{
@@ -178,28 +197,63 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if err := sandboxGCCommandContextError(cmd, "before sandbox sweep"); err != nil {
+		logSandboxGCEntryTagged(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "request_context_ended",
+			Error:     err.Error(),
+			DryRun:    !sandboxGCReap,
+		})
+		return err
+	}
+
 	result, err := runSandboxGCSweep(&ops.OpContext{Context: cmd.Context()}, &ops.SandboxGCRequest{
 		Reap:           reap,
 		MinAge:         minAge,
 		LiveSessionIDs: constantLiveSessionIDs(liveSessionIDs),
 		Warnings:       warnings,
+		Source:         strings.TrimSpace(os.Getenv(sandboxGCSourceEnv)),
 	})
+	// A sweep can accumulate failed removal attempts before a later candidate
+	// cancels the run. Preserve each mutation receipt durably even though an
+	// aborted command intentionally emits no JSON/text success result.
+	logSandboxGCRemovalErrors(result)
 	if err != nil {
-		logSandboxGCEntryTagged(gclog.Entry{
+		if ctxErr := sandboxGCCommandContextError(cmd, "during sandbox sweep"); ctxErr != nil {
+			err = errors.Join(ctxErr, err)
+		}
+		entry := gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "sweep_failed",
 			Error:     err.Error(),
 			DryRun:    !sandboxGCReap,
-		})
+		}
+		addSandboxGCPartialCounts(&entry, result)
+		logSandboxGCEntryTagged(entry)
 		return handleError(err)
 	}
-
 	// Carry the refusal into the machine-readable result. `dry_run: true` alone
 	// is ambiguous — it is the ordinary shape of a preview run — so an automated
 	// caller that asked for --reap and got a scan would otherwise read a refusal
 	// as a successful no-op sweep, and its `reaped` count (which now means
 	// would-reap) as deleted sandboxes.
 	result.ReapRefused = notice
+
+	// Linearize completion immediately before its durable record. Cancellation
+	// observed before this point is an aborted sweep and writes only an error;
+	// once this check passes, the completed sweep commits even if cancellation
+	// races with the contextless append-only logger itself.
+	if err := sandboxGCCommandContextError(cmd, "before committing sandbox sweep completion"); err != nil {
+		entry := gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "request_context_ended",
+			Error:     err.Error(),
+			DryRun:    !sandboxGCReap,
+		}
+		addSandboxGCPartialCounts(&entry, result)
+		logSandboxGCEntryTagged(entry)
+		return err
+	}
 
 	// Once authenticated authority lets a destructive request reach this point,
 	// a sweep that reaps nothing is still a healthy sweep. Without a record for
@@ -232,6 +286,43 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 
 	printSandboxGCText(result)
 	return nil
+}
+
+func sandboxGCCommandContextError(cmd *cobra.Command, phase string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("sandbox GC context ended %s: %w", phase, err)
+	}
+	return nil
+}
+
+func logSandboxGCRemovalErrors(result *ops.SandboxGCResult) {
+	if result == nil {
+		return
+	}
+	for _, entry := range result.Entries {
+		if entry.Action != "error" {
+			continue
+		}
+		logSandboxGCEntryTagged(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "candidate_removal_failed",
+			SessionID: entry.Name,
+			Error:     entry.Reason,
+			DryRun:    result.DryRun,
+		})
+	}
+}
+
+func addSandboxGCPartialCounts(entry *gclog.Entry, result *ops.SandboxGCResult) {
+	if result == nil {
+		return
+	}
+	entry.Errors = result.Errors
+	entry.ProbeFailures = result.ProbeFailures
 }
 
 // printSandboxGCText renders the human-readable sweep report.
