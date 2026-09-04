@@ -69,6 +69,27 @@ func TestGetDoctorSessionsDirAtHome(t *testing.T) {
 	}
 }
 
+func TestGetDoctorSessionsDirHandlesMissingLiveHome(t *testing.T) {
+	originalCfg, originalTestMode := cfg, doctorTestMode
+	t.Cleanup(func() {
+		cfg = originalCfg
+		doctorTestMode = originalTestMode
+	})
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	doctorTestMode = false
+	cfg = &config.Config{}
+
+	if got, err := getDoctorSessionsDir(); err == nil || got != "" {
+		t.Fatalf("getDoctorSessionsDir() = %q, %v; want empty path and HOME error", got, err)
+	}
+
+	cfg.SessionsDir = filepath.Join(t.TempDir(), "configured-sessions")
+	if got, err := getDoctorSessionsDir(); err != nil || got != cfg.SessionsDir {
+		t.Fatalf("configured getDoctorSessionsDir() = %q, %v; want %q, nil", got, err, cfg.SessionsDir)
+	}
+}
+
 func TestRunInstallChecksUsesRetainedRuntimeHome(t *testing.T) {
 	loaded, retainedHome := loadDoctorConfigThroughSymlinkedHome(t)
 	home, err := resolveDoctorHomePath(loaded)

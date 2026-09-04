@@ -319,6 +319,28 @@ func TestValidateHarnessAvailabilityAtHomeUsesExplicitCodexOAuth(t *testing.T) {
 	}
 }
 
+func TestValidateHarnessAvailabilityHandlesMissingLiveHome(t *testing.T) {
+	clearClaudeEnv(t)
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	t.Run("binary remains authoritative", func(t *testing.T) {
+		mockLookPath(t, map[string]bool{"codex": true})
+		if err := ValidateHarnessAvailability("codex-cli"); err != nil {
+			t.Fatalf("ValidateHarnessAvailability() with binary = %v, want nil", err)
+		}
+	})
+
+	t.Run("no signal retains unavailable error", func(t *testing.T) {
+		mockLookPath(t, map[string]bool{})
+		err := ValidateHarnessAvailability("codex-cli")
+		if _, ok := errors.AsType[*HarnessUnavailableError](err); !ok {
+			t.Fatalf("ValidateHarnessAvailability() error = %T %v, want HarnessUnavailableError", err, err)
+		}
+	})
+}
+
 func TestCodexOAuthAtHomeRejectsRelativePaths(t *testing.T) {
 	originalStat := statPath
 	statCalls := 0

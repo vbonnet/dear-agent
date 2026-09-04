@@ -88,7 +88,14 @@ func ValidateHarnessName(name string) error {
 // or if the appropriate API key / auth environment is configured. This
 // compatibility entrypoint selects the live process HOME once.
 func ValidateHarnessAvailability(name string) error {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Preserve the compatibility entrypoint's prior behavior: a missing
+		// process HOME removes only filesystem-backed credential evidence.
+		// Binary and environment availability remain valid, while a Codex
+		// caller with no other signal still receives HarnessUnavailableError.
+		home = ""
+	}
 	return validateHarnessAvailabilityAtHome(name, home)
 }
 

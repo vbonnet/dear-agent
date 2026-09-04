@@ -28,10 +28,17 @@ var (
 	doctorTestMode bool
 )
 
-// getDoctorSessionsDir returns the sessions directory based on test mode
-func getDoctorSessionsDir() string {
-	homeDir, _ := os.UserHomeDir()
-	return getDoctorSessionsDirAtHome(homeDir)
+// getDoctorSessionsDir returns the sessions directory for compatibility
+// callers that do not already hold a retained runtime HOME.
+func getDoctorSessionsDir() (string, error) {
+	if !doctorTestMode && cfg != nil && cfg.SessionsDir != "" {
+		return cfg.SessionsDir, nil
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve HOME for sessions directory: %w", err)
+	}
+	return getDoctorSessionsDirAtHome(homeDir), nil
 }
 
 func getDoctorSessionsDirAtHome(homeDir string) string {
