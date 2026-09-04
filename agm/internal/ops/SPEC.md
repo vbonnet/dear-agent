@@ -199,9 +199,9 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-98** When `ArchiveSession` reloads sandbox ownership metadata, the system shall authorize sandbox cleanup only for a complete valid record whose ID matches the stable session ID and whose merged boundary is the current host sandbox base's identified `merged` child; a recorded boundary spelled differently from that child shall be authorized only when both spellings are proven to be one existing host directory, and shall then be addressed in the host cleanup base's spelling so every downstream allowlist gate and reaper validates the same path; incomplete, mismatched, unresolvable, legacy, or out-of-base metadata shall preserve every sandbox path.
 
-**OPS-107** When archive sandbox cleanup receives a live-process refusal for a specific process immediately after owned session shutdown, the system shall retry only before an absolute bounded process-grace deadline while re-running every path, process, unmount, and mount safety gate in that order without any caller-side pre-unmount; the system shall propagate the remaining shared budget into each in-flight process and mount scan and re-check it before removal, and persistent holders, expired or unreadable process state, bad paths, or surviving mounts shall preserve the sandbox.
+**OPS-112** When archive sandbox cleanup receives a live-process refusal for a specific process immediately after owned session shutdown, the system shall retry only before an absolute bounded process-grace deadline while re-running every path, process, unmount, and mount safety gate in that order without any caller-side pre-unmount; the system shall propagate the remaining shared budget into each in-flight process and mount scan and re-check it before removal, and persistent holders, expired or unreadable process state, bad paths, or surviving mounts shall preserve the sandbox.
 
-**OPS-108** When archive sandbox cleanup retries after a live holder, the system shall refresh the owned upper-layer settings snapshot before every safety attempt so permission rules written during shutdown survive a later successful removal.
+**OPS-113** When archive sandbox cleanup retries after a live holder, the system shall refresh the owned upper-layer settings snapshot before every safety attempt so permission rules written during shutdown survive a later successful removal.
 
 ### Shared Session Resume Lifecycle
 
@@ -269,11 +269,11 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-49** When `Sweep` runs in dry-run mode without a caller-confirmed active-session set, the system shall still classify every worktree and shall remove nothing.
 
-**OPS-112** When `Sweep` classifies a worktree that is Git locked, the system shall evaluate the lock reason; if the lock reason names an active session or a live safe-pr process, the system shall classify the worktree as `ClassActive`, and if the lock reason indicates explicit operator preservation, the system shall classify the worktree as `ClassUnknown`.
+**OPS-114** When `Sweep` classifies a worktree that is Git locked, the system shall evaluate the lock reason; if the lock reason names an active session or a live safe-pr process, the system shall classify the worktree as `ClassActive`, and if the lock reason indicates explicit operator preservation, the system shall classify the worktree as `ClassUnknown`.
 
-**OPS-113** When `Sweep` classifies a worktree that is Git locked with a blanket creation lock or an archived session, the system shall permit standard merge and dirty classification.
+**OPS-115** When `Sweep` classifies a worktree that is Git locked with a blanket creation lock or an archived session, the system shall permit standard merge and dirty classification.
 
-**OPS-114** When `Sweep` removes a reapable worktree that is Git locked, the system shall unlock the worktree before invoking removal and propagate unlock failures to `SweepResult.Failed` without deleting the worktree or branch.
+**OPS-116** When `Sweep` removes a reapable worktree that is Git locked, the system shall unlock the worktree before invoking removal and propagate unlock failures to `SweepResult.Failed` without deleting the worktree or branch.
 
 ---
 
