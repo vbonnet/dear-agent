@@ -771,14 +771,41 @@ func TestBoundsFailClosed(t *testing.T) {
 		if descendantTerminationAdmission(runtime.GOOS) != nil {
 			t.Skip("guard rejects this platform before executing the POSIX test helper")
 		}
-		executable := writeFakeGit(t, "#!/bin/sh\nexec sleep 5\n")
+		fixture := newGuardRepository(t)
+		marker := filepath.Join(t.TempDir(), "post-admission-git-started")
+		quotedRoot := strings.ReplaceAll(fixture.root, "'", "'\"'\"'")
+		quotedGitDir := strings.ReplaceAll(filepath.Join(fixture.root, ".git"), "'", "'\"'\"'")
+		quotedMarker := strings.ReplaceAll(marker, "'", "'\"'\"'")
+		executable := writeFakeGit(t, fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+	case "$arg" in
+		--show-toplevel)
+			printf '%%s\n' '%s'
+			exit 0
+			;;
+		--absolute-git-dir)
+			printf '%%s\n' '%s'
+			exit 0
+			;;
+		--is-inside-work-tree)
+			printf 'true\n'
+			exit 0
+			;;
+	esac
+done
+: > '%s'
+exec /bin/sleep 5
+`, quotedRoot, quotedGitDir, quotedMarker))
 		limits := defaultLimits()
-		limits.gitTime = 25 * time.Millisecond
-		limits.wallTime = 100 * time.Millisecond
+		limits.gitTime = 500 * time.Millisecond
+		limits.wallTime = 2 * time.Second
 		started := time.Now()
-		result := evaluate(context.Background(), Request{Repository: t.TempDir(), Mode: ModeStaged}, limits, guardDependencies{gitExecutable: executable})
+		result := evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged}, limits, guardDependencies{gitExecutable: executable})
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatalf("post-admission bounded Git command did not start: %v; findings = %#v", err, result.Findings)
+		}
 		assertDecisionAndCode(t, result, DecisionBlock, "git-time-limit")
-		if elapsed := time.Since(started); elapsed > time.Second {
+		if elapsed := time.Since(started); elapsed > 3*time.Second {
 			t.Fatalf("time bound took %s", elapsed)
 		}
 	})

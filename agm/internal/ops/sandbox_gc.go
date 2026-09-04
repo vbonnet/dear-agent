@@ -241,13 +241,13 @@ func reapSandboxGCCandidate(
 	reapErr := checker.ReapContext(ctx, dir)
 	if reapErr != nil {
 		if ctxErr := sandboxGCContextError(ctx, "while reaping sandbox "+name); ctxErr != nil {
-			if _, refused := errors.AsType[*sandboxgc.RefusalError](reapErr); !refused {
+			if !isSandboxGCRefusal(reapErr) {
 				// Removal was attempted and may have partially mutated the tree.
 				recordSandboxGCRemovalError(result, name, reapErr)
 			}
 			return errors.Join(ctxErr, reapErr)
 		}
-		if _, refused := errors.AsType[*sandboxgc.RefusalError](reapErr); refused {
+		if isSandboxGCRefusal(reapErr) {
 			recordSandboxGCRefusal(result, name, reapErr)
 		} else {
 			recordSandboxGCRemovalError(result, name, reapErr)
@@ -264,6 +264,11 @@ func reapSandboxGCCandidate(
 		SandboxRemoved: dir,
 	})
 	return sandboxGCContextError(ctx, "after reaping sandbox "+name)
+}
+
+func isSandboxGCRefusal(err error) bool {
+	var refusal *sandboxgc.RefusalError
+	return errors.As(err, &refusal)
 }
 
 func recordSandboxGCRefusal(result *SandboxGCResult, name string, err error) {
