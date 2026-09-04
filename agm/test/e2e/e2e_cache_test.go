@@ -217,3 +217,24 @@ func TestPruneDefaultE2EBuildCache_SkipsCustomOverride(t *testing.T) {
 	// anything when a custom per-build cache directory override is active.
 	pruneDefaultE2EBuildCache("agm-custom")
 }
+
+func TestPruneDefaultE2EBuildCache_PrunesCanonicalOverride(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("REAL_HOME", tempHome)
+	baseDir := filepath.Join(tempHome, ".cache", "dear-agent", "e2e")
+	past := time.Now().Add(-10 * time.Hour)
+	createTestFixtureDir(t, baseDir, "agm-older", past)
+
+	canonicalDir := filepath.Join(baseDir, "agm-current")
+	if err := os.MkdirAll(canonicalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGM_E2E_BUILD_CACHE_DIR", canonicalDir)
+	t.Setenv("AGM_E2E_CACHE_MAX_ENTRIES", "1")
+
+	pruneDefaultE2EBuildCache("agm-current")
+
+	if _, err := os.Stat(filepath.Join(baseDir, "agm-older")); !os.IsNotExist(err) {
+		t.Errorf("expected agm-older to be pruned from canonical base dir, got err=%v", err)
+	}
+}

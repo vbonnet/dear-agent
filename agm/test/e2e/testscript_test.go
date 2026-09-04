@@ -369,10 +369,12 @@ func touchE2ECacheDir(dir, dest string) {
 }
 
 func pruneDefaultE2EBuildCache(currentDirName string) {
-	if os.Getenv("AGM_E2E_BUILD_CACHE_DIR") != "" {
-		return
-	}
 	baseDir := e2eCacheBaseDir()
+	if override := os.Getenv("AGM_E2E_BUILD_CACHE_DIR"); override != "" {
+		if filepath.Clean(filepath.Dir(override)) != filepath.Clean(baseDir) {
+			return
+		}
+	}
 	maxEntries := defaultE2ECacheMaxEntries
 	if v := os.Getenv("AGM_E2E_CACHE_MAX_ENTRIES"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
