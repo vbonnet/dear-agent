@@ -16,7 +16,10 @@
 
 **REPO-SCRIPT-07** When full local preflight cannot resolve a required Go-installed security tool from `PATH`, the system shall inspect a configured `GOBIN` first and shall use the first `GOPATH` entry's `bin` directory only when `GOBIN` is empty, so the documented `go install` remediation produces a discoverable executable.
 
+**REPO-SCRIPT-08** When preflight runs in isolated mode, the system shall provision scratch roots under a dedicated cache directory with owner-only permissions and shall register cleanup handlers to remove the isolated scratch on exit or failure.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
+- Feature: `tests/bats/isolated-preflight.bats` (REPO-SCRIPT-08)
