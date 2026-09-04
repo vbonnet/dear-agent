@@ -175,6 +175,11 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 		if !ok {
 			return errors.New("credentials file unreadable under lock")
 		}
+		// Source the refresh token from whichever store holds the newer
+		// credential. Claude Code writes re-logins into the keychain and leaves
+		// the file behind, so a file-only read here presents a dead token and
+		// invalid_grant kills the family the operator just created.
+		creds = r.preferFreshestCredential(creds)
 		if creds.ClaudeAIOAuth.AccessToken != "" && r.fileTokenFresh(creds.ClaudeAIOAuth.ExpiresAt) {
 			token = creds.ClaudeAIOAuth.AccessToken
 			r.log("oauth.refresh.skipped", "reason", "another process already refreshed")
@@ -268,6 +273,22 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 				wrapQuarantineWriteError(qerr),
 				wrapRefreshStopWriteError(stopErr),
 			)
+		}
+
+		// Converge every other store the CLI might resolve on the credential
+		// we just persisted. Claude Code reads the macOS keychain BEFORE this
+		// file and stops as soon as the keychain answers, so a file-only
+		// refresh leaves a stale keychain item shadowing a healthy file and
+		// every harness process keeps reporting an expired session while this
+		// refresher logs success (ce-cknn).
+		//
+		// A mirror failure is logged rather than returned: the rotated token is
+		// already durably on disk, so raising ErrRefreshNotPersisted here would
+		// quarantine a credential that persisted correctly and turn a partial
+		// convergence into a self-inflicted outage. Check mode reports the
+		// unconverged state instead.
+		if merr := r.mirrorToSecondaryStores(updated); merr != nil {
+			r.log("oauth.refresh.mirror_failed", "error", merr.Error())
 		}
 
 		// The rotation completed and is on disk, so any earlier quarantine is

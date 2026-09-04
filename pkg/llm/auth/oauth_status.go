@@ -18,20 +18,36 @@ type TokenStatus struct {
 	// Fresh reports whether the access token is present and still usable
 	// (accounting for the expiry skew).
 	Fresh bool
+
+	// PrimaryStore is the store Claude Code will actually read for this
+	// environment. When it is not StoreFile, refreshing the file alone cannot
+	// fix a broken session.
+	PrimaryStore CredentialStoreKind
+	// Shadowed reports that the primary store holds a credential that cannot
+	// be refreshed while the file store still holds one that can. This is the
+	// state in which a file-only refresher reports success indefinitely and
+	// every CLI process still fails to authenticate; it needs an operator
+	// re-login, not another refresh.
+	Shadowed bool
 }
 
 // Status returns a snapshot of the on-disk credential state without performing
 // any network call or mutation.
 func (r OAuthResolver) Status() TokenStatus {
-	creds, _, ok := r.readFullCredentials()
-	if !ok {
-		return TokenStatus{}
+	// Report on the credential the CLI will actually present, not merely the
+	// one on disk: those differ exactly when auth is broken.
+	res := r.ResolveStores()
+	if res.Primary == StoreNone {
+		return TokenStatus{PrimaryStore: StoreNone}
 	}
+	creds := res.Effective
 	o := creds.ClaudeAIOAuth
 	st := TokenStatus{
 		HasToken:        o.AccessToken != "",
 		HasRefreshToken: o.RefreshToken != "",
 		Fresh:           o.AccessToken != "" && r.fileTokenFresh(o.ExpiresAt),
+		PrimaryStore:    res.Primary,
+		Shadowed:        res.Shadowed,
 	}
 	if o.ExpiresAt > 0 {
 		st.ExpiresAt = time.UnixMilli(o.ExpiresAt)

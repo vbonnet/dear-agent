@@ -44,6 +44,22 @@ provider credential handling.
 
 **CTR-19** When cadence mode receives a non-persistence error, the system shall report that refreshing stopped only when the credential-scoped refresh-stop marker exists.
 
+**CTR-20** When resolving credentials, the system shall apply the same store precedence as the Claude Code CLI, reading the macOS keychain item before the plaintext credentials file.
+
+**CTR-21** When deriving the keychain item identity, the system shall use the CLI's own rules: the service name scoped by an explicitly configured config directory, and the account taken from `USER` falling back to the current OS user.
+
+**CTR-22** When a refresh persists rotated credentials, the system shall mirror them into every other store the CLI may resolve, so the credential presented by the CLI is the credential that was refreshed.
+
+**CTR-23** When a mirror to a secondary store fails after the file write succeeded, the system shall log the failure and preserve the successful refresh rather than quarantining a credential that persisted correctly.
+
+**CTR-24** When the store the CLI reads holds no refresh token while the fallback store holds one, the system shall report the credential set as SHADOWED and name the operator re-authentication step, rather than reporting a successful refresh.
+
+**CTR-25** When mirroring credentials, the system shall refuse to write a credential set that carries no refresh token, so a store holding a refreshable credential is never overwritten with an unrefreshable one.
+
+**CTR-26** When selecting the refresh token to present, the system shall use the credential from whichever store holds the newer refreshable credential, so a refresh never presents a stale token while a fresher one exists in another store.
+
+**CTR-27** While a resolver addresses a credentials path other than the canonical one, the system shall not consult the platform keychain, since that item is the peer of the canonical file alone.
+
 **CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
 
 ## BDD Traceability

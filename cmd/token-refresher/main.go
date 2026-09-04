@@ -391,12 +391,30 @@ func printStatus(w io.Writer, st auth.TokenStatus) {
 	default:
 		state = "STALE (needs refresh)"
 	}
-	fmt.Fprintf(w, "token-refresher: status=%s has_refresh_token=%t", state, st.HasRefreshToken)
+	fmt.Fprintf(w, "token-refresher: status=%s has_refresh_token=%t store=%s", state, st.HasRefreshToken, st.PrimaryStore)
 	if !st.ExpiresAt.IsZero() {
 		fmt.Fprintf(w, " expires_at=%s (%s)", st.ExpiresAt.UTC().Format(time.RFC3339), humanizeUntil(st.ExpiresAt))
 	}
 	fmt.Fprintln(w)
+	if st.Shadowed {
+		fmt.Fprint(w, shadowedStoreAdvice)
+	}
 }
+
+// shadowedStoreAdvice explains the one failure this refresher cannot repair on
+// its own. Claude Code reads the macOS keychain before ~/.claude/.credentials.json
+// and stops as soon as the keychain answers, so a keychain item whose refresh
+// token has been blanked hides a perfectly good file from every CLI process.
+// No amount of refreshing the file changes what the CLI presents, which is why
+// this state has to name the human step instead of reporting success.
+const shadowedStoreAdvice = "token-refresher: SHADOWED credential store.\n" +
+	"  Claude Code reads the macOS keychain BEFORE ~/.claude/.credentials.json\n" +
+	"  and stops as soon as the keychain answers. The keychain item it reads is\n" +
+	"  not the credential this refresher has been keeping fresh, so refreshing\n" +
+	"  the file cannot restore the session.\n" +
+	"  A refresh token cannot be regenerated without re-authenticating.\n" +
+	"  Fix (operator, once): run /login inside an interactive `claude` session.\n" +
+	"  Every later rotation is mirrored into both stores automatically.\n"
 
 func humanizeUntil(t time.Time) string {
 	d := time.Until(t).Round(time.Second)
