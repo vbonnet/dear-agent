@@ -24,7 +24,10 @@ func TestReportPostCleanup_SandboxRemovalFailedIsVisible(t *testing.T) {
 		t.Errorf("expected a visible sandbox cleanup failure message, got: %q", out)
 	}
 	if !strings.Contains(out, "agm sandbox gc") {
-		t.Errorf("expected the failure message to suggest a retry command, got: %q", out)
+		t.Errorf("expected the failure message to suggest a read-only scan, got: %q", out)
+	}
+	if strings.Contains(out, "agm sandbox gc --reap") || !strings.Contains(out, "unavailable") {
+		t.Errorf("expected the failure message to refuse the unavailable reap path, got: %q", out)
 	}
 }
 

@@ -41,6 +41,8 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 **SGC-17** When a requested reap is downgraded to a scan under SGC-16, the system shall report the refusal to the caller as an explicit `reap_refused` reason in the machine-readable result, in addition to the warning, so that an automated caller cannot read the refusal as an ordinary preview run nor read the resulting would-reap count as sandboxes deleted.
 
+**SGC-18** When a destructive sandbox sweep cannot authenticate every configured session-store endpoint, the system shall report an error before consulting any endpoint or examining or changing any sandbox.
+
 ### Live-Process Gate
 
 **SGC-06** When any process holds a working directory or an open file descriptor at or under the sandbox, the system shall refuse the reap before attempting any unmount.
@@ -77,3 +79,4 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 - Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, deadline-bounded process and mount inspection, store-down, path escapes), `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage), and `agm/cmd/agm/sandbox_gc_test.go` (configured workspace missing-database degradation).
 - SGC-16 evidence: `agm/cmd/agm/sandbox_gc_test.go::TestEffectiveSandboxGCReapRefusesPartialInventory` (a requested reap with any skipped workspace yields scan-only plus a notice; a complete inventory reaps as asked).
 - SGC-17 evidence: `agm/internal/ops/sandbox_gc_test.go::TestSandboxGCResultPublishesTheRefusalOnTheWire` and `::TestSandboxGCResultOmitsTheRefusalWhenItReaped` (the refusal, and only a real refusal, reaches the caller as `reap_refused`); the reciprocal consumer check is `cmd/disk-watchdog/reaper_liveness_honesty_test.go::TestSweepMergedWorktrees_RefusedReapIsARemediationFailure`, which asserts the watchdog treats it as failed remediation rather than a completed sweep.
+- SGC-18 evidence: `agm/cmd/agm/sandbox_gc_transport_containment_test.go::TestSandboxGCReapRefusesBeforeInventoryOrCandidateMutation` (direct execution refuses before command-local inventory, store, sweep, sandbox-GC log, or candidate mutation), `::TestSandboxGCReapRefusesBeforeRootPreRun` (the public command refuses before inherited root configuration and its `~/.agm` or configured centralized-storage mutation), and `::TestSandboxGCDryRunRemainsAvailable` (the existing SGC-11 read-only path remains available). Process-global package initialization is outside this command-boundary claim. Focused command-seam tests are the deterministic proof because the requirement governs one native command boundary rather than cross-harness behavior.
