@@ -33,6 +33,8 @@ this command swallowing the error itself.
 
 **PRSIZECOMMENT-04** When there is no fresh code-health report to show and nothing to recover, and the code-health step reports an unknown result with a summary, the command shall render that summary so an unknown-only run is not silently invisible.
 
+**PRSIZECOMMENT-07** When the size detector's own outcome was not successful, the command shall recover the size section from the comment it is about to overwrite, and when the mixed-concern detector's own outcome was not successful, the command shall recover the concern section, each gated on that detector alone. A recovered section shall be labeled as recovered and not from this revision. The two detectors fail independently, so recovering them together lets a fresh result from either erase the other's last known result, or lets a run where both are blank republish a half-stale block as current.
+
 **PRSIZECOMMENT-05** When more than one marker comment exists, the command shall update or delete only the oldest and remove the rest.
 
 **PRSIZECOMMENT-06** When a required `gh` operation fails while upserting or deleting the marker comment, the command shall exit with a distinct non-zero status rather than reporting success.

@@ -49,6 +49,11 @@ const marker = "<!-- pr-size-scope -->"
 // run can recover it verbatim from the comment it is about to overwrite.
 const crapSectionMarker = "<!-- crap-section -->"
 
+// The size and the concern detectors fail independently, so each renders into
+// its own delimited section. Recovering them as one blob lets a fresh result
+// from either one erase the other's last known result.
+const concernSectionMarker = "<!-- concern-section -->"
+
 func run(ctx context.Context, args []string, _, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pr-size-comment", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -203,25 +208,31 @@ func composeBody(in inputs, priorCrapSection string, priorSizeScope ...string) s
 	fmt.Fprintln(&b, marker)
 	fmt.Fprintln(&b, "## PR size, scope, and code health signals")
 	fmt.Fprintln(&b)
-	if in.reasons != "" || in.concernReason != "" {
+	priorSize, priorConcern := "", ""
+	if len(priorSizeScope) > 0 {
+		priorSize = priorSizeScope[0]
+	}
+	if len(priorSizeScope) > 1 {
+		priorConcern = priorSizeScope[1]
+	}
+	sizeSection, sizeRecovered := recoverSection(in.reasons, priorSize)
+	concernSection, concernRecovered := recoverSection(in.concernReason, priorConcern)
+
+	if sizeSection != "" || concernSection != "" {
 		fmt.Fprintln(&b, "This PR tripped a deterministic split-suggestion signal:")
 		fmt.Fprintln(&b)
-		if in.reasons != "" {
-			fmt.Fprintln(&b, in.reasons)
+	}
+	writeSignalSection(&b, sizeSection, sizeRecovered, "size and scope")
+	fmt.Fprintln(&b, concernSectionMarker)
+	writeSignalSection(&b, concernSection, concernRecovered, "mixed concern")
+	if sizeSection != "" || concernSection != "" {
+		if in.changedLines != "" {
+			fmt.Fprintln(&b)
+			fmt.Fprintf(&b, "Current scope: %s changed lines, %s changed files, %s top-level areas.\n", in.changedLines, in.changedFiles, in.topLevelAreas)
 		}
-		if in.concernReason != "" {
-			fmt.Fprintln(&b, in.concernReason)
-		}
-		fmt.Fprintln(&b)
-		fmt.Fprintf(&b, "Current scope: %s changed lines, %s changed files, %s top-level areas.\n", in.changedLines, in.changedFiles, in.topLevelAreas)
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands.")
 		fmt.Fprintln(&b)
-	} else if len(priorSizeScope) > 0 && priorSizeScope[0] != "" {
-		fmt.Fprint(&b, priorSizeScope[0])
-		if !strings.HasSuffix(priorSizeScope[0], "\n") {
-			fmt.Fprintln(&b)
-		}
 	}
 
 	fmt.Fprintln(&b, crapSectionMarker)
@@ -279,8 +290,46 @@ func extractCrapSection(body string) string {
 	return strings.TrimPrefix(after, "\n")
 }
 
-func extractSizeScopeSection(body string) string {
+// recoverSection picks this run's fresh detector output when it has any, and
+// otherwise falls back to what the comment being overwritten last said. The
+// bool reports which one it returned so the render can label a recovered
+// result rather than passing a stale finding off as current.
+func recoverSection(fresh, prior string) (string, bool) {
+	if fresh != "" {
+		return fresh, false
+	}
+	return strings.TrimSpace(prior), prior != ""
+}
+
+// writeSignalSection renders one detector's block, labeling it when the
+// content came from a previous comment instead of this run.
+func writeSignalSection(b *strings.Builder, section string, recovered bool, label string) {
+	if section == "" {
+		return
+	}
+	if recovered {
+		fmt.Fprintf(b, "Last known %s result (recovered — not from this revision):\n\n", label)
+	}
+	fmt.Fprintln(b, section)
+}
+
+// extractSizeSection and extractConcernSection pull one detector's block out
+// of a previously rendered comment. They are separate so a failure in one
+// detector cannot erase or stale-republish the other's last result.
+func extractSizeSection(body string) string {
 	_, after, found := strings.Cut(body, "## PR size, scope, and code health signals\n\n")
+	if !found {
+		return ""
+	}
+	section, _, found := strings.Cut(after, concernSectionMarker)
+	if !found {
+		return ""
+	}
+	return cleanRecoveredSignal(section)
+}
+
+func extractConcernSection(body string) string {
+	_, after, found := strings.Cut(body, concernSectionMarker)
 	if !found {
 		return ""
 	}
@@ -288,15 +337,24 @@ func extractSizeScopeSection(body string) string {
 	if !found {
 		return ""
 	}
-	// A run with nothing to say left this section empty; TrimSpace alone
-	// would still turn that back into "\n\n" below, which composeBody's
-	// non-empty check would treat as real content to restore, adding two
-	// stray blank lines above the crap-section marker on the next render.
-	trimmed := strings.TrimSpace(section)
-	if trimmed == "" {
-		return ""
+	return cleanRecoveredSignal(section)
+}
+
+// cleanRecoveredSignal strips the shared prose and any prior recovery label so
+// a section recovered twice is not labeled twice.
+func cleanRecoveredSignal(section string) string {
+	section = strings.ReplaceAll(section, "This PR tripped a deterministic split-suggestion signal:", "")
+	var kept []string
+	for _, line := range strings.Split(section, "\n") {
+		switch {
+		case strings.HasPrefix(line, "Last known ") && strings.Contains(line, "(recovered"):
+		case strings.HasPrefix(line, "Current scope: "):
+		case strings.HasPrefix(line, "Please consider splitting this into stacked PRs"):
+		default:
+			kept = append(kept, line)
+		}
 	}
-	return trimmed + "\n\n"
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 // upsertComment recovers a prior code-health section if needed, composes the
@@ -327,7 +385,7 @@ func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists
 		return 0
 	}
 
-	prior, priorSize := "", ""
+	prior, priorSize, priorConcern := "", "", ""
 	if (needsCrapRecovery(in) || in.scopeOutcome != "success" || in.concernOutcome != "success") && len(ids) > 0 {
 		body, err := commentBody(ctx, repo, ids[0])
 		if err != nil {
@@ -342,13 +400,19 @@ func upsertComment(ctx context.Context, repo, pr string, in inputs, onlyIfExists
 			return exitFailedOperation
 		}
 		prior = extractCrapSection(body)
-		if in.scopeOutcome != "success" || in.concernOutcome != "success" {
-			priorSize = extractSizeScopeSection(body)
+		// Each detector recovers on its own outcome. Gating both on
+		// "either failed" is what let a fresh result from one erase the
+		// other's last known result.
+		if in.scopeOutcome != "success" {
+			priorSize = extractSizeSection(body)
+		}
+		if in.concernOutcome != "success" {
+			priorConcern = extractConcernSection(body)
 		}
 	}
 
 	failed := false
-	body := composeBody(in, prior, priorSize)
+	body := composeBody(in, prior, priorSize, priorConcern)
 
 	if len(ids) > 0 {
 		if err := patchComment(ctx, repo, ids[0], body); err != nil {

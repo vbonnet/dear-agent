@@ -127,13 +127,27 @@ func TestExtractCrapSection(t *testing.T) {
 // lines above the crap-section marker on every subsequent render.
 func TestExtractSizeScopeSectionReturnsEmptyNotBlankLines(t *testing.T) {
 	clean := composeBody(inputs{}, "")
-	if got := extractSizeScopeSection(clean); got != "" {
-		t.Errorf("extractSizeScopeSection(clean body) = %q, want \"\"", got)
+	if got := extractSizeSection(clean); got != "" {
+		t.Errorf("extractSizeSection(clean body) = %q, want \"\"", got)
+	}
+	if got := extractConcernSection(clean); got != "" {
+		t.Errorf("extractConcernSection(clean body) = %q, want \"\"", got)
 	}
 
 	withFinding := composeBody(inputs{shouldComment: true, reasons: "- too big"}, "")
-	if got := extractSizeScopeSection(withFinding); !strings.Contains(got, "too big") {
-		t.Errorf("extractSizeScopeSection(body with a finding) = %q, want it to contain the finding", got)
+	if got := extractSizeSection(withFinding); !strings.Contains(got, "too big") {
+		t.Errorf("extractSizeSection(body with a finding) = %q, want it to contain the finding", got)
+	}
+	if got := extractConcernSection(withFinding); got != "" {
+		t.Errorf("extractConcernSection(size-only body) = %q, want \"\"", got)
+	}
+
+	withConcern := composeBody(inputs{shouldComment: true, concernReason: "- mixed concerns"}, "")
+	if got := extractConcernSection(withConcern); !strings.Contains(got, "mixed concerns") {
+		t.Errorf("extractConcernSection(body with a concern) = %q, want it to contain the finding", got)
+	}
+	if got := extractSizeSection(withConcern); got != "" {
+		t.Errorf("extractSizeSection(concern-only body) = %q, want \"\"", got)
 	}
 }
 
@@ -410,4 +424,52 @@ func TestComposeBodyPreservesSizeScopeWhenDetectorFailed(t *testing.T) {
 	if !strings.Contains(got, "old oversized finding") || !strings.Contains(got, "99 changed lines") {
 		t.Fatalf("failed detector erased prior size/scope section: %q", got)
 	}
+}
+
+// The size and the concern detectors fail independently, so their prior
+// results must be recovered independently. Recovering them as one blob is
+// wrong in both directions: a fresh result from either detector drops the
+// whole blob and erases the other's last result, and a run where both are
+// blank republishes the whole blob including the half that is stale.
+func TestComposeBodyRecoversSizeAndConcernIndependently(t *testing.T) {
+	priorBody := composeBody(inputs{
+		reasons:       "old oversized finding",
+		concernReason: "old mixed-concern finding",
+		changedLines:  "99", changedFiles: "9", topLevelAreas: "3",
+	}, "")
+
+	t.Run("a fresh concern result keeps the failed size detector's last result", func(t *testing.T) {
+		got := composeBody(inputs{
+			concernReason: "fresh mixed-concern finding",
+			scopeOutcome:  "failure", concernOutcome: "success",
+		}, "", extractSizeSection(priorBody), extractConcernSection(priorBody))
+
+		if !strings.Contains(got, "fresh mixed-concern finding") {
+			t.Errorf("dropped this run's concern result: %q", got)
+		}
+		if !strings.Contains(got, "old oversized finding") {
+			t.Errorf("erased the failed size detector's last result: %q", got)
+		}
+		if strings.Contains(got, "old mixed-concern finding") {
+			t.Errorf("republished a stale concern result over a fresh one: %q", got)
+		}
+	})
+
+	t.Run("a fresh size result keeps the failed concern detector's last result", func(t *testing.T) {
+		got := composeBody(inputs{
+			reasons:      "fresh oversized finding",
+			changedLines: "10", changedFiles: "1", topLevelAreas: "1",
+			scopeOutcome: "success", concernOutcome: "failure",
+		}, "", extractSizeSection(priorBody), extractConcernSection(priorBody))
+
+		if !strings.Contains(got, "fresh oversized finding") {
+			t.Errorf("dropped this run's size result: %q", got)
+		}
+		if !strings.Contains(got, "old mixed-concern finding") {
+			t.Errorf("erased the failed concern detector's last result: %q", got)
+		}
+		if strings.Contains(got, "old oversized finding") {
+			t.Errorf("republished a stale size result over a fresh one: %q", got)
+		}
+	})
 }
