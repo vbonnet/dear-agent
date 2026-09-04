@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -92,7 +93,7 @@ func pruneCadenceAlerts(stateDir string, maxAge time.Duration, keepSentinel stri
 func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPath string, stderr io.Writer, maxAge time.Duration) int {
 	switch code {
 	case exitTokenFamilyDead:
-		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath,
+		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, "dead",
 			"Claude auth DOWN", "OAuth token family is dead. Run: claude /login")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
 		pruneCadenceAlerts(stateDir, maxAge, sentinelName, stderr)
@@ -102,7 +103,7 @@ func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPa
 		// A near-miss, and the alert that matters most: the family is still
 		// alive precisely because we declined to replay the token. Reuse the
 		// death sentinel so one episode raises one notification.
-		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath,
+		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, "quarantined",
 			"Claude auth AT RISK",
 			"Refresh outcome unknown; token quarantined to protect the family. Check token-refresher -check")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
@@ -199,38 +200,45 @@ func isCadenceSentinel(name string) bool {
 	return true
 }
 
-func sentinelMatchesEpisode(hasFP bool, recordedFP, credPath string) bool {
+type sentinelRecord struct {
+	Timestamp       string `json:"timestamp"`
+	QuarantinePath  string `json:"quarantine_path,omitempty"`
+	CredentialsPath string `json:"credentials_path,omitempty"`
+	Fingerprint     string `json:"fingerprint,omitempty"`
+	Outcome         string `json:"outcome,omitempty"`
+}
+
+func parseSentinelData(data []byte) (sentinelRecord, bool) {
+	var rec sentinelRecord
+	if err := json.Unmarshal(data, &rec); err == nil && rec.Timestamp != "" {
+		return rec, true
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return sentinelRecord{}, false
+	}
+	rec.Timestamp = strings.TrimSpace(lines[0])
+	if len(lines) >= 2 {
+		rec.QuarantinePath = filepath.Clean(strings.TrimSpace(lines[1]))
+	}
+	if len(lines) >= 3 {
+		rec.CredentialsPath = strings.TrimSpace(lines[2])
+	}
+	if len(lines) >= 4 {
+		rec.Fingerprint = strings.TrimSpace(lines[3])
+	}
+	return rec, true
+}
+
+func sentinelMatchesEpisode(rec sentinelRecord, credPath string) bool {
 	currentFP, _ := credentialsFingerprint(credPath)
 	if currentFP == "" {
 		return true
 	}
-	if !hasFP {
+	if rec.Fingerprint == "" {
 		return false
 	}
-	return currentFP == recordedFP
-}
-
-func parseSentinelLines(target string) (quarPath, credPath, recordedFP string, hasFP bool, ok bool) {
-	info, err := os.Lstat(target)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", "", "", false, false
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return "", "", "", false, false
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) >= 2 {
-		quarPath = filepath.Clean(strings.TrimSpace(lines[1]))
-	}
-	if len(lines) >= 3 {
-		credPath = strings.TrimSpace(lines[2])
-	}
-	if len(lines) >= 4 {
-		recordedFP = strings.TrimSpace(lines[3])
-		hasFP = true
-	}
-	return quarPath, credPath, recordedFP, hasFP, true
+	return currentFP == rec.Fingerprint
 }
 
 func isQuarantineActive(quarPath, credPath string) bool {
@@ -257,48 +265,70 @@ func isCadenceStoppedFor(target, credPath string) bool {
 	return err == nil && stopped
 }
 
+func readSentinelRecord(path string) (sentinelRecord, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return sentinelRecord{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return sentinelRecord{}, false
+	}
+	return parseSentinelData(data)
+}
+
+func isDeadSentinel(rec sentinelRecord) bool {
+	if rec.Outcome == "dead" {
+		return true
+	}
+	return rec.Outcome == "" && (rec.QuarantinePath == "" || rec.QuarantinePath == ".")
+}
+
 func isActiveSentinel(target string) bool {
-	quarPath, credPath, recordedFP, hasFP, ok := parseSentinelLines(target)
-	if !ok || !hasFP || recordedFP == "" || credPath == "" {
+	rec, ok := readSentinelRecord(target)
+	if !ok || rec.Fingerprint == "" || rec.CredentialsPath == "" {
 		return false
 	}
-	if !sentinelMatchesEpisode(hasFP, recordedFP, credPath) {
+	currentFP, _ := credentialsFingerprint(rec.CredentialsPath)
+	if currentFP == "" || currentFP != rec.Fingerprint {
 		return false
 	}
-	if quarPath != "" && quarPath != "." {
-		return isQuarantineActive(quarPath, credPath) || isCadenceStoppedFor(target, credPath)
+	if isDeadSentinel(rec) {
+		return true
 	}
-	return true
+	if rec.QuarantinePath != "" && rec.QuarantinePath != "." {
+		return isQuarantineActive(rec.QuarantinePath, rec.CredentialsPath) || isCadenceStoppedFor(target, rec.CredentialsPath)
+	}
+	return false
 }
 
 // notifyCadenceOnce records the episode after its first best-effort alert.
 // Every cadence failure path uses this helper so a durable quarantine/stop does
 // not notify again on every launchd tick.
-func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, title, message string) {
+func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, outcome, title, message string) {
 	sentinel := filepath.Join(stateDir, sentinelName)
 	currentFP, _ := credentialsFingerprint(credentialsPath)
-	if info, err := os.Lstat(sentinel); err == nil {
-		if !info.Mode().IsRegular() {
-			_ = os.Remove(sentinel)
-		} else if data, err := os.ReadFile(sentinel); err == nil {
-			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-			var recordedFP string
-			hasFP := len(lines) >= 4
-			if hasFP {
-				recordedFP = strings.TrimSpace(lines[3])
-			}
-			if sentinelMatchesEpisode(hasFP, recordedFP, credentialsPath) {
-				now := time.Now()
-				_ = os.Chtimes(sentinel, now, now)
-				return
-			}
+	if info, err := os.Lstat(sentinel); err == nil && !info.Mode().IsRegular() {
+		_ = os.Remove(sentinel)
+	} else if rec, ok := readSentinelRecord(sentinel); ok {
+		if sentinelMatchesEpisode(rec, credentialsPath) {
+			now := time.Now()
+			_ = os.Chtimes(sentinel, now, now)
+			return
 		}
 	}
 	notifyOperator(title, message)
-	if err := os.MkdirAll(stateDir, 0o700); err == nil {
-		stamp := time.Now().UTC().Format(time.RFC3339)
-		lines := []string{stamp, quarantinePath, credentialsPath, currentFP}
-		_ = os.WriteFile(sentinel, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	if err := ensureSecureStateDir(stateDir); err == nil {
+		rec := sentinelRecord{
+			Timestamp:       time.Now().UTC().Format(time.RFC3339),
+			QuarantinePath:  quarantinePath,
+			CredentialsPath: credentialsPath,
+			Fingerprint:     currentFP,
+			Outcome:         outcome,
+		}
+		if payload, err := json.Marshal(rec); err == nil {
+			_ = os.WriteFile(sentinel, append(payload, '\n'), 0o600)
+		}
 	}
 }
 
@@ -331,18 +361,50 @@ func isSecureStateDir(path string) bool {
 	return false
 }
 
+func fallbackStateDir() string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d", os.Getuid()))
+}
+
+func isFallbackStateDir(clean string) bool {
+	return clean == filepath.Clean(fallbackStateDir()) ||
+		(strings.HasPrefix(clean, filepath.Clean(os.TempDir())) && strings.HasPrefix(filepath.Base(clean), fmt.Sprintf("dear-agent-%d", os.Getuid())))
+}
+
+func ensureSecureStateDir(stateDir string) error {
+	if stateDir == "" {
+		return errors.New("state directory is empty")
+	}
+	clean := filepath.Clean(stateDir)
+	info, err := os.Lstat(clean)
+	if err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("state directory %s is not a directory or is a symlink", clean)
+		}
+		if isFallbackStateDir(clean) && !isSecureStateDir(clean) {
+			return fmt.Errorf("fallback state directory %s has untrusted ownership or permissions", clean)
+		}
+		if info.Mode().Perm()&0o002 != 0 {
+			return fmt.Errorf("state directory %s is world-writable", clean)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(clean, 0o700); err != nil {
+		return err
+	}
+	if isFallbackStateDir(clean) && !isSecureStateDir(clean) {
+		return fmt.Errorf("fallback state directory %s has untrusted ownership or permissions", clean)
+	}
+	return nil
+}
+
 // defaultStateDir is where the sentinel lives, alongside the audit log.
 func defaultStateDir() string {
 	home, err := os.UserHomeDir()
 	if err == nil {
 		return filepath.Join(home, ".local", "state", "dear-agent")
 	}
-	fallback := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d", os.Getuid()))
-	if isSecureStateDir(fallback) {
-		return fallback
-	}
-	if err := os.Mkdir(fallback, 0o700); err == nil && isSecureStateDir(fallback) {
-		return fallback
-	}
-	return ""
+	return fallbackStateDir()
 }

@@ -350,3 +350,23 @@ func TestClearRefreshProtectionsCommand_ShellQuotesMetacharacters(t *testing.T) 
 		t.Errorf("state dir not shell-quoted: %s", cmd)
 	}
 }
+
+func TestRun_CadenceRejectsInsecureFallbackStateDir(t *testing.T) {
+	insecureDir := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d-insecure-main-%d", os.Getuid(), time.Now().UnixNano()))
+	if err := os.Mkdir(insecureDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(insecureDir)
+	if err := os.Chmod(insecureDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-cadence", "-state-dir", insecureDir}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "state directory unavailable") {
+		t.Errorf("expected 'state directory unavailable' in stderr, got: %s", stderr.String())
+	}
+}

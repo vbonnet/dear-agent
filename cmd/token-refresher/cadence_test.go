@@ -54,7 +54,7 @@ func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 
 func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 	dir := t.TempDir()
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "dead", "test title", "test message")
 
 	sentinel := filepath.Join(dir, deathSentinelName)
 	first, err := os.ReadFile(sentinel)
@@ -62,7 +62,7 @@ func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "dead", "test title", "test message")
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel after second alert: %v", err)
@@ -428,7 +428,7 @@ func TestNotifyCadenceOnce_RefreshesSentinelModTimeOnActiveEpisode(t *testing.T)
 	oldTime := now.Add(-10 * time.Hour)
 	_ = os.Chtimes(sentinel, oldTime, oldTime)
 
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "dead", "test title", "test message")
 
 	info, err := os.Stat(sentinel)
 	if err != nil {
@@ -510,7 +510,7 @@ func TestNotifyCadenceOnce_NewEpisodeAlertsWhenTokenFingerprintRotates(t *testin
 	credsPath := credsWithRefreshToken(t, "rt-first")
 	fpFirst, _ := credentialsFingerprint(credsPath)
 
-	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "title1", "msg1")
+	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "dead", "title1", "msg1")
 
 	data1, err := os.ReadFile(sentinel)
 	if err != nil {
@@ -527,7 +527,7 @@ func TestNotifyCadenceOnce_NewEpisodeAlertsWhenTokenFingerprintRotates(t *testin
 		t.Fatal("expected fingerprints to differ for different tokens")
 	}
 
-	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "title2", "msg2")
+	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "dead", "title2", "msg2")
 
 	data2, err := os.ReadFile(sentinel)
 	if err != nil {
@@ -610,7 +610,7 @@ func TestNotifyCadenceOnce_SkipsNonRegularFile(t *testing.T) {
 		t.Skipf("cannot make FIFO on this platform: %v", err)
 	}
 
-	notifyCadenceOnce(dir, "cadence-fifo", "", "", "title", "message")
+	notifyCadenceOnce(dir, "cadence-fifo", "", "", "dead", "title", "message")
 
 	info, err := os.Lstat(fifoPath)
 	if err != nil {
@@ -621,10 +621,10 @@ func TestNotifyCadenceOnce_SkipsNonRegularFile(t *testing.T) {
 	}
 }
 
-func TestSentinelMatchesEpisode_LegacyEmptyRecordedFPReturnsFalse(t *testing.T) {
+func TestSentinelMatchesEpisode_EmptyRecordedFPReturnsFalse(t *testing.T) {
 	credsPath := credsWithRefreshToken(t, "rt-legacy")
-	if sentinelMatchesEpisode(false, "", credsPath) {
-		t.Error("sentinelMatchesEpisode with legacy sentinel (hasFP=false) should return false to trigger upgrade/re-alert")
+	if sentinelMatchesEpisode(sentinelRecord{}, credsPath) {
+		t.Error("sentinelMatchesEpisode with empty recorded fingerprint should return false to trigger upgrade/re-alert")
 	}
 }
 
@@ -658,13 +658,116 @@ func TestIsActiveSentinel_DeadFamilyPreservedWhileFingerprintMatches(t *testing.
 	}
 }
 
-func TestDefaultStateDir_RejectsForeignSquattedDirectory(t *testing.T) {
-	t.Setenv("HOME", "")
-	dir := defaultStateDir()
-	if dir == "" {
-		t.Skip("fallback directory could not be created")
+func TestIsActiveSentinel_DeadFamilyPreservedWithConfiguredQuarantine(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, "token-family-dead-12345678abcdef01")
+	credsPath := credsWithRefreshToken(t, "rt-dead-quar")
+	fp, _ := credentialsFingerprint(credsPath)
+
+	rec := sentinelRecord{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		QuarantinePath:  "/path/to/quarantine.json",
+		CredentialsPath: credsPath,
+		Fingerprint:     fp,
+		Outcome:         "dead",
 	}
-	if !isSecureStateDir(dir) {
-		t.Errorf("defaultStateDir returned unverified directory: %s", dir)
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sentinel, append(payload, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if !isActiveSentinel(sentinel) {
+		t.Error("dead-family sentinel with configured quarantine path must be preserved while fingerprint matches")
+	}
+}
+
+func TestIsActiveSentinel_OrphanedDisabledQuarantineExpires(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, deathSentinelName)
+	nonExistentCreds := filepath.Join(dir, "deleted-creds.json")
+
+	rec := sentinelRecord{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		QuarantinePath:  "",
+		CredentialsPath: nonExistentCreds,
+		Fingerprint:     "deadbeef1234",
+		Outcome:         "dead",
+	}
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sentinel, append(payload, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if isActiveSentinel(sentinel) {
+		t.Error("orphaned sentinel for deleted credentials file must be classified as inactive to allow pruning")
+	}
+}
+
+func TestNotifyCadenceOnce_JSONSerializationHandlesNewlinesInPaths(t *testing.T) {
+	dir := t.TempDir()
+	sentinelName := "token-family-dead-0000000000000001"
+	credsPath := credsWithRefreshToken(t, "rt-newline")
+	quarPath := filepath.Join(dir, "quar\nwith\nnewline.json")
+
+	notifyCadenceOnce(dir, sentinelName, quarPath, credsPath, "quarantined", "Title", "Message")
+
+	sentinel := filepath.Join(dir, sentinelName)
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	rec, ok := parseSentinelData(data)
+	if !ok {
+		t.Fatalf("parseSentinelData failed on JSON payload: %s", string(data))
+	}
+	if rec.QuarantinePath != quarPath {
+		t.Errorf("quarantine path with newlines not preserved: got %q, want %q", rec.QuarantinePath, quarPath)
+	}
+	fp, _ := credentialsFingerprint(credsPath)
+	if rec.Fingerprint != fp {
+		t.Errorf("fingerprint corrupted by newlines in paths: got %q, want %q", rec.Fingerprint, fp)
+	}
+	if rec.Outcome != "quarantined" {
+		t.Errorf("outcome not preserved: got %q, want %q", rec.Outcome, "quarantined")
+	}
+}
+
+func TestDefaultStateDir_IsSideEffectFree(t *testing.T) {
+	t.Setenv("HOME", "")
+	targetFallback := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d", os.Getuid()))
+	if _, err := os.Lstat(targetFallback); os.IsNotExist(err) {
+		dir := defaultStateDir()
+		if dir != targetFallback {
+			t.Errorf("expected %s, got %s", targetFallback, dir)
+		}
+		if _, err := os.Lstat(targetFallback); !os.IsNotExist(err) {
+			t.Errorf("defaultStateDir created %s on disk", targetFallback)
+		}
+	} else {
+		dir := defaultStateDir()
+		if dir != targetFallback {
+			t.Errorf("expected %s, got %s", targetFallback, dir)
+		}
+	}
+}
+
+func TestEnsureSecureStateDir_RejectsInsecureFallback(t *testing.T) {
+	insecureDir := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d-insecure-%d", os.Getuid(), time.Now().UnixNano()))
+	if err := os.Mkdir(insecureDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(insecureDir)
+	if err := os.Chmod(insecureDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureSecureStateDir(insecureDir); err == nil {
+		t.Errorf("ensureSecureStateDir should reject fallback directory with 0777 permissions: %s", insecureDir)
 	}
 }
