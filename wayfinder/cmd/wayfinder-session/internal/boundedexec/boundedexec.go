@@ -104,8 +104,16 @@ func (c Command) Run() Result {
 	start := time.Now()
 	done := make(chan struct{})
 	stopped := make(chan struct{})
+	var beatPanic any
 	go func() {
 		defer close(stopped)
+		// The progress writer belongs to the caller. If it panics, that must
+		// not take the gate down: this package exists to make a gate bounded,
+		// and trading an indefinite hang for a crashed process is no fix. The
+		// panic is recorded and reported below rather than swallowed.
+		defer func() {
+			beatPanic = recover()
+		}()
 		c.beat(done, progress, start, heartbeat)
 	}()
 
@@ -116,6 +124,13 @@ func (c Command) Run() Result {
 	close(done)
 	<-stopped
 	elapsed := time.Since(start)
+	if beatPanic != nil {
+		// Guarded, because the writer that panicked is the only one there is.
+		// If it panics again the notice is lost, but the gate still returns.
+		if !safeFprintf(progress, "!  %s: progress reporting stopped after a panic: %v\n", c.Label, beatPanic) {
+			fmt.Fprintf(os.Stderr, "!  %s: progress writer panicked twice: %v\n", c.Label, beatPanic)
+		}
+	}
 
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	switch {
@@ -128,6 +143,15 @@ func (c Command) Run() Result {
 	}
 
 	return Result{Output: out.String(), Elapsed: elapsed, TimedOut: timedOut, Err: err}
+}
+
+// safeFprintf writes to a writer that has already proved it can panic. It
+// reports whether the line survived, because a failed progress line is never
+// worth a failed gate, but a silently discarded one is not worth having either.
+func safeFprintf(w io.Writer, format string, args ...any) (written bool) {
+	defer func() { written = recover() == nil }()
+	fmt.Fprintf(w, format, args...)
+	return true
 }
 
 // beat writes a liveness line every interval until done is closed, so a gate

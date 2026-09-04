@@ -41,8 +41,8 @@
 
 Only exact `~` and `~` followed by a platform path separator are home-relative. Other leading-tilde path components are project-relative.
 
-## Traceability
+## BDD Traceability
 
-- Tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`
+- Feature: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`
+- Package tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`
 - Bounded execution: `wayfinder/cmd/wayfinder-session/internal/boundedexec/`
-- Cross-surface BDD: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`

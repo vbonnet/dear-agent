@@ -29,8 +29,8 @@ documented ten-minute gate timeout became an indefinite hang in
 
 **WAYFINDER-BOUNDEDEXEC-06** When a run ends, the system shall distinguish a timeout from an ordinary command failure.
 
-## Test Traceability
+## BDD Traceability
 
+- Feature: `agm/test/bdd/features/wayfinder_internal_package_guardrails.feature`
 - Package tests: `wayfinder/cmd/wayfinder-session/internal/boundedexec/boundedexec_test.go`
-- BDD: `agm/test/bdd/features/wayfinder_internal_package_guardrails.feature`
 - Callers: `wayfinder/cmd/wayfinder-session/internal/validator/`, `wayfinder/cmd/wayfinder-session/internal/review/`

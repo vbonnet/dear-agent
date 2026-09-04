@@ -3,6 +3,7 @@ package boundedexec
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -196,5 +197,54 @@ func TestCappedWriterTruncates(t *testing.T) {
 	}
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("expected a truncation notice; got %q", got)
+	}
+}
+
+// panicOnHeartbeat is a caller-supplied progress writer that fails only on the
+// heartbeat line. Progress writers belong to callers, so a gate must survive a
+// writer that panics on a background goroutine rather than take the whole
+// `complete-phase` process down with it.
+type panicOnHeartbeat struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *panicOnHeartbeat) Write(p []byte) (int, error) {
+	if bytes.Contains(p, []byte("still running")) {
+		panic("progress writer failed on the heartbeat line")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *panicOnHeartbeat) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// TestRunSurvivesPanickingProgressWriter proves the heartbeat goroutine is
+// guarded. Without a recover inside the goroutine, this panic is unrecoverable
+// and kills the test binary, which is exactly what it would do to a gate: the
+// hang fix would have traded an indefinite wait for a crash.
+func TestRunSurvivesPanickingProgressWriter(t *testing.T) {
+	t.Parallel()
+
+	progress := &panicOnHeartbeat{}
+	res := Command{
+		Label:     "hostile progress writer",
+		Name:      "sh",
+		Args:      []string{"-c", "exit 0"},
+		Timeout:   10 * time.Second,
+		Heartbeat: time.Millisecond,
+		Progress:  progress,
+	}.Run()
+
+	if res.Err != nil {
+		t.Fatalf("command outcome should be unaffected by the progress writer: %v", res.Err)
+	}
+	if !strings.Contains(progress.String(), "running `sh -c exit 0`") {
+		t.Fatalf("missing start line; got:\n%s", progress.String())
 	}
 }
