@@ -18,9 +18,11 @@
 //	inodes : > 90% WARN, > 95% CRITICAL
 //
 // Remediation reuses sanctioned safe hooks: first `agm sandbox gc --reap`,
-// then `agm worktree sweep --execute`. The sandbox GC re-verifies live-session,
-// process, mount, path, and age gates; the worktree sweep removes only
-// provably-MERGED, clean worktrees. No new destructive cleanup is invented here.
+// then `agm worktree sweep --execute`. SGC-18 currently makes the sandbox-GC
+// request fail closed until session-store endpoint transport is authenticated;
+// this watchdog reports that as a remediation failure and still evaluates the
+// independent worktree sweep. The worktree sweep removes only provably-MERGED,
+// clean worktrees. No new destructive cleanup is invented here.
 //
 // Usage:
 //
@@ -42,7 +44,9 @@
 // Free space is a lagging indicator of a leaked-sandbox problem: by the time it
 // crosses the 20 GiB floor, hundreds of GB have already accumulated. So the
 // watchdog also alarms when the hourly sandbox GC has stopped completing sweeps
-// (--gc-max-age, default 6h), independently of how much space is free.
+// (--gc-max-age, default 6h), independently of how much space is free. During
+// SGC-18 containment no destructive completion is possible, so this alarm is an
+// intentional report of the unavailable reclamation path.
 //
 // This generalises ce-93lw.18. That fix made *this* watchdog's failed
 // remediation consume-able by latching the admission brake. The same reasoning
@@ -213,12 +217,13 @@ func run(args []string, out io.Writer) (int, error) {
 	// free is a bug to report, not a reason to re-sweep every five minutes.
 	diskBreached := level != supervisor.PressureNone
 
-	// Read reaper liveness BEFORE remediating. Remediation runs the sandbox
-	// sweep itself, which appends a completion record; evaluating afterwards
-	// would grade the schedule on a heartbeat this tick just produced. The
-	// producer tag (gcSelfSource) keeps later ticks from counting it too, and
-	// this ordering keeps the current tick honest even against an older `agm`
-	// that does not stamp the tag.
+	// Read reaper liveness BEFORE remediating. SGC-18 currently refuses the
+	// sandbox request before it can append a completion record. Once authenticated
+	// transport restores destructive execution, remediation can append one;
+	// evaluating afterwards would grade the schedule on a heartbeat this tick
+	// just produced. The producer tag (gcSelfSource) keeps later ticks from
+	// counting it too, and this ordering keeps the current tick honest even
+	// against an older `agm` that does not stamp the tag.
 	gc := checkGCHealth(cfg, time.Now())
 
 	// Runs on every tick, breached or not: see the comment on config.

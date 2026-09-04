@@ -1063,8 +1063,9 @@ uninstall-gopls-watchdog-launchagent:
 	@echo "Removed: com.dear-agent.gopls-watchdog launch agent"
 
 # Stage the hourly sandbox-dir GC launch agent (ce-uxju). Staging only —
-# activation is a separate ask-gated `launchctl bootstrap`, and the plist
-# header says to run a manual `agm sandbox gc` dry run first.
+# activation is a separate ask-gated `launchctl bootstrap`. During SGC-18
+# containment the retained job exits non-zero and cannot reclaim sandboxes;
+# the plist header documents that expected alarm state.
 install-sandbox-gc-launchagent: install-agm
 	@mkdir -p $(HOME)/Library/LaunchAgents
 	@mkdir -p $(HOME)/.local/state/dear-agent
@@ -1072,6 +1073,7 @@ install-sandbox-gc-launchagent: install-agm
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist
 	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist"
 	@echo "Review a dry run first: agm sandbox gc"
+	@echo "SGC-18: destructive --reap is unavailable until session-store transport is authenticated."
 	@echo "Activate it yourself (ask-gated host action):"
 	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist"
 

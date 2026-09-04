@@ -160,7 +160,7 @@ Manages the full lifecycle of AGM sessions: creation (via `agm session new` / `a
 | Sandbox unmount fails | Logged as warning, archive proceeds (best-effort) |
 | Archive sandbox is held by an exiting child process | Retry before one absolute bounded process-grace deadline, refreshing the upper-layer settings snapshot and re-running all cleanup safety gates on every attempt, canceling in-flight process and mount scans at that deadline, and re-checking the budget before removal; preserve it if the holder persists |
 | Lifecycle reactivation overlaps archive cleanup | Serialize archive, unarchive, and administrative reconciliation with the stable session-ID lifecycle lock; reload lifecycle under that lock, and make reconciliation revalidate tmux state there, so cleanup cannot remove a sandbox after the session becomes active and a stale mismatch cannot overwrite completed lifecycle work |
-| Sandbox process or mount state cannot be proven safe | Preserve the sandbox for periodic GC; never remove it through unknown process state or a surviving mount |
+| Sandbox process or mount state cannot be proven safe | Preserve the sandbox for a future GC with authenticated endpoint authority; never remove it through unknown process state or a surviving mount |
 | MCP cleanup fails | Logged as warning, archive proceeds (best-effort) |
 | Trust event recording fails on archive | Logged as warning, archive proceeds |
 | Branch delete fails (unmerged) | Logged at debug level, archive proceeds |
