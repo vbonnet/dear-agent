@@ -36,3 +36,4 @@ Feature: SKILL and plugin marketplace parity
       | wayfinder |
       | youtube   |
       | research-pipeline |
+      | spec-governance |

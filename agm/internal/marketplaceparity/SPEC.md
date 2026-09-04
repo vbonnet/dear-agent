@@ -1,6 +1,6 @@
 # Marketplace Harness Parity Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-09-04 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -9,7 +9,8 @@
 ## Overview
 
 Marketplace parity means every active harness has a declared way to discover
-the same AGM, Wayfinder, research-pipeline, and YouTube command/SKILL bundles.
+the same AGM, Wayfinder, research-pipeline, SPEC-governance, and YouTube
+command/SKILL bundles.
 Claude Code uses its native `.claude-plugin/marketplace.json` format. Codex
 CLI, AGY, OpenCode, and Pi use the harness-neutral `.dear-agent/marketplace.json`
 catalog and AGENTS.md/SKILL fallback instructions until those harnesses
@@ -36,6 +37,24 @@ provide a native marketplace format.
 **MKT-09** When Codex CLI, AGY, OpenCode, or Pi consume the catalog, the system shall use an AGENTS.md/SKILL fallback mode.
 
 **MKT-10** When a new active harness is added, the system shall require marketplace parity tests before the harness is considered supported.
+
+**MKT-11** When the SPEC-governance package is declared, the neutral catalog and Claude marketplace shall each contain exactly one `spec-governance` entry with version `0.1.0`, literal source `./spec-governance`, repository `https://github.com/vbonnet/dear-agent`, license `Apache-2.0`, and dear-agent authorship.
+
+**MKT-12** When the SPEC-governance Claude marketplace entry is validated, the system shall require `strict: true` and shall reject component definitions or other behavior-bearing supplemental fields.
+
+**MKT-13** When the SPEC-governance Claude plugin manifest is validated, the system shall require matching authority metadata, shall allow no fields beyond that descriptive metadata and skill exports, and shall export exactly `audit-specs` and `write-spec` from their canonical directories.
+
+**MKT-14** When a provider-default command, agent, hook, MCP server, LSP server, executable, setting, output style, theme, monitor, workflow, or additional skill surface appears in the SPEC-governance plugin source, the system shall reject the package.
+
+**MKT-15** When catalog or manifest JSON is decoded, the system shall reject duplicate object fields recursively, trailing values, and case aliases of known authority fields while retaining compatible neutral supplemental metadata that does not alias an authority field.
+
+**MKT-16** When marketplace validation reads a catalog, manifest, SPEC-governance source root, skill tree, skill entrypoint, or exported reference, the system shall use bounded descriptor-anchored no-follow and nonblocking inspection, require stable regular-file identity with one hard link, and reject escapes, symlinks, nonregular objects, replacement races, and bounds violations.
+
+**MKT-17** When the host cannot provide descriptor-anchored no-follow filesystem inspection, the system shall fail SPEC-governance source validation closed.
+
+**MKT-18** When canonical skill content is validated, the system shall apply the existing skill-lint rules to the bytes read through the anchored descriptor rather than rereading a mutable path.
+
+**MKT-19** When SPEC-governance marketplace source validation succeeds, the system shall report only catalog, manifest, inventory, and source-schema evidence and shall not claim marketplace registration, installation, enabled state, discovery, invocation, or runtime loading.
 
 ## BDD Traceability
 

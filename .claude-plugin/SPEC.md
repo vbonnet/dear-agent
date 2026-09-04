@@ -1,6 +1,6 @@
 # Claude Plugin Marketplace Mirror Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-09-04 -->
 
 ## Overview
 
@@ -19,6 +19,12 @@ into Claude's native plugin marketplace format.
 **CLAUDE-MARKET-04** When neutral marketplace plugin sources are published, the system shall keep matching source paths in the Claude marketplace mirror.
 
 **CLAUDE-MARKET-05** When neutral marketplace plugin versions are published, the system shall keep matching versions in the Claude marketplace mirror.
+
+**CLAUDE-MARKET-06** When the SPEC-governance plugin is projected into the Claude marketplace, the system shall use literal source `./spec-governance`, require the co-located manifest as the authoritative strict declaration, and include matching repository, license, author, description, and version metadata.
+
+**CLAUDE-MARKET-07** When the Claude marketplace mirror is validated, the system shall require its plugin-name inventory to match the neutral catalog exactly and shall reject missing, additional, or duplicate entries.
+
+**CLAUDE-MARKET-08** When source marketplace files validate successfully, the system shall not treat that result as evidence of marketplace registration, plugin installation, enabled state, discovery, invocation, or runtime loading.
 
 ## BDD Traceability
 
