@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/readiness"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
@@ -211,18 +212,21 @@ func startClaudeHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPr
 	return modeAppliedAtStartup, false, nil
 }
 
-// waitForClaudeReady waits for the Claude prompt to appear (90s timeout) and
-// triggers the SessionStart hook for consistency. On failure it tears the
-// session down before returning.
+// waitForClaudeReady waits for the Claude prompt to appear and triggers the
+// SessionStart hook for consistency. On failure it tears the session down
+// before returning. The wait budget honors AGM_READY_TIMEOUT_SECONDS; it used
+// to be hardcoded, so raising that variable to debug a slow bring-up had no
+// effect and the spawn still failed at 90s.
 func waitForClaudeReady(ctx context.Context, sessionName string, claudeReady *tmux.ClaudeReadyFile) error {
+	promptTimeout := readiness.ClaudePromptTimeout()
 	debug.Phase("Wait for Claude Ready Signal (Text-Parsing)")
-	debug.Log("Waiting for Claude prompt to appear in tmux (timeout: 90s)")
+	debug.Log("Waiting for Claude prompt to appear in tmux (timeout: %v)", promptTimeout)
 	var waitErr error
 	spinErr := spinner.New().
 		Title("Waiting for Claude to be ready...").
 		Accessible(true).
 		Action(func() {
-			waitErr = tmux.WaitForClaudePromptContext(ctx, sessionName, 90*time.Second)
+			waitErr = tmux.WaitForClaudePromptContext(ctx, sessionName, promptTimeout)
 		}).
 		Run()
 	if spinErr != nil {

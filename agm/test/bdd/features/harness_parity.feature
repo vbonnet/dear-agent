@@ -30,6 +30,7 @@
 # RELATED-SPEC: agm/internal/interrupt/SPEC.md
 # RELATED-SPEC: agm/internal/lifecycle/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
+# RELATED-SPEC: agm/internal/claudetrust/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
 # RELATED-SPEC: agm/internal/dolt/SPEC.md

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/claudetrust"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
@@ -223,13 +224,15 @@ func runCreateSessionLifecycle(
 		if prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
-		extraAddDirs, trustPreConfigured = collectExtraAddDirs(preparedSandbox, trustedAddDirs)
+		extraAddDirs = collectExtraAddDirs(preparedSandbox, trustedAddDirs)
 		if prepareErr := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
 		if prepareErr := configureProjectPermissions(preparedWorkDir); prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
+		trustPreConfigured = seedWorkspaceTrust(harnessName, preparedSandbox, preparedWorkDir)
+		approveSandboxProjectMcpServers(harnessName, preparedSandbox, preparedWorkDir)
 		bypassCodexHookTrust, prepareErr = prepareCodexHookTrustBypass(prepareCtx, preparedSandbox)
 		if prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
@@ -551,14 +554,67 @@ func getWorkDir() (string, error) {
 // collectExtraAddDirs returns the explicitly configured host paths that Codex
 // may modify outside its sandbox workspace. Source repositories are lower
 // layers inside the sandbox and must never be forwarded as writable add-dirs.
-// The second return value reports that trust was pre-configured.
 // codexHookTrustBypassReason is the CLI-supplied justification. The flag takes
 // a reason rather than being a bool: the caller must say why, and that text is
 // what the recurring override audit reads.
 var codexHookTrustBypassReason string
 
-func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig, requested []string) ([]string, bool) {
-	return collectExtraAddDirsForHarness(sandboxInfo, harnessName, roleName, requested), true
+func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig, requested []string) []string {
+	return collectExtraAddDirsForHarness(sandboxInfo, harnessName, roleName, requested)
+}
+
+// seedWorkspaceTrust pre-authorizes the directory the harness will actually run
+// in, and reports whether the trust dialog can now be skipped.
+//
+// This used to be assumed rather than done: the create path hardcoded
+// "trust is pre-configured" and skipped the dialog monitor, while nothing
+// anywhere wrote hasTrustDialogAccepted. Every spawn therefore met the dialog
+// with nothing watching for it, and since the dialog opens on "No, exit" the
+// harness either exited or hung until the composer wait timed out.
+//
+// A failure here is not fatal. It only means the dialog may appear, which the
+// monitor is now able to answer, so the session degrades to the slower path
+// instead of failing to launch.
+// Sandboxes only, for the same reason approveSandboxProjectMcpServers is:
+// with --no-sandbox the work directory is the user's real checkout, and
+// recording hasTrustDialogAccepted there would grant an untrusted checkout
+// trusted-project behavior while Claude runs directly against it. AGM does not
+// widen the user's real workspace on their behalf; outside a sandbox the trust
+// dialog appears and the monitor answers it.
+func seedWorkspaceTrust(harness string, sandboxInfo *manifest.SandboxConfig, workDir string) bool {
+	if sandboxInfo == nil || agent.NormalizeHarnessName(harness) != "claude-code" {
+		return false
+	}
+	debug.Phase("Seed Workspace Trust")
+	seeded, err := claudetrust.SeedWorkspaceTrust(workDir)
+	if err != nil {
+		debug.Log("Could not pre-authorize workspace trust: %v", err)
+		ui.PrintWarning("Could not pre-approve workspace trust - the trust prompt may appear")
+		return false
+	}
+	debug.Log("Pre-approved workspace trust for %s", seeded)
+	return true
+}
+
+// approveSandboxProjectMcpServers pre-answers Claude's project MCP-server
+// prompt, which otherwise blocks the composer immediately after the trust
+// dialog and stalls the spawn just the same.
+//
+// Sandboxes only. The workspace here is a throwaway clone, and the servers being
+// enabled are the ones the cloned project declares in its own .mcp.json —
+// alongside the permission allowlist configureProjectPermissions has already
+// written to the same file. A non-sandboxed session runs in a real checkout the
+// user works in, and AGM does not widen that on their behalf.
+func approveSandboxProjectMcpServers(harness string, sandboxInfo *manifest.SandboxConfig, workDir string) {
+	if sandboxInfo == nil || agent.NormalizeHarnessName(harness) != "claude-code" {
+		return
+	}
+	if err := claudetrust.ApproveProjectMcpServers(workDir); err != nil {
+		debug.Log("Could not pre-approve project MCP servers: %v", err)
+		ui.PrintWarning("Could not pre-approve project MCP servers - the MCP prompt may appear")
+		return
+	}
+	debug.Log("Pre-approved project MCP servers for %s", workDir)
 }
 
 // collectExtraAddDirsForHarness resolves the current configured writable roots

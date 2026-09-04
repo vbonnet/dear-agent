@@ -797,8 +797,38 @@ func isClaudeComposerFooterChrome(line string) bool {
 			return true
 		}
 	}
+	// The remote control affordance: a standalone, right-aligned hyperlink to
+	// this session on claude.ai. It renders only for an authenticated Claude,
+	// which is why it is invisible to any check done from a logged-out pane.
+	if isClaudeSessionLinkRow(line) {
+		return true
+	}
 	// Status-line cwd anchor, e.g. "vbonnet@mac:/private/tmp/wd".
 	return claudeStatusCwdPattern.MatchString(plain)
+}
+
+// claudeSessionHyperlinkPattern matches one OSC 8 hyperlink whose target is
+// Claude's own web surface, capturing the visible label between the opening and
+// closing sequences.
+var claudeSessionHyperlinkPattern = regexp.MustCompile(
+	"\x1b\\]8;[^;]*;https://(?:www\\.)?claude\\.ai/[^\x1b]*\x1b\\\\([^\x1b]*)\x1b\\]8;;\x1b\\\\")
+
+// isClaudeSessionLinkRow reports whether a row is nothing but a hyperlink to
+// this session on claude.ai.
+//
+// Recognising it by its link target rather than by its label is what keeps this
+// narrow: the label is short and generic ("/rc"), so matching that text alone
+// would let ordinary model output pass as idle chrome. Requiring the whole row
+// to be a single Claude-hosted link means a spinner or tool progress below the
+// composer still fails closed (ce-wn4qe).
+func isClaudeSessionLinkRow(line string) bool {
+	matches := claudeSessionHyperlinkPattern.FindAllStringSubmatch(line, -1)
+	if len(matches) != 1 {
+		return false
+	}
+	// Nothing may share the row with the link.
+	remainder := strings.TrimSpace(stripANSI(strings.Replace(line, matches[0][0], "", 1)))
+	return remainder == "" && strings.TrimSpace(matches[0][1]) != ""
 }
 
 func hasTailOwnedGeminiComposer(content string) bool {
