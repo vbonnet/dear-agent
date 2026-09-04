@@ -61,7 +61,8 @@ parity; it does not establish any non-Claude discovery surface.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/marketplace_parity.feature` covers shared catalog parity; its generic plugin examples intentionally exclude the Claude-only SPEC-governance projection.
+- Feature: `agm/test/bdd/features/marketplace_parity.feature`
+- Scope note: The feature covers shared catalog parity; its generic plugin examples intentionally exclude the Claude-only SPEC-governance projection.
 - Deterministic Go tests in `agm/internal/marketplaceparity/claude_projection_contract_test.go` and `agm/internal/marketplaceparity/claude_projection_nonregular_unix_test.go` exercise the implemented authority, inventory, schema, and supported-host filesystem failure modes; MKT-17 is enforced by the unsupported-platform implementation.
 - MKT-19 governs the interpretation of successful source-validation results and intentionally has no provider/runtime acceptance scenario.
 - Shell integration tests: `tests/bats/install-claude-plugins.bats` cover MKT-20 and prove that the catalog-visible Claude-only projection is outside bulk install, update, and uninstall behavior.
