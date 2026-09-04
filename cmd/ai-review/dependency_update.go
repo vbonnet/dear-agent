@@ -28,6 +28,17 @@ import (
 // workflow classify by it, so the path and cause may only follow it.
 const reviewerDependencyReasonPrefix = "SPEC reviewer dependency graph change requires maintainer review ("
 
+// reviewerDependencyReason names the refused path and, when the delta proof
+// found one, the specific difference that requires maintainer judgment. The
+// leading text is a stable contract: onlyReviewerDependencyReasons and the
+// trusted workflow both classify by it.
+func reviewerDependencyReason(path, cause string) string {
+	if cause == "" {
+		return reviewerDependencyReasonPrefix + path + ")"
+	}
+	return reviewerDependencyReasonPrefix + path + ": " + cause + ")"
+}
+
 // dependencyGraphDelta is the dependency-graph slice of one authenticated diff.
 // Routine is true only when every dependency path in the delta is proven to be
 // an ordinary dependency version update; Causes records, in path order, why a

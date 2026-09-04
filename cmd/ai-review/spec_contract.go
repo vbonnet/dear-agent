@@ -803,17 +803,6 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 	return plan, nil
 }
 
-// reviewerDependencyReason names the refused path and, when the delta proof
-// found one, the specific difference that requires maintainer judgment. The
-// leading text is a stable contract: onlyReviewerDependencyReasons and the
-// trusted workflow both classify by it.
-func reviewerDependencyReason(path, cause string) string {
-	if cause == "" {
-		return reviewerDependencyReasonPrefix + path + ")"
-	}
-	return reviewerDependencyReasonPrefix + path + ": " + cause + ")"
-}
-
 func onlyReviewerDependencyReasons(reasons []string) bool {
 	if len(reasons) == 0 {
 		return false
