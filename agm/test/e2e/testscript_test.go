@@ -328,7 +328,7 @@ func shouldEvictE2EFixture(index, maxEntries int, age, maxAge time.Duration) boo
 
 func tryRemoveE2EFixtureDir(dirPath string) {
 	lockPath := filepath.Join(dirPath, "agm.lock")
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	lockFile, err := os.Open(lockPath)
 	if err != nil {
 		return
 	}

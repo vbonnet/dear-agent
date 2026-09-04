@@ -85,13 +85,17 @@ func (cfg e2eCacheConfig) withDefaults() e2eCacheGates {
 	return g
 }
 
-func removeE2EFixtureDir(path string) error {
+func removeE2EFixtureDir(path string) (err error) {
 	lockPath := filepath.Join(path, "agm.lock")
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
+	lockFile, oerr := os.Open(lockPath)
+	if oerr != nil {
 		return os.RemoveAll(path)
 	}
-	defer lockFile.Close()
+	defer func() {
+		if cerr := lockFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return fmt.Errorf("lock active: %w", err)
 	}
@@ -100,7 +104,7 @@ func removeE2EFixtureDir(path string) error {
 
 func isE2ECacheInUse(path string, lsof func(string) (bool, error)) (bool, error) {
 	lockPath := filepath.Join(path, "agm.lock")
-	if lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
+	if lockFile, err := os.Open(lockPath); err == nil {
 		flockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		_ = lockFile.Close()
 		if flockErr != nil {
