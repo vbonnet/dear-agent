@@ -1106,6 +1106,11 @@ install-absence-alarm-launchagent: install-absence-alarm install-jaeger-health
 		cp deploy/absence-alarm/pulses.json $(HOME)/.config/dear-agent/absence-alarm-pulses.json
 	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.absence-alarm.plist \
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.absence-alarm.plist
+	@if [ ! -f $(HOME)/.local/state/dear-agent/absence-alarm.heartbeat.json ]; then \
+		printf '{"tick_time":"%s","results":[],"alarming":0}\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			> $(HOME)/.local/state/dear-agent/absence-alarm.heartbeat.json; \
+		echo "Seeded: $(HOME)/.local/state/dear-agent/absence-alarm.heartbeat.json"; \
+	fi
 	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.absence-alarm.plist"
 	@echo "Review the pulse set: $(HOME)/.config/dear-agent/absence-alarm-pulses.json"
 	@echo "Activate it yourself (ask-gated host action):"

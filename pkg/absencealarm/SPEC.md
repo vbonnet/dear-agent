@@ -154,4 +154,5 @@ the absence alarm itself.
 - Package tests: `pkg/absencealarm/*_test.go` (domain)
 
 - CLI tests: `cmd/absence-alarm/main_test.go` (AA-07, AA-08, AA-10, AA-12,
-  AA-13, AA-15, AA-16, AA-17, AA-20, AA-21, AA-22, AA-23)
+  AA-13, AA-15, AA-16, AA-17, AA-20, AA-21, AA-22, AA-23,
+  AA-24 (per-pulse + tick deadline; remaining pulses continue after a hung probe))

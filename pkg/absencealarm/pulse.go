@@ -282,6 +282,8 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 			res.Reason = fmt.Sprintf("launchctl list: %v", launchdErr)
 			return res
 		}
+		// Evidence = the moment the listing was obtained (AA-09).
+		res.Evidence = pr.Now()
 		if !launchdListingContains(launchdListing, p.Label) {
 			res.Status = StatusAbsent
 			res.Reason = fmt.Sprintf("launchd job %s is not loaded", p.Label)
@@ -295,6 +297,8 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 			res.Reason = fmt.Sprintf("run %s: %v", strings.Join(p.Command, " "), err)
 			return res
 		}
+		// Evidence = the moment the command returned (AA-09).
+		res.Evidence = pr.Now()
 		if code != 0 {
 			res.Status = StatusAbsent
 			res.Reason = fmt.Sprintf("%s exited %d", strings.Join(p.Command, " "), code)
