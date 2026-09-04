@@ -17,6 +17,7 @@
 package ops
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -86,7 +87,7 @@ type SandboxGCResult struct {
 }
 
 // SandboxGC sweeps ~/.agm/sandboxes for reapable sandbox dirs.
-func SandboxGC(ctx *OpContext, req *SandboxGCRequest) (*SandboxGCResult, error) {
+func SandboxGC(opCtx *OpContext, req *SandboxGCRequest) (*SandboxGCResult, error) {
 	if req == nil {
 		req = &SandboxGCRequest{}
 	}
@@ -96,14 +97,14 @@ func SandboxGC(ctx *OpContext, req *SandboxGCRequest) (*SandboxGCResult, error) 
 	}
 	liveSessionIDs := req.LiveSessionIDs
 	if liveSessionIDs == nil {
-		liveSessionIDs = liveSessionIDsFromStorage(ctx)
+		liveSessionIDs = liveSessionIDsFromStorage(opCtx)
 	}
 	checker := sandboxgc.NewChecker(base, liveSessionIDs)
-	return sandboxGCWithChecker(req, base, checker)
+	return sandboxGCWithChecker(requestContext(opCtx), req, base, checker)
 }
 
 // sandboxGCWithChecker is the testable core of SandboxGC.
-func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc.Checker) (*SandboxGCResult, error) {
+func sandboxGCWithChecker(ctx context.Context, req *SandboxGCRequest, base string, checker *sandboxgc.Checker) (*SandboxGCResult, error) {
 	minAge := req.MinAge
 	if minAge <= 0 {
 		minAge = DefaultSandboxMinAge
@@ -156,7 +157,7 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 		if !req.Reap {
 			// Dry run: classify only (Reap would re-run these gates itself;
 			// running them once per entry avoids duplicate lsof/mount scans).
-			if err := checker.CheckReapable(dir); err != nil {
+			if err := checker.CheckReapableContext(ctx, dir); err != nil {
 				result.Kept++
 				if isProbeFailure(err) {
 					result.ProbeFailures++
@@ -173,7 +174,7 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 			continue
 		}
 
-		if err := checker.Reap(dir); err != nil {
+		if err := checker.ReapContext(ctx, dir); err != nil {
 			var refusal *sandboxgc.RefusalError
 			if errors.As(err, &refusal) {
 				result.Kept++
