@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 func writeCredsFile(path, accessToken string, expiresAt int64, refreshToken string) error {
@@ -405,5 +408,78 @@ func TestRun_CadenceRejectsReadOnlyStateDir(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "state directory unavailable") {
 		t.Errorf("expected 'state directory unavailable' in stderr, got: %s", stderr.String())
+	}
+}
+
+func TestRun_CadenceFingerprintsUnderLockAttemptedToken(t *testing.T) {
+	credDir := t.TempDir()
+	credPath := filepath.Join(credDir, ".credentials.json")
+	lockPath := filepath.Join(credDir, ".credentials.lock")
+	stateDir := t.TempDir()
+
+	if err := writeCredsFile(credPath, "stale-access", staleMs(), "token-A"); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer server.Close()
+
+	lockF, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lockF.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan int, 1)
+	var stdout, stderr bytes.Buffer
+	go func() {
+		quarPath := filepath.Join(stateDir, "quar.json")
+		code := run([]string{
+			"-cadence",
+			"-force",
+			"-credentials", credPath,
+			"-state-dir", stateDir,
+			"-quarantine", quarPath,
+			"-endpoint", server.URL,
+		}, &stdout, &stderr)
+		done <- code
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if err := writeCredsFile(credPath, "stale-access", staleMs(), "token-B"); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = syscall.Flock(int(lockF.Fd()), syscall.LOCK_UN)
+	_ = lockF.Close()
+
+	select {
+	case code := <-done:
+		if code != exitOK {
+			t.Fatalf("expected cadence exitOK (0), got %d; stderr: %s", code, stderr.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for run to complete")
+	}
+
+	quarPath := filepath.Join(stateDir, "quar.json")
+	sentinelPath := filepath.Join(stateDir, cadenceSentinelName(quarPath, credPath))
+	data, err := os.ReadFile(sentinelPath)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	rec, ok := parseSentinelData(data)
+	if !ok {
+		t.Fatalf("parse sentinel record: %s", string(data))
+	}
+	wantFP := auth.RefreshTokenFingerprint("token-B")
+	if rec.Fingerprint != wantFP {
+		t.Errorf("sentinel recorded fingerprint %q, want %q (under-lock attempted token)", rec.Fingerprint, wantFP)
 	}
 }

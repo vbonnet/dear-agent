@@ -56,11 +56,33 @@ func clearCadenceSentinel(stateDir, name string) error {
 		return nil
 	}
 	target := filepath.Join(stateDir, name)
-	err := os.Remove(target)
-	if err == nil || errors.Is(err, os.ErrNotExist) {
+	f, err := os.Open(target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if _, statErr := os.Stat(stateDir); statErr != nil {
+			return nil
+		}
+		return err
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	fStat, err := f.Stat()
+	if err != nil {
 		return nil
 	}
-	if _, statErr := os.Stat(stateDir); statErr != nil {
+	curInfo, err := os.Lstat(target)
+	if err != nil || !os.SameFile(fStat, curInfo) {
+		return nil
+	}
+	err = os.Remove(target)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	return err
@@ -174,7 +196,7 @@ func pruneCadenceSentinels(stateDir string, maxAge time.Duration, keepSentinel s
 	return pruned, firstErr
 }
 
-func pruneCadenceEntry(stateDir string, entry os.DirEntry, cutoff time.Time, keepSentinel string) (bool, error) {
+func isPrunableCandidate(entry os.DirEntry, cutoff time.Time, keepSentinel string) (bool, error) {
 	if !entry.Type().IsRegular() {
 		return false, nil
 	}
@@ -182,12 +204,40 @@ func pruneCadenceEntry(stateDir string, entry os.DirEntry, cutoff time.Time, kee
 	if name == keepSentinel || !isCadenceSentinel(name) {
 		return false, nil
 	}
-	target := filepath.Join(stateDir, name)
 	info, err := entry.Info()
 	if err != nil {
 		return false, fmt.Errorf("get entry info for %s: %w", name, err)
 	}
-	if !info.ModTime().Before(cutoff) || isActiveSentinel(target) {
+	return info.ModTime().Before(cutoff), nil
+}
+
+func pruneCadenceEntry(stateDir string, entry os.DirEntry, cutoff time.Time, keepSentinel string) (bool, error) {
+	candidate, err := isPrunableCandidate(entry, cutoff, keepSentinel)
+	if err != nil || !candidate {
+		return false, err
+	}
+	target := filepath.Join(stateDir, entry.Name())
+	return removeCadenceSentinelLocked(target, cutoff)
+}
+
+func removeCadenceSentinelLocked(target string, cutoff time.Time) (bool, error) {
+	f, err := os.Open(target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("open sentinel %s before removal: %w", filepath.Base(target), err)
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return false, fmt.Errorf("lock sentinel %s before removal: %w", filepath.Base(target), err)
+	}
+
+	fStat, err := f.Stat()
+	if err != nil {
 		return false, nil
 	}
 	currentInfo, err := os.Lstat(target)
@@ -195,13 +245,13 @@ func pruneCadenceEntry(stateDir string, entry os.DirEntry, cutoff time.Time, kee
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
-		return false, fmt.Errorf("stat sentinel %s before removal: %w", name, err)
+		return false, fmt.Errorf("stat sentinel %s before removal: %w", filepath.Base(target), err)
 	}
-	if !currentInfo.ModTime().Before(cutoff) || !os.SameFile(info, currentInfo) || !currentInfo.ModTime().Equal(info.ModTime()) || isActiveSentinel(target) {
+	if !os.SameFile(fStat, currentInfo) || !currentInfo.ModTime().Before(cutoff) || isActiveSentinel(target) {
 		return false, nil
 	}
 	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, fmt.Errorf("remove sentinel %s: %w", name, err)
+		return false, fmt.Errorf("remove sentinel %s: %w", filepath.Base(target), err)
 	}
 	return true, nil
 }
@@ -340,43 +390,59 @@ func isActiveSentinel(target string) bool {
 }
 
 func claimOrTouchSentinel(sentinel, credentialsPath, tokenFP, quarantinePath, outcome string) bool {
-	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return false
-	}
-	defer func() {
+	for range 3 {
+		f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			return false
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			_ = f.Close()
+			return false
+		}
+		fStat, err := f.Stat()
+		if err != nil {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			_ = f.Close()
+			return false
+		}
+		curInfo, err := os.Lstat(sentinel)
+		if err != nil || !os.SameFile(fStat, curInfo) {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			_ = f.Close()
+			continue
+		}
+
+		data, err := io.ReadAll(f)
+		if err == nil && len(data) > 0 {
+			if rec, ok := parseSentinelData(data); ok {
+				if sentinelMatchesEpisode(rec, credentialsPath, tokenFP) {
+					now := time.Now()
+					_ = os.Chtimes(sentinel, now, now)
+					_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+					_ = f.Close()
+					return true
+				}
+			}
+		}
+
+		rec := sentinelRecord{
+			Timestamp:       time.Now().UTC().Format(time.RFC3339),
+			QuarantinePath:  quarantinePath,
+			CredentialsPath: credentialsPath,
+			Fingerprint:     tokenFP,
+			Outcome:         outcome,
+		}
+		if payload, err := json.Marshal(rec); err == nil {
+			if err := f.Truncate(0); err == nil {
+				if _, err := f.Seek(0, io.SeekStart); err == nil {
+					_, _ = f.Write(append(payload, '\n'))
+					_ = f.Sync()
+				}
+			}
+		}
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		_ = f.Close()
-	}()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return false
-	}
-
-	data, err := io.ReadAll(f)
-	if err == nil && len(data) > 0 {
-		if rec, ok := parseSentinelData(data); ok {
-			if sentinelMatchesEpisode(rec, credentialsPath, tokenFP) {
-				now := time.Now()
-				_ = os.Chtimes(sentinel, now, now)
-				return true
-			}
-		}
-	}
-
-	rec := sentinelRecord{
-		Timestamp:       time.Now().UTC().Format(time.RFC3339),
-		QuarantinePath:  quarantinePath,
-		CredentialsPath: credentialsPath,
-		Fingerprint:     tokenFP,
-		Outcome:         outcome,
-	}
-	if payload, err := json.Marshal(rec); err == nil {
-		if err := f.Truncate(0); err == nil {
-			if _, err := f.Seek(0, io.SeekStart); err == nil {
-				_, _ = f.Write(append(payload, '\n'))
-				_ = f.Sync()
-			}
-		}
 	}
 	return false
 }

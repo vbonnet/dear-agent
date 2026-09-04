@@ -140,6 +140,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, span := otel.Tracer("token-refresher").Start(context.Background(), "token-refresher.run")
 	defer span.End()
 
+	var attemptedFP string
 	r := auth.OAuthResolver{
 		CredentialsPath: resolvedCredPath,
 		TokenEndpoint:   *endpoint,
@@ -149,6 +150,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		QuarantinePath:  *quarPath,
 		Logger:          logger,
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
+		OnAttempt: func(token string) {
+			attemptedFP = auth.RefreshTokenFingerprint(token)
+		},
 	}
 	resolvedStateDir := canonicalStateDir(*stateDir)
 	if *cadence && !*check {
@@ -250,6 +254,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	token, refreshed, err := r.EnsureFresh(ctx)
+	if attemptedFP != "" {
+		fp = attemptedFP
+	}
 	mode := "ensure"
 	if *force {
 		mode = "force"

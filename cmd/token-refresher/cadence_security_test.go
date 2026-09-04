@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -283,5 +284,76 @@ func TestNotifyCadenceOnce_CanonicalizesRelativeQuarantinePath(t *testing.T) {
 	}
 	if !filepath.IsAbs(rec.QuarantinePath) {
 		t.Errorf("expected absolute quarantine path in sentinel, got %q", rec.QuarantinePath)
+	}
+}
+
+func TestPruneCadenceSentinels_HoldsLockCoordinatesWithClaim(t *testing.T) {
+	stateDir := t.TempDir()
+	sentinelName := deathSentinelName
+	sentinelPath := filepath.Join(stateDir, sentinelName)
+
+	credsPath := credsWithRefreshToken(t, "rt-stale")
+	fp, _ := credentialsFingerprint(credsPath)
+
+	staleRec := sentinelRecord{
+		Timestamp:       time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339),
+		CredentialsPath: credsPath,
+		Fingerprint:     "old-fp-no-longer-matches",
+		Outcome:         "quarantined",
+		QuarantinePath:  filepath.Join(stateDir, "nonexistent.json"),
+	}
+	payload, err := json.Marshal(staleRec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sentinelPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-2 * time.Hour)
+	_ = os.Chtimes(sentinelPath, oldTime, oldTime)
+
+	lockF, err := os.OpenFile(sentinelPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lockF.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneDone := make(chan int, 1)
+	go func() {
+		pruned, _ := pruneCadenceSentinels(stateDir, 1*time.Hour, "")
+		pruneDone <- pruned
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	newRec := sentinelRecord{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		CredentialsPath: credsPath,
+		Fingerprint:     fp,
+		Outcome:         "dead",
+	}
+	newPayload, _ := json.Marshal(newRec)
+	_ = lockF.Truncate(0)
+	_, _ = lockF.Seek(0, io.SeekStart)
+	_, _ = lockF.Write(newPayload)
+	now := time.Now()
+	_ = os.Chtimes(sentinelPath, now, now)
+
+	_ = syscall.Flock(int(lockF.Fd()), syscall.LOCK_UN)
+	_ = lockF.Close()
+
+	select {
+	case pruned := <-pruneDone:
+		if pruned != 0 {
+			t.Errorf("expected 0 pruned sentinels, got %d", pruned)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pruneCadenceSentinels")
+	}
+
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Errorf("sentinel was pruned despite concurrent claim: %v", err)
 	}
 }
