@@ -151,7 +151,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
 	}
 	resolvedStateDir := canonicalStateDir(*stateDir)
-	if (*cadence || *clearQuar) && !*check {
+	if *cadence && !*check {
 		if err := ensureSecureStateDir(resolvedStateDir); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: state directory unavailable: %v\n", err)
 			return exitError

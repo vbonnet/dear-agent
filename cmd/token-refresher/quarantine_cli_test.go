@@ -153,7 +153,7 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 	}
 }
 
-func TestRun_ClearQuarantineKeepsMarkerWhenAlertCannotRearm(t *testing.T) {
+func TestRun_ClearQuarantineSucceedsWhenDefaultStateDirUnavailable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	if err := os.WriteFile(filepath.Join(home, ".local"), []byte("blocks state directory"), 0o600); err != nil {
@@ -166,11 +166,11 @@ func TestRun_ClearQuarantineKeepsMarkerWhenAlertCannotRearm(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"-clear-quarantine", "-quarantine", quar}, &stdout, &stderr)
-	if code != exitError {
-		t.Fatalf("exit code = %d, want %d", code, exitError)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr: %s", code, exitOK, stderr.String())
 	}
-	if _, err := os.Stat(quar); err != nil {
-		t.Fatalf("quarantine marker was removed before alert re-arm succeeded: %v", err)
+	if _, err := os.Stat(quar); !os.IsNotExist(err) {
+		t.Fatalf("quarantine marker was not removed: %v", err)
 	}
 }
 

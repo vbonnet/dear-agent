@@ -42,8 +42,15 @@ func cadenceSentinelName(quarantinePath, credentialsPath string) string {
 }
 
 func clearCadenceSentinel(stateDir, name string) error {
-	err := os.Remove(filepath.Join(stateDir, name))
-	if errors.Is(err, os.ErrNotExist) {
+	if stateDir == "" {
+		return nil
+	}
+	target := filepath.Join(stateDir, name)
+	err := os.Remove(target)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if _, statErr := os.Stat(stateDir); statErr != nil {
 		return nil
 	}
 	return err
