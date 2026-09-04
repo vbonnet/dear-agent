@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -479,5 +480,92 @@ func TestPruneCadenceSentinels_SkipsNonRegularFiles(t *testing.T) {
 	}
 	if _, err := os.Lstat(symlinkSentinel); err != nil {
 		t.Errorf("symlink sentinel was improperly removed: %v", err)
+	}
+}
+
+func TestPruneCadenceSentinels_SkipsTempAndSystemRoot(t *testing.T) {
+	pruned, err := pruneCadenceSentinels(os.TempDir(), 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("pruneCadenceSentinels on TempDir returned error: %v", err)
+	}
+	if pruned != 0 {
+		t.Errorf("pruneCadenceSentinels on TempDir pruned %d files, want 0", pruned)
+	}
+
+	pruned, err = pruneCadenceSentinels("/", 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("pruneCadenceSentinels on root returned error: %v", err)
+	}
+	if pruned != 0 {
+		t.Errorf("pruneCadenceSentinels on root pruned %d files, want 0", pruned)
+	}
+}
+
+func TestNotifyCadenceOnce_NewEpisodeAlertsWhenTokenFingerprintRotates(t *testing.T) {
+	stateDir := t.TempDir()
+	sentinel := filepath.Join(stateDir, deathSentinelName)
+	credsPath := credsWithRefreshToken(t, "rt-first")
+	fpFirst, _ := credentialsFingerprint(credsPath)
+
+	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "title1", "msg1")
+
+	data1, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel after first notify: %v", err)
+	}
+	if !strings.Contains(string(data1), fpFirst) {
+		t.Fatalf("sentinel missing initial fingerprint %q: %s", fpFirst, string(data1))
+	}
+
+	// Update credentials with rotated token representing a new episode.
+	credsPath = credsWithRefreshToken(t, "rt-second")
+	fpSecond, _ := credentialsFingerprint(credsPath)
+	if fpFirst == fpSecond {
+		t.Fatal("expected fingerprints to differ for different tokens")
+	}
+
+	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "title2", "msg2")
+
+	data2, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel after second notify: %v", err)
+	}
+	if !strings.Contains(string(data2), fpSecond) {
+		t.Fatalf("sentinel not updated with new episode fingerprint %q: %s", fpSecond, string(data2))
+	}
+}
+
+func TestIsActiveSentinel_ExpiredEpisodeWithRotatedFingerprintReturnsFalse(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, "token-family-dead-0123456789abcdef")
+
+	credsPath := credsWithRefreshToken(t, "rt-current")
+	fpOld := "deadbeef0000"
+
+	// Write sentinel recording a prior episode fingerprint and active stop marker.
+	if err := writeCadenceStop(credsPath); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = clearCadenceStop(credsPath) }()
+
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	lines := []string{stamp, "", credsPath, fpOld}
+	if err := os.WriteFile(sentinel, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if isActiveSentinel(sentinel) {
+		t.Error("isActiveSentinel = true for sentinel with rotated/mismatched fingerprint, want false")
+	}
+
+	// Now rewrite sentinel recording current fingerprint.
+	fpCurrent, _ := credentialsFingerprint(credsPath)
+	lines = []string{stamp, "", credsPath, fpCurrent}
+	if err := os.WriteFile(sentinel, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if !isActiveSentinel(sentinel) {
+		t.Error("isActiveSentinel = false for sentinel with current matching fingerprint, want true")
 	}
 }

@@ -124,6 +124,10 @@ func pruneCadenceSentinels(stateDir string, maxAge time.Duration, keepSentinel s
 	if maxAge <= 0 || stateDir == "" {
 		return 0, nil
 	}
+	cleanState := filepath.Clean(stateDir)
+	if cleanState == "/" || cleanState == filepath.Clean(os.TempDir()) {
+		return 0, nil
+	}
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -189,41 +193,66 @@ func isCadenceSentinel(name string) bool {
 	return true
 }
 
-func isActiveSentinel(target string) bool {
+func sentinelMatchesEpisode(recordedFP, credPath string) bool {
+	if recordedFP == "" {
+		return true
+	}
+	currentFP, _ := credentialsFingerprint(credPath)
+	return currentFP == "" || currentFP == recordedFP
+}
+
+func parseSentinelLines(target string) (quarPath, credPath, recordedFP string, ok bool) {
 	info, err := os.Stat(target)
 	if err != nil || !info.Mode().IsRegular() {
-		return false
+		return "", "", "", false
 	}
 	data, err := os.ReadFile(target)
 	if err != nil {
-		return false
+		return "", "", "", false
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	var quarPath, credPath string
 	if len(lines) >= 2 {
 		quarPath = filepath.Clean(strings.TrimSpace(lines[1]))
 	}
 	if len(lines) >= 3 {
 		credPath = strings.TrimSpace(lines[2])
 	}
-	if quarPath != "" && quarPath != "." {
-		// #nosec G703 -- path was recorded by local token-refresher to track its active quarantine marker.
-		if _, err := os.Stat(quarPath); err == nil {
-			resolver := auth.OAuthResolver{
-				CredentialsPath: canonicalCredentialsPath(credPath),
-				QuarantinePath:  quarPath,
-			}
-			if _, _, _, active := resolver.QuarantineStatus(); active {
-				return true
-			}
-		}
+	if len(lines) >= 4 {
+		recordedFP = strings.TrimSpace(lines[3])
 	}
-	if filepath.Base(target) == deathSentinelName || credPath != "" {
-		if stopped, err := cadenceStopped(credPath); err == nil && stopped {
-			return true
-		}
+	return quarPath, credPath, recordedFP, true
+}
+
+func isQuarantineActive(quarPath, credPath string) bool {
+	if quarPath == "" || quarPath == "." {
+		return false
 	}
-	return false
+	// #nosec G703 -- path was recorded by local token-refresher to track its active quarantine marker.
+	if _, err := os.Stat(quarPath); err != nil {
+		return false
+	}
+	resolver := auth.OAuthResolver{
+		CredentialsPath: canonicalCredentialsPath(credPath),
+		QuarantinePath:  quarPath,
+	}
+	_, _, _, active := resolver.QuarantineStatus()
+	return active
+}
+
+func isCadenceStoppedFor(target, credPath string) bool {
+	if filepath.Base(target) != deathSentinelName && credPath == "" {
+		return false
+	}
+	stopped, err := cadenceStopped(credPath)
+	return err == nil && stopped
+}
+
+func isActiveSentinel(target string) bool {
+	quarPath, credPath, recordedFP, ok := parseSentinelLines(target)
+	if !ok || !sentinelMatchesEpisode(recordedFP, credPath) {
+		return false
+	}
+	return isQuarantineActive(quarPath, credPath) || isCadenceStoppedFor(target, credPath)
 }
 
 // notifyCadenceOnce records the episode after its first best-effort alert.
@@ -231,21 +260,23 @@ func isActiveSentinel(target string) bool {
 // not notify again on every launchd tick.
 func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, title, message string) {
 	sentinel := filepath.Join(stateDir, sentinelName)
-	if _, err := os.Stat(sentinel); err == nil {
-		now := time.Now()
-		_ = os.Chtimes(sentinel, now, now)
-		return
+	currentFP, _ := credentialsFingerprint(credentialsPath)
+	if data, err := os.ReadFile(sentinel); err == nil {
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		var recordedFP string
+		if len(lines) >= 4 {
+			recordedFP = strings.TrimSpace(lines[3])
+		}
+		if sentinelMatchesEpisode(recordedFP, credentialsPath) {
+			now := time.Now()
+			_ = os.Chtimes(sentinel, now, now)
+			return
+		}
 	}
 	notifyOperator(title, message)
 	if err := os.MkdirAll(stateDir, 0o700); err == nil {
 		stamp := time.Now().UTC().Format(time.RFC3339)
-		lines := []string{stamp}
-		if quarantinePath != "" || credentialsPath != "" {
-			lines = append(lines, quarantinePath)
-			if credentialsPath != "" {
-				lines = append(lines, credentialsPath)
-			}
-		}
+		lines := []string{stamp, quarantinePath, credentialsPath, currentFP}
 		_ = os.WriteFile(sentinel, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 	}
 }
@@ -272,7 +303,7 @@ func notifyOperator(title, message string) {
 func defaultStateDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return os.TempDir()
+		return filepath.Join(os.TempDir(), "dear-agent")
 	}
 	return filepath.Join(home, ".local", "state", "dear-agent")
 }
