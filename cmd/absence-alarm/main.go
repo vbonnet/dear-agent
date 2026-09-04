@@ -171,20 +171,7 @@ func run(args []string, stdout, stderr io.Writer, pr absencealarm.Probes, notify
 	// other probe. Skip the fetch entirely when every launchd_loaded pulse is
 	// snoozed: AA-13 says a snoozed pulse must not be probed, and launchctl
 	// list can delay a whole tick when launchd is wedged or slow.
-	needsLaunchdListing := false
-	for _, p := range pulses {
-		if p.Type == absencealarm.PulseLaunchdLoaded {
-			if _, snoozed := snoozes[p.Name]; !snoozed {
-				needsLaunchdListing = true
-				break
-			}
-		}
-	}
-	if needsLaunchdListing {
-		listCtx, cancel := context.WithTimeout(ctx, *probeBudget)
-		tk.launchdListing, tk.launchdErr = pr.LaunchdList(listCtx)
-		cancel()
-	}
+	tk.launchdListing, tk.launchdErr = fetchLaunchdListing(ctx, pulses, snoozes, pr, *probeBudget)
 
 	rep := report{TickTime: now}
 	for _, p := range pulses {
@@ -209,6 +196,29 @@ func run(args []string, stdout, stderr io.Writer, pr absencealarm.Probes, notify
 		return 1
 	}
 	return 0
+}
+
+// fetchLaunchdListing fetches the launchd job listing when at least one
+// launchd_loaded pulse is not snoozed, bounded by budget. Returns empty string
+// and nil when every such pulse is snoozed (the listing is unnecessary then).
+func fetchLaunchdListing(
+	ctx context.Context,
+	pulses []absencealarm.Pulse,
+	snoozes map[string]absencealarm.Snooze,
+	pr absencealarm.Probes,
+	budget time.Duration,
+) (listing string, err error) {
+	for _, p := range pulses {
+		if p.Type == absencealarm.PulseLaunchdLoaded {
+			if _, snoozed := snoozes[p.Name]; !snoozed {
+				listCtx, cancel := context.WithTimeout(ctx, budget)
+				listing, err = pr.LaunchdList(listCtx)
+				cancel()
+				return
+			}
+		}
+	}
+	return "", nil
 }
 
 // process evaluates one pulse, advances its alarm state, journals it when
