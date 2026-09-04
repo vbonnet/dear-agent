@@ -38,6 +38,14 @@ type markdownApproval struct {
 	shellCommands portableShellCommands
 }
 
+type portableMarkdownValidator struct {
+	packagePath             string
+	content                 []byte
+	blockCount              int
+	specauditReferenceCount int
+	seenShellCommands       portableShellCommands
+}
+
 // markdownApprovals is deliberately review-maintained rather than derived at
 // runtime. It approves exact source bytes without copying their normative prose;
 // the compact capability bitset selects the generic shell grammar below.
@@ -128,89 +136,112 @@ func validatePortableMarkdownCommands(packagePath string, content []byte) error 
 	if !declared {
 		return fmt.Errorf("markdown payload %q has no approved content digest", packagePath)
 	}
-	seenShellCommands := portableShellCommands(0)
 	document := goldmark.DefaultParser().Parse(text.NewReader(content))
-	blockCount := 0
-	specauditReferenceCount := 0
+	validator := portableMarkdownValidator{packagePath: packagePath, content: content}
 	prose, err := markdownProseText(document, content)
 	if err != nil {
 		return fmt.Errorf("read visible prose from markdown payload %q: %w", packagePath, err)
 	}
-	if err := validateProseSpecauditReferences(packagePath, prose, &specauditReferenceCount); err != nil {
+	if err := validateProseSpecauditReferences(packagePath, prose, &validator.specauditReferenceCount); err != nil {
 		return err
 	}
-	err = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
-		}
-		switch typed := node.(type) {
-		case *ast.CodeSpan:
-			value := strings.TrimSpace(codeSpanText(typed, content))
-			if err := validateInlineSpecauditReference(packagePath, value, &specauditReferenceCount); err != nil {
-				return ast.WalkStop, err
-			}
-			return ast.WalkSkipChildren, nil
-		case *ast.FencedCodeBlock:
-			blockCount++
-			if blockCount > maxMarkdownCodeBlocks {
-				return ast.WalkStop, fmt.Errorf("markdown payload %q exceeds the %d-code-block bound", packagePath, maxMarkdownCodeBlocks)
-			}
-			if insideBlockquote(typed) {
-				return ast.WalkStop, fmt.Errorf("markdown payload %q contains an ambiguous blockquoted code block", packagePath)
-			}
-			language := strings.ToLower(strings.TrimSpace(string(typed.Language(content))))
-			info := ""
-			if typed.Info != nil {
-				info = string(typed.Info.Text(content))
-			}
-			if info != language {
-				return ast.WalkStop, fmt.Errorf("markdown payload %q contains noncanonical code block info %q", packagePath, info)
-			}
-			body := string(typed.Text(content))
-			switch language {
-			case "sh", "shell", "bash", "zsh", "console", "terminal":
-				if language != "sh" {
-					return ast.WalkStop, fmt.Errorf("markdown payload %q contains noncanonical shell block language %q", packagePath, language)
-				}
-				commands, err := validatePortableShellBlock(packagePath, body, &specauditReferenceCount)
-				if err != nil {
-					return ast.WalkStop, err
-				}
-				if seenShellCommands&commands != 0 {
-					return ast.WalkStop, fmt.Errorf("markdown payload %q repeats an approved packaged shell command", packagePath)
-				}
-				seenShellCommands |= commands
-			case "text":
-				if _, err := visitSpecauditReferences(packagePath, body, &specauditReferenceCount, func(int) error {
-					return fmt.Errorf("markdown payload %q text block is not an approved packaged data template", packagePath)
-				}); err != nil {
-					return ast.WalkStop, err
-				}
-			case "json":
-				if err := validateJSONSpecauditReferences(packagePath, body, &specauditReferenceCount); err != nil {
-					return ast.WalkStop, err
-				}
-			case "":
-				return ast.WalkStop, fmt.Errorf("markdown payload %q contains an ambiguous untyped code block", packagePath)
-			default:
-				return ast.WalkStop, fmt.Errorf("markdown payload %q contains unsupported code block language %q", packagePath, language)
-			}
-			return ast.WalkSkipChildren, nil
-		case *ast.CodeBlock:
-			blockCount++
-			if blockCount > maxMarkdownCodeBlocks {
-				return ast.WalkStop, fmt.Errorf("markdown payload %q exceeds the %d-code-block bound", packagePath, maxMarkdownCodeBlocks)
-			}
-			return ast.WalkStop, fmt.Errorf("markdown payload %q contains an ambiguous indented code block", packagePath)
-		default:
-			return ast.WalkContinue, nil
-		}
-	})
+	err = ast.Walk(document, validator.visit)
 	if err != nil {
 		return err
 	}
-	if seenShellCommands != approval.shellCommands {
-		return fmt.Errorf("markdown payload %q has approved shell command set %d, want %d", packagePath, seenShellCommands, approval.shellCommands)
+	if validator.seenShellCommands != approval.shellCommands {
+		return fmt.Errorf("markdown payload %q has approved shell command set %d, want %d", packagePath, validator.seenShellCommands, approval.shellCommands)
+	}
+	return nil
+}
+
+func (validator *portableMarkdownValidator) visit(node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	switch typed := node.(type) {
+	case *ast.CodeSpan:
+		value := strings.TrimSpace(codeSpanText(typed, validator.content))
+		return ast.WalkSkipChildren, validateInlineSpecauditReference(
+			validator.packagePath, value, &validator.specauditReferenceCount,
+		)
+	case *ast.FencedCodeBlock:
+		return ast.WalkSkipChildren, validator.validateFencedCodeBlock(typed)
+	case *ast.CodeBlock:
+		return ast.WalkStop, validator.rejectIndentedCodeBlock()
+	default:
+		return ast.WalkContinue, nil
+	}
+}
+
+func (validator *portableMarkdownValidator) validateFencedCodeBlock(block *ast.FencedCodeBlock) error {
+	if err := validator.recordCodeBlock(); err != nil {
+		return err
+	}
+	if insideBlockquote(block) {
+		return fmt.Errorf("markdown payload %q contains an ambiguous blockquoted code block", validator.packagePath)
+	}
+	language := strings.ToLower(strings.TrimSpace(string(block.Language(validator.content))))
+	info := ""
+	if block.Info != nil {
+		info = string(block.Info.Value(validator.content))
+	}
+	if info != language {
+		return fmt.Errorf("markdown payload %q contains noncanonical code block info %q", validator.packagePath, info)
+	}
+	return validator.validateFencedCodeBlockBody(language, string(block.Lines().Value(validator.content)))
+}
+
+func (validator *portableMarkdownValidator) validateFencedCodeBlockBody(language, body string) error {
+	switch language {
+	case "sh":
+		return validator.validateShellBlock(body)
+	case "shell", "bash", "zsh", "console", "terminal":
+		return fmt.Errorf("markdown payload %q contains noncanonical shell block language %q", validator.packagePath, language)
+	case "text":
+		_, err := visitSpecauditReferences(
+			validator.packagePath,
+			body,
+			&validator.specauditReferenceCount,
+			func(int) error {
+				return fmt.Errorf("markdown payload %q text block is not an approved packaged data template", validator.packagePath)
+			},
+		)
+		return err
+	case "json":
+		return validateJSONSpecauditReferences(validator.packagePath, body, &validator.specauditReferenceCount)
+	case "":
+		return fmt.Errorf("markdown payload %q contains an ambiguous untyped code block", validator.packagePath)
+	default:
+		return fmt.Errorf("markdown payload %q contains unsupported code block language %q", validator.packagePath, language)
+	}
+}
+
+func (validator *portableMarkdownValidator) validateShellBlock(body string) error {
+	commands, err := validatePortableShellBlock(
+		validator.packagePath, body, &validator.specauditReferenceCount,
+	)
+	if err != nil {
+		return err
+	}
+	if validator.seenShellCommands&commands != 0 {
+		return fmt.Errorf("markdown payload %q repeats an approved packaged shell command", validator.packagePath)
+	}
+	validator.seenShellCommands |= commands
+	return nil
+}
+
+func (validator *portableMarkdownValidator) rejectIndentedCodeBlock() error {
+	if err := validator.recordCodeBlock(); err != nil {
+		return err
+	}
+	return fmt.Errorf("markdown payload %q contains an ambiguous indented code block", validator.packagePath)
+}
+
+func (validator *portableMarkdownValidator) recordCodeBlock() error {
+	validator.blockCount++
+	if validator.blockCount > maxMarkdownCodeBlocks {
+		return fmt.Errorf("markdown payload %q exceeds the %d-code-block bound", validator.packagePath, maxMarkdownCodeBlocks)
 	}
 	return nil
 }
@@ -243,55 +274,11 @@ func validatePortableShellBlock(packagePath, body string, count *int) (portableS
 }
 
 func validatePortableShellStatement(packagePath string, statement *syntax.Stmt) (portableShellCommands, error) {
-	if statement.Negated || statement.Background || statement.Coprocess || statement.Disown || statement.Semicolon.IsValid() {
-		return 0, fmt.Errorf("markdown payload %q shell block is not an approved packaged command template: statement control syntax", packagePath)
+	arguments, err := staticShellArguments(packagePath, statement)
+	if err != nil {
+		return 0, err
 	}
-	call, ok := statement.Cmd.(*syntax.CallExpr)
-	if !ok || len(call.Assigns) != 0 {
-		return 0, fmt.Errorf("markdown payload %q shell block is not an approved static command", packagePath)
-	}
-	arguments := make([]string, 0, len(call.Args))
-	for _, word := range call.Args {
-		literal, err := staticShellWord(word)
-		if err != nil {
-			return 0, fmt.Errorf("markdown payload %q shell block contains a dynamic word: %w", packagePath, err)
-		}
-		arguments = append(arguments, literal)
-	}
-
-	var command portableShellCommands
-	var expectedArguments []string
-	var expectedOutput string
-	if len(arguments) >= 2 {
-		switch arguments[1] {
-		case "inventory":
-			command = portableShellInventory
-			expectedArguments = []string{
-				authenticatedSpecauditPath, "inventory",
-				"-repo", "<repository-path>",
-				"-repository", "<owner/name>",
-				"-revision", "<40-hex-sha>",
-			}
-			expectedOutput = "inventory.json"
-		case "validate":
-			command = portableShellValidate
-			expectedArguments = []string{
-				authenticatedSpecauditPath, "validate",
-				"-input", "findings.json",
-				"-inventory", "inventory.json",
-				"-repo", "<repository-path>",
-			}
-		case "render":
-			command = portableShellRender
-			expectedArguments = []string{
-				authenticatedSpecauditPath, "render",
-				"-input", "findings.json",
-				"-inventory", "inventory.json",
-				"-repo", "<repository-path>",
-			}
-			expectedOutput = "report.html"
-		}
-	}
+	command, expectedArguments, expectedOutput := portableShellCommandShape(arguments)
 	if command == 0 || !equalStrings(arguments, expectedArguments) {
 		return 0, fmt.Errorf("markdown payload %q shell block is not an approved packaged command template", packagePath)
 	}
@@ -299,6 +286,61 @@ func validatePortableShellStatement(packagePath string, statement *syntax.Stmt) 
 		return 0, err
 	}
 	return command, nil
+}
+
+func staticShellArguments(packagePath string, statement *syntax.Stmt) ([]string, error) {
+	if hasUnapprovedShellControl(statement) {
+		return nil, fmt.Errorf("markdown payload %q shell block is not an approved packaged command template: statement control syntax", packagePath)
+	}
+	call, ok := statement.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) != 0 {
+		return nil, fmt.Errorf("markdown payload %q shell block is not an approved static command", packagePath)
+	}
+	arguments := make([]string, 0, len(call.Args))
+	for _, word := range call.Args {
+		literal, err := staticShellWord(word)
+		if err != nil {
+			return nil, fmt.Errorf("markdown payload %q shell block contains a dynamic word: %w", packagePath, err)
+		}
+		arguments = append(arguments, literal)
+	}
+	return arguments, nil
+}
+
+func hasUnapprovedShellControl(statement *syntax.Stmt) bool {
+	return statement.Negated || statement.Background || statement.Coprocess ||
+		statement.Disown || statement.Semicolon.IsValid()
+}
+
+func portableShellCommandShape(arguments []string) (portableShellCommands, []string, string) {
+	if len(arguments) < 2 {
+		return 0, nil, ""
+	}
+	switch arguments[1] {
+	case "inventory":
+		return portableShellInventory, []string{
+			authenticatedSpecauditPath, "inventory",
+			"-repo", "<repository-path>",
+			"-repository", "<owner/name>",
+			"-revision", "<40-hex-sha>",
+		}, "inventory.json"
+	case "validate":
+		return portableShellValidate, []string{
+			authenticatedSpecauditPath, "validate",
+			"-input", "findings.json",
+			"-inventory", "inventory.json",
+			"-repo", "<repository-path>",
+		}, ""
+	case "render":
+		return portableShellRender, []string{
+			authenticatedSpecauditPath, "render",
+			"-input", "findings.json",
+			"-inventory", "inventory.json",
+			"-repo", "<repository-path>",
+		}, "report.html"
+	default:
+		return 0, nil, ""
+	}
 }
 
 func validatePortableShellRedirection(packagePath string, redirections []*syntax.Redirect, expectedOutput string) error {
