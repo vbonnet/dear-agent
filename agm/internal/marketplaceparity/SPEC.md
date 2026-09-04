@@ -39,15 +39,15 @@ parity; it does not establish any non-Claude discovery surface.
 
 **MKT-10** When a new active harness is added, the system shall require marketplace parity tests before the harness is considered supported.
 
-**MKT-11** When repository source declares the Claude-only SPEC-governance projection, the system shall treat it as the sole exception to shared neutral-to-Claude inventory parity, require exactly one `spec-governance` entry in `.claude-plugin/marketplace.json`, require no such entry in `.dear-agent/marketplace.json`, and make no non-Claude discovery claim for the package.
+**MKT-11** When repository source declares the Claude-only SPEC-governance projection, the system shall treat it as the sole exception to shared neutral-to-Claude inventory parity, require exactly one `spec-governance` entry in `.claude-plugin/marketplace.json`, reject every `.dear-agent/marketplace.json` entry whose name case-folds to `spec-governance` or whose normalized or resolved source aliases `./spec-governance`, and make no non-Claude discovery claim for the package.
 
 **MKT-12** When the SPEC-governance Claude marketplace entry is validated, the system shall require version `0.1.0`, literal source `./spec-governance`, repository `https://github.com/vbonnet/dear-agent`, license `Apache-2.0`, dear-agent author name and URL, the canonical description, and `strict: true`, and shall reject component definitions and every field outside that closed descriptive authority set.
 
 **MKT-13** When the SPEC-governance Claude plugin manifest is validated, the system shall require authority metadata matching the Claude marketplace entry, allow no fields beyond that closed descriptive authority set and skill exports, and export exactly `audit-specs` and `write-spec` from their canonical directories.
 
-**MKT-14** When a provider-default command, agent, hook, MCP server, LSP server, executable, setting, output style, theme, monitor, workflow, or additional skill surface appears in the SPEC-governance plugin source, the system shall reject the package.
+**MKT-14** When a provider-default command, agent, hook, MCP server, LSP server, executable, setting, output style, theme, monitor, workflow, package manifest, dependency lockfile, or additional skill surface appears in the SPEC-governance plugin source, the system shall reject the package.
 
-**MKT-15** When marketplace JSON is decoded for projection validation, the system shall reject duplicate object fields recursively and trailing values, enforce closed schemas and exact authority-field case for the Claude catalog and SPEC-governance manifest, and retain compatible neutral supplemental metadata only when it does not case-alias a known neutral authority field.
+**MKT-15** When marketplace JSON is decoded for projection validation, the system shall reject duplicate object fields recursively and trailing values, enforce closed schemas and exact authority-field case for the Claude catalog and SPEC-governance manifest, require every Claude string local source to start with `./`, require a nonempty Claude marketplace owner name while allowing only its documented `name`, `email`, and `url` fields, and retain compatible neutral supplemental metadata only when it does not case-alias a known neutral authority field.
 
 **MKT-16** When marketplace validation reads a catalog, manifest, SPEC-governance source root, skill tree, skill entrypoint, or exported reference, the system shall use bounded descriptor-anchored no-follow and nonblocking inspection, require stable regular-file identity with one hard link, and reject escapes, symlinks, nonregular objects, replacement races, and bounds violations.
 
@@ -59,10 +59,12 @@ parity; it does not establish any non-Claude discovery surface.
 
 **MKT-20** When the repository bulk Claude installer enumerates managed plugins, the system shall keep the closed historical set to `agm`, `wayfinder`, `youtube`, and `research-pipeline` and shall exclude `spec-governance` from install, update, and uninstall actions.
 
+**MKT-21** When canonical SPEC-governance package metadata and tree closure are validated, the system shall require `.claude-plugin/SPEC.owner` bytes to equal `agm/internal/marketplaceparity/SPEC.md` followed by one newline, allow no other `.claude-plugin` entries besides `plugin.json` and `SPEC.owner`, require `spec-governance/LICENSE` bytes to equal repository `LICENSE` exactly, permit only `LICENSE`, `README.md`, and `SPEC.md` files at the package root, and allow only the canonical `.claude-plugin`, `skills`, two named skill, and `references` directories.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/marketplace_parity.feature`
 - Scope note: The feature covers shared catalog parity; its generic plugin examples intentionally exclude the Claude-only SPEC-governance projection.
-- Deterministic Go tests in `agm/internal/marketplaceparity/claude_projection_contract_test.go` and `agm/internal/marketplaceparity/claude_projection_nonregular_unix_test.go` exercise the implemented authority, inventory, schema, and supported-host filesystem failure modes; MKT-17 is enforced by the unsupported-platform implementation.
+- Test consequence: Deterministic unit and integration tests in `agm/internal/marketplaceparity/claude_projection_contract_test.go`, `agm/internal/marketplaceparity/claude_projection_nonregular_unix_test.go`, and `agm/internal/marketplaceparity/claude_projection_license_unix_test.go` exercise the implemented authority, inventory, schema, metadata, license, and supported-host filesystem failure modes; MKT-17 is enforced by the unsupported-platform implementation.
 - MKT-19 governs the interpretation of successful source-validation results and intentionally has no provider/runtime acceptance scenario.
 - Shell integration tests: `tests/bats/install-claude-plugins.bats` cover MKT-20 and prove that the catalog-visible Claude-only projection is outside bulk install, update, and uninstall behavior.

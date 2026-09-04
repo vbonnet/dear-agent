@@ -88,6 +88,72 @@ func TestNeutralCatalogRejectsClaudeOnlySpecGovernance(t *testing.T) {
 	}
 }
 
+func TestNeutralCatalogRejectsClaudeOnlySpecGovernanceAliases(t *testing.T) {
+	tests := []struct {
+		name          string
+		neutralPlugin string
+		claudePlugin  string
+	}{
+		{
+			name:          "case-folded name",
+			neutralPlugin: `{"name":"Spec-Governance","source":"./research-pipeline","description":"Shadow","version":"0.1.0"}`,
+			claudePlugin:  `{"name":"Spec-Governance","source":"./research-pipeline","description":"Shadow","version":"0.1.0"}`,
+		},
+		{
+			name:          "normalized source",
+			neutralPlugin: `{"name":"shadow","source":"./nested/../spec-governance","description":"Shadow","version":"0.1.0"}`,
+			claudePlugin:  `{"name":"shadow","source":"./nested/../spec-governance","description":"Shadow","version":"0.1.0"}`,
+		},
+		{
+			name:          "rooted source",
+			neutralPlugin: `{"name":"shadow","source":"/spec-governance","description":"Shadow","version":"0.1.0"}`,
+			claudePlugin:  `{"name":"shadow","source":"/spec-governance","description":"Shadow","version":"0.1.0"}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newProjectionTestFixture(t)
+			projectionTestReplace(t, fixture.neutralPath, "\n  ],\n  \"harnesses\"", ",\n    "+test.neutralPlugin+"\n  ],\n  \"harnesses\"")
+			projectionTestReplace(t, fixture.claudePath, "\n  ]\n}\n", ",\n    "+test.claudePlugin+"\n  ]\n}\n")
+			operations := []struct {
+				name     string
+				validate func(string) error
+			}{
+				{name: "ValidateCatalog", validate: ValidateCatalog},
+				{name: "ValidateClaudeMarketplaceMirror", validate: ValidateClaudeMarketplaceMirror},
+			}
+			for _, operation := range operations {
+				err := operation.validate(fixture.root)
+				if err == nil || !strings.Contains(err.Error(), "must not advertise Claude-only plugin identity") {
+					t.Fatalf("%s() error = %v, want Claude-only identity rejection", operation.name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestNeutralCatalogRejectsResolvedClaudeOnlySpecGovernanceAlias(t *testing.T) {
+	fixture := newProjectionTestFixture(t)
+	if err := os.Symlink("spec-governance", filepath.Join(fixture.root, "shadow")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	const shadow = `{"name":"shadow","source":"./shadow","description":"Shadow","version":"0.1.0"}`
+	projectionTestReplace(t, fixture.neutralPath, "\n  ],\n  \"harnesses\"", ",\n    "+shadow+"\n  ],\n  \"harnesses\"")
+	projectionTestReplace(t, fixture.claudePath, "\n  ]\n}\n", ",\n    "+shadow+"\n  ]\n}\n")
+	for _, operation := range []struct {
+		name     string
+		validate func(string) error
+	}{
+		{name: "ValidateCatalog", validate: ValidateCatalog},
+		{name: "ValidateClaudeMarketplaceMirror", validate: ValidateClaudeMarketplaceMirror},
+	} {
+		err := operation.validate(fixture.root)
+		if err == nil || !strings.Contains(err.Error(), "must not advertise Claude-only plugin identity") {
+			t.Fatalf("%s() error = %v, want resolved Claude-only identity rejection", operation.name, err)
+		}
+	}
+}
+
 func TestSpecGovernanceManifestAuthorityIsExact(t *testing.T) {
 	tests := []struct {
 		name string
@@ -185,6 +251,52 @@ func TestSpecGovernanceManifestAndClaudeEntryUseClosedFields(t *testing.T) {
 			return ValidateClaudeMarketplaceMirror(fixture.root)
 		})
 	})
+}
+
+func TestClaudeMarketplaceOwnerIsClosedAndRequired(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		replacement string
+	}{
+		{name: "missing name", replacement: `"owner": {}`},
+		{name: "unknown field", replacement: `"owner": {"name": "dear-agent", "x-shadow": true}`},
+		{name: "case-aliased URL", replacement: `"owner": {"name": "dear-agent", "URL": "https://github.com/vbonnet/dear-agent"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newProjectionTestFixture(t)
+			projectionTestReplace(t, fixture.claudePath, `"owner": {"name": "dear-agent", "email": "tools@example.com"}`, test.replacement)
+			projectionTestRequireError(t, "ValidateClaudeMarketplaceMirror", func() error {
+				return ValidateClaudeMarketplaceMirror(fixture.root)
+			})
+		})
+	}
+
+	t.Run("documented URL", func(t *testing.T) {
+		fixture := newProjectionTestFixture(t)
+		projectionTestReplace(
+			t,
+			fixture.claudePath,
+			`"owner": {"name": "dear-agent", "email": "tools@example.com"}`,
+			`"owner": {"name": "dear-agent", "url": "https://github.com/vbonnet/dear-agent"}`,
+		)
+		if err := ValidateClaudeMarketplaceMirror(fixture.root); err != nil {
+			t.Fatalf("ValidateClaudeMarketplaceMirror() documented owner URL: %v", err)
+		}
+	})
+}
+
+func TestClaudeMarketplaceSharedSourceRequiresDocumentedRelativePrefix(t *testing.T) {
+	for _, source := range []string{"agm/agm-plugin", "/agm/agm-plugin"} {
+		t.Run(source, func(t *testing.T) {
+			fixture := newProjectionTestFixture(t)
+			projectionTestReplace(t, fixture.neutralPath, `"source":"./agm/agm-plugin"`, `"source":"`+source+`"`)
+			projectionTestReplace(t, fixture.claudePath, `"source":"./agm/agm-plugin"`, `"source":"`+source+`"`)
+			err := ValidateClaudeMarketplaceMirror(fixture.root)
+			if err == nil || !strings.Contains(err.Error(), "must start with ./") {
+				t.Fatalf("ValidateClaudeMarketplaceMirror() error = %v, want documented local-source rejection", err)
+			}
+		})
+	}
 }
 
 func TestClaudeSharedMarketplaceEntryRejectsBehaviorField(t *testing.T) {

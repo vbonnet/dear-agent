@@ -119,6 +119,13 @@ func validateCatalogSnapshot(root string, catalog Catalog) error {
 	if err := validateRequiredPlugins(catalog); err != nil {
 		return err
 	}
+	plugins, err := indexPlugins(catalog.Plugins, "neutral marketplace")
+	if err != nil {
+		return err
+	}
+	if err := validateNeutralCanonicalExclusion(root, plugins); err != nil {
+		return err
+	}
 	for _, plugin := range catalog.Plugins {
 		if err := validatePlugin(root, plugin); err != nil {
 			return err
@@ -132,8 +139,8 @@ func validateRequiredPlugins(catalog Catalog) error {
 	if err != nil {
 		return err
 	}
-	if _, advertised := present[canonicalPluginName]; advertised {
-		return fmt.Errorf("neutral marketplace must not advertise Claude-only plugin %q", canonicalPluginName)
+	if err := validateNeutralCanonicalLexicalExclusion(present); err != nil {
+		return err
 	}
 	for _, name := range requiredNeutralPluginNames {
 		plugin, ok := present[name]

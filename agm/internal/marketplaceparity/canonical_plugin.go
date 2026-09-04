@@ -3,7 +3,9 @@ package marketplaceparity
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -25,6 +27,65 @@ const (
 
 var requiredPluginSkills = []string{"audit-specs", "write-spec"}
 var requiredPluginSkillExports = []string{"./skills/audit-specs", "./skills/write-spec"}
+
+func validateNeutralCanonicalLexicalExclusion(neutral map[string]PluginEntry) error {
+	for _, name := range sortedPluginNames(neutral) {
+		plugin := neutral[name]
+		if strings.EqualFold(plugin.Name, canonicalPluginName) {
+			return fmt.Errorf(
+				"neutral marketplace must not advertise Claude-only plugin identity through name %q",
+				plugin.Name,
+			)
+		}
+		if strings.EqualFold(path.Clean(plugin.Source), path.Clean(canonicalPluginSource)) {
+			return fmt.Errorf(
+				"neutral marketplace must not advertise Claude-only plugin identity through source %q on plugin %q",
+				plugin.Source,
+				plugin.Name,
+			)
+		}
+	}
+	return nil
+}
+
+func validateNeutralCanonicalExclusion(root string, neutral map[string]PluginEntry) error {
+	if err := validateNeutralCanonicalLexicalExclusion(neutral); err != nil {
+		return err
+	}
+	canonicalSource, err := resolvedPathWithin(
+		root,
+		filepath.Join(root, filepath.FromSlash(canonicalPluginSource)),
+	)
+	if err != nil {
+		return fmt.Errorf("resolve Claude-only plugin source: %w", err)
+	}
+	canonicalInfo, err := os.Stat(canonicalSource)
+	if err != nil {
+		return fmt.Errorf("inspect Claude-only plugin source: %w", err)
+	}
+	for _, name := range sortedPluginNames(neutral) {
+		plugin := neutral[name]
+		resolvedSource, err := resolvedPathWithin(
+			root,
+			filepath.Join(root, filepath.FromSlash(plugin.Source)),
+		)
+		if err != nil {
+			return fmt.Errorf("neutral marketplace plugin %q source %q: %w", plugin.Name, plugin.Source, err)
+		}
+		sourceInfo, err := os.Stat(resolvedSource)
+		if err != nil {
+			return fmt.Errorf("inspect neutral marketplace plugin %q source %q: %w", plugin.Name, plugin.Source, err)
+		}
+		if os.SameFile(sourceInfo, canonicalInfo) {
+			return fmt.Errorf(
+				"neutral marketplace must not advertise Claude-only plugin identity through resolved source %q on plugin %q",
+				plugin.Source,
+				plugin.Name,
+			)
+		}
+	}
+	return nil
+}
 
 var allowedCanonicalDirectories = map[string]bool{
 	".claude-plugin":                true,

@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type claudeCatalog struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Owner       Owner               `json:"owner"`
-	Plugins     []claudePluginEntry `json:"plugins"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Owner       claudeMarketplaceOwner `json:"owner"`
+	Plugins     []claudePluginEntry    `json:"plugins"`
 }
 
 func (catalog *claudeCatalog) UnmarshalJSON(data []byte) error {
@@ -22,10 +23,10 @@ func (catalog *claudeCatalog) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var decoded struct {
-		Name        string              `json:"name"`
-		Description string              `json:"description"`
-		Owner       Owner               `json:"owner"`
-		Plugins     []claudePluginEntry `json:"plugins"`
+		Name        string                 `json:"name"`
+		Description string                 `json:"description"`
+		Owner       claudeMarketplaceOwner `json:"owner"`
+		Plugins     []claudePluginEntry    `json:"plugins"`
 	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
@@ -34,6 +35,32 @@ func (catalog *claudeCatalog) UnmarshalJSON(data []byte) error {
 	catalog.Description = decoded.Description
 	catalog.Owner = decoded.Owner
 	catalog.Plugins = decoded.Plugins
+	return nil
+}
+
+type claudeMarketplaceOwner struct {
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
+	URL   string `json:"url,omitempty"`
+}
+
+func (owner *claudeMarketplaceOwner) UnmarshalJSON(data []byte) error {
+	fields, err := decodeJSONObject(data)
+	if err != nil {
+		return err
+	}
+	if err := validateExactCaseFields("claude marketplace owner", fields, claudeMarketplaceOwnerCanonicalFields); err != nil {
+		return err
+	}
+	if err := validateAllowedFields("claude marketplace owner", fields, claudeMarketplaceOwnerAllowedFields); err != nil {
+		return err
+	}
+	type ownerJSON claudeMarketplaceOwner
+	var decoded ownerJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*owner = claudeMarketplaceOwner(decoded)
 	return nil
 }
 
@@ -108,6 +135,14 @@ var claudeCatalogAllowedFields = map[string]bool{
 	"plugins":     true,
 }
 
+var claudeMarketplaceOwnerAllowedFields = map[string]bool{
+	"email": true,
+	"name":  true,
+	"url":   true,
+}
+
+var claudeMarketplaceOwnerCanonicalFields = []string{"name", "email", "url"}
+
 var claudeMarketplaceEntryAllowedFields = map[string]bool{
 	"author":      true,
 	"description": true,
@@ -149,27 +184,19 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 	if err := readJSONWithin(root, ClaudeCatalogPath, &claude); err != nil {
 		return err
 	}
-	if neutral.Name != claude.Name {
-		return fmt.Errorf("claude marketplace name = %q, want %q", claude.Name, neutral.Name)
+	if err := validateClaudeCatalogIdentity(neutral, claude); err != nil {
+		return err
 	}
 	neutralByName, err := indexPlugins(neutral.Plugins, "neutral marketplace")
 	if err != nil {
 		return err
 	}
-	claudeByName := make(map[string]claudePluginEntry, len(claude.Plugins))
-	for _, plugin := range claude.Plugins {
-		if _, duplicate := claudeByName[plugin.Name]; duplicate {
-			return fmt.Errorf("claude marketplace contains duplicate plugin %q", plugin.Name)
-		}
-		if err := validateAllowedFields("claude marketplace entry", plugin.fields, claudeMarketplaceEntryAllowedFields); err != nil {
-			return err
-		}
-		if plugin.Name == canonicalPluginName {
-			if err := validateCanonicalClaudeEntry(plugin); err != nil {
-				return err
-			}
-		}
-		claudeByName[plugin.Name] = plugin
+	if err := validateNeutralCanonicalExclusion(root, neutralByName); err != nil {
+		return err
+	}
+	claudeByName, err := indexClaudePlugins(claude.Plugins)
+	if err != nil {
+		return err
 	}
 	neutralNames := sortedPluginNames(neutralByName)
 	expectedClaudeNames, err := expectedClaudePluginNames(neutralByName)
@@ -193,9 +220,45 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 	return validateCanonicalClaudeSource(root, claudeByName[canonicalPluginName])
 }
 
+func indexClaudePlugins(plugins []claudePluginEntry) (map[string]claudePluginEntry, error) {
+	byName := make(map[string]claudePluginEntry, len(plugins))
+	for _, plugin := range plugins {
+		if _, duplicate := byName[plugin.Name]; duplicate {
+			return nil, fmt.Errorf("claude marketplace contains duplicate plugin %q", plugin.Name)
+		}
+		if err := validateAllowedFields("claude marketplace entry", plugin.fields, claudeMarketplaceEntryAllowedFields); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(plugin.Source, "./") {
+			return nil, fmt.Errorf(
+				"claude marketplace plugin %q local source %q must start with ./",
+				plugin.Name,
+				plugin.Source,
+			)
+		}
+		if plugin.Name == canonicalPluginName {
+			if err := validateCanonicalClaudeEntry(plugin); err != nil {
+				return nil, err
+			}
+		}
+		byName[plugin.Name] = plugin
+	}
+	return byName, nil
+}
+
+func validateClaudeCatalogIdentity(neutral Catalog, claude claudeCatalog) error {
+	if neutral.Name != claude.Name {
+		return fmt.Errorf("claude marketplace name = %q, want %q", claude.Name, neutral.Name)
+	}
+	if claude.Owner.Name == "" {
+		return fmt.Errorf("claude marketplace owner is missing required name")
+	}
+	return nil
+}
+
 func expectedClaudePluginNames(neutral map[string]PluginEntry) ([]string, error) {
-	if _, advertised := neutral[canonicalPluginName]; advertised {
-		return nil, fmt.Errorf("neutral marketplace must not advertise Claude-only plugin %q", canonicalPluginName)
+	if err := validateNeutralCanonicalLexicalExclusion(neutral); err != nil {
+		return nil, err
 	}
 	names := sortedPluginNames(neutral)
 	names = append(names, canonicalPluginName)
