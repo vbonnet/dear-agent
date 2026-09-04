@@ -147,15 +147,7 @@ func (c Command) Run() Result {
 	<-stopped
 	elapsed := time.Since(start)
 
-	// A timeout requires the command to have failed, cancellation to have
-	// actually reached the process, the deadline to be what cancelled it, and
-	// the process not to have exited under its own power anyway. That last
-	// condition matters because the kill can lose the race: a command that
-	// returns its own exit status just as the deadline fires has produced a
-	// real diagnostic, and relabelling it a timeout makes the gate advise
-	// raising the timeout instead of showing the build or test error.
-	timedOut := err != nil && cancelled.Load() &&
-		errors.Is(ctx.Err(), context.DeadlineExceeded) && !exitedUnderOwnPower(err)
+	timedOut, err := classifyOutcome(cmd.ProcessState, err, cancelled.Load(), ctx.Err())
 	switch {
 	case timedOut:
 		sink.emit("⏱  %s: timed out after %s\n", c.Label, c.Timeout)
@@ -217,12 +209,29 @@ func (s *progressSink) close() {
 	}
 }
 
-// exitedUnderOwnPower reports whether the process finished with its own exit
-// status rather than dying from a signal. A signalled process is one we killed;
-// an exited one told us something, and that something is worth keeping.
-func exitedUnderOwnPower(err error) bool {
-	exitErr, ok := errors.AsType[*exec.ExitError](err)
-	return ok && exitErr.ProcessState != nil && exitErr.Exited()
+// classifyOutcome recovers the command's real outcome and decides whether the
+// deadline is what ended it.
+//
+// os/exec can replace a finished command's result with the context error: when
+// cancellation races the exit, Cancel returns nil for a process that is already
+// dead (killing its zombie group succeeds), and Wait then prefers ctx.Err() to
+// the real status. So the returned error cannot be trusted to describe how the
+// process ended. A recorded ProcessState reporting a normal exit can: a
+// successful build stays successful, and a real failure keeps its exit code and
+// its diagnostic instead of being relabelled a timeout.
+func classifyOutcome(state *os.ProcessState, err error, cancelled bool, ctxErr error) (timedOut bool, outcome error) {
+	if state != nil && state.Exited() {
+		if state.Success() {
+			return false, nil
+		}
+		if _, ok := errors.AsType[*exec.ExitError](err); !ok {
+			err = &exec.ExitError{ProcessState: state}
+		}
+		return false, err
+	}
+	// No normal exit: the process was signalled, never started, or Wait gave up
+	// on descendants holding the pipes. Only now can the deadline own the result.
+	return err != nil && cancelled && errors.Is(ctxErr, context.DeadlineExceeded), err
 }
 
 // beat writes a liveness line every interval until done is closed, so a gate

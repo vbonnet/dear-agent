@@ -179,9 +179,14 @@ func runBuild(projectDir, lang string) *CompilationResult {
 		// pattern malformed, so this error is reachable and not decoration.
 		pyFiles, err := filepath.Glob(filepath.Join(projectDir, "*.py"))
 		if err != nil {
+			// The message goes in Output as well: that is the field the
+			// caller renders, so a diagnostic that lives only in ErrorMessage
+			// reaches the operator as "0 compilation errors" and no remedy.
+			diagnostic := fmt.Sprintf("cannot enumerate Python sources in %s: %v", projectDir, err)
 			return &CompilationResult{
 				Success:      false,
-				ErrorMessage: fmt.Sprintf("cannot enumerate Python sources in %s: %v", projectDir, err),
+				Output:       diagnostic,
+				ErrorMessage: diagnostic,
 			}
 		}
 		if len(pyFiles) == 0 {

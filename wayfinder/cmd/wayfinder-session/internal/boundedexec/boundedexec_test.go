@@ -2,6 +2,7 @@ package boundedexec
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -382,4 +383,62 @@ func TestOrdinaryFailureIsNotReportedAsTimeout(t *testing.T) {
 			t.Fatalf("successful command was misclassified as a timeout: %+v", res)
 		}
 	}
+}
+
+// realProcessState runs a command to completion and returns its recorded state,
+// so the classification tests work against genuine kernel-reported states
+// rather than a fabrication.
+func realProcessState(t *testing.T, script string) *os.ProcessState {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", script)
+	_ = cmd.Run() // a non-zero exit is expected for some scripts
+	if cmd.ProcessState == nil {
+		t.Fatalf("no ProcessState recorded for %q", script)
+	}
+	return cmd.ProcessState
+}
+
+// TestClassifyOutcomePrefersProcessStateOverContextError pins the exact race
+// reported against the previous revision: at the deadline boundary a child can
+// already have exited while unreaped, killing its zombie group succeeds, and
+// os/exec then replaces the real status with "context deadline exceeded".
+// Classifying on that error alone marks a successful build as timed out and the
+// gate rejects it. The recorded ProcessState is the truth.
+func TestClassifyOutcomePrefersProcessStateOverContextError(t *testing.T) {
+	t.Parallel()
+
+	success := realProcessState(t, "exit 0")
+	failure := realProcessState(t, "exit 3")
+
+	t.Run("success survives a racing deadline", func(t *testing.T) {
+		timedOut, err := classifyOutcome(success, context.DeadlineExceeded, true, context.DeadlineExceeded)
+		if err != nil || timedOut {
+			t.Fatalf("a successful command was reported as err=%v timedOut=%v", err, timedOut)
+		}
+	})
+
+	t.Run("ordinary failure keeps its exit code", func(t *testing.T) {
+		timedOut, err := classifyOutcome(failure, context.DeadlineExceeded, true, context.DeadlineExceeded)
+		if timedOut {
+			t.Fatal("an ordinary failure was reported as a timeout")
+		}
+		if code := (Result{Err: err}).ExitCode(); code != 3 {
+			t.Fatalf("lost the exit status: got %d, want 3", code)
+		}
+	})
+
+	t.Run("a signalled process is a timeout", func(t *testing.T) {
+		killed := realProcessState(t, "kill -9 $$")
+		timedOut, err := classifyOutcome(killed, context.DeadlineExceeded, true, context.DeadlineExceeded)
+		if !timedOut {
+			t.Fatalf("a killed process was not reported as a timeout: err=%v", err)
+		}
+	})
+
+	t.Run("no deadline means no timeout", func(t *testing.T) {
+		killed := realProcessState(t, "kill -9 $$")
+		if timedOut, _ := classifyOutcome(killed, context.Canceled, true, context.Canceled); timedOut {
+			t.Fatal("cancellation without a deadline was reported as a timeout")
+		}
+	})
 }

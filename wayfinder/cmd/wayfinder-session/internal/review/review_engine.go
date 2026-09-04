@@ -401,6 +401,13 @@ func (e *ReviewEngine) runGolangciLint(_ []string) (PersonaResult, error) {
 		Args:    []string{"run", "./..."},
 		Timeout: e.lintTimeout(),
 	}.Run()
+	if res.TimedOut {
+		// A linter that never finished has found nothing. Reporting it as a
+		// completed persona with an empty P2 issue lets the review pass on the
+		// strength of a timeout, so fail the external path and let the caller
+		// fall back to the internal checks.
+		return PersonaResult{}, fmt.Errorf("maintainability lint exceeded its %s bound", e.lintTimeout())
+	}
 	output, err := []byte(res.Output), res.Err
 
 	result := PersonaResult{
