@@ -43,3 +43,28 @@ Feature: AGM supervision and recovery guardrails
     Then required-check policy should use the shared layered owner
     And check-run reads should consume every provider page
     And policy failures should prevent trigger calls
+    And unreadable check runs should remain indeterminate
+
+  Scenario: Missing-check recovery resolves policy per actual pull request base
+    Given no-check recovery scans pull requests across bases
+    When AGM validates no-check provider completeness
+    Then each non-draft pull request should use its actual base policy
+    And branch selection should be an optional verified filter
+    And every non-draft base policy should preflight before check-run reads
+    And policy preflight should use one total deadline
+    And draft pull requests should require no policy or check-run reads
+    And pull request listings should require known draft state
+    And pull request listings should honor a positive operator limit
+    And draft output should distinguish listed from eligible pull requests
+    And scan output should report the explicit base filter
+    And stuck evidence should report the actual pull request base
+
+  Scenario: Missing-check retriggers revalidate the mutation target
+    Given no-check recovery can mutate a pull request branch
+    When AGM validates no-check provider completeness
+    Then retrigger should revalidate current pull request identity
+    And stale or forked retriggers should stop before mutation
+    And retrigger should recheck whether CI already appeared
+    And caller cancellation should stop later trigger calls
+    And retrigger dry-run should validate without mutation
+    And trigger documentation should preserve snapshot boundaries
