@@ -296,6 +296,38 @@ type rollupResponse struct {
 	} `json:"data"`
 }
 
+// blocksMerge reports whether a rollup context in this state stops the pull
+// request from merging. It mirrors internal/safegit's classification
+// (requiredCheckStatus, parseFailingChecks): passing and pending states are
+// enumerated and everything else counts as blocking.
+//
+// The default is deliberately "blocking" rather than "passing". A conclusion
+// GitHub introduces after this code was written would otherwise read as a
+// healthy check, which is precisely the blindness this detector exists to end.
+// Erring the other way costs a notification; erring this way costs another
+// undetected deadlock. An empty conclusion is a CheckRun that has not finished,
+// so it is pending, not a silent pass.
+func blocksMerge(state string) bool {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "SUCCESS", "PASS", "NEUTRAL", "SKIPPED", "SKIPPING":
+		return false
+	default:
+		return !isPending(state)
+	}
+}
+
+// isPending reports whether a rollup context has not yet produced a terminal
+// result. An empty conclusion is the shape GitHub returns for a CheckRun that
+// is still running.
+func isPending(state string) bool {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "", "PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED":
+		return true
+	default:
+		return false
+	}
+}
+
 func parseRollup(raw []byte) ([]queuePR, error) {
 	var resp rollupResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -313,14 +345,26 @@ func parseRollup(raw []byte) ([]queuePR, error) {
 			prs = append(prs, pr)
 			continue
 		}
+		terminal := 0
 		for _, c := range n.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes {
 			name, state := c.Name, c.Conclusion
 			if name == "" {
 				name, state = c.Context, c.State
 			}
-			if state == "FAILURE" || state == "ERROR" {
+			if isPending(state) {
+				continue
+			}
+			terminal++
+			if blocksMerge(state) {
 				pr.FailingChecks = append(pr.FailingChecks, name)
 			}
+		}
+		if terminal == 0 {
+			// A rollup exists but nothing in it has reported a terminal result,
+			// so this PR is no more evidence of health than a missing rollup is
+			// (GHC-09). Counting it as an evaluated passing PR would let an
+			// in-progress queue dilute the denominator and mask the outage.
+			pr.ChecksUnknown = true
 		}
 		prs = append(prs, pr)
 	}

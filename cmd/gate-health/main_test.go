@@ -232,3 +232,106 @@ func TestParseRollupRejectsGarbage(t *testing.T) {
 		t.Fatal("parseRollup(garbage) = nil error, want a decode failure")
 	}
 }
+
+func TestParseRollupCountsEveryTerminalBlockingConclusion(t *testing.T) {
+	// GHC-10: a required check that is CANCELLED, TIMED_OUT, ACTION_REQUIRED,
+	// STARTUP_FAILURE or STALE blocks the merge exactly as FAILURE does, so a
+	// detector that recognises only FAILURE/ERROR reports healthy while the
+	// queue is wedged. The repository already classifies this way in
+	// internal/safegit (requiredCheckStatus, parseFailingChecks); this pins the
+	// same classification here. SUCCESS, NEUTRAL and SKIPPED pass; a CheckRun
+	// still running reports a null conclusion and must count as neither.
+	raw := []byte(`{"data":{"repository":{"pullRequests":{"nodes":[
+      {"number":1,"isDraft":false,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+        {"__typename":"CheckRun","name":"cancelled-check","conclusion":"CANCELLED"},
+        {"__typename":"CheckRun","name":"timed-out-check","conclusion":"TIMED_OUT"},
+        {"__typename":"CheckRun","name":"action-required-check","conclusion":"ACTION_REQUIRED"},
+        {"__typename":"CheckRun","name":"startup-failure-check","conclusion":"STARTUP_FAILURE"},
+        {"__typename":"CheckRun","name":"stale-check","conclusion":"STALE"},
+        {"__typename":"CheckRun","name":"failure-check","conclusion":"FAILURE"},
+        {"__typename":"StatusContext","context":"legacy-error","state":"ERROR"},
+        {"__typename":"CheckRun","name":"passing-check","conclusion":"SUCCESS"},
+        {"__typename":"CheckRun","name":"neutral-check","conclusion":"NEUTRAL"},
+        {"__typename":"CheckRun","name":"skipped-check","conclusion":"SKIPPED"},
+        {"__typename":"CheckRun","name":"still-running-check","conclusion":null},
+        {"__typename":"StatusContext","context":"legacy-pending","state":"PENDING"}
+      ]}}}}]}}
+    ]}}}}`)
+
+	prs, err := parseRollup(raw)
+	if err != nil {
+		t.Fatalf("parseRollup: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("len = %d, want 1", len(prs))
+	}
+
+	want := []string{
+		"cancelled-check", "timed-out-check", "action-required-check",
+		"startup-failure-check", "stale-check", "failure-check", "legacy-error",
+	}
+	got := prs[0].FailingChecks
+	if len(got) != len(want) {
+		t.Fatalf("FailingChecks = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("FailingChecks[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseRollupTreatsAnUnrecognisedConclusionAsFailing(t *testing.T) {
+	// GHC-12: fail closed. A conclusion GitHub adds after this code was written
+	// must not be silently read as a passing check, because that is the exact
+	// shape of the blindness this detector exists to end. Passing and pending
+	// states are enumerated; everything else counts as blocking.
+	raw := []byte(`{"data":{"repository":{"pullRequests":{"nodes":[
+      {"number":1,"isDraft":false,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+        {"__typename":"CheckRun","name":"future-conclusion","conclusion":"SOME_NEW_TERMINAL_STATE"}
+      ]}}}}]}}
+    ]}}}}`)
+
+	prs, err := parseRollup(raw)
+	if err != nil {
+		t.Fatalf("parseRollup: %v", err)
+	}
+	if got := prs[0].FailingChecks; len(got) != 1 || got[0] != "future-conclusion" {
+		t.Errorf("FailingChecks = %v, want [future-conclusion]", got)
+	}
+}
+
+func TestParseRollupTreatsAnAllPendingRollupAsUnevaluated(t *testing.T) {
+	// GHC-13: a rollup whose contexts are all still running has reported no
+	// terminal result, so it is not evidence of health. Counting it as an
+	// evaluated passing PR lets an in-progress queue dilute the denominator and
+	// mask the outage: five failing PRs beside 25 all-pending ones would read
+	// 5/30 rather than 5/5. GHC-09 already excludes a missing rollup from the
+	// denominator for exactly this reason; a rollup with no terminal context is
+	// the same state wearing a different shape.
+	raw := []byte(`{"data":{"repository":{"pullRequests":{"nodes":[
+      {"number":1,"isDraft":false,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+        {"__typename":"CheckRun","name":"still-running","conclusion":null},
+        {"__typename":"StatusContext","context":"legacy-pending","state":"PENDING"}
+      ]}}}}]}},
+      {"number":2,"isDraft":false,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+        {"__typename":"CheckRun","name":"done","conclusion":"SUCCESS"},
+        {"__typename":"CheckRun","name":"still-running","conclusion":null}
+      ]}}}}]}},
+      {"number":3,"isDraft":false,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[]}}}}]}}
+    ]}}}}`)
+
+	prs, err := parseRollup(raw)
+	if err != nil {
+		t.Fatalf("parseRollup: %v", err)
+	}
+	if !prs[0].ChecksUnknown {
+		t.Errorf("PR 1 (all contexts pending) = %+v, want ChecksUnknown", prs[0])
+	}
+	if prs[1].ChecksUnknown {
+		t.Errorf("PR 2 has a terminal SUCCESS, so it is evaluated: %+v", prs[1])
+	}
+	if !prs[2].ChecksUnknown {
+		t.Errorf("PR 3 (empty context list) = %+v, want ChecksUnknown", prs[2])
+	}
+}

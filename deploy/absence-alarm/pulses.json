@@ -59,6 +59,17 @@
       "path": "~/.local/state/dear-agent/absence-alarm.heartbeat.json",
       "window": "30m",
       "expect": "an absence-alarm tick within 30m (3 missed 10-min launchd intervals)"
+    },
+    {
+      "name": "merge-gate-not-systemically-failing",
+      "type": "command",
+      "command": [
+        "~/go/bin/gate-health",
+        "--repo",
+        "vbonnet/dear-agent"
+      ],
+      "window": "1h",
+      "expect": "no single required check failing across 30%+ of the open pull-request queue"
     }
   ]
 }

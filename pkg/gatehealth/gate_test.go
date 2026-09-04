@@ -18,6 +18,16 @@ func spread(n int, check string) []PullRequest {
 	return out
 }
 
+// fill builds n evaluated pull requests with nothing failing, numbered after
+// whatever spread produced, so a case can set an exact denominator.
+func fill(n int) []PullRequest {
+	out := make([]PullRequest, 0, n)
+	for i := 1; i <= n; i++ {
+		out = append(out, pr(1000+i))
+	}
+	return out
+}
+
 func TestDetectReportsHealthyWhenNoCheckIsShared(t *testing.T) {
 	// GH-01: unrelated per-PR churn is the normal state and must not alarm.
 	prs := []PullRequest{
@@ -315,5 +325,48 @@ func TestDefaultConfigWouldHaveCaughtTheGovulncheckDeadlock(t *testing.T) {
 	}
 	if got.RemediationKind != RemediationDependencyBump {
 		t.Errorf("RemediationKind = %q, want %q", got.RemediationKind, RemediationDependencyBump)
+	}
+}
+
+func TestDefaultConfigPinsItsExactThresholds(t *testing.T) {
+	// GH-13: the outage regression above proves only that the 2026-09-03 queue
+	// still reads systemic, which a wide band of thresholds satisfies. Defaults
+	// of MinFraction 0.45 / MinPRs 19 would pass it while consuming all the
+	// headroom, and much lower ones would pass it while making the alarm noisy.
+	// These are the shipped numbers, asserted exactly, plus the boundary cases
+	// that fail on drift in either direction.
+	cfg := DefaultConfig()
+	if cfg.MinFraction != 0.30 {
+		t.Errorf("DefaultConfig().MinFraction = %v, want 0.30", cfg.MinFraction)
+	}
+	if cfg.MinPRs != 5 {
+		t.Errorf("DefaultConfig().MinPRs = %d, want 5", cfg.MinPRs)
+	}
+	if cfg.ExcludeDrafts {
+		t.Error("DefaultConfig().ExcludeDrafts = true, want false; drafts are counted (GH-12)")
+	}
+
+	// Fraction boundary, with MinPRs comfortably cleared so only the fraction
+	// is under test: 6 of 20 is exactly 0.30 and systemic; 6 of 21 is 0.286 and
+	// is not. Raising MinFraction breaks the first case, lowering it breaks the
+	// second.
+	atFraction := append(spread(6, "shared"), fill(14)...)
+	if got := Detect(atFraction, cfg); got.Status != StatusSystemic {
+		t.Errorf("6 of 20 (30.0%%) = %v, want systemic at the 0.30 boundary", got.Status)
+	}
+	belowFraction := append(spread(6, "shared"), fill(15)...)
+	if got := Detect(belowFraction, cfg); got.Status == StatusSystemic {
+		t.Errorf("6 of 21 (28.6%%) = systemic, want healthy below the 0.30 boundary")
+	}
+
+	// Count boundary: 5 of 10 clears MinPRs, 4 of 8 is 50% but only 4 PRs.
+	// Raising MinPRs breaks the first case, lowering it breaks the second.
+	atCount := append(spread(5, "shared"), fill(5)...)
+	if got := Detect(atCount, cfg); got.Status != StatusSystemic {
+		t.Errorf("5 of 10 = %v, want systemic at the MinPRs boundary", got.Status)
+	}
+	belowCount := append(spread(4, "shared"), fill(4)...)
+	if got := Detect(belowCount, cfg); got.Status == StatusSystemic {
+		t.Errorf("4 of 8 (50%%, 4 PRs) = systemic, want healthy below MinPRs=5")
 	}
 }

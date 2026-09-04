@@ -60,7 +60,7 @@ on without opening anything else.
 
 **GHC-09** When a pull request's check rollup has not reported, the command shall mark it unknown and exclude it from the denominator.
 
-**GHC-10** When parsing a forge response, the command shall read both modern check runs and legacy status contexts, and treat `FAILURE` and `ERROR` as failing.
+**GHC-10** When parsing a forge response, the command shall read both modern check runs and legacy status contexts, and treat every terminal conclusion that blocks a merge as failing. `SUCCESS`, `NEUTRAL` and `SKIPPED` pass; a check that has not reached a conclusion counts as neither; every other terminal conclusion, including `CANCELLED`, `TIMED_OUT`, `ACTION_REQUIRED`, `STARTUP_FAILURE` and `STALE`, is failing. This matches the required-check classification the repository already applies in `internal/safegit`.
 
 **GHC-11** When a forge response cannot be decoded, the command shall return an error so GHC-03 applies.
 
