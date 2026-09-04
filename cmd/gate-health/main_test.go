@@ -226,7 +226,7 @@ func TestParseRollupReadsRealGitHubShapes(t *testing.T) {
 }
 
 func TestParseRollupRejectsGarbage(t *testing.T) {
-	// GHC-10: a malformed response must error, so run() reports down instead of
+	// GHC-11: a malformed response must error, so run() reports down instead of
 	// silently treating an unparseable queue as an empty healthy one.
 	if _, err := parseRollup([]byte("not json")); err == nil {
 		t.Fatal("parseRollup(garbage) = nil error, want a decode failure")
