@@ -217,6 +217,16 @@ func statMtimeBounded(
 	}
 	done := make(chan statResult, 1)
 	go func() {
+		// The hook is injected and runs on a goroutine that deliberately
+		// outlives this call, so a panic here cannot reach the caller's stack
+		// and would take the whole tick down: no later pulses, no
+		// notifications, no heartbeat. Turn it into an ordinary probe failure
+		// so AA-05 classifies the pulse UNDETERMINED instead.
+		defer func() {
+			if r := recover(); r != nil {
+				done <- statResult{err: fmt.Errorf("stat hook panicked: %v", r)}
+			}
+		}()
 		mtime, exists, err := stat(path)
 		done <- statResult{mtime, exists, err}
 	}()

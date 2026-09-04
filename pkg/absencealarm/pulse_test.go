@@ -232,3 +232,29 @@ func TestEvaluatePulseBoundsAWedgedFileStat(t *testing.T) {
 		t.Fatal("EvaluatePulse did not return after the probe deadline expired")
 	}
 }
+
+// AA-05: a stat hook that panics must classify the pulse UNDETERMINED, not
+// take the process down. The bounded stat runs the hook on its own goroutine
+// that deliberately outlives this call, so a panic there cannot be recovered
+// by the caller and would kill the whole tick: no later pulses, no
+// notifications, no heartbeat. That is the silent failure this alarm exists to
+// detect, caused by the alarm itself.
+func TestEvaluatePulseSurvivesAPanickingFileStat(t *testing.T) {
+	probes := Probes{
+		StatMtime: func(string) (time.Time, bool, error) {
+			panic("stat hook blew up")
+		},
+		Now: func() time.Time { return t0 },
+	}
+
+	res := EvaluatePulse(context.Background(), Pulse{
+		Name: "spans", Type: PulseFileMtime, Path: "/mnt/broken/spans.jsonl", Window: "1h",
+	}, probes, "", nil)
+
+	if res.Status != StatusUndetermined {
+		t.Errorf("Status = %q, want UNDETERMINED for a stat hook that panics", res.Status)
+	}
+	if !strings.Contains(res.Reason, "stat hook blew up") {
+		t.Errorf("Reason = %q, want it to carry the panic value", res.Reason)
+	}
+}
