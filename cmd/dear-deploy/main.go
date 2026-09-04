@@ -426,7 +426,7 @@ func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, a
 		case deploy.StateDrift:
 			would = "update"
 		case deploy.StateOK:
-			if force {
+			if force && !a.AbsentOnly {
 				would = "reinstall"
 			}
 		case deploy.StateSourceMissing:

@@ -230,3 +230,81 @@ func TestDeploy_CreatesRuntimeDirs(t *testing.T) {
 		t.Fatalf("runtime dir not created: %v", err)
 	}
 }
+
+func TestDeploy_AbsentOnlyPreservedUnderForce(t *testing.T) {
+	a, opts := fixture(t, Artifact{
+		Name:       "cfg",
+		Source:     "src/cfg",
+		Deployed:   "~/cfg",
+		AbsentOnly: true,
+	}, "default\n")
+
+	if _, err := Deploy(a, opts); err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+
+	// Operator customizes the live file.
+	customPath := a.DeployedPath(opts.Home)
+	if err := os.WriteFile(customPath, []byte("customized\n"), 0o644); err != nil {
+		t.Fatalf("write custom: %v", err)
+	}
+
+	// Forced deploy (dear-deploy install) must preserve operator edits.
+	opts.Force = true
+	res, err := Deploy(a, opts)
+	if err != nil {
+		t.Fatalf("deploy under force: %v", err)
+	}
+	if res.Action != ActionUnchanged {
+		t.Fatalf("action = %q, want %q under force for absent-only", res.Action, ActionUnchanged)
+	}
+
+	got, err := os.ReadFile(customPath)
+	if err != nil {
+		t.Fatalf("read custom: %v", err)
+	}
+	if string(got) != "customized\n" {
+		t.Fatalf("content = %q, want customized", string(got))
+	}
+}
+
+func TestStatus_CreateDirsMissingReportsDrift(t *testing.T) {
+	a, opts := fixture(t, Artifact{
+		Name:       "p",
+		Source:     "src/p",
+		Deployed:   "~/p",
+		CreateDirs: []string{"~/.local/state/custom"},
+	}, "content\n")
+
+	if _, err := Deploy(a, opts); err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if s := Status(a, opts); s.State != StateOK {
+		t.Fatalf("state = %q, want ok", s.State)
+	}
+
+	// Deleting the required runtime dir causes drift even when the artifact file is OK.
+	customDir := filepath.Join(opts.Home, ".local", "state", "custom")
+	if err := os.Remove(customDir); err != nil {
+		t.Fatalf("remove customDir: %v", err)
+	}
+	if s := Status(a, opts); s.State != StateDrift {
+		t.Fatalf("state = %q, want drift for missing runtime dir", s.State)
+	}
+
+	// Re-deploying without force (file unchanged) reconciles the missing directory.
+	res, err := Deploy(a, opts)
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if res.Action != ActionUnchanged {
+		t.Fatalf("action = %q, want %q", res.Action, ActionUnchanged)
+	}
+	info, err := os.Stat(customDir)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("runtime dir was not reconciled: %v", err)
+	}
+	if s := Status(a, opts); s.State != StateOK {
+		t.Fatalf("state = %q, want ok after reconcile", s.State)
+	}
+}

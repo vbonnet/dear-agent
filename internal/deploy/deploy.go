@@ -115,11 +115,19 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 	wantHash := sha256hex(content)
 	res.SHA256 = wantHash
 
+	for _, d := range a.CreateDirs {
+		target := expandPath(d, home)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return res, fmt.Errorf("creating required dir %s: %w", target, err)
+		}
+	}
+
 	// Decide install vs update vs unchanged from the current host state.
 	existing, statErr := os.ReadFile(deployedPath)
 	switch {
-	case statErr == nil && a.AbsentOnly && !opts.Force:
-		// Absent-only: already deployed, preserve operator edits unconditionally.
+	case statErr == nil && a.AbsentOnly:
+		// Absent-only: already deployed, preserve operator edits unconditionally,
+		// taking precedence over generic force installs.
 		res.Action = ActionUnchanged
 		return res, nil
 	case statErr == nil && sha256hex(existing) == wantHash && !opts.Force:
@@ -131,13 +139,6 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 		res.Action = ActionInstalled
 	default:
 		return res, fmt.Errorf("reading deployed %q: %w", deployedPath, statErr)
-	}
-
-	for _, d := range a.CreateDirs {
-		target := expandPath(d, home)
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return res, fmt.Errorf("creating required dir %s: %w", target, err)
-		}
 	}
 
 	if err := atomicWrite(deployedPath, content, mode, wantHash); err != nil {
@@ -279,6 +280,25 @@ func Status(a Artifact, opts Options) StatusResult {
 		res.Error = err.Error()
 		return res
 	}
+
+	for _, d := range a.CreateDirs {
+		target := expandPath(d, home)
+		fi, err := os.Stat(target)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				res.State = StateDrift
+				return res
+			}
+			res.State = StateError
+			res.Error = err.Error()
+			return res
+		}
+		if !fi.IsDir() {
+			res.State = StateDrift
+			return res
+		}
+	}
+
 	if sha256hex(deployed) == sha256hex(content) {
 		res.State = StateOK
 	} else if a.AbsentOnly {
