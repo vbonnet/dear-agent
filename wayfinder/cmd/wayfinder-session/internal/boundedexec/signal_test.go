@@ -3,8 +3,10 @@
 package boundedexec
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
@@ -92,4 +94,56 @@ func waitForPid(t *testing.T, pidFile string) int {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// TestInterruptPreservesTheSignal checks that a supervisor's SIGTERM comes back
+// as SIGTERM. Wayfinder runs under supervisors that read the exit status, so
+// collapsing every signal into SIGINT/130 misreports why it stopped.
+func TestInterruptPreservesTheSignal(t *testing.T) {
+	pidFile := t.TempDir() + "/descendant.pid"
+
+	helper := exec.Command(os.Args[0], "-test.run=TestHelperProcessRunsBoundedCommand", "-test.timeout=120s")
+	helper.Env = append(os.Environ(), helperEnv+"="+pidFile)
+	helper.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := helper.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-helper.Process.Pid, syscall.SIGKILL) })
+
+	waitForPid(t, pidFile)
+	if err := helper.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("terminate helper: %v", err)
+	}
+
+	waited := make(chan error, 1)
+	go func() { waited <- helper.Wait() }()
+	select {
+	case <-waited:
+	case <-time.After(20 * time.Second):
+		t.Fatal("SIGTERM was swallowed: the caller kept running")
+	}
+
+	status, ok := helper.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok {
+		t.Fatal("no wait status recorded")
+	}
+	if !status.Signaled() || status.Signal() != syscall.SIGTERM {
+		t.Fatalf("SIGTERM was not preserved: signaled=%v signal=%v exit=%d",
+			status.Signaled(), status.Signal(), status.ExitStatus())
+	}
+}
+
+// TestRunSurvivesAnIgnoredInterrupt covers the fall-through that re-raising
+// cannot rule out: a signal inherited as ignored is delivered and discarded, so
+// Run keeps executing past the re-raise. It must still return a well-formed
+// result rather than writing to the sink it already closed.
+func TestRunSurvivesAnIgnoredInterrupt(t *testing.T) {
+	signal.Ignore(syscall.SIGUSR1)
+	t.Cleanup(func() { signal.Reset(syscall.SIGUSR1) })
+
+	sink := newProgressSink(&bytes.Buffer{})
+	sink.close()
+	sink.close() // idempotent: the interrupt path closes early, the defer closes again
+
+	reraise(syscall.SIGUSR1) // ignored, so this returns instead of terminating
 }

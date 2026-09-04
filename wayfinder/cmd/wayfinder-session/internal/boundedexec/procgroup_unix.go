@@ -46,11 +46,22 @@ func endedByCancellation(state *os.ProcessState, _ bool) bool {
 	return !state.Exited()
 }
 
-// raiseInterrupt re-sends SIGINT to this process after the handler has been
-// restored, so an interrupt that this package absorbed still terminates
-// Wayfinder itself.
-func raiseInterrupt() {
-	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
-		os.Exit(interruptExitCode)
+// reraise re-sends the signal that this package absorbed, after the handler has
+// been restored, so the interrupt still terminates Wayfinder itself and does so
+// as the signal the supervisor actually sent.
+//
+// It can return: a signal the process inherited as ignored is delivered and
+// discarded. Callers must stay correct in that case rather than treating this
+// as unreachable.
+func reraise(sig os.Signal) {
+	unixSig, ok := sig.(syscall.Signal)
+	if !ok {
+		unixSig = syscall.SIGINT
+	}
+	if err := syscall.Kill(os.Getpid(), unixSig); err != nil {
+		os.Exit(signalExitCode(unixSig))
 	}
 }
+
+// signalExitCode is the conventional shell status for death by a signal.
+func signalExitCode(sig syscall.Signal) int { return 128 + int(sig) }

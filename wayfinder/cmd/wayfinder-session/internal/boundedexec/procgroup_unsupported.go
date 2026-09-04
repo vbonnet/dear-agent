@@ -7,6 +7,10 @@ import (
 	"os/exec"
 )
 
+// interruptExitCode is the conventional shell status for death by SIGINT, used
+// where re-raising the signal itself is unavailable.
+const interruptExitCode = 130
+
 // configureProcessGroup is a no-op where process groups are unavailable.
 func configureProcessGroup(_ *exec.Cmd) {}
 
@@ -28,8 +32,8 @@ func endedByCancellation(_ *os.ProcessState, cancelled bool) bool {
 	return cancelled
 }
 
-// raiseInterrupt exits directly, because sending an interrupt to the current
-// process is not supported on the platforms selected by this file.
-func raiseInterrupt() {
+// reraise exits directly, because sending a signal to the current process is
+// not supported on the platforms selected by this file.
+func reraise(_ os.Signal) {
 	os.Exit(interruptExitCode)
 }

@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -48,10 +49,6 @@ const (
 	// progressDrainGrace bounds how long Run waits for queued progress lines to
 	// reach the writer before returning without them.
 	progressDrainGrace = 2 * time.Second
-
-	// interruptExitCode is the conventional shell status for death by SIGINT,
-	// used when re-raising the signal itself is unavailable.
-	interruptExitCode = 130
 )
 
 // Command describes one bounded external command.
@@ -100,6 +97,12 @@ func (c Command) Run() Result {
 	// kills the whole group.
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	// NotifyContext reports that a signal arrived but not which one, and the
+	// difference is visible to whoever supervises Wayfinder: SIGTERM must not
+	// come back as SIGINT. A second registration on the same signals records it.
+	arrived := make(chan os.Signal, 1)
+	signal.Notify(arrived, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(arrived)
 	cancel := context.CancelFunc(func() {})
 	if c.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
@@ -168,17 +171,6 @@ func (c Command) Run() Result {
 
 	timedOut, err := classifyOutcome(cmd.ProcessState, err, cancelled.Load(), ctx.Err())
 
-	// An interrupt must end Wayfinder, not just this command. Consuming the
-	// signal here and returning would let complete-phase treat the cancelled
-	// review as an abstention and carry on to complete the phase, which is the
-	// opposite of what the operator asked for. Restore the default disposition
-	// and re-raise, so the process dies as it would have before this package
-	// took the command out of the foreground process group.
-	if errors.Is(ctx.Err(), context.Canceled) {
-		sink.close()
-		stopSignals()
-		raiseInterrupt()
-	}
 	switch {
 	case timedOut:
 		sink.emit("⏱  %s: timed out after %s\n", c.Label, c.Timeout)
@@ -188,7 +180,34 @@ func (c Command) Run() Result {
 		sink.emit("✗  %s: failed after %s\n", c.Label, elapsed.Round(time.Second))
 	}
 
+	// An interrupt must end Wayfinder, not just this command. Consuming the
+	// signal here and returning would let complete-phase treat the cancelled
+	// review as an abstention and carry on to complete the phase, which is the
+	// opposite of what the operator asked for. Restore the default disposition
+	// and re-raise the signal that actually arrived.
+	//
+	// This runs after the terminal progress line, and re-raising is not assumed
+	// to be fatal: a signal the process inherited as ignored comes straight back
+	// here, and the caller still gets a well-formed result instead of a panic.
+	if errors.Is(ctx.Err(), context.Canceled) {
+		sink.close()
+		stopSignals()
+		signal.Stop(arrived)
+		reraise(receivedSignal(arrived))
+	}
+
 	return Result{Output: out.String(), Elapsed: elapsed, TimedOut: timedOut, Err: err}
+}
+
+// receivedSignal reports the signal that cancelled the run, defaulting to
+// os.Interrupt when the delivery was observed only through the context.
+func receivedSignal(arrived <-chan os.Signal) os.Signal {
+	select {
+	case sig := <-arrived:
+		return sig
+	default:
+		return os.Interrupt
+	}
 }
 
 // progressSink serializes progress lines onto the caller's writer from a single
@@ -199,8 +218,9 @@ func (c Command) Run() Result {
 // gate open through the very code added to keep it bounded, so lines are queued
 // and dropped rather than waited on.
 type progressSink struct {
-	lines chan string
-	done  chan struct{}
+	lines    chan string
+	done     chan struct{}
+	closeOne sync.Once
 }
 
 func newProgressSink(w io.Writer) *progressSink {
@@ -232,12 +252,16 @@ func (s *progressSink) emit(format string, args ...any) {
 
 // close stops the sink and waits a bounded time for queued lines to land. A
 // wedged writer simply loses the tail.
+// close is idempotent: the interrupt path closes the sink before re-raising,
+// and Run's deferred close still runs afterwards.
 func (s *progressSink) close() {
-	close(s.lines)
-	select {
-	case <-s.done:
-	case <-time.After(progressDrainGrace):
-	}
+	s.closeOne.Do(func() {
+		close(s.lines)
+		select {
+		case <-s.done:
+		case <-time.After(progressDrainGrace):
+		}
+	})
 }
 
 // classifyOutcome recovers the command's real outcome and decides whether the
