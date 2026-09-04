@@ -296,14 +296,14 @@ func TestRun_HungProbeDoesNotDisableTheTick(t *testing.T) {
 
 	probes := absencealarm.DefaultProbes()
 	var sawDeadline bool
-	probes.RunCommand = func(ctx context.Context, _ []string) (int, error) {
+	probes.RunCommand = func(ctx context.Context, _ []string) (int, string, error) {
 		if _, ok := ctx.Deadline(); ok {
 			sawDeadline = true
 		}
 		// Stand in for a process that outlives its budget: block until the
 		// probe's own context is cancelled, then report as CommandContext does.
 		<-ctx.Done()
-		return -1, ctx.Err()
+		return -1, "", ctx.Err()
 	}
 
 	done := make(chan int, 1)
