@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -435,5 +436,48 @@ func TestNotifyCadenceOnce_RefreshesSentinelModTimeOnActiveEpisode(t *testing.T)
 	content, err := os.ReadFile(sentinel)
 	if err != nil || string(content) != "initial\n" {
 		t.Errorf("sentinel content was modified: %q", string(content))
+	}
+}
+
+func TestPruneCadenceSentinels_SkipsNonRegularFiles(t *testing.T) {
+	dir := t.TempDir()
+	oldTime := time.Now().Add(-48 * time.Hour)
+
+	// Subdirectory matching valid sentinel name shape.
+	subDirSentinel := filepath.Join(dir, "token-family-dead-1111111111111111")
+	if err := os.Mkdir(subDirSentinel, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(subDirSentinel, oldTime, oldTime)
+
+	// Symlink matching valid sentinel name shape.
+	symlinkSentinel := filepath.Join(dir, "token-family-dead-2222222222222222")
+	targetFile := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("regular\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetFile, symlinkSentinel); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// FIFO matching valid sentinel name shape.
+	fifoSentinel := filepath.Join(dir, "token-family-dead-3333333333333333")
+	if err := syscall.Mkfifo(fifoSentinel, 0o600); err == nil {
+		defer os.Remove(fifoSentinel)
+	}
+
+	pruned, err := pruneCadenceSentinels(dir, 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("pruneCadenceSentinels failed: %v", err)
+	}
+	if pruned != 0 {
+		t.Errorf("pruned = %d, want 0 non-regular entries pruned", pruned)
+	}
+
+	if _, err := os.Stat(subDirSentinel); err != nil {
+		t.Errorf("subdirectory sentinel was improperly removed: %v", err)
+	}
+	if _, err := os.Lstat(symlinkSentinel); err != nil {
+		t.Errorf("symlink sentinel was improperly removed: %v", err)
 	}
 }

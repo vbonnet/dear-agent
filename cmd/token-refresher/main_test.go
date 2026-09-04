@@ -313,14 +313,35 @@ func TestClearRefreshProtectionsCommand_IncludesCustomStateDir(t *testing.T) {
 
 	customDir := "/custom/state/dir"
 	cmdCustom := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", customDir)
-	if !strings.Contains(cmdCustom, fmt.Sprintf("-state-dir %q", customDir)) {
+	if !strings.Contains(cmdCustom, fmt.Sprintf("-state-dir %s", shellQuote(customDir))) {
 		t.Errorf("custom state dir should be included in clear command: %s", cmdCustom)
 	}
 
 	relDir := "relative/state/dir"
 	expectedAbs, _ := filepath.Abs(relDir)
 	cmdRel := clearRefreshProtectionsCommand("/path/creds.json", "/path/quar.json", relDir)
-	if !strings.Contains(cmdRel, fmt.Sprintf("-state-dir %q", filepath.Clean(expectedAbs))) {
+	if !strings.Contains(cmdRel, fmt.Sprintf("-state-dir %s", shellQuote(filepath.Clean(expectedAbs)))) {
 		t.Errorf("relative state dir should be canonicalized to absolute in clear command: %s", cmdRel)
+	}
+}
+
+func TestClearRefreshProtectionsCommand_ShellQuotesMetacharacters(t *testing.T) {
+	creds := "/path/with space/$VAR/`id`/creds.json"
+	quar := "/path/with'quote/quar.json"
+	state := "/custom/state'dir/with spaces and $SIG"
+
+	cmd := clearRefreshProtectionsCommand(creds, quar, state)
+	expectedCreds := shellQuote(creds)
+	expectedQuar := shellQuote(quar)
+	expectedState := shellQuote(canonicalStateDir(state))
+
+	if !strings.Contains(cmd, expectedCreds) {
+		t.Errorf("credentials path not shell-quoted: %s", cmd)
+	}
+	if !strings.Contains(cmd, expectedQuar) {
+		t.Errorf("quarantine path not shell-quoted: %s", cmd)
+	}
+	if !strings.Contains(cmd, expectedState) {
+		t.Errorf("state dir not shell-quoted: %s", cmd)
 	}
 }

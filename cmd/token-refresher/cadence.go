@@ -147,7 +147,7 @@ func pruneCadenceSentinels(stateDir string, maxAge time.Duration, keepSentinel s
 }
 
 func pruneCadenceEntry(stateDir string, entry os.DirEntry, cutoff time.Time, keepSentinel string) (bool, error) {
-	if entry.IsDir() {
+	if !entry.Type().IsRegular() {
 		return false, nil
 	}
 	name := entry.Name()
@@ -190,6 +190,10 @@ func isCadenceSentinel(name string) bool {
 }
 
 func isActiveSentinel(target string) bool {
+	info, err := os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
 	data, err := os.ReadFile(target)
 	if err != nil {
 		return false

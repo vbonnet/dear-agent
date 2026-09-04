@@ -54,6 +54,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -84,15 +85,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("token-refresher", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		check       = fs.Bool("check", false, "report credential status only; no network call or mutation")
-		force       = fs.Bool("force", false, "refresh even if the current token is still fresh")
-		quiet       = fs.Bool("quiet", false, "suppress structured stderr logs (stdout still gets the token)")
-		credPath    = fs.String("credentials", "", "path to credentials.json (default ~/.claude/.credentials.json)")
-		endpoint    = fs.String("endpoint", "", "OAuth token endpoint override (default built-in / $CLAUDE_OAUTH_TOKEN_ENDPOINT)")
-		clientID    = fs.String("client-id", "", "OAuth client ID override (default built-in / $CLAUDE_OAUTH_CLIENT_ID)")
-		cadence     = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
-		lockTimeout = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
-		expirySkew  = fs.Duration("expiry-skew", 0, "treat the access token as stale this long before it expires; MUST exceed the scheduler's tick or the cadence job will sample straight past the expiry (default 60s)")
+		check          = fs.Bool("check", false, "report credential status only; no network call or mutation")
+		force          = fs.Bool("force", false, "refresh even if the current token is still fresh")
+		quiet          = fs.Bool("quiet", false, "suppress structured stderr logs (stdout still gets the token)")
+		credPath       = fs.String("credentials", "", "path to credentials.json (default ~/.claude/.credentials.json)")
+		endpoint       = fs.String("endpoint", "", "OAuth token endpoint override (default built-in / $CLAUDE_OAUTH_TOKEN_ENDPOINT)")
+		clientID       = fs.String("client-id", "", "OAuth client ID override (default built-in / $CLAUDE_OAUTH_CLIENT_ID)")
+		cadence        = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
+		lockTimeout    = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
+		expirySkew     = fs.Duration("expiry-skew", 0, "treat the access token as stale this long before it expires; MUST exceed the scheduler's tick or the cadence job will sample straight past the expiry (default 60s)")
 		auditPath      = fs.String("audit-log", defaultAuditPath(), "JSONL audit log path (empty to disable)")
 		quarPath       = fs.String("quarantine", defaultQuarantinePath(), "refresh-token quarantine marker path (empty to disable quarantine)")
 		clearQuar      = fs.Bool("clear-quarantine", false, "clear the refresh-token quarantine and exit (operator override)")
@@ -379,12 +380,18 @@ func canonicalStateDir(dir string) string {
 	return filepath.Clean(abs)
 }
 
+// shellQuote wraps a value in single quotes for safe POSIX shell interpolation.
+// Embedded single quotes are safely escaped using the standard single-quote termination sequence.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
 func clearRefreshProtectionsCommand(credentialsPath, quarantinePath, stateDir string) string {
-	cmd := fmt.Sprintf("token-refresher -credentials %q -quarantine %q", credentialsPath, quarantinePath)
+	cmd := fmt.Sprintf("token-refresher -credentials %s -quarantine %s", shellQuote(credentialsPath), shellQuote(quarantinePath))
 	if stateDir != "" {
 		canonicalState := canonicalStateDir(stateDir)
 		if canonicalState != canonicalStateDir(defaultStateDir()) {
-			cmd += fmt.Sprintf(" -state-dir %q", canonicalState)
+			cmd += fmt.Sprintf(" -state-dir %s", shellQuote(canonicalState))
 		}
 	}
 	return cmd + " -clear-quarantine"
