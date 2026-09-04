@@ -1,6 +1,6 @@
 # Absence Alarm Specification
 
-<!-- Last audited at: 2026-09-01 -->
+<!-- Last audited at: 2026-09-03 -->
 <!-- Audit scope: the domain helpers pkg/absencealarm ships at this revision,
      and only those. Audited and covered by pkg/absencealarm/*_test.go:
      AA-01 through AA-06 (pulse classification), AA-09 (journal record),

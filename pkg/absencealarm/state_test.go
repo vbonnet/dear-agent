@@ -251,3 +251,43 @@ func TestUpdateAlarmRecoversFromAClockRollback(t *testing.T) {
 		t.Errorf("UpdateAlarm() = %v one minute later, want NotifyNone", next)
 	}
 }
+
+// AA-18 covers an alarm-state file that cannot be read, which is a distinct
+// branch from the malformed-JSON one TestLoadAlarmState_CorruptDegradesLouder
+// already pins: the read fails before any parse is attempted. A missing file
+// is the normal first-run case and must stay silent, but an unreadable one
+// must surface the error while still returning an empty, usable state, so a
+// lost dedup ledger degrades toward re-notifying rather than toward silence.
+func TestLoadAlarmState_UnreadableDegradesLouder(t *testing.T) {
+	// A directory is readable as a path but not as a file, so ReadFile fails
+	// with something that is neither os.IsNotExist nor a parse error.
+	unreadable := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(unreadable, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	st, err := LoadAlarmState(unreadable)
+	if err == nil {
+		t.Fatal("LoadAlarmState(unreadable) = nil error, want the read failure reported")
+	}
+	if !strings.Contains(err.Error(), "read alarm state") {
+		t.Errorf("error = %q, want it to name the read failure", err)
+	}
+	if st.Pulses == nil {
+		t.Error("Pulses = nil, want an empty usable map so the caller can proceed")
+	}
+	if len(st.Pulses) != 0 {
+		t.Errorf("Pulses = %v, want empty so no alarm is deduplicated away", st.Pulses)
+	}
+}
+
+// AA-18: a missing state file is the ordinary first run, not a failure.
+func TestLoadAlarmState_MissingIsSilent(t *testing.T) {
+	st, err := LoadAlarmState(filepath.Join(t.TempDir(), "absent.json"))
+	if err != nil {
+		t.Fatalf("LoadAlarmState(missing) = %v, want no error on a first run", err)
+	}
+	if st.Pulses == nil {
+		t.Error("Pulses = nil, want an empty usable map")
+	}
+}

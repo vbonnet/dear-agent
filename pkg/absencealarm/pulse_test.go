@@ -258,3 +258,48 @@ func TestEvaluatePulseSurvivesAPanickingFileStat(t *testing.T) {
 		t.Errorf("Reason = %q, want it to carry the panic value", res.Reason)
 	}
 }
+
+// AA-19 covers a pulse configuration that cannot be loaded, is empty, or is
+// invalid. TestLoadPulseConfig_Validation already pins the invalid-pulse
+// table, but the load failures ahead of validation were unproven: the config
+// gates every pulse, so a tick that cannot read it must refuse loudly rather
+// than come back with an empty pulse set, which would report all-clear and
+// silence the alarm entirely.
+func TestLoadPulseConfig_UnloadableRefuses(t *testing.T) {
+	dir := t.TempDir()
+
+	unreadable := filepath.Join(dir, "config")
+	if err := os.Mkdir(unreadable, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	malformed := filepath.Join(dir, "malformed.json")
+	if err := os.WriteFile(malformed, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(dir, "empty.json")
+	if err := os.WriteFile(empty, []byte(`{"pulses":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, path, want string
+	}{
+		{"unreadable", unreadable, "read pulse config"},
+		{"missing", filepath.Join(dir, "absent.json"), "read pulse config"},
+		{"malformed", malformed, "parse pulse config"},
+		{"no pulses", empty, "no pulses configured"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pulses, err := LoadPulseConfig(tc.path)
+			if err == nil {
+				t.Fatalf("LoadPulseConfig(%s) = nil error, want a refusal", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tc.want)
+			}
+			if pulses != nil {
+				t.Errorf("pulses = %v, want nil so no tick treats this as all-clear", pulses)
+			}
+		})
+	}
+}
