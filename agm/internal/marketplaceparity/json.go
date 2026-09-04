@@ -15,7 +15,7 @@ const (
 
 func readJSONWithin(root, relative string, dst any) error {
 	limit := maxCatalogBytes
-	if strings.HasSuffix(relative, "/plugin.json") {
+	if relative == "plugin.json" || strings.HasSuffix(relative, "/plugin.json") {
 		limit = maxManifestBytes
 	}
 	data, err := readAnchoredRegular(root, relative, limit)
