@@ -867,6 +867,7 @@ install-merge-audit: build-merge-audit
 
 build-merge-health:
 	@echo "Building merge-health..."
+	@mkdir -p bin
 	go build $(BUILD_STAMP_FLAGS) -o bin/merge-health ./cmd/merge-health/
 	@echo "Built: bin/merge-health"
 

@@ -82,21 +82,6 @@ func defaultDeps() deps {
 			}
 			return strings.TrimSpace(string(out)), nil
 		},
-		fetchMtime: func(ctx context.Context, repo string) (time.Time, bool) {
-			gitDir, err := exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--git-common-dir").Output()
-			if err != nil {
-				return time.Time{}, false
-			}
-			dir := strings.TrimSpace(string(gitDir))
-			if !filepath.IsAbs(dir) {
-				dir = filepath.Join(repo, dir)
-			}
-			fi, err := os.Stat(filepath.Join(dir, "FETCH_HEAD"))
-			if err != nil {
-				return time.Time{}, false
-			}
-			return fi.ModTime(), true
-		},
 	}
 }
 
@@ -133,7 +118,27 @@ func run(args []string, d deps) int {
 		Ref:       *ref,
 		Lookback:  *lookback,
 	}
-	if mtime, ok := d.fetchMtime(ctx, *repo); ok {
+
+	fetchMtime := d.fetchMtime
+	if fetchMtime == nil {
+		fetchMtime = func(ctx context.Context, repo string) (time.Time, bool) {
+			gitDir, err := d.gitOutput(ctx, repo, "rev-parse", "--git-common-dir")
+			if err != nil {
+				return time.Time{}, false
+			}
+			dir := strings.TrimSpace(gitDir)
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(repo, dir)
+			}
+			fi, err := os.Stat(filepath.Join(dir, "FETCH_HEAD"))
+			if err != nil {
+				return time.Time{}, false
+			}
+			return fi.ModTime(), true
+		}
+	}
+
+	if mtime, ok := fetchMtime(ctx, *repo); ok {
 		r.LastFetchAge = now.Sub(mtime).Round(time.Minute).String()
 	}
 

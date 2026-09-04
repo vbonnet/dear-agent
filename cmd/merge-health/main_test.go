@@ -86,18 +86,19 @@ func TestRun_NoFetchHeadStillHealthy(t *testing.T) {
 	}
 }
 
-// MH-08: the probe runs exactly one read-only git command.
+// MH-08: the probe runs only read-only git commands, and default fetchMtime delegates to gitOutput.
 func TestRun_ReadOnly(t *testing.T) {
 	var calls [][]string
 	d := testDeps(time.Hour, nil)
+	d.fetchMtime = nil // exercise default fetchMtime resolution through gitOutput
 	inner := d.gitOutput
 	d.gitOutput = func(ctx context.Context, repo string, args ...string) (string, error) {
 		calls = append(calls, args)
 		return inner(ctx, repo, args...)
 	}
 	run([]string{"--lookback", "96h"}, d)
-	if len(calls) != 1 || calls[0][0] != "log" {
-		t.Fatalf("git calls = %v, want exactly one log invocation", calls)
+	if len(calls) != 2 || calls[0][0] != "rev-parse" || calls[1][0] != "log" {
+		t.Fatalf("git calls = %v, want rev-parse and log invocations", calls)
 	}
 }
 
