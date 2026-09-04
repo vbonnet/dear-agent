@@ -463,17 +463,22 @@ func readConfigFile(path string) ([]byte, error) {
 	return readConfigFileWithSetNonblock(path, unix.SetNonblock)
 }
 
-func readConfigFileWithSetNonblock(path string, setNonblock setNonblockFunc) ([]byte, error) {
+func readConfigFileWithSetNonblock(path string, setNonblock setNonblockFunc) (data []byte, err error) {
 	source, err := openReadReadyConfigFile(path, setNonblock)
 	if err != nil {
 		return nil, err
 	}
-	defer source.file.Close()
+	defer func() {
+		if closeErr := source.file.Close(); closeErr != nil {
+			data = nil
+			err = errors.Join(err, closeErr)
+		}
+	}()
 
 	return readBoundedConfig(source.file, source.declaredSize)
 }
 
-func openReadReadyConfigFile(path string, setNonblock setNonblockFunc) (*readReadyConfigFile, error) {
+func openReadReadyConfigFile(path string, setNonblock setNonblockFunc) (source *readReadyConfigFile, err error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
@@ -481,7 +486,9 @@ func openReadReadyConfigFile(path string, setNonblock setNonblockFunc) (*readRea
 	ownsFD := true
 	defer func() {
 		if ownsFD {
-			_ = unix.Close(fd)
+			if closeErr := unix.Close(fd); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close config source: %w", closeErr))
+			}
 		}
 	}()
 

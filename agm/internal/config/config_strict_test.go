@@ -469,7 +469,11 @@ func TestOpenReadReadyConfigFileClearsNonblockOnSameDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openReadReadyConfigFile() error = %v", err)
 	}
-	defer source.file.Close()
+	t.Cleanup(func() {
+		if err := source.file.Close(); err != nil {
+			t.Errorf("close read-ready config source: %v", err)
+		}
+	})
 
 	if got := int(source.file.Fd()); got != transitionedFD {
 		t.Fatalf("returned fd = %d, want authenticated and transitioned fd %d", got, transitionedFD)
@@ -537,8 +541,7 @@ func TestOpenReadReadyConfigFileRejectsOversizeBeforeTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := file.Truncate(maxConfigBytes + 1); err != nil {
-		_ = file.Close()
-		t.Fatal(err)
+		t.Fatal(errors.Join(err, file.Close()))
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
@@ -550,7 +553,9 @@ func TestOpenReadReadyConfigFileRejectsOversizeBeforeTransition(t *testing.T) {
 		return nil
 	})
 	if source != nil {
-		_ = source.file.Close()
+		if closeErr := source.file.Close(); closeErr != nil {
+			t.Errorf("close unexpected oversize source: %v", closeErr)
+		}
 		t.Fatal("oversize source became read-ready")
 	}
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
@@ -588,7 +593,9 @@ func TestOpenReadReadyConfigFileRejectsNonregularBeforeTransition(t *testing.T) 
 			select {
 			case got := <-done:
 				if got.source != nil {
-					_ = got.source.file.Close()
+					if closeErr := got.source.file.Close(); closeErr != nil {
+						t.Errorf("close unexpected nonregular source: %v", closeErr)
+					}
 					t.Fatalf("openReadReadyConfigFile(%q) returned a read-ready nonregular source", path)
 				}
 				if got.err == nil || !strings.Contains(got.err.Error(), "regular file") {
