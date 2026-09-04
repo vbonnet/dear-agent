@@ -1,0 +1,45 @@
+{
+  "pulses": [
+    {
+      "name": "mergeloop-loaded",
+      "type": "launchd_loaded",
+      "label": "com.dear-agent.mergeloop",
+      "expect": "the mergeloop launchd job to be loaded"
+    },
+    {
+      "name": "mergeloop-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/mergeloop.out.log",
+      "window": "24h",
+      "expect": "a mergeloop tick within 24h"
+    },
+    {
+      "name": "otel-receiving",
+      "type": "command",
+      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
+      "window": "24h",
+      "expect": "Jaeger alive and receiving traces within 24h"
+    },
+    {
+      "name": "disk-watchdog-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/disk-watchdog.out.log",
+      "window": "1h",
+      "expect": "a disk-watchdog tick within 1h"
+    },
+    {
+      "name": "gobin-guard-heartbeat",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/gobin-guard.heartbeat",
+      "window": "15m",
+      "expect": "a gobin-guard heartbeat within 15m"
+    },
+    {
+      "name": "absence-alarm-heartbeat",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/absence-alarm.heartbeat.json",
+      "window": "30m",
+      "expect": "an absence-alarm tick within 30m (3 missed 10-min launchd intervals)"
+    }
+  ]
+}

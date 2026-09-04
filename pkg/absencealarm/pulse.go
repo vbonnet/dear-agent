@@ -113,6 +113,15 @@ func DefaultProbes() Probes {
 			if err == nil {
 				return 0, nil
 			}
+			// A probe killed by its own deadline was never evaluated. Report
+			// that as an evaluation failure (UNDETERMINED, AA-05) rather than
+			// letting CommandContext's signal kill surface as a non-zero exit
+			// (ABSENT, AA-04). "The check did not finish" and "the check said
+			// the thing is missing" are different facts, and collapsing them
+			// would blame the monitored subject for the monitor's own timeout.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return -1, fmt.Errorf("probe did not finish within its deadline: %w", ctxErr)
+			}
 			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 				return exitErr.ExitCode(), nil
 			}
@@ -243,6 +252,10 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 	res := Result{Name: p.Name, Expect: p.Expect, Window: p.Window}
 	switch p.Type {
 	case PulseFileMtime:
+		// Evidence defaults to the moment the file was probed (AA-09),
+		// ensuring missing or error records carry an observation timestamp.
+		// If the file exists, it is updated below to the actual mtime.
+		res.Evidence = pr.Now()
 		mtime, exists, err := statMtimeBounded(ctx, pr.StatMtime, p.Path)
 		if err != nil {
 			res.Status = StatusUndetermined
@@ -268,6 +281,9 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 		}
 		res.Status = StatusPresent
 	case PulseLaunchdLoaded:
+		// Evidence = the moment the listing was obtained (AA-09); set before any
+		// early return so error records also carry an observation timestamp.
+		res.Evidence = pr.Now()
 		if launchdErr != nil {
 			res.Status = StatusUndetermined
 			res.Reason = fmt.Sprintf("launchctl list: %v", launchdErr)
@@ -281,6 +297,9 @@ func EvaluatePulse(ctx context.Context, p Pulse, pr Probes, launchdListing strin
 		res.Status = StatusPresent
 	case PulseCommand:
 		code, err := pr.RunCommand(ctx, p.Command)
+		// Evidence = the moment the command returned (AA-09); set before any
+		// early return so timeout/error records also carry an observation timestamp.
+		res.Evidence = pr.Now()
 		if err != nil {
 			res.Status = StatusUndetermined
 			res.Reason = fmt.Sprintf("run %s: %v", strings.Join(p.Command, " "), err)
