@@ -269,6 +269,12 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-49** When `Sweep` runs in dry-run mode without a caller-confirmed active-session set, the system shall still classify every worktree and shall remove nothing.
 
+**OPS-112** When `Sweep` classifies a worktree that is Git locked, the system shall evaluate the lock reason; if the lock reason names an active session or a live safe-pr process, the system shall classify the worktree as `ClassActive`, and if the lock reason indicates explicit operator preservation, the system shall classify the worktree as `ClassUnknown`.
+
+**OPS-113** When `Sweep` classifies a worktree that is Git locked with a blanket creation lock or an archived session, the system shall permit standard merge and dirty classification.
+
+**OPS-114** When `Sweep` removes a reapable worktree that is Git locked, the system shall unlock the worktree before invoking removal and propagate unlock failures to `SweepResult.Failed` without deleting the worktree or branch.
+
 ---
 
 ## Key Invariants

@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
@@ -55,9 +57,11 @@ func (c Classification) Reapable() bool { return c == ClassMerged }
 
 // DiscoveredWorktree is one linked worktree found beneath the sweep base.
 type DiscoveredWorktree struct {
-	Path   string // absolute worktree path
-	Repo   string // owning repo (the <repo> segment of ~/worktrees/<repo>/<name>)
-	Branch string // checked-out branch ("" if detached)
+	Path       string // absolute worktree path
+	Repo       string // owning repo (the <repo> segment of ~/worktrees/<repo>/<name>)
+	Branch     string // checked-out branch ("" if detached)
+	Locked     bool   // git worktree lock state
+	LockReason string // lock reason, if locked
 }
 
 // WorktreeStatus is the fully-classified record for one worktree — the row
@@ -74,6 +78,8 @@ type WorktreeStatus struct {
 	PRState    string         `json:"pr_state,omitempty"`
 	Class      Classification `json:"class"`
 	Reason     string         `json:"reason"`
+	Locked     bool           `json:"locked,omitempty"`
+	LockReason string         `json:"lock_reason,omitempty"`
 	// DupGroup is set when two or more worktrees in the same repo share an
 	// identical HEAD commit subject (the parallel-agent fan-out
 	// fingerprint). DupCount is that group's size. Report-only — dedup
@@ -115,6 +121,7 @@ type SweepDeps interface {
 	// ended waiting on the user (detail is a short tag for the report).
 	// Positive only — see wtpolicy.AwaitingInput for the fail-safe stance.
 	AwaitingInput(worktreePath string) (awaiting bool, detail string)
+	UnlockWorktree(repoPath, worktreePath string) error
 	RemoveWorktree(repoPath, worktreePath string, force bool) error
 	DeleteBranch(repoPath, branch string, force bool) error
 }
@@ -227,13 +234,30 @@ func Sweep(opts SweepOptions, deps SweepDeps, logger *slog.Logger) (*SweepResult
 		if !w.Class.Reapable() {
 			continue
 		}
+		if w.Locked {
+			if err := deps.UnlockWorktree(w.MainRepo, w.Path); err != nil {
+				res.Failed[w.Path] = fmt.Sprintf("unlock: %v", err)
+				logger.Warn("sweep: unlock failed; keeping", "path", w.Path, "error", err)
+				continue
+			}
+		}
 		// Non-force on purpose: git refuses to remove a dirty or locked
 		// worktree without --force, the last line of defense if a status
 		// probe raced.
 		if err := deps.RemoveWorktree(w.MainRepo, w.Path, false); err != nil {
-			res.Failed[w.Path] = err.Error()
-			logger.Warn("sweep: remove failed; keeping", "path", w.Path, "error", err)
-			continue
+			removed := false
+			if isLockedError(err) {
+				if uerr := deps.UnlockWorktree(w.MainRepo, w.Path); uerr == nil {
+					if rerr := deps.RemoveWorktree(w.MainRepo, w.Path, false); rerr == nil {
+						removed = true
+					}
+				}
+			}
+			if !removed {
+				res.Failed[w.Path] = err.Error()
+				logger.Warn("sweep: remove failed; keeping", "path", w.Path, "error", err)
+				continue
+			}
 		}
 		// Worktree (the sprawl artifact) is gone. Delete the orphaned local
 		// branch best-effort with -D: a squash-merged branch is one git
@@ -254,6 +278,52 @@ func setClass(st WorktreeStatus, c Classification, reason string) WorktreeStatus
 	return st
 }
 
+// isLockActive reports whether reason names an active session or a live process.
+func isLockActive(activeSessions map[string]bool, reason string) bool {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || reason == "added with --lock" {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(reason, "safe-pr-owned:"); ok {
+		parts := strings.Split(rest, ":")
+		if len(parts) > 0 {
+			if pid, err := strconv.Atoi(parts[0]); err == nil && pid > 0 {
+				return processExists(pid)
+			}
+		}
+		return false
+	}
+	sessionID := reason
+	if s, ok := strings.CutPrefix(reason, "session:"); ok {
+		sessionID = s
+	}
+	if len(activeSessions) > 0 && activeSessions[sessionID] {
+		return true
+	}
+	return false
+}
+
+// processExists reports whether a process with the given pid is alive.
+func processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// isLockedError reports whether an error from git worktree remove indicates a locked worktree.
+func isLockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "locked") || strings.Contains(msg, "unlock first")
+}
+
 // ownershipClass returns a terminal class (and ok=true) when a worktree must
 // not even be evaluated for merge: it is owned by something live, or it is a
 // detached HEAD with no branch to reason about. ok=false means "keep going".
@@ -267,6 +337,10 @@ func ownershipClass(opts SweepOptions, dw DiscoveredWorktree, selfPath string) (
 		return ClassActive, "live-session", true
 	case dw.Branch != "" && opts.ActiveSessions[dw.Branch]:
 		return ClassActive, "live-session", true
+	case dw.Locked && isLockActive(opts.ActiveSessions, dw.LockReason):
+		return ClassActive, "locked-active-session", true
+	case dw.Locked && gitpkg.IsExplicitPreserve(dw.LockReason):
+		return ClassUnknown, "locked-preserved:" + dw.LockReason, true
 	case dw.Branch == "":
 		return ClassUnknown, "detached-head", true
 	}
@@ -296,7 +370,13 @@ func huskReason(unpushed bool, prState string) string {
 // kept class, and ClassMerged is reached ONLY through a positive
 // ancestor-of-base or PR-MERGED proof on a clean tree.
 func classify(opts SweepOptions, deps SweepDeps, dw DiscoveredWorktree, selfPath string) WorktreeStatus {
-	st := WorktreeStatus{Path: dw.Path, Repo: dw.Repo, Branch: dw.Branch}
+	st := WorktreeStatus{
+		Path:       dw.Path,
+		Repo:       dw.Repo,
+		Branch:     dw.Branch,
+		Locked:     dw.Locked,
+		LockReason: dw.LockReason,
+	}
 
 	// Display-only; a failure here never changes the verdict.
 	if when, subj, err := deps.LastCommit(dw.Path); err == nil {
@@ -494,9 +574,11 @@ func (RealSweepDeps) Discover(base string) ([]DiscoveredWorktree, error) {
 				}
 				seen[wt.Path] = true
 				out = append(out, DiscoveredWorktree{
-					Path:   wt.Path,
-					Repo:   repoName,
-					Branch: wt.Branch,
+					Path:       wt.Path,
+					Repo:       repoName,
+					Branch:     wt.Branch,
+					Locked:     wt.Locked,
+					LockReason: wt.LockReason,
 				})
 			}
 		}
@@ -548,6 +630,11 @@ func (RealSweepDeps) CommitsAboveMergeBase(repoPath, branch, base string) (int, 
 // with the assistant waiting on the user.
 func (RealSweepDeps) AwaitingInput(worktreePath string) (bool, string) {
 	return wtpolicy.AwaitingInput(worktreePath)
+}
+
+// UnlockWorktree unlocks a locked worktree via gitpkg.
+func (RealSweepDeps) UnlockWorktree(repoPath, worktreePath string) error {
+	return gitpkg.UnlockWorktree(repoPath, worktreePath)
 }
 
 // RemoveWorktree removes the worktree (non-force lets git guard a dirty tree).
