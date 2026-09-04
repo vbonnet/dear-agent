@@ -93,8 +93,13 @@ func removeAllSafe(path string) error {
 		return nil
 	}
 	// On permission error (e.g. read-only Go module caches), make writable and retry
+	_ = os.Chmod(path, 0o700) //nolint:gosec // G302: directory traversal requires execute permission
 	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr == nil && d.IsDir() {
+		if walkErr != nil {
+			_ = os.Chmod(p, 0o700) //nolint:gosec // G302: directory traversal requires execute permission
+			return nil             //nolint:nilerr // WalkDir callback: continue after making entry writable
+		}
+		if d.IsDir() {
 			_ = os.Chmod(p, 0o700) //nolint:gosec // G302: directory traversal requires execute permission
 		}
 		return nil
@@ -165,7 +170,7 @@ func scanTmpSubdirectory(tmpDir string, euid int64) []string {
 		}
 	}
 	if allScratch && len(subEntries) > 0 {
-		res = append(res, tmpDir)
+		return []string{tmpDir}
 	}
 	return res
 }

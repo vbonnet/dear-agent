@@ -24,7 +24,7 @@ cleanup() {
     chmod -R u+w "$RUN_DIR" 2>/dev/null || true
     rm -rf "$RUN_DIR" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM HUP
+trap cleanup EXIT
 
 # Establish isolated environment roots
 ISOLATED_HOME="$RUN_DIR/home"

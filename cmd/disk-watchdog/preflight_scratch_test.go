@@ -96,7 +96,6 @@ func TestFindPreflightScratchDirs_Locations(t *testing.T) {
 		homeCePreflight:   true,
 		homeCe68:          true,
 		homeTmp:           true,
-		homeTmpChild:      true,
 	}
 	for _, c := range homeCandidates {
 		if !wantHome[c] {
