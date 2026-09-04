@@ -113,6 +113,15 @@ type config struct {
 	gcMaxAge   time.Duration
 	thresholds supervisor.DiskAlertThresholds
 
+	// Build-cache reaping is deliberately NOT gated on disk pressure. A Go
+	// build cache older than buildCacheMinAge has no value — the next run
+	// makes its own — and on this host they accrued ~9 GB/day. Waiting for a
+	// breach would mean absorbing that between breaches, which is
+	// firefighting rather than a bound.
+	buildCacheRoots  string
+	buildCacheMinAge time.Duration
+	buildCacheDepth  int
+
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
 	// so tests can observe the sweep invocation without spawning a process.
 	runCommand func(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -136,6 +145,12 @@ func run(args []string, out io.Writer) (int, error) {
 		"sandbox-GC JSONL log consulted for reaper liveness; empty disables the check")
 	fs.DurationVar(&cfg.gcMaxAge, "gc-max-age", defaultGCMaxAge,
 		"alarm when the sandbox GC has not completed a sweep within this window (0 disables)")
+	fs.StringVar(&cfg.buildCacheRoots, "build-cache-roots", defaultBuildCacheRoots(),
+		"comma-separated directories scanned for abandoned Go build caches (empty disables the reaper)")
+	fs.DurationVar(&cfg.buildCacheMinAge, "build-cache-min-age", defaultBuildCacheMinAge,
+		"only reap Go build caches whose mtime is older than this")
+	fs.IntVar(&cfg.buildCacheDepth, "build-cache-depth", defaultBuildCacheDepth,
+		"how many directory levels below each scan root to search for build caches")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -155,6 +170,12 @@ func run(args []string, out io.Writer) (int, error) {
 	// the monitoring gap this watchdog exists to close. Refuse it out loud.
 	if cfg.gcMaxAge < 0 {
 		return 2, fmt.Errorf("invalid -gc-max-age %s: the reaper-liveness window cannot be negative (use 0 to disable the check)", cfg.gcMaxAge)
+	}
+	// A negative or zero age window would make every cache — including one a
+	// build is writing right now — instantly eligible. Refuse it rather than
+	// silently reaping live state.
+	if cfg.buildCacheRoots != "" && cfg.buildCacheMinAge <= 0 {
+		return 2, fmt.Errorf("invalid -build-cache-min-age %s: must be positive (pass an empty -build-cache-roots to disable the reaper)", cfg.buildCacheMinAge)
 	}
 
 	snap, err := takeSnapshot(cfg.path)
@@ -181,6 +202,9 @@ func run(args []string, out io.Writer) (int, error) {
 	// this ordering keeps the current tick honest even against an older `agm`
 	// that does not stamp the tag.
 	gc := checkGCHealth(cfg, time.Now())
+
+	// Runs on every tick, breached or not: see the comment on config.
+	buildCaches := reapAbandonedBuildCaches(cfg)
 
 	var remediation *sweepResult
 	if diskBreached && !cfg.dryRun {
@@ -222,11 +246,11 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	if cfg.jsonOutput {
-		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc); err != nil {
+		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, buildCaches); err != nil {
 			return 2, err
 		}
 	} else {
-		emitReport(out, snap, level, reasons, remediation, cfg, gc)
+		emitReport(out, snap, level, reasons, remediation, cfg, gc, buildCaches)
 	}
 
 	if breached {
@@ -513,7 +537,8 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 }
 
 func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth) error {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
+	buildCaches *buildCacheReapResult) error {
 	type gcReport struct {
 		Stale       bool   `json:"stale"`
 		LastSuccess string `json:"last_success,omitempty"`
@@ -535,6 +560,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Reasons           []string                       `json:"reasons"`
 		Remediation       *sweepResult                   `json:"remediation,omitempty"`
 		SandboxGC         *gcReport                      `json:"sandbox_gc,omitempty"`
+		BuildCaches       *buildCacheReapResult          `json:"build_caches,omitempty"`
 		OK                bool                           `json:"ok"`
 	}
 	var gcr *gcReport
@@ -557,12 +583,14 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Reasons:           reasons,
 		Remediation:       rem,
 		SandboxGC:         gcr,
+		BuildCaches:       buildCaches,
 		OK:                level == supervisor.PressureNone,
 	})
 }
 
 func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth) {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
+	buildCaches *buildCacheReapResult) {
 	fmt.Fprintln(out, "disk-watchdog report")
 	fmt.Fprintf(out, "  path        : %s\n", cfg.path)
 	fmt.Fprintf(out, "  disk free   : %.1f GiB  [warn < %.0f GiB, critical < %.0f GiB]\n",
@@ -586,6 +614,9 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 			fmt.Fprintf(out, "  sandbox GC  : %s, last sweep %s ago  [max age %s]\n",
 				state, gc.Age.Round(time.Minute), cfg.gcMaxAge)
 		}
+	}
+	if buildCaches != nil {
+		fmt.Fprintf(out, "  %s\n", summarizeBuildCacheReap(*buildCaches))
 	}
 	fmt.Fprintln(out)
 
