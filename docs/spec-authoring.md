@@ -25,10 +25,12 @@ permission to delete or merge anything.
 Use the contract model's canonical
 [implementation projection rules](../spec-governance/skills/write-spec/references/contract-model.md#implementation-projections)
 when an implementation directory adapts a contract owned elsewhere. That
-reference defines whether `SPEC.owner` is permitted and which ownership and
-coverage checks the pointer inherits. The pointer is traceability, not a second
-normative contract; a distinct observable requires a neutral product or domain
-owner.
+reference explains how to discover whether an ownership projection is
+permitted without importing another repository's rules. For this repository,
+[`SCB-28` and `SCB-29`](../internal/speccoverage/SPEC.md) own the exact
+`SPEC.owner` declaration and inherited coverage constraints. The pointer is
+traceability, not a second normative contract; a distinct observable requires
+a neutral product or domain owner.
 
 ## Start here
 
