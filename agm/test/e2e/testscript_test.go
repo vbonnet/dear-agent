@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ func TestMain(m *testing.M) {
 		fmt.Println("Skipping: requires infrastructure not available in CI")
 		os.Exit(0)
 	}
+	pruneDefaultE2EBuildCache("")
 	testscript.Main(m, map[string]func(){
 		"agm": agmMain,
 	})
@@ -240,21 +243,161 @@ func TestE2EBuildCacheKeyIncludesBuildFlags(t *testing.T) {
 	}
 }
 
+// defaultE2ECacheMaxEntries bounds how many distinct AGM binary fixture
+// directories are retained across build key variations.
+const defaultE2ECacheMaxEntries = 5
+
+// defaultE2ECacheMaxAge bounds how long an unused AGM binary fixture directory
+// is retained.
+const defaultE2ECacheMaxAge = 24 * time.Hour
+
+func e2eCacheBaseDir() string {
+	cacheHome := os.Getenv("REAL_HOME")
+	if cacheHome != "" {
+		return filepath.Join(cacheHome, ".cache", "dear-agent", "e2e")
+	}
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil || cacheRoot == "" {
+		cacheRoot = filepath.Join(os.Getenv("HOME"), ".cache")
+	}
+	return filepath.Join(cacheRoot, "dear-agent", "e2e")
+}
+
 // e2eBuildCacheDir is a private, per-user fallback build cache. Its source key
 // permits sharing only by subprocesses that build the same AGM source.
 func e2eBuildCacheDir() string {
 	if dir := os.Getenv("AGM_E2E_BUILD_CACHE_DIR"); dir != "" {
 		return dir
 	}
-	cacheHome := os.Getenv("REAL_HOME")
-	if cacheHome != "" {
-		return filepath.Join(cacheHome, ".cache", "dear-agent", "e2e", "agm-"+e2eBuildCacheKey())
+	return filepath.Join(e2eCacheBaseDir(), "agm-"+e2eBuildCacheKey())
+}
+
+type e2ePruneCandidate struct {
+	name    string
+	path    string
+	modTime time.Time
+}
+
+func collectE2ECacheCandidates(baseDir, currentDirName string, euid int64) ([]e2ePruneCandidate, error) {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	cacheRoot, err := os.UserCacheDir()
-	if err != nil || cacheRoot == "" {
-		cacheRoot = filepath.Join(os.Getenv("HOME"), ".cache")
+	var candidates []e2ePruneCandidate
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, "agm-") || (currentDirName != "" && name == currentDirName) {
+			continue
+		}
+		dirPath := filepath.Join(baseDir, name)
+		info, lerr := os.Lstat(dirPath)
+		if lerr != nil || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || int64(stat.Uid) != euid {
+			continue
+		}
+		candidates = append(candidates, e2ePruneCandidate{
+			name:    name,
+			path:    dirPath,
+			modTime: info.ModTime(),
+		})
 	}
-	return filepath.Join(cacheRoot, "dear-agent", "e2e", "agm-"+e2eBuildCacheKey())
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].modTime.After(candidates[j].modTime)
+	})
+	return candidates, nil
+}
+
+func shouldEvictE2EFixture(index, maxEntries int, age, maxAge time.Duration) bool {
+	if maxEntries > 0 && index >= maxEntries {
+		return true
+	}
+	if maxAge > 0 && age > maxAge {
+		return true
+	}
+	return false
+}
+
+func tryRemoveE2EFixtureDir(dirPath string) {
+	if !isSafeE2EFixtureDir(dirPath) {
+		return
+	}
+	lockPath := filepath.Join(dirPath, "agm.lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return
+	}
+	_ = os.RemoveAll(dirPath)
+}
+
+func isSafeE2EFixtureDir(dir string) bool {
+	subEntries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, se := range subEntries {
+		name := se.Name()
+		if se.IsDir() {
+			return false
+		}
+		if name == "agm" || name == "agm.lock" || strings.HasPrefix(name, "agm-build-") {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func touchE2ECacheDir(dir, dest string) {
+	now := time.Now()
+	_ = os.Chtimes(dir, now, now)
+	if dest != "" {
+		_ = os.Chtimes(dest, now, now)
+	}
+}
+
+func pruneDefaultE2EBuildCache(currentDirName string) {
+	baseDir := filepath.Dir(e2eBuildCacheDir())
+	maxEntries := defaultE2ECacheMaxEntries
+	if v := os.Getenv("AGM_E2E_CACHE_MAX_ENTRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			maxEntries = n
+		}
+	}
+	maxAge := defaultE2ECacheMaxAge
+	if v := os.Getenv("AGM_E2E_CACHE_MAX_AGE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			maxAge = d
+		}
+	}
+	_ = pruneE2EBuildCache(baseDir, currentDirName, maxEntries, maxAge)
+}
+
+func pruneE2EBuildCache(baseDir, currentDirName string, maxEntries int, maxAge time.Duration) error {
+	euid := int64(os.Geteuid())
+	candidates, err := collectE2ECacheCandidates(baseDir, currentDirName, euid)
+	if err != nil || len(candidates) == 0 {
+		return err
+	}
+	now := time.Now()
+	for i, c := range candidates {
+		if shouldEvictE2EFixture(i, maxEntries, now.Sub(c.modTime), maxAge) {
+			tryRemoveE2EFixtureDir(c.path)
+		}
+	}
+	return nil
 }
 
 func ensurePrivateBuildCacheDir(dir string) error {
@@ -316,6 +459,8 @@ func buildAGMToCache() (string, error) {
 	}
 	if info, err := os.Lstat(dest); err == nil {
 		if info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0 {
+			touchE2ECacheDir(dir, dest)
+			pruneDefaultE2EBuildCache(filepath.Base(dir))
 			return dest, nil
 		}
 		return "", fmt.Errorf("unsafe cached AGM binary %q", dest)
@@ -334,6 +479,8 @@ func buildAGMToCache() (string, error) {
 	// A peer may have completed while we waited for the lock.
 	if info, err := os.Lstat(dest); err == nil {
 		if info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0 {
+			touchE2ECacheDir(dir, dest)
+			pruneDefaultE2EBuildCache(filepath.Base(dir))
 			return dest, nil
 		}
 		return "", fmt.Errorf("unsafe cached AGM binary %q", dest)
@@ -371,10 +518,14 @@ func buildAGMToCache() (string, error) {
 	if err := os.Rename(tmpPath, dest); err != nil {
 		os.Remove(tmpPath)
 		if info, statErr := os.Lstat(dest); statErr == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0 {
+			touchE2ECacheDir(dir, dest)
+			pruneDefaultE2EBuildCache(filepath.Base(dir))
 			return dest, nil
 		}
 		return "", fmt.Errorf("publish build: %w", err)
 	}
+	touchE2ECacheDir(dir, dest)
+	pruneDefaultE2EBuildCache(filepath.Base(dir))
 	return dest, nil
 }
 

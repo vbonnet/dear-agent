@@ -122,6 +122,12 @@ type config struct {
 	buildCacheMinAge time.Duration
 	buildCacheDepth  int
 
+	// E2E test fixture directories under the user cache directory also accrue
+	// multi-GB build artifacts without bounds (ce-4cp3a).
+	e2eCacheDir        string
+	e2eCacheMinAge     time.Duration
+	e2eCacheMaxEntries int
+
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
 	// so tests can observe the sweep invocation without spawning a process.
 	runCommand func(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -151,6 +157,12 @@ func run(args []string, out io.Writer) (int, error) {
 		"only reap Go build caches whose mtime is older than this")
 	fs.IntVar(&cfg.buildCacheDepth, "build-cache-depth", defaultBuildCacheDepth,
 		"how many directory levels below each scan root to search for build caches")
+	fs.StringVar(&cfg.e2eCacheDir, "e2e-cache-dir", defaultE2ECacheDir(),
+		"directory scanned for abandoned E2E test fixture directories (empty disables the reaper)")
+	fs.DurationVar(&cfg.e2eCacheMinAge, "e2e-cache-min-age", defaultE2ECacheMinAge,
+		"only reap E2E fixture directories whose mtime is older than this")
+	fs.IntVar(&cfg.e2eCacheMaxEntries, "e2e-cache-max-entries", defaultE2ECacheMaxEntries,
+		"maximum number of recent E2E fixture directories to retain")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -176,6 +188,12 @@ func run(args []string, out io.Writer) (int, error) {
 	// silently reaping live state.
 	if cfg.buildCacheRoots != "" && cfg.buildCacheMinAge <= 0 {
 		return 2, fmt.Errorf("invalid -build-cache-min-age %s: must be positive (pass an empty -build-cache-roots to disable the reaper)", cfg.buildCacheMinAge)
+	}
+	if cfg.e2eCacheDir != "" && cfg.e2eCacheMinAge <= 0 {
+		return 2, fmt.Errorf("invalid -e2e-cache-min-age %s: must be positive (pass an empty -e2e-cache-dir to disable the reaper)", cfg.e2eCacheMinAge)
+	}
+	if cfg.e2eCacheDir != "" && cfg.e2eCacheMaxEntries < 0 {
+		return 2, fmt.Errorf("invalid -e2e-cache-max-entries %d: must be non-negative", cfg.e2eCacheMaxEntries)
 	}
 
 	snap, err := takeSnapshot(cfg.path)
@@ -205,6 +223,7 @@ func run(args []string, out io.Writer) (int, error) {
 
 	// Runs on every tick, breached or not: see the comment on config.
 	buildCaches := reapAbandonedBuildCaches(cfg)
+	e2eCaches := reapAbandonedE2ECaches(cfg)
 
 	var remediation *sweepResult
 	if diskBreached && !cfg.dryRun {
@@ -238,7 +257,7 @@ func run(args []string, out io.Writer) (int, error) {
 	// write is timeout-bounded because I/O on an exhausted disk can stall.
 	if breached {
 		logCtx, logCancel := context.WithTimeout(context.Background(), trailTimeout)
-		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc)
+		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc, buildCaches, e2eCaches)
 		logCancel()
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: trail append failed: %v\n", lerr)
@@ -246,11 +265,11 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	if cfg.jsonOutput {
-		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, buildCaches); err != nil {
+		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches); err != nil {
 			return 2, err
 		}
 	} else {
-		emitReport(out, snap, level, reasons, remediation, cfg, gc, buildCaches)
+		emitReport(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches)
 	}
 
 	if breached {
@@ -478,7 +497,8 @@ func applyBrake(cfg config, engage bool, reason string) {
 
 // logAlarm appends one watchdog.disk.alarm record to the decision trail.
 func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult, gc *gcHealth) error {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, gc *gcHealth,
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) error {
 	trail, err := decisiontrail.OpenJSONL(cfg.trailPath)
 	if err != nil {
 		return err
@@ -528,6 +548,12 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 		}
 		payload["sandbox_gc"] = sandboxGC
 	}
+	if buildCaches != nil {
+		payload["build_caches"] = buildCaches
+	}
+	if e2eCaches != nil {
+		payload["e2e_caches"] = e2eCaches
+	}
 
 	return trail.Append(ctx, decisiontrail.Record{
 		Role:    "watchdog",
@@ -538,7 +564,7 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 
 func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
-	buildCaches *buildCacheReapResult) error {
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) error {
 	type gcReport struct {
 		Stale       bool   `json:"stale"`
 		LastSuccess string `json:"last_success,omitempty"`
@@ -561,6 +587,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Remediation       *sweepResult                   `json:"remediation,omitempty"`
 		SandboxGC         *gcReport                      `json:"sandbox_gc,omitempty"`
 		BuildCaches       *buildCacheReapResult          `json:"build_caches,omitempty"`
+		E2ECaches         *e2eCacheReapResult            `json:"e2e_caches,omitempty"`
 		OK                bool                           `json:"ok"`
 	}
 	var gcr *gcReport
@@ -584,13 +611,14 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Remediation:       rem,
 		SandboxGC:         gcr,
 		BuildCaches:       buildCaches,
+		E2ECaches:         e2eCaches,
 		OK:                level == supervisor.PressureNone,
 	})
 }
 
 func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
-	buildCaches *buildCacheReapResult) {
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) {
 	fmt.Fprintln(out, "disk-watchdog report")
 	fmt.Fprintf(out, "  path        : %s\n", cfg.path)
 	fmt.Fprintf(out, "  disk free   : %.1f GiB  [warn < %.0f GiB, critical < %.0f GiB]\n",
@@ -617,6 +645,9 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	}
 	if buildCaches != nil {
 		fmt.Fprintf(out, "  %s\n", summarizeBuildCacheReap(*buildCaches))
+	}
+	if e2eCaches != nil {
+		fmt.Fprintf(out, "  %s\n", summarizeE2ECacheReap(*e2eCaches))
 	}
 	fmt.Fprintln(out)
 

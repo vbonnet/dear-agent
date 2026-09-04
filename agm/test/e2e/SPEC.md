@@ -14,6 +14,8 @@
 
 **E2E-05** When harness-detection portability is enforced by unit and BDD surfaces, the suite shall route both through one canonical checker.
 
+**E2E-06** When caching fallback AGM binaries in the user cache directory, the suite shall prune obsolete fixture directories exceeding the configured entry bound or age gate so that unbounded disk growth is prevented.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`
