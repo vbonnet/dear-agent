@@ -186,3 +186,14 @@ artifacts:
     deployed: ~/go/bin/jaeger-health
     mode: "0755"
     remediation: make install-jaeger-health
+
+  # The absence-alarm default pulse set includes a merge-health command pulse.
+  # Without this entry, `dear-deploy status` reports the stack current while
+  # the probe binary is missing, causing the merge-pipeline-recent-commit pulse
+  # to classify as UNDETERMINED on every tick.
+  - name: merge-health
+    kind: binary
+    source: cmd/merge-health
+    deployed: ~/go/bin/merge-health
+    mode: "0755"
+    remediation: make install-merge-health
