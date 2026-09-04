@@ -77,12 +77,25 @@ func (cfg e2eCacheConfig) withDefaults() e2eCacheGates {
 		}
 	}
 	if g.remove == nil {
-		g.remove = os.RemoveAll
+		g.remove = removeE2EFixtureDir
 	}
 	if g.sizeOf == nil {
 		g.sizeOf = dirBytes
 	}
 	return g
+}
+
+func removeE2EFixtureDir(path string) error {
+	lockPath := filepath.Join(path, "agm.lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return os.RemoveAll(path)
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return fmt.Errorf("lock active: %w", err)
+	}
+	return os.RemoveAll(path)
 }
 
 func isE2ECacheInUse(path string, lsof func(string) (bool, error)) (bool, error) {
@@ -214,7 +227,7 @@ func reapE2ECaches(cfg e2eCacheConfig) e2eCacheReapResult {
 	for i, c := range candidates {
 		res.Scanned++
 		age := now.Sub(c.modTime)
-		withinLimits := (cfg.MaxEntries <= 0 || i < cfg.MaxEntries) && (cfg.MinAge <= 0 || age < cfg.MinAge)
+		withinLimits := (i < cfg.MaxEntries) && (cfg.MinAge <= 0 || age < cfg.MinAge)
 		if withinLimits {
 			res.Skipped[c.path] = fmt.Sprintf("within max-entries and age limits (%s < %s)", age.Round(time.Second), cfg.MinAge)
 			continue

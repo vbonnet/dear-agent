@@ -67,6 +67,33 @@ func TestReapE2ECaches_ReapsExceedingMaxEntries(t *testing.T) {
 	}
 }
 
+func TestReapE2ECaches_ZeroMaxEntriesReapsAll(t *testing.T) {
+	baseDir := t.TempDir()
+	now := time.Now()
+
+	createE2ETestFixture(t, baseDir, "agm-01", now.Add(-1*time.Minute))
+	createE2ETestFixture(t, baseDir, "agm-02", now.Add(-2*time.Minute))
+
+	res := reapE2ECaches(e2eCacheConfig{
+		Dir:        baseDir,
+		MaxEntries: 0,
+		MinAge:     24 * time.Hour,
+		Reap:       true,
+	})
+
+	if res.Scanned != 2 {
+		t.Fatalf("expected 2 scanned, got %d", res.Scanned)
+	}
+	if len(res.Reaped) != 2 {
+		t.Fatalf("expected 2 reaped, got %d", len(res.Reaped))
+	}
+	for _, evicted := range []string{"agm-01", "agm-02"} {
+		if _, err := os.Stat(filepath.Join(baseDir, evicted)); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be evicted, still exists", evicted)
+		}
+	}
+}
+
 func TestReapE2ECaches_ReapsExceedingMinAge(t *testing.T) {
 	baseDir := t.TempDir()
 	now := time.Now()

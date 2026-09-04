@@ -317,7 +317,7 @@ func collectE2ECacheCandidates(baseDir, currentDirName string, euid int64) ([]e2
 }
 
 func shouldEvictE2EFixture(index, maxEntries int, age, maxAge time.Duration) bool {
-	if maxEntries > 0 && index >= maxEntries {
+	if maxEntries >= 0 && index >= maxEntries {
 		return true
 	}
 	if maxAge > 0 && age > maxAge {
@@ -327,9 +327,6 @@ func shouldEvictE2EFixture(index, maxEntries int, age, maxAge time.Duration) boo
 }
 
 func tryRemoveE2EFixtureDir(dirPath string) {
-	if !isSafeE2EFixtureDir(dirPath) {
-		return
-	}
 	lockPath := filepath.Join(dirPath, "agm.lock")
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -337,6 +334,9 @@ func tryRemoveE2EFixtureDir(dirPath string) {
 	}
 	defer lockFile.Close()
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return
+	}
+	if !isSafeE2EFixtureDir(dirPath) {
 		return
 	}
 	_ = os.RemoveAll(dirPath)
@@ -391,9 +391,13 @@ func pruneE2EBuildCache(baseDir, currentDirName string, maxEntries int, maxAge t
 	if err != nil || len(candidates) == 0 {
 		return err
 	}
+	effectiveMax := maxEntries
+	if currentDirName != "" && effectiveMax > 0 {
+		effectiveMax--
+	}
 	now := time.Now()
 	for i, c := range candidates {
-		if shouldEvictE2EFixture(i, maxEntries, now.Sub(c.modTime), maxAge) {
+		if shouldEvictE2EFixture(i, effectiveMax, now.Sub(c.modTime), maxAge) {
 			tryRemoveE2EFixtureDir(c.path)
 		}
 	}

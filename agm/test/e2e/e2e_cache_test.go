@@ -100,6 +100,27 @@ func TestPruneE2EBuildCache_PreservesCurrentDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(baseDir, "agm-current")); err != nil {
 		t.Errorf("current active dir must not be evicted: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(baseDir, "agm-newer")); !os.IsNotExist(err) {
+		t.Errorf("expected agm-newer to be evicted since agm-current counts toward the 1-entry bound")
+	}
+}
+
+func TestPruneE2EBuildCache_EnforcesZeroMaxEntries(t *testing.T) {
+	baseDir := t.TempDir()
+	now := time.Now()
+
+	createTestFixtureDir(t, baseDir, "agm-01", now.Add(-1*time.Minute))
+	createTestFixtureDir(t, baseDir, "agm-02", now.Add(-2*time.Minute))
+
+	if err := pruneE2EBuildCache(baseDir, "", 0, 24*time.Hour); err != nil {
+		t.Fatalf("prune failed: %v", err)
+	}
+
+	for _, evicted := range []string{"agm-01", "agm-02"} {
+		if _, err := os.Stat(filepath.Join(baseDir, evicted)); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be evicted, but still exists", evicted)
+		}
+	}
 }
 
 func TestPruneE2EBuildCache_SkipsLockedDirectory(t *testing.T) {
