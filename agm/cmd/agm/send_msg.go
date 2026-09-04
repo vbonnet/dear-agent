@@ -599,10 +599,10 @@ func queueMessage(ctx context.Context, recipientSession, senderName, messageID, 
 	// Create message queue
 	queue, err := messages.NewMessageQueue()
 	if err != nil {
-		// CLI fallback re-enters shared atomic exact-pane readiness.
+		// Ordinary availability fallback re-enters shared atomic exact-pane readiness.
 		fmt.Fprintf(os.Stderr, "Warning: failed to create message queue: %v\n", err)
-		fallbackAdapter, _ := getStorage()
-		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
+
+		return handleQueueConstructionError(err, directQueueConstructionFallback(ctx, recipientSession, senderName, messageID, formattedMessage))
 	}
 	defer func() { _ = queue.Close() }()
 

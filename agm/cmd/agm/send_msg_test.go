@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -176,6 +178,46 @@ func TestDispatchSendByOperationOutcome(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleQueueConstructionError(t *testing.T) {
+	t.Run("unsafe storage fails closed", func(t *testing.T) {
+		constructionErr := fmt.Errorf("open message queue: %w", messages.ErrUnsafeQueueStorage)
+		fallbackCalls := 0
+
+		err := handleQueueConstructionError(constructionErr, func() error {
+			fallbackCalls++
+			return nil
+		})
+
+		if !errors.Is(err, constructionErr) {
+			t.Fatalf("handleQueueConstructionError() error = %v, want original construction error %v", err, constructionErr)
+		}
+		if !errors.Is(err, messages.ErrUnsafeQueueStorage) {
+			t.Fatalf("handleQueueConstructionError() error = %v, want ErrUnsafeQueueStorage identity", err)
+		}
+		if fallbackCalls != 0 {
+			t.Fatalf("fallback calls = %d, want 0", fallbackCalls)
+		}
+	})
+
+	t.Run("ordinary construction failure uses fallback", func(t *testing.T) {
+		constructionErr := errors.New("queue unavailable")
+		fallbackErr := errors.New("direct delivery failed")
+		fallbackCalls := 0
+
+		err := handleQueueConstructionError(constructionErr, func() error {
+			fallbackCalls++
+			return fallbackErr
+		})
+
+		if !errors.Is(err, fallbackErr) {
+			t.Fatalf("handleQueueConstructionError() error = %v, want fallback result %v", err, fallbackErr)
+		}
+		if fallbackCalls != 1 {
+			t.Fatalf("fallback calls = %d, want 1", fallbackCalls)
+		}
+	})
 }
 
 func TestOverlayRecoveryRetriesSharedOperation(t *testing.T) {
