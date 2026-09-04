@@ -2,6 +2,7 @@ package ops
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -459,6 +460,30 @@ func (RealSweepDeps) Discover(base string) ([]DiscoveredWorktree, error) {
 				continue
 			}
 			probe := filepath.Join(repoDir, ch.Name())
+			// Dot-prefixed children may be linked worktrees (which contain a
+			// .git file) or standalone clones/husks (which contain a .git
+			// directory or no git metadata). Only probe dot-prefixed children
+			// if they are genuine linked worktrees.
+			if strings.HasPrefix(ch.Name(), ".") {
+				gitPath := filepath.Join(probe, ".git")
+				fi, err := os.Stat(gitPath)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						continue
+					}
+					return nil, fmt.Errorf("stat %s: %w", gitPath, err)
+				}
+				if fi.IsDir() {
+					continue
+				}
+			}
+			resolvedProbe := probe
+			if resolved, rerr := filepath.EvalSymlinks(probe); rerr == nil {
+				resolvedProbe = resolved
+			}
+			if seen[resolvedProbe] {
+				continue
+			}
 			wts, err := gitpkg.ListWorktrees(probe)
 			if err != nil || wts == nil {
 				continue
@@ -474,7 +499,6 @@ func (RealSweepDeps) Discover(base string) ([]DiscoveredWorktree, error) {
 					Branch: wt.Branch,
 				})
 			}
-			break // repo fully enumerated from this one probe
 		}
 	}
 	return out, nil
