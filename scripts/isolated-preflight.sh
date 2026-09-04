@@ -20,6 +20,7 @@ chmod 700 "$PREFLIGHT_PARENT"
 
 RUN_DIR="$(mktemp -d "$PREFLIGHT_PARENT/run.XXXXXX")"
 
+# shellcheck disable=SC2317,SC2329
 cleanup() {
     chmod -R u+w "$RUN_DIR" 2>/dev/null || true
     rm -rf "$RUN_DIR" 2>/dev/null || true
