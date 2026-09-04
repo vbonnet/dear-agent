@@ -27,3 +27,9 @@ func killProcessTree(cmd *exec.Cmd) error {
 func endedByCancellation(_ *os.ProcessState, cancelled bool) bool {
 	return cancelled
 }
+
+// raiseInterrupt exits directly, because sending an interrupt to the current
+// process is not supported on the platforms selected by this file.
+func raiseInterrupt() {
+	os.Exit(interruptExitCode)
+}

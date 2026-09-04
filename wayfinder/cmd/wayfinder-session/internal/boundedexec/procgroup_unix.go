@@ -32,7 +32,9 @@ func killProcessTree(cmd *exec.Cmd) error {
 	// been recycled.
 	err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	if errors.Is(err, syscall.ESRCH) {
-		return nil // already gone, which is the outcome we wanted
+		// Already gone. Reported distinctly because "nothing to kill" is not
+		// the same as "we killed it", and the classification depends on that.
+		return os.ErrProcessDone
 	}
 	return err
 }
@@ -42,4 +44,13 @@ func killProcessTree(cmd *exec.Cmd) error {
 // from a signalled one, so the recorded state answers this on its own.
 func endedByCancellation(state *os.ProcessState, _ bool) bool {
 	return !state.Exited()
+}
+
+// raiseInterrupt re-sends SIGINT to this process after the handler has been
+// restored, so an interrupt that this package absorbed still terminates
+// Wayfinder itself.
+func raiseInterrupt() {
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		os.Exit(interruptExitCode)
+	}
 }

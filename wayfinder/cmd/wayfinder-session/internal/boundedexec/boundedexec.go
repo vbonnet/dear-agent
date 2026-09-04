@@ -48,6 +48,10 @@ const (
 	// progressDrainGrace bounds how long Run waits for queued progress lines to
 	// reach the writer before returning without them.
 	progressDrainGrace = 2 * time.Second
+
+	// interruptExitCode is the conventional shell status for death by SIGINT,
+	// used when re-raising the signal itself is unavailable.
+	interruptExitCode = 130
 )
 
 // Command describes one bounded external command.
@@ -117,8 +121,15 @@ func (c Command) Run() Result {
 	// timeout instead of showing the real build or test failure.
 	var cancelled atomic.Bool
 	cmd.Cancel = func() error {
-		cancelled.Store(true)
-		return killProcessTree(cmd)
+		err := killProcessTree(cmd)
+		// Only a kill that actually reached a live process counts. A process
+		// that had already exited reports ErrProcessDone, and treating that as
+		// proof of cancellation relabels an ordinary failure as a timeout on
+		// platforms where the process state cannot tell the two apart.
+		if err == nil {
+			cancelled.Store(true)
+		}
+		return err
 	}
 	// Release Wait once the child is killed, even if a descendant still holds
 	// the pipes. This is the difference between a bounded gate and a hang.
@@ -156,6 +167,18 @@ func (c Command) Run() Result {
 	elapsed := time.Since(start)
 
 	timedOut, err := classifyOutcome(cmd.ProcessState, err, cancelled.Load(), ctx.Err())
+
+	// An interrupt must end Wayfinder, not just this command. Consuming the
+	// signal here and returning would let complete-phase treat the cancelled
+	// review as an abstention and carry on to complete the phase, which is the
+	// opposite of what the operator asked for. Restore the default disposition
+	// and re-raise, so the process dies as it would have before this package
+	// took the command out of the foreground process group.
+	if errors.Is(ctx.Err(), context.Canceled) {
+		sink.close()
+		stopSignals()
+		raiseInterrupt()
+	}
 	switch {
 	case timedOut:
 		sink.emit("⏱  %s: timed out after %s\n", c.Label, c.Timeout)
