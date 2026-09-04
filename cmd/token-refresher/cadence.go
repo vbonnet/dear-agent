@@ -370,6 +370,19 @@ func isFallbackStateDir(clean string) bool {
 		(strings.HasPrefix(clean, filepath.Clean(os.TempDir())) && strings.HasPrefix(filepath.Base(clean), fmt.Sprintf("dear-agent-%d", os.Getuid())))
 }
 
+func isWritableDir(dir string) error {
+	if err := syscall.Access(dir, 2); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(dir, ".probe-*")
+	if err != nil {
+		return err
+	}
+	_ = probe.Close()
+	_ = os.Remove(probe.Name())
+	return nil
+}
+
 func ensureSecureStateDir(stateDir string) error {
 	if stateDir == "" {
 		return errors.New("state directory is empty")
@@ -386,6 +399,9 @@ func ensureSecureStateDir(stateDir string) error {
 		if info.Mode().Perm()&0o002 != 0 {
 			return fmt.Errorf("state directory %s is world-writable", clean)
 		}
+		if err := isWritableDir(clean); err != nil {
+			return fmt.Errorf("state directory %s is not writable: %w", clean, err)
+		}
 		return nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
@@ -396,6 +412,9 @@ func ensureSecureStateDir(stateDir string) error {
 	}
 	if isFallbackStateDir(clean) && !isSecureStateDir(clean) {
 		return fmt.Errorf("fallback state directory %s has untrusted ownership or permissions", clean)
+	}
+	if err := isWritableDir(clean); err != nil {
+		return fmt.Errorf("state directory %s is not writable: %w", clean, err)
 	}
 	return nil
 }

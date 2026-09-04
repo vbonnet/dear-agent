@@ -118,6 +118,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "token-refresher: -check and -clear-quarantine are mutually exclusive")
 		return exitError
 	}
+	if *check && *cadence {
+		fmt.Fprintln(stderr, "token-refresher: -check and -cadence are mutually exclusive")
+		return exitError
+	}
 	resolvedCredPath := canonicalCredentialsPath(*credPath)
 
 	var logger *slog.Logger
@@ -147,7 +151,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
 	}
 	resolvedStateDir := canonicalStateDir(*stateDir)
-	if *cadence || *clearQuar {
+	if (*cadence || *clearQuar) && !*check {
 		if err := ensureSecureStateDir(resolvedStateDir); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: state directory unavailable: %v\n", err)
 			return exitError

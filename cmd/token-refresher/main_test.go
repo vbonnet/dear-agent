@@ -370,3 +370,37 @@ func TestRun_CadenceRejectsInsecureFallbackStateDir(t *testing.T) {
 		t.Errorf("expected 'state directory unavailable' in stderr, got: %s", stderr.String())
 	}
 }
+
+func TestRun_CheckAndCadenceMutuallyExclusive(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	nonExistentStateDir := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-sideeffect-%d", time.Now().UnixNano()))
+	code := run([]string{"-check", "-cadence", "-state-dir", nonExistentStateDir}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "-check and -cadence are mutually exclusive") {
+		t.Errorf("expected mutual exclusion error in stderr, got: %s", stderr.String())
+	}
+	if _, err := os.Lstat(nonExistentStateDir); !os.IsNotExist(err) {
+		t.Errorf("combined check and cadence created state directory on disk: %s", nonExistentStateDir)
+	}
+}
+
+func TestRun_CadenceRejectsReadOnlyStateDir(t *testing.T) {
+	roDir := t.TempDir()
+	if err := os.Chmod(roDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chmod(roDir, 0o700)
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-cadence", "-state-dir", roDir}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "state directory unavailable") {
+		t.Errorf("expected 'state directory unavailable' in stderr, got: %s", stderr.String())
+	}
+}

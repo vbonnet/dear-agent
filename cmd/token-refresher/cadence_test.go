@@ -771,3 +771,17 @@ func TestEnsureSecureStateDir_RejectsInsecureFallback(t *testing.T) {
 		t.Errorf("ensureSecureStateDir should reject fallback directory with 0777 permissions: %s", insecureDir)
 	}
 }
+
+func TestEnsureSecureStateDir_RejectsReadOnlyDirectory(t *testing.T) {
+	roDir := t.TempDir()
+	if err := os.Chmod(roDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chmod(roDir, 0o700)
+	}()
+
+	if err := ensureSecureStateDir(roDir); err == nil {
+		t.Errorf("ensureSecureStateDir should reject non-writable directory: %s", roDir)
+	}
+}
