@@ -416,6 +416,61 @@ While the database path is not currently configurable via environment variable, 
    agm sync  # Rebuild from YAML manifests
    ```
 
+### Message Queue Storage Privacy
+
+The cross-session message queue is stored separately at
+`~/.config/agm/message_queue.db`. On Darwin and Linux, AGM admits this storage
+before giving SQLite the path; queue construction fails closed as unsupported
+on other operating systems. The supported on-disk state is:
+
+- `~/.config/agm` is a real directory owned by the current user with mode
+  `0700`.
+- `message_queue.db` and any live `message_queue.db-wal`,
+  `message_queue.db-shm`, or rollback-journal sidecar are non-symlink regular
+  files owned by the current user, have one link, and use mode `0600`.
+- Existing home and `.config` path components are real directories owned by
+  the current user and are not group- or other-writable. AGM may retain an
+  otherwise-safe existing `.config` mode, but creates missing path components
+  privately.
+
+AGM fails closed before opening SQLite when a pre-existing queue path component
+or owned file fails owner, type, link-identity, or symbolic-link preflight. A
+post-initialization attestation also closes the database if SQLite-created
+storage is not private. A CLI send does not evade either refusal through
+direct-delivery fallback. AGM may tighten the POSIX mode bits of admitted queue
+storage in place, but it does not delete, truncate, replace, or automatically
+repair an unsafe storage object. Other configuration and session files under
+the AGM directory remain intact.
+
+All cooperating AGM processes are expected to run as the same operating-system
+user. Mode `0600` intentionally permits another process under that same user to
+open the queue; group-based, cross-user queue sharing is not supported. This is
+a POSIX mode-bit guarantee, not a claim that platform-specific ACL entries have
+been removed. It cannot revoke queue data read before the repair or access held
+through an already-open file descriptor.
+
+#### Existing-host rollout
+
+Treat migration of an existing live queue as a human-gated operational change,
+not as a development-time permission mutation:
+
+1. Obtain operator approval and quiesce every queue consumer for the account,
+   including `agm-daemon` and concurrent AGM commands. Inspect the path owner,
+   object types, links, and platform ACLs before changing or relocating any
+   rejected object.
+2. Install the reviewed AGM build and restart the consumers. The first queue
+   open tightens only an admitted directory, database, and existing sidecars;
+   an unsafe object remains untouched and produces an error for operator
+   remediation.
+3. With the daemon running, exercise one approved queued delivery so the WAL
+   and SHM exist, then use non-mutating platform inspection to verify mode
+   `0700` on `~/.config/agm` and mode `0600` on the database, WAL, and SHM.
+   Confirm the message lifecycle before declaring the rollout complete.
+
+Do not run permission-changing commands against production queue files merely
+to validate this change; use an isolated home for development and package
+tests.
+
 ## Event Bus Configuration
 
 AGM includes a WebSocket-based event bus for real-time session updates.
