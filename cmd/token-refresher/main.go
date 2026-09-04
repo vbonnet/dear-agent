@@ -187,19 +187,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
 				retCode := exitNotPersisted
 				if _, _, _, quarantined := r.QuarantineStatus(); quarantined && sharedQuarantine {
-					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, "quarantined",
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, "quarantined",
 						"Claude auth AT RISK",
 						"Credential persistence failed; the refresh-token quarantine is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh QUARANTINED until -clear-quarantine re-arms it.")
 					retCode = exitOK
 				} else if stopped, stopErr := r.RefreshStopped(); stopErr == nil && stopped {
-					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, "quarantined",
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, "quarantined",
 						"Claude auth AT RISK",
 						"Refresh quarantine could not be persisted; the durable refresh stop is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
 					retCode = exitOK
 				} else {
-					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, "quarantined",
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, "quarantined",
 						"Claude auth AT RISK",
 						"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
@@ -207,7 +207,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				pruneCadenceAlerts(resolvedStateDir, *sentinelMaxAge, sentinelName, stderr)
 				return retCode
 			}
-			return cadenceExit(code, resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, stderr, *sentinelMaxAge)
+			return cadenceExit(code, resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, stderr, *sentinelMaxAge)
 		}
 		return code
 	}

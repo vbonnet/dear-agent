@@ -461,7 +461,7 @@ func TestCadenceExit_QuarantinedKeepsScheduleAlive(t *testing.T) {
 	stateDir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
+	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
 		t.Errorf("cadence exit = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, deathSentinelName)); err != nil {

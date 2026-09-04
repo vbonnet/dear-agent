@@ -21,7 +21,7 @@ func TestCadenceExit_TokenFamilyDeathReportsSuccess(t *testing.T) {
 	dir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
+	if got := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
 		t.Errorf("cadenceExit(family dead) = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(dir, deathSentinelName)); err != nil {
@@ -35,13 +35,13 @@ func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
 	first, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
@@ -54,7 +54,7 @@ func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 
 func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 	dir := t.TempDir()
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "dead", "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "", "dead", "test title", "test message")
 
 	sentinel := filepath.Join(dir, deathSentinelName)
 	first, err := os.ReadFile(sentinel)
@@ -62,7 +62,7 @@ func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "dead", "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "", "dead", "test title", "test message")
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel after second alert: %v", err)
@@ -78,8 +78,8 @@ func TestCadenceExit_SuccessClearsSentinel(t *testing.T) {
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
-	cadenceExit(exitOK, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitOK, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
 
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Error("sentinel survived a successful refresh: the next death would be silent")
@@ -125,10 +125,10 @@ func TestCadenceExit_PassesThroughOtherFailures(t *testing.T) {
 	dir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitNotPersisted, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge); got != exitNotPersisted {
+	if got := cadenceExit(exitNotPersisted, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitNotPersisted {
 		t.Errorf("cadenceExit(not persisted) = %d, want %d", got, exitNotPersisted)
 	}
-	if got := cadenceExit(exitError, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge); got != exitError {
+	if got := cadenceExit(exitError, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitError {
 		t.Errorf("cadenceExit(generic error) = %d, want %d", got, exitError)
 	}
 }
@@ -304,7 +304,7 @@ func TestCadenceExit_PrunesStaleSentinels(t *testing.T) {
 	_ = os.Chtimes(stale, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
 	var stderr bytes.Buffer
-	cadenceExit(exitOK, dir, deathSentinelName, "", "", &stderr, 24*time.Hour)
+	cadenceExit(exitOK, dir, deathSentinelName, "", "", "", &stderr, 24*time.Hour)
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale sentinel survived cadenceExit")
@@ -324,7 +324,7 @@ func TestCadenceExit_PreservesActiveSentinelSpanningMaxAge(t *testing.T) {
 	var stderr bytes.Buffer
 	// During an ongoing failure episode, cadenceExit must not delete the sentinel
 	// being handled, which would re-alert the operator every maxAge.
-	code := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", &stderr, 24*time.Hour)
+	code := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, 24*time.Hour)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
@@ -386,7 +386,7 @@ func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
 
 	// Job 1 runs cadenceExit while both failures remain unresolved.
 	var stderr bytes.Buffer
-	code := cadenceExit(exitQuarantined, stateDir, s1Name, q1, c1, &stderr, 24*time.Hour)
+	code := cadenceExit(exitQuarantined, stateDir, s1Name, q1, c1, fp1, &stderr, 24*time.Hour)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
@@ -404,7 +404,7 @@ func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
 	_ = writeCredsFile(c2, "access2-rotated", freshMs(), "refresh2-rotated")
 
 	// Job 1 runs again: now that Job 2's quarantine is inactive/stale, S2 should be pruned.
-	code = cadenceExit(exitQuarantined, stateDir, s1Name, q1, c1, &stderr, 24*time.Hour)
+	code = cadenceExit(exitQuarantined, stateDir, s1Name, q1, c1, fp1, &stderr, 24*time.Hour)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
@@ -428,7 +428,7 @@ func TestNotifyCadenceOnce_RefreshesSentinelModTimeOnActiveEpisode(t *testing.T)
 	oldTime := now.Add(-10 * time.Hour)
 	_ = os.Chtimes(sentinel, oldTime, oldTime)
 
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "dead", "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", "", "", "dead", "test title", "test message")
 
 	info, err := os.Stat(sentinel)
 	if err != nil {
@@ -510,7 +510,7 @@ func TestNotifyCadenceOnce_NewEpisodeAlertsWhenTokenFingerprintRotates(t *testin
 	credsPath := credsWithRefreshToken(t, "rt-first")
 	fpFirst, _ := credentialsFingerprint(credsPath)
 
-	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "dead", "title1", "msg1")
+	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, fpFirst, "dead", "title1", "msg1")
 
 	data1, err := os.ReadFile(sentinel)
 	if err != nil {
@@ -527,7 +527,7 @@ func TestNotifyCadenceOnce_NewEpisodeAlertsWhenTokenFingerprintRotates(t *testin
 		t.Fatal("expected fingerprints to differ for different tokens")
 	}
 
-	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, "dead", "title2", "msg2")
+	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, fpSecond, "dead", "title2", "msg2")
 
 	data2, err := os.ReadFile(sentinel)
 	if err != nil {
@@ -593,7 +593,7 @@ func TestCadenceExit_UnrelatedErrorPrunesStaleExpiredSentinel(t *testing.T) {
 	}
 	_ = os.Chtimes(staleSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
-	got := cadenceExit(exitError, dir, deathSentinelName, "", "", &stderr, defaultSentinelMaxAge)
+	got := cadenceExit(exitError, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
 	if got != exitError {
 		t.Fatalf("cadenceExit = %d, want %d", got, exitError)
 	}
@@ -610,7 +610,7 @@ func TestNotifyCadenceOnce_SkipsNonRegularFile(t *testing.T) {
 		t.Skipf("cannot make FIFO on this platform: %v", err)
 	}
 
-	notifyCadenceOnce(dir, "cadence-fifo", "", "", "dead", "title", "message")
+	notifyCadenceOnce(dir, "cadence-fifo", "", "", "", "dead", "title", "message")
 
 	info, err := os.Lstat(fifoPath)
 	if err != nil {
@@ -623,7 +623,7 @@ func TestNotifyCadenceOnce_SkipsNonRegularFile(t *testing.T) {
 
 func TestSentinelMatchesEpisode_EmptyRecordedFPReturnsFalse(t *testing.T) {
 	credsPath := credsWithRefreshToken(t, "rt-legacy")
-	if sentinelMatchesEpisode(sentinelRecord{}, credsPath) {
+	if sentinelMatchesEpisode(sentinelRecord{}, credsPath, "") {
 		t.Error("sentinelMatchesEpisode with empty recorded fingerprint should return false to trigger upgrade/re-alert")
 	}
 }
@@ -715,7 +715,7 @@ func TestNotifyCadenceOnce_JSONSerializationHandlesNewlinesInPaths(t *testing.T)
 	credsPath := credsWithRefreshToken(t, "rt-newline")
 	quarPath := filepath.Join(dir, "quar\nwith\nnewline.json")
 
-	notifyCadenceOnce(dir, sentinelName, quarPath, credsPath, "quarantined", "Title", "Message")
+	notifyCadenceOnce(dir, sentinelName, quarPath, credsPath, "", "quarantined", "Title", "Message")
 
 	sentinel := filepath.Join(dir, sentinelName)
 	data, err := os.ReadFile(sentinel)
@@ -773,6 +773,9 @@ func TestEnsureSecureStateDir_RejectsInsecureFallback(t *testing.T) {
 }
 
 func TestEnsureSecureStateDir_RejectsReadOnlyDirectory(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping chmod-based write denial test when running as root")
+	}
 	roDir := t.TempDir()
 	if err := os.Chmod(roDir, 0o555); err != nil {
 		t.Fatal(err)
@@ -783,5 +786,79 @@ func TestEnsureSecureStateDir_RejectsReadOnlyDirectory(t *testing.T) {
 
 	if err := ensureSecureStateDir(roDir); err == nil {
 		t.Errorf("ensureSecureStateDir should reject non-writable directory: %s", roDir)
+	}
+}
+
+func TestIsQuarantineActive_SkipsFIFOWithoutHanging(t *testing.T) {
+	dir := t.TempDir()
+	fifoPath := filepath.Join(dir, "quarantine-fifo")
+	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
+		t.Skipf("cannot make FIFO on this platform: %v", err)
+	}
+	credsPath := credsWithRefreshToken(t, "rt-fifo-test")
+
+	if isQuarantineActive(fifoPath, credsPath) {
+		t.Errorf("isQuarantineActive returned true for FIFO path %s", fifoPath)
+	}
+}
+
+func TestPruneCadenceSentinels_PreservesSentinelIfModifiedBetweenInspectionAndUnlink(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, deathSentinelName)
+	if err := os.WriteFile(sentinel, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	oldTime := now.Add(-48 * time.Hour)
+	_ = os.Chtimes(sentinel, oldTime, oldTime)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	newTime := now
+	_ = os.Chtimes(sentinel, newTime, newTime)
+
+	cutoff := now.Add(-24 * time.Hour)
+	pruned, err := pruneCadenceEntry(dir, entries[0], cutoff, "")
+	if err != nil {
+		t.Fatalf("pruneCadenceEntry failed: %v", err)
+	}
+	if pruned {
+		t.Errorf("sentinel modified between inspection and unlink was unexpectedly pruned")
+	}
+	if _, err := os.Stat(sentinel); os.IsNotExist(err) {
+		t.Errorf("sentinel file was deleted despite being modified")
+	}
+}
+
+func TestNotifyCadenceOnce_PersistsFailedTokenFingerprintEvenIfCredentialsRotate(t *testing.T) {
+	stateDir := t.TempDir()
+	credsPath := credsWithRefreshToken(t, "rt-initial-failed")
+	fpInitial, _ := credentialsFingerprint(credsPath)
+
+	_ = writeCredsFile(credsPath, "access-rotated", freshMs(), "rt-newly-rotated")
+	fpRotated, _ := credentialsFingerprint(credsPath)
+	if fpInitial == fpRotated {
+		t.Fatal("expected different fingerprints for rotated tokens")
+	}
+
+	notifyCadenceOnce(stateDir, deathSentinelName, "", credsPath, fpInitial, "dead", "Alert", "Msg")
+
+	sentinel := filepath.Join(stateDir, deathSentinelName)
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	rec, ok := parseSentinelData(data)
+	if !ok {
+		t.Fatalf("parseSentinelData failed on payload: %s", string(data))
+	}
+	if rec.Fingerprint != fpInitial {
+		t.Errorf("sentinel recorded fingerprint %q, want failed token fingerprint %q", rec.Fingerprint, fpInitial)
 	}
 }

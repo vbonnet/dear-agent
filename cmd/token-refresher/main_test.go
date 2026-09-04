@@ -387,6 +387,9 @@ func TestRun_CheckAndCadenceMutuallyExclusive(t *testing.T) {
 }
 
 func TestRun_CadenceRejectsReadOnlyStateDir(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping chmod-based write denial test when running as root")
+	}
 	roDir := t.TempDir()
 	if err := os.Chmod(roDir, 0o555); err != nil {
 		t.Fatal(err)

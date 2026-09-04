@@ -90,10 +90,10 @@ func pruneCadenceAlerts(stateDir string, maxAge time.Duration, keepSentinel stri
 	}
 }
 
-func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPath string, stderr io.Writer, maxAge time.Duration) int {
+func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPath, tokenFP string, stderr io.Writer, maxAge time.Duration) int {
 	switch code {
 	case exitTokenFamilyDead:
-		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, "dead",
+		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, tokenFP, "dead",
 			"Claude auth DOWN", "OAuth token family is dead. Run: claude /login")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
 		pruneCadenceAlerts(stateDir, maxAge, sentinelName, stderr)
@@ -103,7 +103,7 @@ func cadenceExit(code int, stateDir, sentinelName, quarantinePath, credentialsPa
 		// A near-miss, and the alert that matters most: the family is still
 		// alive precisely because we declined to replay the token. Reuse the
 		// death sentinel so one episode raises one notification.
-		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, "quarantined",
+		notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, tokenFP, "quarantined",
 			"Claude auth AT RISK",
 			"Refresh outcome unknown; token quarantined to protect the family. Check token-refresher -check")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode: reporting success so launchd keeps the schedule.\n")
@@ -173,6 +173,16 @@ func pruneCadenceEntry(stateDir string, entry os.DirEntry, cutoff time.Time, kee
 	if !info.ModTime().Before(cutoff) || isActiveSentinel(target) {
 		return false, nil
 	}
+	currentInfo, err := os.Lstat(target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat sentinel %s before removal: %w", name, err)
+	}
+	if !currentInfo.ModTime().Before(cutoff) || !os.SameFile(info, currentInfo) || !currentInfo.ModTime().Equal(info.ModTime()) || isActiveSentinel(target) {
+		return false, nil
+	}
 	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("remove sentinel %s: %w", name, err)
 	}
@@ -230,15 +240,17 @@ func parseSentinelData(data []byte) (sentinelRecord, bool) {
 	return rec, true
 }
 
-func sentinelMatchesEpisode(rec sentinelRecord, credPath string) bool {
-	currentFP, _ := credentialsFingerprint(credPath)
-	if currentFP == "" {
+func sentinelMatchesEpisode(rec sentinelRecord, credPath, tokenFP string) bool {
+	if tokenFP == "" {
+		tokenFP, _ = credentialsFingerprint(credPath)
+	}
+	if tokenFP == "" {
 		return true
 	}
 	if rec.Fingerprint == "" {
 		return false
 	}
-	return currentFP == rec.Fingerprint
+	return tokenFP == rec.Fingerprint
 }
 
 func isQuarantineActive(quarPath, credPath string) bool {
@@ -246,7 +258,8 @@ func isQuarantineActive(quarPath, credPath string) bool {
 		return false
 	}
 	// #nosec G703 -- path was recorded by local token-refresher to track its active quarantine marker.
-	if _, err := os.Stat(quarPath); err != nil {
+	info, err := os.Lstat(quarPath)
+	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
 	resolver := auth.OAuthResolver{
@@ -305,13 +318,15 @@ func isActiveSentinel(target string) bool {
 // notifyCadenceOnce records the episode after its first best-effort alert.
 // Every cadence failure path uses this helper so a durable quarantine/stop does
 // not notify again on every launchd tick.
-func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, outcome, title, message string) {
+func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, tokenFP, outcome, title, message string) {
 	sentinel := filepath.Join(stateDir, sentinelName)
-	currentFP, _ := credentialsFingerprint(credentialsPath)
+	if tokenFP == "" {
+		tokenFP, _ = credentialsFingerprint(credentialsPath)
+	}
 	if info, err := os.Lstat(sentinel); err == nil && !info.Mode().IsRegular() {
 		_ = os.Remove(sentinel)
 	} else if rec, ok := readSentinelRecord(sentinel); ok {
-		if sentinelMatchesEpisode(rec, credentialsPath) {
+		if sentinelMatchesEpisode(rec, credentialsPath, tokenFP) {
 			now := time.Now()
 			_ = os.Chtimes(sentinel, now, now)
 			return
@@ -323,7 +338,7 @@ func notifyCadenceOnce(stateDir, sentinelName, quarantinePath, credentialsPath, 
 			Timestamp:       time.Now().UTC().Format(time.RFC3339),
 			QuarantinePath:  quarantinePath,
 			CredentialsPath: credentialsPath,
-			Fingerprint:     currentFP,
+			Fingerprint:     tokenFP,
 			Outcome:         outcome,
 		}
 		if payload, err := json.Marshal(rec); err == nil {
