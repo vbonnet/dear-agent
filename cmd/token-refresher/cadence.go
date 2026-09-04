@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -17,7 +18,10 @@ import (
 // deathSentinelName marks an in-progress token-family death. Its presence means
 // the operator has already been alerted for this episode, so the 30-minute
 // cadence does not re-notify every tick; a successful refresh clears it.
-const deathSentinelName = "token-family-dead"
+const (
+	deathSentinelName     = "token-family-dead"
+	defaultSentinelMaxAge = 24 * time.Hour
+)
 
 // clearCadenceSentinel re-arms the next cadence alert after an operator has
 // explicitly cleared quarantine. A missing sentinel means there is nothing to
@@ -70,7 +74,12 @@ func cadenceStopped(credentialsPath string) (bool, error) {
 //
 // The real exit code still reaches the audit log and stderr; only the process
 // status is flattened, and only for the cadence caller.
-func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer) int {
+func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer, maxAge time.Duration) int {
+	if maxAge > 0 {
+		if _, err := pruneCadenceSentinels(stateDir, maxAge); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not prune cadence sentinels: %v\n", err)
+		}
+	}
 	switch code {
 	case exitTokenFamilyDead:
 		notifyCadenceOnce(stateDir, sentinelName,
@@ -97,6 +106,56 @@ func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer) int 
 	}
 
 	return code
+}
+
+// pruneCadenceSentinels removes dead-family sentinels in stateDir that are older
+// than maxAge. If maxAge <= 0, pruning is disabled and returns (0, nil).
+// It returns the count of removed sentinels and the first encountered error.
+func pruneCadenceSentinels(stateDir string, maxAge time.Duration) (int, error) {
+	if maxAge <= 0 || stateDir == "" {
+		return 0, nil
+	}
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	cutoff := time.Now().Add(-maxAge)
+	pruned := 0
+	var firstErr error
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !isCadenceSentinel(name) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			target := filepath.Join(stateDir, name)
+			if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else {
+				pruned++
+			}
+		}
+	}
+	return pruned, firstErr
+}
+
+func isCadenceSentinel(name string) bool {
+	return name == deathSentinelName || strings.HasPrefix(name, deathSentinelName+"-")
 }
 
 // notifyCadenceOnce records the episode after its first best-effort alert.
@@ -134,6 +193,9 @@ func notifyOperator(title, message string) {
 
 // defaultStateDir is where the sentinel lives, alongside the audit log.
 func defaultStateDir() string {
+	if d := os.Getenv("AGM_STATE_DIR"); d != "" {
+		return d
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return os.TempDir()

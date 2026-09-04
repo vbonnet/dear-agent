@@ -258,6 +258,7 @@ func TestRun_CadenceWithDisabledQuarantineConfirmsDurableStop(t *testing.T) {
 	code := run([]string{
 		"-cadence", "-credentials", creds, "-endpoint", srv.URL,
 		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", "",
+		"-state-dir", t.TempDir(),
 	}, &stdout, &stderr)
 
 	if code != exitOK {
@@ -298,6 +299,7 @@ func TestRun_CadenceWithCustomQuarantineAndFailedSharedStopEscalates(t *testing.
 	code := run([]string{
 		"-cadence", "-credentials", creds, "-endpoint", srv.URL,
 		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", quarantine,
+		"-state-dir", t.TempDir(),
 	}, &stdout, &stderr)
 
 	if code != exitNotPersisted {
@@ -459,7 +461,7 @@ func TestCadenceExit_QuarantinedKeepsScheduleAlive(t *testing.T) {
 	stateDir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, &stderr); got != exitOK {
+	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, &stderr, defaultSentinelMaxAge); got != exitOK {
 		t.Errorf("cadence exit = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, deathSentinelName)); err != nil {

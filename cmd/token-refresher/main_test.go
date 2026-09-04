@@ -242,3 +242,58 @@ func TestRun_CheckModeReportsStatusNoNetwork(t *testing.T) {
 		t.Errorf("audit log missing check record: %s", data)
 	}
 }
+
+func TestRun_NegativeSentinelMaxAgeRejects(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-sentinel-max-age", "-1s"}, &stdout, &stderr)
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr.String(), "-sentinel-max-age cannot be negative") {
+		t.Errorf("stderr missing validation message: %s", stderr.String())
+	}
+}
+
+func TestRun_CadencePrunesStaleSentinelsViaFlag(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Now()
+
+	staleSentinel := filepath.Join(stateDir, deathSentinelName+"-old0123456789ab")
+	if err := os.WriteFile(staleSentinel, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(staleSentinel, now.Add(-3*time.Hour), now.Add(-3*time.Hour))
+
+	freshSentinel := filepath.Join(stateDir, deathSentinelName+"-new0123456789ab")
+	if err := os.WriteFile(freshSentinel, []byte("fresh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(freshSentinel, now.Add(-5*time.Minute), now.Add(-5*time.Minute))
+
+	srv := okTokenServer(t, "new-access", "new-refresh")
+	defer srv.Close()
+
+	creds := writeCreds(t, "fresh-tok", freshMs(), "fresh-rt")
+	audit := filepath.Join(stateDir, "audit.jsonl")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-cadence",
+		"-credentials", creds,
+		"-endpoint", srv.URL,
+		"-audit-log", audit,
+		"-state-dir", stateDir,
+		"-sentinel-max-age", "1h",
+		"-quarantine", filepath.Join(stateDir, "quar.json"),
+	}, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if _, err := os.Stat(staleSentinel); !os.IsNotExist(err) {
+		t.Errorf("stale sentinel %s was not pruned", staleSentinel)
+	}
+	if _, err := os.Stat(freshSentinel); err != nil {
+		t.Errorf("fresh sentinel %s was unexpectedly removed: %v", freshSentinel, err)
+	}
+}
