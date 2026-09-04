@@ -27,6 +27,7 @@ cannot own this file's observable behavior. These requirements do.
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Package tests: `cmd/otel-local/config_contract_test.go`
 - Manifest registration: `deploy/manifest.yaml` (`jaeger-collector-config`)
 

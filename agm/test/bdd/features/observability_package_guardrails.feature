@@ -6,6 +6,7 @@
 # RELATED-SPEC: pkg/otelsetup/SPEC.md
 # RELATED-SPEC: cmd/otel-local/SPEC.md
 # RELATED-SPEC: cmd/jaeger-health/SPEC.md
+# RELATED-SPEC: deploy/jaeger/SPEC.md
 Feature: Observability package guardrails
   Observability packages must keep executable SPEC traceability because quota,
   drift, trace, and agent-runtime monitoring need the same contracts across
