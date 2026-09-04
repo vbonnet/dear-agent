@@ -345,7 +345,7 @@ func extractConcernSection(body string) string {
 func cleanRecoveredSignal(section string) string {
 	section = strings.ReplaceAll(section, "This PR tripped a deterministic split-suggestion signal:", "")
 	var kept []string
-	for _, line := range strings.Split(section, "\n") {
+	for line := range strings.SplitSeq(section, "\n") {
 		switch {
 		case strings.HasPrefix(line, "Last known ") && strings.Contains(line, "(recovered"):
 		case strings.HasPrefix(line, "Current scope: "):
