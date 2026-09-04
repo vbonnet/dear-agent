@@ -155,9 +155,13 @@ func TestSandboxGCDryRunRemainsAvailable(t *testing.T) {
 		return &fakeSandboxGCStore{sessions: []*manifest.Manifest{{SessionID: "live"}}}, nil
 	}
 
+	wantContext := t.Context()
 	var sweepCalls int
-	runSandboxGCSweep = func(_ *ops.OpContext, req *ops.SandboxGCRequest) (*ops.SandboxGCResult, error) {
+	runSandboxGCSweep = func(opCtx *ops.OpContext, req *ops.SandboxGCRequest) (*ops.SandboxGCResult, error) {
 		sweepCalls++
+		if opCtx.Context != wantContext {
+			t.Fatalf("operation context = %v, want command context %v", opCtx.Context, wantContext)
+		}
 		if req.Reap {
 			t.Fatal("dry run passed Reap=true to the sweep")
 		}
@@ -173,6 +177,7 @@ func TestSandboxGCDryRunRemainsAvailable(t *testing.T) {
 
 	var out bytes.Buffer
 	cmd := &cobra.Command{}
+	cmd.SetContext(wantContext)
 	cmd.SetOut(&out)
 	if err := runSandboxGC(cmd, nil); err != nil {
 		t.Fatalf("runSandboxGC() dry run error = %v", err)

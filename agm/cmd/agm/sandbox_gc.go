@@ -178,7 +178,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	result, err := runSandboxGCSweep(&ops.OpContext{}, &ops.SandboxGCRequest{
+	result, err := runSandboxGCSweep(&ops.OpContext{Context: cmd.Context()}, &ops.SandboxGCRequest{
 		Reap:           reap,
 		MinAge:         minAge,
 		LiveSessionIDs: constantLiveSessionIDs(liveSessionIDs),
