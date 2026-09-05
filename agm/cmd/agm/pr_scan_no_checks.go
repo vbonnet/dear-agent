@@ -28,10 +28,16 @@ required checks never report, so the safe-merge babysit loop skips the PR as
 #579/#581/#582 for 8+ hours with no CI.
 
 For each open, non-draft PR it reads the check-runs on the head SHA and compares
-them against the branch-protection required set. A PR is flagged only when NONE of
+them against the effective required set. A PR is flagged only when NONE of
 the required checks has a run on the head SHA — a partial set means CI fired and is
-merely still in progress, so the PR is left alone. When the required set can't be
-read, it falls back to "any check-run at all", which can only ever under-flag.
+merely still in progress, so the PR is left alone. The required set is the complete
+union of applied rulesets and classic branch protection. If that policy can't be
+completely read, or contains a requirement this name-only scanner can't prove, the
+scan stops before classification or re-trigger. Only an authoritatively empty policy
+uses the conservative "any check-run at all" fallback.
+
+Every head check-run page is read before classification. A failed page makes that
+PR indeterminate and never eligible for re-trigger from partial evidence.
 
 With --trigger it re-triggers CI on each stuck PR by pushing an empty commit (same
 tree, no file changes) to the head branch via the GitHub API. This is headless — no
@@ -95,7 +101,11 @@ func runPRScanNoChecks(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	required := nochecks.FetchRequiredChecks(noCheckRepo, noCheckBranch)
+	required, err := nochecks.FetchRequiredChecks(cmd.Context(), noCheckRepo, noCheckBranch)
+	if err != nil {
+		cmd.SilenceUsage = true
+		return err
+	}
 	stuck, readErrs := nochecks.Scan(prs, required, nochecks.CheckRunsFor(noCheckRepo))
 
 	// A per-PR check-runs read failure must not blind the whole scan; surface it

@@ -76,9 +76,12 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-30** When the set of commits a push would publish cannot be determined, the system shall report the skipped scan on the diagnostic stream and shall allow the push to proceed.
 
+**SAFEGIT-31** When a name-only consumer requests effective required-check contexts for a branch, the system shall return a non-nil complete set after every policy layer resolves and shall fail closed for incomplete discovery, required workflows, or integration-scoped identities.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
+- Feature: `agm/test/bdd/features/agm_supervision_recovery_guardrails.feature`
 
 ## Test Traceability
 
