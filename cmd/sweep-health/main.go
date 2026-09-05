@@ -94,18 +94,20 @@ type logSummary struct {
 }
 
 type deps struct {
-	now         func() time.Time
-	userHomeDir func() (string, error)
-	statFile    func(path string) (os.FileInfo, error)
-	openFile    func(path string) (*os.File, error)
+	now             func() time.Time
+	userHomeDir     func() (string, error)
+	statFile        func(path string) (os.FileInfo, error)
+	openFile        func(path string) (*os.File, error)
+	maxLogScanBytes int64
 }
 
 func defaultDeps() deps {
 	return deps{
-		now:         time.Now,
-		userHomeDir: os.UserHomeDir,
-		statFile:    os.Stat,
-		openFile:    os.Open,
+		now:             time.Now,
+		userHomeDir:     os.UserHomeDir,
+		statFile:        os.Stat,
+		openFile:        os.Open,
+		maxLogScanBytes: maxLogScanBytes,
 	}
 }
 
@@ -200,7 +202,11 @@ func run(args []string, d deps) int {
 	}
 	defer f.Close()
 
-	summary, err := scanLog(f, fi.Size())
+	maxScanBytes := d.maxLogScanBytes
+	if maxScanBytes <= 0 {
+		maxScanBytes = maxLogScanBytes
+	}
+	summary, err := scanLog(f, fi.Size(), maxScanBytes)
 	if err != nil {
 		r.Status = "down"
 		r.Error = err.Error()
@@ -211,19 +217,22 @@ func run(args []string, d deps) int {
 	return emit(r, cfg.asJSON, msg, exitCode)
 }
 
-func scanLog(f *os.File, size int64) (logSummary, error) {
+func scanLog(f *os.File, size int64, maxScanBytes int64) (logSummary, error) {
 	var summary logSummary
-	if size > maxLogScanBytes {
-		if _, err := f.Seek(size-maxLogScanBytes, io.SeekStart); err == nil {
-			// Discard the initial partial record
-			skip := bufio.NewReader(f)
-			if _, err := skip.ReadBytes('\n'); err != nil && !errors.Is(err, io.EOF) {
-				return summary, err
-			}
+	seeked := false
+	if maxScanBytes > 0 && size > maxScanBytes {
+		if _, err := f.Seek(size-maxScanBytes, io.SeekStart); err == nil {
+			seeked = true
 		}
 	}
 
 	reader := bufio.NewReaderSize(f, maxLogRecordBytes)
+	if seeked {
+		// Discard the initial partial record
+		if _, err := reader.ReadBytes('\n'); err != nil && !errors.Is(err, io.EOF) {
+			return summary, err
+		}
+	}
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {

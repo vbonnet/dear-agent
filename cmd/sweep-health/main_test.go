@@ -323,3 +323,27 @@ func TestRun_CompatibilityReapRecordsOnly(t *testing.T) {
 		t.Errorf("stdout = %q, want HEALTHY for compatibility reap", out)
 	}
 }
+
+func TestRun_BoundedTailScanDiscardsPartialLine(t *testing.T) {
+	now := fixedTime()
+	prefixLine := `{"timestamp":"2026-09-05T01:00:00Z","operation":"ignored_prefix_line"}`
+	sweepLine := fmt.Sprintf(`{"timestamp":"%s","operation":"sandbox_gc_completed","reason":"scanned=2 reaped=1 kept=1 errors=0 probe_failures=0"}`,
+		now.Add(-30*time.Minute).Format(time.RFC3339))
+
+	logPath := writeLog(t, prefixLine, sweepLine)
+
+	d := defaultDeps()
+	d.now = fixedTime
+	d.maxLogScanBytes = int64(len(sweepLine) + 20)
+
+	out := captureStdout(func() {
+		code := run([]string{"--log", logPath, "--lookback", "6h"}, d)
+		if code != 0 {
+			t.Fatalf("run() = %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(out, "HEALTHY") {
+		t.Errorf("stdout = %q, want HEALTHY", out)
+	}
+}
