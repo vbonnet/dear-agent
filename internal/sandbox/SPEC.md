@@ -30,6 +30,8 @@
 
 **SNDBR-14** When a process monitor loop exits without an active alert callback, the system shall publish stopped lifecycle state before unblocking stop callers so an immediate restart creates a fresh lifecycle.
 
+**SNDBR-15** Where sandbox orphan cleanup runs on a platform other than Linux or Darwin, the system shall report an unsupported-platform failure before mount discovery, unmount, retry, or directory removal.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

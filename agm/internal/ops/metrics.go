@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"math/bits"
 	"os"
 	"strconv"
 	"strings"
@@ -20,15 +21,15 @@ type MetricsRequest struct {
 
 // MetricsResult is the full metrics payload.
 type MetricsResult struct {
-	Operation  string           `json:"operation"`
-	Timestamp  string           `json:"timestamp"`
-	Sessions   SessionMetrics   `json:"sessions"`
+	Operation  string            `json:"operation"`
+	Timestamp  string            `json:"timestamp"`
+	Sessions   SessionMetrics    `json:"sessions"`
 	Throughput ThroughputMetrics `json:"throughput"`
-	Cost       CostMetrics      `json:"cost"`
-	Resources  ResourceMetrics  `json:"resources"`
-	Alerts     []Alert          `json:"alerts"`
-	Workflow   *WorkflowMetrics `json:"workflow,omitempty"`
-	Batch      *BatchMetrics    `json:"batch,omitempty"`
+	Cost       CostMetrics       `json:"cost"`
+	Resources  ResourceMetrics   `json:"resources"`
+	Alerts     []Alert           `json:"alerts"`
+	Workflow   *WorkflowMetrics  `json:"workflow,omitempty"`
+	Batch      *BatchMetrics     `json:"batch,omitempty"`
 }
 
 // CostMetrics tracks aggregate spending across sessions.
@@ -85,12 +86,15 @@ type DiskMetrics struct {
 	UsedGB      float64 `json:"used_gb"`
 	AvailGB     float64 `json:"avail_gb"`
 	UsedPercent float64 `json:"used_percent"`
+	// OverflowErr is non-empty when block-count arithmetic overflowed uint64;
+	// the mount is present but all numeric fields are zero.
+	OverflowErr string `json:"overflow_err,omitempty"`
 }
 
 // Alert represents a threshold violation.
 type Alert struct {
-	Level   string `json:"level"`   // "warning", "critical"
-	Type    string `json:"type"`    // "load", "memory", "disk", "throughput"
+	Level   string `json:"level"` // "warning", "critical"
+	Type    string `json:"type"`  // "load", "memory", "disk", "throughput"
 	Message string `json:"message"`
 	Value   string `json:"value"`
 }
@@ -316,52 +320,103 @@ func readDiskUsage() []DiskMetrics {
 	var results []DiskMetrics
 
 	for _, mount := range mounts {
-		dm := statfsDisk(mount)
+		dm, err := statfsDisk(mount)
+		if err != nil {
+			// Overflow on a real mount: include it with zeroed counters so
+			// callers can see the mount exists rather than silently omitting it.
+			results = append(results, DiskMetrics{Mount: mount, OverflowErr: err.Error()})
+			continue
+		}
 		if dm.TotalGB > 0 {
 			results = append(results, dm)
 		}
 	}
 
-	// Deduplicate if /home is on the same filesystem as /
-	if len(results) == 2 && results[0].TotalGB == results[1].TotalGB &&
-		results[0].UsedGB == results[1].UsedGB {
-		results = results[:1]
-	}
+	return dedupeSameFilesystem(results)
+}
 
+// dedupeSameFilesystem drops /home when its measurements prove it is the same
+// filesystem as /. Only a real measurement can prove that: an overflowed mount
+// reports zeroed counters, so two overflowed mounts would compare equal without
+// being the same filesystem. Collapsing them would discard the second mount's
+// OverflowErr and hide an unreadable filesystem entirely, so an errored entry
+// never participates in deduplication.
+func dedupeSameFilesystem(results []DiskMetrics) []DiskMetrics {
+	if len(results) != 2 {
+		return results
+	}
+	if results[0].OverflowErr != "" || results[1].OverflowErr != "" {
+		return results
+	}
+	if results[0].TotalGB == results[1].TotalGB && results[0].UsedGB == results[1].UsedGB {
+		return results[:1]
+	}
 	return results
 }
 
 // statfsDisk gets disk usage for a mount point using the statfs syscall.
-func statfsDisk(mount string) DiskMetrics {
+func statfsDisk(mount string) (DiskMetrics, error) {
 	var stat unix.Statfs_t
+	// A mount that cannot be stat'ed is absent, not unreadable: a machine
+	// with no /home is the ordinary case. Report a zero-valued metric with
+	// no error so readDiskUsage's TotalGB filter drops it, and reserve the
+	// error return for a measurement that overflowed and must be surfaced.
 	if err := unix.Statfs(mount, &stat); err != nil {
-		return DiskMetrics{Mount: mount}
+		return DiskMetrics{Mount: mount}, nil //nolint:nilerr // an absent mount is not a measurement failure
 	}
 
-	// stat.Bsize is int64 on Linux (gosec G115 warns on the cast) and
-	// uint32 on darwin (a widening cast is trivially safe). Filesystem
-	// block sizes are non-negative by kernel contract on both platforms.
-	bsize := uint64(stat.Bsize) //nolint:gosec // filesystem block size is non-negative
-	totalBytes := stat.Blocks * bsize
-	freeBytes := stat.Bavail * bsize
-	usedBytes := totalBytes - (stat.Bfree * bsize)
+	return diskMetricsFromBlockCounts(
+		mount,
+		nonNegativeStatfsBlockCount(stat.Bsize),
+		nonNegativeStatfsBlockCount(stat.Blocks),
+		nonNegativeStatfsBlockCount(stat.Bfree),
+		nonNegativeStatfsBlockCount(stat.Bavail),
+	)
+}
 
-	totalGB := float64(totalBytes) / (1024 * 1024 * 1024)
-	usedGB := float64(usedBytes) / (1024 * 1024 * 1024)
-	availGB := float64(freeBytes) / (1024 * 1024 * 1024)
+type statfsBlockCount interface {
+	~int32 | ~int64 | ~uint32 | ~uint64
+}
 
-	var usedPct float64
-	if totalBytes > 0 {
-		usedPct = float64(usedBytes) / float64(totalBytes) * 100
+// nonNegativeStatfsBlockCount normalizes the signed availability counters used
+// by FreeBSD without allowing a negative kernel value to wrap to uint64.
+func nonNegativeStatfsBlockCount[T statfsBlockCount](value T) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	return uint64(value)
+}
+
+func diskMetricsFromBlockCounts(
+	mount string,
+	blockSize, totalBlocks, freeBlocks, availableBlocks uint64,
+) (DiskMetrics, error) {
+	if blockSize == 0 || totalBlocks == 0 {
+		return DiskMetrics{Mount: mount}, nil
 	}
 
-	return DiskMetrics{
-		Mount:       mount,
-		TotalGB:     roundTo1(totalGB),
-		UsedGB:      roundTo1(usedGB),
-		AvailGB:     roundTo1(availGB),
-		UsedPercent: roundTo1(usedPct),
+	freeBlocks = min(freeBlocks, totalBlocks)
+	availableBlocks = min(availableBlocks, totalBlocks)
+
+	if overflow, totalBytes := bits.Mul64(totalBlocks, blockSize); overflow == 0 {
+		_, usedBytes := bits.Mul64(totalBlocks-freeBlocks, blockSize)
+		_, availableBytes := bits.Mul64(availableBlocks, blockSize)
+
+		totalGB := float64(totalBytes) / (1024 * 1024 * 1024)
+		usedGB := float64(usedBytes) / (1024 * 1024 * 1024)
+		availableGB := float64(availableBytes) / (1024 * 1024 * 1024)
+		usedPercent := float64(usedBytes) / float64(totalBytes) * 100
+
+		return DiskMetrics{
+			Mount:       mount,
+			TotalGB:     roundTo1(totalGB),
+			UsedGB:      roundTo1(usedGB),
+			AvailGB:     roundTo1(availableGB),
+			UsedPercent: roundTo1(usedPercent),
+		}, nil
 	}
+
+	return DiskMetrics{Mount: mount}, fmt.Errorf("disk metric overflow on %s: totalBlocks=%d blockSize=%d exceeds uint64", mount, totalBlocks, blockSize)
 }
 
 // generateAlerts checks thresholds and returns violations.

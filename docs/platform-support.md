@@ -153,17 +153,45 @@ Future provider options:
 - Windows Container Storage Interface (CSI)
 - Filesystem filters (minifilter drivers)
 
+## FreeBSD
+
+**Status:** Compile-only compatibility; runtime and release support are not
+implemented.
+
+The native test suite cross-compiles the harnessexec, sandbox, VROOM resource
+probe, and AGM operations test packages for `freebsd/amd64` with cgo disabled.
+It also cross-builds the AGM and disk-watchdog commands. This static canary does
+not execute a FreeBSD artifact and is not evidence of native runtime behavior.
+
+Authority-bearing runtime paths fail closed on FreeBSD:
+
+- private harness execution is rejected before request parsing, handoff
+  consumption, override commitment, spawn accounting, executable lookup, or
+  process replacement;
+- sandbox orphan cleanup returns a typed unsupported-platform error before
+  mount discovery, unmount, retry, or directory removal; and
+- the VROOM system resource probe returns an unsupported error and an empty
+  snapshot rather than publishing incomplete all-zero resource evidence.
+
+AGM's read-only disk reporting normalizes signed FreeBSD `statfs` counters
+before unsigned arithmetic, caps free and available blocks at the filesystem
+total, and refuses invalid or overflowing byte counts. This arithmetic support
+does not widen the runtime-support boundary.
+
 ## Cross-Platform Testing
 
 ### Test Suite
 
-The test suite is designed to work across all platforms:
+Platform-detection and mock-provider tests are intended to remain portable.
+Native provider and cleanup behavior runs only on the declared Linux and
+Darwin platforms. On FreeBSD, use the compile-only canary described above and
+do not infer runtime support from a successful build.
 
 ```bash
-# Platform detection tests (work everywhere)
+# Portable platform-detection subset
 go test ./internal/sandbox/... -run TestPlatformDetection -v
 
-# Provider availability tests (platform-specific)
+# Provider availability tests (supported native platforms)
 go test ./internal/sandbox/... -run TestProviderAvailability -v
 
 # Benchmarks (use mock provider if real provider unavailable)
