@@ -298,13 +298,37 @@ func vroomEntryFromFlag(cmd *cobra.Command, value string) vroomEntrySpec {
 // to the human. Discovering no VROOM node therefore leaves the chain local,
 // exactly as a dead pinned vroom-orchestrator used to.
 func discoverEscalationEntry(adapter *dolt.Adapter) *escalation.ParentRef {
+	return discoverEscalationEntryWithTmux(adapter, tmuxClient)
+}
+
+// discoverEscalationEntryWithTmux is discoverEscalationEntry with its tmux
+// dependency injected, so the liveness-verification behavior below can be
+// tested without the package-global tmuxClient.
+func discoverEscalationEntryWithTmux(adapter *dolt.Adapter, tmux session.TmuxInterface) *escalation.ParentRef {
 	sessions, err := adapter.ListSessions(&dolt.SessionFilter{ExcludeArchived: true, Limit: 1000})
 	if err != nil {
 		return nil
 	}
 	for _, preferred := range vroomEntryPreference {
 		for _, m := range sessions {
-			if m == nil || m.Name != preferred || !ops.SessionIsLive(m) {
+			if m == nil || m.Name != preferred {
+				continue
+			}
+			// ops.SessionIsLiveConfirmed, not the plain SessionIsLive: a
+			// manifest state of DONE is ambiguous between "finished a task,
+			// idle at composer" and "harness process exited, pane
+			// lingering" (its state-detector "safe default" origin — see
+			// ops.SessionIsLiveConfirmed's doc). This PR made completion
+			// routing treat DONE as reachable, which is correct there
+			// because that DONE always comes from a confirmed-idle
+			// completion watcher observation; it is not something
+			// discoverEscalationEntry can assume for an arbitrary VROOM
+			// node, so an escalation must additionally verify the harness is
+			// actually still there before committing the chain to it. A
+			// candidate that fails verification is skipped, not treated as
+			// absent: the loop still falls through to the next preferred
+			// VROOM node.
+			if !ops.SessionIsLiveConfirmed(m, tmux) {
 				continue
 			}
 			return &escalation.ParentRef{SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m)}
