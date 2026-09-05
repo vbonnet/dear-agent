@@ -216,6 +216,94 @@ func TestHardenRepoOverridesCommandScopeHooksForProductionCommands(t *testing.T)
 	}
 }
 
+const automaticMaintenanceTrace = `"argv":["git","maintenance","run","--auto"`
+
+func tracedGitCommand(t *testing.T, cmd *exec.Cmd, tracePath string) []byte {
+	t.Helper()
+	cmd.Env = append(cmd.Environ(), "GIT_TRACE2_EVENT="+tracePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("traced Git command failed: %v\n%s", err, output)
+	}
+	trace, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("read Git process trace: %v", err)
+	}
+	return trace
+}
+
+// TestSandboxedRepositoriesDoNotStartAutomaticMaintenance protects the
+// TempDir lifecycle shared by every gittest repository. Git 2.54 stopped
+// treating gc.auto=0 as a request to skip the auto-maintenance subprocess, so
+// a successful foreground command could return while detached maintenance was
+// still mutating .git/objects. Both package-built commands and production Git
+// wrappers pointed at a hardened repository must suppress that subprocess.
+func TestSandboxedRepositoriesDoNotStartAutomaticMaintenance(t *testing.T) {
+	sandbox := gittest.New(t)
+	commandRepo := t.TempDir()
+	sandbox.Run(t, commandRepo, "init", "-b", "main")
+
+	// Keep the positive control in the foreground: it proves this Git build
+	// emits the trace event without leaving its maintenance child behind.
+	control := sandbox.Command(commandRepo,
+		"-c", "maintenance.auto=true",
+		"-c", "maintenance.autoDetach=false",
+		"-c", "gc.auto=1",
+		"commit", "--allow-empty", "-m", "maintenance trace control")
+	controlTrace := tracedGitCommand(t, control, filepath.Join(t.TempDir(), "control-trace.json"))
+	if !strings.Contains(string(controlTrace), automaticMaintenanceTrace) {
+		t.Fatal("control failed: Git did not start automatic maintenance, so the lifecycle assertions would be vacuous")
+	}
+
+	productionRepo := sandbox.NewRepo(t)
+	productionCommand := func(args ...string) *exec.Cmd {
+		return exec.Command("git", append([]string{"-C", productionRepo}, args...)...)
+	}
+	for _, config := range []struct {
+		key      string
+		want     string
+		override string
+	}{
+		{"maintenance.auto", "false", "true"},
+		{"gc.auto", "0", "1"},
+	} {
+		output, err := productionCommand("config", "--get", config.key).CombinedOutput()
+		if err != nil {
+			t.Fatalf("read inherited production Git config %s: %v\n%s", config.key, err, output)
+		}
+		if got := strings.TrimSpace(string(output)); got != config.want {
+			t.Fatalf("inherited production Git config %s = %q, want %q", config.key, got, config.want)
+		}
+
+		output, err = productionCommand(
+			"-c", config.key+"="+config.override, "config", "--get", config.key).CombinedOutput()
+		if err != nil {
+			t.Fatalf("override production Git config %s: %v\n%s", config.key, err, output)
+		}
+		if got := strings.TrimSpace(string(output)); got != config.override {
+			t.Fatalf("command-line production Git config %s = %q, want override %q",
+				config.key, got, config.override)
+		}
+	}
+
+	tests := []struct {
+		name string
+		cmd  *exec.Cmd
+	}{
+		{"sandbox command", sandbox.Command(commandRepo,
+			"-c", "gc.auto=1", "commit", "--allow-empty", "-m", "sandbox lifecycle probe")},
+		{"production command", productionCommand(
+			"-c", "gc.auto=1", "commit", "--allow-empty", "-m", "production lifecycle probe")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			trace := tracedGitCommand(t, test.cmd, filepath.Join(t.TempDir(), "trace.json"))
+			if strings.Contains(string(trace), automaticMaintenanceTrace) {
+				t.Fatalf("Git command started automatic maintenance despite sandbox lifecycle controls:\n%s", trace)
+			}
+		})
+	}
+}
+
 // TestSandboxRedirectsGlobalConfigWrites proves `git config --global` in a
 // test lands inside the sandbox instead of the developer's ~/.gitconfig.
 func TestSandboxRedirectsGlobalConfigWrites(t *testing.T) {
