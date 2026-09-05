@@ -32,10 +32,10 @@ const (
 // - Config file validity
 // - tmux availability
 // - Go version minimum
+// homeDir is the retained runtime HOME selected by configuration load.
 // Returns true if all critical checks pass.
-func runInstallChecks() bool {
+func runInstallChecks(homeDir string) bool {
 	allHealthy := true
-	homeDir, _ := os.UserHomeDir()
 
 	// 1. Check required binaries in PATH
 	fmt.Println(ui.Blue("\n--- Checking required binaries ---"))

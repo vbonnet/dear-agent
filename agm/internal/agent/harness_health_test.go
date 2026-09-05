@@ -10,8 +10,9 @@ func TestCheckHarnessHealth_BinaryPresence(t *testing.T) {
 	clearClaudeEnv(t)
 	// Only the claude binary is on PATH; gemini/codex/opencode are absent.
 	mockLookPath(t, map[string]bool{"claude": true})
+	home := t.TempDir()
 
-	claude := CheckHarnessHealth("claude-code")
+	claude := CheckHarnessHealthAtHome("claude-code", home)
 	if !claude.Known {
 		t.Fatalf("claude-code should be a known harness")
 	}
@@ -30,7 +31,7 @@ func TestCheckHarnessHealth_BinaryPresence(t *testing.T) {
 		t.Errorf("claude-code should be healthy when its binary is present")
 	}
 
-	gemini := CheckHarnessHealth("gemini-cli")
+	gemini := CheckHarnessHealthAtHome("gemini-cli", home)
 	if gemini.BinaryName != "gemini" {
 		t.Errorf("BinaryName = %q, want %q", gemini.BinaryName, "gemini")
 	}
@@ -48,7 +49,7 @@ func TestCheckHarnessHealth_OpenCodeBinaryTracked(t *testing.T) {
 	// reports its binary. Verify the binary name is wired up.
 	mockLookPath(t, map[string]bool{"opencode": true})
 
-	oc := CheckHarnessHealth("opencode-cli")
+	oc := CheckHarnessHealthAtHome("opencode-cli", t.TempDir())
 	if !oc.Known {
 		t.Fatalf("opencode-cli should be a known harness")
 	}
@@ -68,12 +69,13 @@ func TestCheckHarnessHealth_OpenCodeBinaryTracked(t *testing.T) {
 func TestHarnessHealthUsesCanonicalBinaryRegistry(t *testing.T) {
 	clearClaudeEnv(t)
 	mockLookPath(t, map[string]bool{})
+	home := t.TempDir()
 
 	for harness, binaries := range harnessBinaries {
 		if len(binaries) == 0 {
 			t.Fatalf("canonical binary registry has no binaries for %q", harness)
 		}
-		h := CheckHarnessHealth(harness)
+		h := CheckHarnessHealthAtHome(harness, home)
 		if !h.Known || h.BinaryName != binaries[0] {
 			t.Fatalf("doctor binary for %q = known %v name %q, want true %q", harness, h.Known, h.BinaryName, binaries[0])
 		}
@@ -92,7 +94,7 @@ func TestCheckHarnessHealth_AgyPresent(t *testing.T) {
 	}
 	mockLookPath(t, map[string]bool{"agy": true})
 
-	h := CheckHarnessHealth("agy")
+	h := CheckHarnessHealthAtHome("agy", home)
 	if !h.Known || h.BinaryName != "agy" || !h.BinaryPresent {
 		t.Fatalf("AGY binary health = %+v", h)
 	}
@@ -112,7 +114,7 @@ func TestCheckHarnessHealth_AgyAbsent(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	mockLookPath(t, map[string]bool{})
 
-	h := CheckHarnessHealth("agy")
+	h := CheckHarnessHealthAtHome("agy", home)
 	if !h.Known || h.BinaryName != "agy" {
 		t.Fatalf("AGY should remain a known harness when absent: %+v", h)
 	}
@@ -137,7 +139,7 @@ func TestCheckHarnessHealth_AgyAliases(t *testing.T) {
 
 	for _, alias := range []string{"agy-cli", "antigravity"} {
 		t.Run(alias, func(t *testing.T) {
-			h := CheckHarnessHealth(alias)
+			h := CheckHarnessHealthAtHome(alias, home)
 			if h.Harness != "agy" || !h.Known || h.BinaryName != "agy" || !h.IsHealthy() {
 				t.Fatalf("health for alias %q = %+v", alias, h)
 			}
@@ -153,7 +155,7 @@ func TestCheckHarnessHealth_UnknownHarness(t *testing.T) {
 	clearClaudeEnv(t)
 	mockLookPath(t, map[string]bool{})
 
-	h := CheckHarnessHealth("totally-made-up")
+	h := CheckHarnessHealthAtHome("totally-made-up", t.TempDir())
 	if h.Known {
 		t.Errorf("unknown harness should not be marked Known")
 	}
@@ -173,13 +175,65 @@ func TestCheckHarnessHealth_GeminiAuthViaEnv(t *testing.T) {
 	mockLookPath(t, map[string]bool{}) // no binaries on PATH
 	t.Setenv("GEMINI_API_KEY", "test-key")
 
-	gemini := CheckHarnessHealth("gemini-cli")
+	gemini := CheckHarnessHealthAtHome("gemini-cli", t.TempDir())
 	if !gemini.AuthConfigured {
 		t.Errorf("gemini-cli should be auth-configured when GEMINI_API_KEY is set")
 	}
 	// Binary still absent ⇒ not healthy: a CLI harness needs its binary.
 	if gemini.IsHealthy() {
 		t.Errorf("gemini-cli should be unhealthy without its binary even when API key is set")
+	}
+}
+
+func TestCheckHarnessHealthAtHomeUsesRetainedCodexHome(t *testing.T) {
+	clearClaudeEnv(t)
+	mockLookPath(t, map[string]bool{})
+	t.Setenv("OPENAI_API_KEY", "")
+
+	retainedHome := t.TempDir()
+	driftHome := t.TempDir()
+	codexDir := filepath.Join(retainedHome, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatalf("create retained Codex directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("create retained Codex credentials: %v", err)
+	}
+	t.Setenv("HOME", driftHome)
+	t.Setenv("USERPROFILE", driftHome)
+
+	h := CheckHarnessHealthAtHome("codex-cli", retainedHome)
+	if !h.AuthConfigured {
+		t.Fatalf("retained Codex OAuth should configure auth: %+v", h)
+	}
+	if h.ConfigDir != codexDir || !h.ConfigDirFound {
+		t.Fatalf("Codex config health = path %q found %v, want %q true", h.ConfigDir, h.ConfigDirFound, codexDir)
+	}
+}
+
+func TestCheckHarnessHealthAtHomeRejectsRelativeHome(t *testing.T) {
+	clearClaudeEnv(t)
+	mockLookPath(t, map[string]bool{})
+	t.Setenv("OPENAI_API_KEY", "")
+	originalStat := statPath
+	statCalls := 0
+	statPath = func(string) (os.FileInfo, error) {
+		statCalls++
+		return nil, os.ErrNotExist
+	}
+	t.Cleanup(func() { statPath = originalStat })
+
+	for _, home := range []string{"", "."} {
+		h := CheckHarnessHealthAtHome("codex-cli", home)
+		if h.AuthConfigured {
+			t.Fatalf("CheckHarnessHealthAtHome(%q) unexpectedly configured Codex auth: %+v", home, h)
+		}
+		if h.ConfigDir != "" || h.ConfigDirFound {
+			t.Fatalf("CheckHarnessHealthAtHome(%q) config = %q found %v, want no relative config path", home, h.ConfigDir, h.ConfigDirFound)
+		}
+	}
+	if statCalls != 0 {
+		t.Fatalf("non-absolute HOME triggered %d filesystem lookup(s), want none", statCalls)
 	}
 }
 
