@@ -161,15 +161,23 @@ func (s *SQLiteStore) UpsertFinding(ctx context.Context, f Finding) (Finding, er
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		existingID    string
-		existingState string
-		firstSeen     time.Time
+		existingID       string
+		existingState    string
+		existingStrategy string
+		firstSeen        time.Time
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT finding_id, state, first_seen
+		SELECT finding_id, state, first_seen, suggested_strategy
 		  FROM audit_findings
 		 WHERE repo = ? AND fingerprint = ?
-	`, f.Repo, f.Fingerprint).Scan(&existingID, &existingState, &firstSeen)
+	`, f.Repo, f.Fingerprint).Scan(
+		&existingID, &existingState, &firstSeen, &existingStrategy,
+	)
+	if err == nil {
+		if strategyErr := validateStoredRemediationStrategy(existingID, existingStrategy); strategyErr != nil {
+			return Finding{}, strategyErr
+		}
+	}
 
 	evidenceJSON := "{}"
 	if len(f.Evidence) > 0 {
@@ -257,13 +265,19 @@ func (s *SQLiteStore) SetFindingState(ctx context.Context, findingID string, sta
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var current string
-	err = tx.QueryRowContext(ctx, `SELECT state FROM audit_findings WHERE finding_id = ?`, findingID).Scan(&current)
+	var current, strategy string
+	err = tx.QueryRowContext(ctx,
+		`SELECT state, suggested_strategy FROM audit_findings WHERE finding_id = ?`,
+		findingID,
+	).Scan(&current, &strategy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Finding{}, ErrNotFound
 	}
 	if err != nil {
 		return Finding{}, fmt.Errorf("audit: SetFindingState lookup: %w", err)
+	}
+	if err := validateStoredRemediationStrategy(findingID, strategy); err != nil {
+		return Finding{}, err
 	}
 	from := FindingState(current)
 	if !legalManualTransition(from, state) {
@@ -427,6 +441,9 @@ func scanFinding(s scannable) (Finding, error) {
 	f.Severity = Severity(severity)
 	f.State = FindingState(state)
 	f.Suggested.Strategy = Strategy(strategy)
+	if err := validateStoredRemediationStrategy(f.FindingID, strategy); err != nil {
+		return Finding{}, err
+	}
 	if resolved.Valid {
 		f.ResolvedAt = resolved.Time
 	}
@@ -438,6 +455,13 @@ func scanFinding(s scannable) (Finding, error) {
 	}
 	_ = stateNote
 	return f, nil
+}
+
+func validateStoredRemediationStrategy(findingID, raw string) error {
+	if Strategy(raw).IsValid() {
+		return nil
+	}
+	return fmt.Errorf("audit: finding %q has invalid stored remediation strategy %q", findingID, raw)
 }
 
 // UpsertProposal inserts a new proposal row or returns the existing

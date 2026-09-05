@@ -19,6 +19,8 @@ type fakeInbox struct {
 	listErr    error
 	answerErr  error
 	forwardErr error
+	answerEsc  *escalation.Escalation
+	forwardEsc *escalation.Escalation
 
 	answered  []string
 	forwarded []string
@@ -30,7 +32,7 @@ func (f *fakeInbox) List(_ context.Context, _ escalation.Filter) ([]*escalation.
 
 func (f *fakeInbox) Answer(_ context.Context, id, _, _, _ string) (*escalation.Escalation, error) {
 	if f.answerErr != nil {
-		return nil, f.answerErr
+		return f.answerEsc, f.answerErr
 	}
 	f.answered = append(f.answered, id)
 	return &escalation.Escalation{ID: id}, nil
@@ -38,7 +40,7 @@ func (f *fakeInbox) Answer(_ context.Context, id, _, _, _ string) (*escalation.E
 
 func (f *fakeInbox) Forward(_ context.Context, id, _, _, _ string) (*escalation.Escalation, error) {
 	if f.forwardErr != nil {
-		return nil, f.forwardErr
+		return f.forwardEsc, f.forwardErr
 	}
 	f.forwarded = append(f.forwarded, id)
 	return &escalation.Escalation{ID: id}, nil
@@ -143,6 +145,25 @@ func TestDrain_ContinuesPastPerEscalationError(t *testing.T) {
 	}
 	if res.Listed != 2 || res.Failed != 2 || res.Forwarded != 0 {
 		t.Errorf("result = %+v, want listed=2 failed=2", res)
+	}
+}
+
+func TestDrain_CountsCommittedTransitionWhoseEffectFailed(t *testing.T) {
+	committed := &escalation.Escalation{ID: "e1", Phase: escalation.PhaseRouted}
+	inbox := &fakeInbox{
+		pending:    escNamed("e1"),
+		forwardEsc: committed,
+		forwardErr: &escalation.CommittedEffectError{
+			EscalationID: "e1", Phase: escalation.PhaseRouted, Err: errors.New("delivery failed"),
+		},
+	}
+	d, _ := NewInboxDrainer(inbox, "sup", "overseer", nil)
+	res, err := d.Drain(context.Background())
+	if err == nil {
+		t.Fatal("expected post-commit effect error")
+	}
+	if res.Listed != 1 || res.Forwarded != 1 || res.Failed != 1 {
+		t.Fatalf("result=%+v, want listed=1 forwarded=1 failed=1", res)
 	}
 }
 

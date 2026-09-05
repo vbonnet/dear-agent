@@ -66,6 +66,24 @@
       ],
       "window": "1h",
       "expect": "no single required check failing across 30%+ of the open pull-request queue"
+    },
+    {
+      "name": "retro-lint-guards",
+      "type": "command",
+      "command": [
+        "~/go/bin/retro-lint",
+        "--repo",
+        "~/src/dear-agent",
+        "--retros-dir",
+        "~/src/engram-research/retrospectives",
+        "--baseline",
+        "~/src/dear-agent/deploy/retro-lint/baseline.jsonl",
+        "--absence-lookback",
+        "7d",
+        "--ratchet"
+      ],
+      "window": "24h",
+      "expect": "all retrospectives within 7d declare valid guards or tracked deferrals"
     }
   ]
 }
