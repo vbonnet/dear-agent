@@ -2,8 +2,8 @@
 
 <!-- Last audited at: 2026-07-17 -->
 
-**Version**: 1.2
-**Last Updated**: 2026-07-17
+**Version**: 1.3
+**Last Updated**: 2026-08-28
 **Status**: Active
 **Scope**: VROOM supervisor task queues, with emphasis on AGM-backed worker dispatch.
 
@@ -100,10 +100,28 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-31** When callers request all topology members, the system shall return a copy that cannot mutate the canonical topology.
 
+### Authoritative Supervisor Heartbeat Observation
+
+**VROOM-SUP-32** When a VROOM component observes supervisor heartbeat freshness, the system shall use the authoritative AGM supervisor record addressed by canonical supervisor ID.
+
+**VROOM-SUP-33** When the authoritative AGM supervisor record is missing, unreadable, or has no heartbeat timestamp, the system shall not infer heartbeat freshness from a legacy mirror.
+
+**VROOM-SUP-34** When supervisor heartbeat persistence receives an empty identifier, an identifier containing NUL, or an identifier that is not one lexical path component, the system shall reject the operation before accessing a heartbeat record.
+
+**VROOM-SUP-35** When an authoritative supervisor heartbeat record's embedded identity differs from the identity used to address it, the system shall reject the record as invalid rather than infer heartbeat freshness from it.
+
+**VROOM-SUP-36** When supervisor launch receives an empty identifier, an identifier containing NUL, or an identifier that is not one lexical path component, the system shall reject the operation before authentication, admission, or process preflight.
+
+## BDD traceability
+
+- No BDD change, with reason: an independent existing-AGM JSON fixture plus deterministic Store, AGM command, and Dispatch adapter tests exercise the established file protocol, invalid-identifier rejection, bounded read diagnostics, and classification precedence without process orchestration.
+
 ## Test Traceability
 
 - Package tests: `pkg/vroom/supervisor/disk_alert_test.go`
 - Package tests: `pkg/vroom/supervisor/check_test.go`
 - Package tests: `pkg/vroom/supervisor/queue_test.go`
 - Package tests: `pkg/vroom/supervisor/topology_test.go`
+- Authoritative heartbeat store: `internal/supervisorheartbeat/store_test.go`
+- Authoritative heartbeat adapters: `agm/cmd/agm/supervisor_heartbeat_store_test.go`, `agm/cmd/agm/supervisor_test.go`, `agm/internal/bus/heartbeat_watcher_test.go`, `cmd/vroom-dispatch/coverage_test.go`
 - BDD: `agm/test/bdd/features/vroom_runtime_guardrails.feature`

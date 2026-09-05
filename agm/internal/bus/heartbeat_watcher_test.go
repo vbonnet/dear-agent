@@ -2,11 +2,12 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/supervisorheartbeat"
 )
 
 // newTestWatcher wires up a SupervisorHeartbeatWatcher whose Emitter is
@@ -30,27 +31,15 @@ func newTestWatcher(t *testing.T, dir string, staleAfter, interval time.Duration
 }
 
 // writeHeartbeat creates dir/<id>/heartbeat.json with the given age.
-// Returns the parsed record for reference.
 func writeHeartbeat(t *testing.T, base, id string, ageOverZero time.Duration) {
 	t.Helper()
-	supDir := filepath.Join(base, id)
-	if err := os.MkdirAll(supDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	rec := map[string]any{
-		"id":            id,
-		"last_beat_utc": time.Now().UTC().Add(-ageOverZero),
-		"pid":           1234,
-		"primary_for":   "",
-		"tertiary_for":  "",
-	}
-	data, err := json.Marshal(rec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(supDir, "heartbeat.json")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
+	store := supervisorheartbeat.New(base)
+	if err := store.Write(supervisorheartbeat.Record{
+		ID:          id,
+		LastBeatUTC: time.Now().UTC().Add(-ageOverZero),
+		PID:         1234,
+	}); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
 	}
 }
 
