@@ -1,0 +1,43 @@
+{
+  "jobs": [
+    {
+      "name": "mergeloop",
+      "launchd_label": "com.dear-agent.mergeloop",
+      "plist_path": "~/Library/LaunchAgents/com.dear-agent.mergeloop.plist",
+      "binary_path": "~/go/bin/mergeloop",
+      "install_cmd": ["go", "install", "./cmd/mergeloop"],
+      "pulse": "mergeloop-loaded"
+    },
+    {
+      "name": "disk-watchdog",
+      "launchd_label": "com.dear-agent.disk-watchdog",
+      "plist_path": "~/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist",
+      "binary_path": "~/go/bin/disk-watchdog",
+      "install_cmd": ["go", "install", "./cmd/disk-watchdog"],
+      "pulse": "disk-watchdog-tick"
+    },
+    {
+      "name": "sandbox-gc",
+      "launchd_label": "com.dear-agent.sandbox-gc",
+      "plist_path": "~/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist",
+      "binary_path": "~/go/bin/agm",
+      "install_cmd": ["go", "install", "./agm/cmd/agm"],
+      "pulse": "sandbox-gc-tick"
+    },
+    {
+      "name": "token-refresher",
+      "launchd_label": "com.dear-agent.token-refresher",
+      "plist_path": "~/Library/LaunchAgents/com.dear-agent.token-refresher.plist",
+      "binary_path": "~/go/bin/token-refresher",
+      "pulse": "token-refresher-tick"
+    },
+    {
+      "name": "absence-alarm",
+      "launchd_label": "com.dear-agent.absence-alarm",
+      "plist_path": "~/Library/LaunchAgents/com.dear-agent.absence-alarm.plist",
+      "binary_path": "~/go/bin/absence-alarm",
+      "install_cmd": ["go", "install", "./cmd/absence-alarm"],
+      "pulse": "absence-alarm-heartbeat"
+    }
+  ]
+}
