@@ -67,6 +67,7 @@ override _GOVERNED_BUILD_TARGETS := \
 	health-check \
 	build-absence-alarm \
 	build-recovery-loop \
+	build-retro-lint \
 	build-merge-health \
 	build-gate-health \
 	build-reaper-e2e \
@@ -185,6 +186,8 @@ override _GOVERNED_BUILD_TARGETS := \
 #   install-recovery-loop           Install recovery-loop to ~/go/bin
 #   install-recovery-loop-launchagent   Stage the recovery-loop launch agent (10-min tick)
 #   uninstall-recovery-loop-launchagent Remove the recovery-loop launch agent
+#   build-retro-lint                Build retro-lint: enforce machine-verifiable guards for DEAR retros
+#   install-retro-lint              Install retro-lint to ~/go/bin
 #   build-override-ledger-helper        Build the fixed privileged Unix ledger append helper
 #   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Unix)
 #   install-override-audit-launchdaemon Install the macOS dangerous-override audit
@@ -229,6 +232,7 @@ override _GOVERNED_BUILD_TARGETS := \
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: build-absence-alarm install-absence-alarm install-absence-alarm-launchagent uninstall-absence-alarm-launchagent
 .PHONY: build-recovery-loop install-recovery-loop install-recovery-loop-launchagent uninstall-recovery-loop-launchagent
+.PHONY: build-retro-lint install-retro-lint
 .PHONY: build-merge-health install-merge-health
 .PHONY: build-gate-health install-gate-health
 .PHONY: lint-skills
@@ -1185,6 +1189,14 @@ uninstall-recovery-loop-launchagent:
 	@launchctl bootout gui/$$(id -u)/com.dear-agent.recovery-loop 2>/dev/null || true
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.recovery-loop.plist
 	@echo "Removed: com.dear-agent.recovery-loop launch agent"
+
+build-retro-lint:
+	@echo "Building retro-lint..."
+	go build $(BUILD_STAMP_FLAGS) -o bin/retro-lint ./cmd/retro-lint/
+	@echo "Built: bin/retro-lint"
+
+install-retro-lint: build-retro-lint
+	$(call install-go-bin,bin/retro-lint)
 
 # On Unix systems without macOS authopen, authorized uses append through this
 # one-purpose root-owned helper. Installation is an explicit operator action:
