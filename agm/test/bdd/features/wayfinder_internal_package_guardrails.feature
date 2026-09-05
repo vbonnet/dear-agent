@@ -1,5 +1,6 @@
 # SPEC: wayfinder/cmd/wayfinder/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/beads/SPEC.md
+# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/boundedexec/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/config/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/git/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/history/SPEC.md
@@ -22,6 +23,7 @@ Feature: Wayfinder internal package guardrails
       | package                                                  |
       | wayfinder/cmd/wayfinder                                  |
       | wayfinder/cmd/wayfinder-session/internal/beads           |
+      | wayfinder/cmd/wayfinder-session/internal/boundedexec     |
       | wayfinder/cmd/wayfinder-session/internal/config          |
       | wayfinder/cmd/wayfinder-session/internal/git             |
       | wayfinder/cmd/wayfinder-session/internal/history         |
