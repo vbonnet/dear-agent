@@ -161,6 +161,11 @@ func TestLoadPulseConfig_Validation(t *testing.T) {
 		{"negative window", `{"pulses":[{"name":"a","type":"file_mtime","path":"/x","window":"-1h"}]}`, "must be positive"},
 		{"launchd missing label", `{"pulses":[{"name":"a","type":"launchd_loaded"}]}`, "requires label"},
 		{"command empty", `{"pulses":[{"name":"a","type":"command"}]}`, "non-empty command"},
+		{"json_timestamp missing path", `{"pulses":[{"name":"a","type":"json_timestamp","field":"ts","window":"1h"}]}`, "requires path"},
+		{"json_timestamp missing field", `{"pulses":[{"name":"a","type":"json_timestamp","path":"/x","window":"1h"}]}`, "requires field"},
+		{"json_timestamp missing window", `{"pulses":[{"name":"a","type":"json_timestamp","path":"/x","field":"ts"}]}`, "requires window"},
+		{"json_timestamp bad window", `{"pulses":[{"name":"a","type":"json_timestamp","path":"/x","field":"ts","window":"soon"}]}`, "bad window"},
+		{"json_timestamp negative window", `{"pulses":[{"name":"a","type":"json_timestamp","path":"/x","field":"ts","window":"-1h"}]}`, "must be positive"},
 		{"duplicate name", `{"pulses":[{"name":"a","type":"launchd_loaded","label":"x"},{"name":"a","type":"launchd_loaded","label":"y"}]}`, "duplicate pulse name"},
 	}
 	for _, tc := range cases {
@@ -181,7 +186,8 @@ func TestLoadPulseConfig_Valid(t *testing.T) {
 	doc := `{"pulses":[
 		{"name":"spans","type":"file_mtime","path":"~/x/spans.jsonl","window":"24h","expect":"a fresh OTel span file"},
 		{"name":"mergeloop","type":"launchd_loaded","label":"com.dear-agent.mergeloop"},
-		{"name":"merge","type":"command","command":["true"]}]}`
+		{"name":"merge","type":"command","command":["true"]},
+		{"name":"supervisor","type":"json_timestamp","path":"~/hb.json","field":"last_beat_utc","window":"10m"}]}`
 	path := filepath.Join(t.TempDir(), "pulses.json")
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
@@ -190,8 +196,8 @@ func TestLoadPulseConfig_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPulseConfig: %v", err)
 	}
-	if len(pulses) != 3 {
-		t.Fatalf("len = %d, want 3", len(pulses))
+	if len(pulses) != 4 {
+		t.Fatalf("len = %d, want 4", len(pulses))
 	}
 	if strings.HasPrefix(pulses[0].Path, "~") {
 		t.Errorf("path %q not home-expanded", pulses[0].Path)
@@ -382,5 +388,162 @@ func TestCommandPulseReasonTruncatesOnRuneBoundary(t *testing.T) {
 	}
 	if !strings.Contains(res.Reason, "truncated") {
 		t.Errorf("Reason must mark truncation: %q", res.Reason)
+	}
+}
+
+// AA-26: fresh json_timestamp is PRESENT.
+func TestJSONTimestampPulse_FreshIsPresent(t *testing.T) {
+	pr := fixedProbes()
+	ts := t0.Add(-5 * time.Minute)
+	data := []byte(`{"id":"vroom-overseer","last_beat_utc":"` + ts.Format(time.RFC3339Nano) + `"}`)
+	pr.ReadFile = func(string) ([]byte, error) { return data, nil }
+	p := Pulse{Name: "overseer", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "last_beat_utc", Window: "10m", window: 10 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusPresent {
+		t.Fatalf("status = %s, want present", res.Status)
+	}
+	if !res.Evidence.Equal(ts) {
+		t.Errorf("evidence = %s, want %s", res.Evidence, ts)
+	}
+}
+
+// AA-26: stale json_timestamp is ABSENT.
+func TestJSONTimestampPulse_StaleIsAbsent(t *testing.T) {
+	pr := fixedProbes()
+	ts := t0.Add(-30 * time.Minute)
+	data := []byte(`{"last_beat_utc":"` + ts.Format(time.RFC3339) + `"}`)
+	pr.ReadFile = func(string) ([]byte, error) { return data, nil }
+	p := Pulse{Name: "overseer", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "last_beat_utc", Window: "10m", window: 10 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusAbsent {
+		t.Fatalf("status = %s, want absent", res.Status)
+	}
+	if !strings.Contains(res.Reason, "window 10m") {
+		t.Errorf("reason %q does not name the window", res.Reason)
+	}
+}
+
+// AA-27: missing file for json_timestamp is ABSENT with missing-file reason.
+func TestJSONTimestampPulse_MissingIsAbsent(t *testing.T) {
+	pr := fixedProbes()
+	pr.ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	p := Pulse{Name: "overseer", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "last_beat_utc", Window: "10m", window: 10 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusAbsent || !strings.Contains(res.Reason, "does not exist") {
+		t.Fatalf("got %s %q, want absent with does not exist", res.Status, res.Reason)
+	}
+}
+
+// AA-28: unreadable file is UNDETERMINED.
+func TestJSONTimestampPulse_ReadErrorIsUndetermined(t *testing.T) {
+	pr := fixedProbes()
+	pr.ReadFile = func(string) ([]byte, error) { return nil, errors.New("permission denied") }
+	p := Pulse{Name: "overseer", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "last_beat_utc", Window: "10m", window: 10 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusUndetermined {
+		t.Fatalf("status = %s, want undetermined", res.Status)
+	}
+}
+
+// AA-28: invalid JSON is UNDETERMINED.
+func TestJSONTimestampPulse_InvalidJSONIsUndetermined(t *testing.T) {
+	pr := fixedProbes()
+	pr.ReadFile = func(string) ([]byte, error) { return []byte("not valid json"), nil }
+	p := Pulse{Name: "overseer", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "last_beat_utc", Window: "10m", window: 10 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusUndetermined || !strings.Contains(res.Reason, "parsing JSON") {
+		t.Fatalf("got %s %q, want undetermined with parsing JSON reason", res.Status, res.Reason)
+	}
+}
+
+// AA-28: missing field in JSON is UNDETERMINED.
+func TestJSONTimestampPulse_MissingFieldIsUndetermined(t *testing.T) {
+	pr := fixedProbes()
+	pr.ReadFile = func(string) ([]byte, error) { return []byte(`{"other_field":123}`), nil }
+	p := Pulse{Name: "overseer", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "last_beat_utc", Window: "10m", window: 10 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusUndetermined || !strings.Contains(res.Reason, "not found") {
+		t.Fatalf("got %s %q, want undetermined with not found reason", res.Status, res.Reason)
+	}
+}
+
+// AA-06: timestamp in the future beyond tolerance is UNDETERMINED.
+func TestJSONTimestampPulse_FutureTimestampIsUndetermined(t *testing.T) {
+	pr := fixedProbes()
+	futureTS := t0.Add(10 * time.Minute)
+	data := []byte(`{"last_beat_utc":"` + futureTS.Format(time.RFC3339) + `"}`)
+	pr.ReadFile = func(string) ([]byte, error) { return data, nil }
+	p := Pulse{Name: "overseer", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "last_beat_utc", Window: "10m", window: 10 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusUndetermined || !strings.Contains(res.Reason, "future") {
+		t.Fatalf("got %s %q, want undetermined with future timestamp reason", res.Status, res.Reason)
+	}
+}
+
+// Test nested field and numeric/unix epoch formats.
+func TestJSONTimestampPulse_NestedFieldAndFormats(t *testing.T) {
+	pr := fixedProbes()
+	ts := t0.Add(-2 * time.Minute)
+
+	// Nested object with RFC3339
+	data := []byte(`{"meta":{"deep":{"ts":"` + ts.Format(time.RFC3339) + `"}}}`)
+	pr.ReadFile = func(string) ([]byte, error) { return data, nil }
+	p := Pulse{Name: "nested", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "meta.deep.ts", Window: "5m", window: 5 * time.Minute}
+	res := EvaluatePulse(context.Background(), p, pr, "", nil)
+	if res.Status != StatusPresent {
+		t.Fatalf("nested status = %s, want present", res.Status)
+	}
+
+	// DateTime string format
+	pr.ReadFile = func(string) ([]byte, error) {
+		return []byte(`{"ts":"` + ts.Format("2006-01-02 15:04:05") + `"}`), nil
+	}
+	res = EvaluatePulse(context.Background(), Pulse{Name: "dt", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "ts", Window: "5m", window: 5 * time.Minute}, pr, "", nil)
+	if res.Status != StatusPresent {
+		t.Fatalf("datetime status = %s, want present", res.Status)
+	}
+
+	// Unix epoch integer seconds
+	pr.ReadFile = func(string) ([]byte, error) {
+		return []byte(`{"epoch":1788263880}`), nil
+	}
+	res = EvaluatePulse(context.Background(), Pulse{Name: "epoch", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "epoch", Window: "5m", window: 5 * time.Minute}, pr, "", nil)
+	if res.Status != StatusPresent {
+		t.Fatalf("epoch status = %s, want present", res.Status)
+	}
+
+	// Unix epoch integer nanoseconds (large integer requiring json.Number to preserve precision)
+	pr.ReadFile = func(string) ([]byte, error) {
+		return []byte(`{"epoch_ns":1788263880000000000}`), nil
+	}
+	res = EvaluatePulse(context.Background(), Pulse{Name: "epoch_ns", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "epoch_ns", Window: "5m", window: 5 * time.Minute}, pr, "", nil)
+	if res.Status != StatusPresent {
+		t.Fatalf("epoch_ns status = %s, want present", res.Status)
+	}
+}
+
+// Bounded read test: A hung read on a wedged mount must not block past deadline.
+func TestEvaluatePulseBoundsAWedgedReadFile(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	probes := Probes{
+		ReadFile: func(string) ([]byte, error) {
+			<-release
+			return nil, nil
+		},
+		Now: func() time.Time { return t0 },
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	p := Pulse{Name: "slow", Type: PulseJSONTimestamp, Path: "/wedged/hb.json", Field: "ts", Window: "1h", window: time.Hour}
+	res := EvaluatePulse(ctx, p, probes, "", nil)
+	if res.Status != StatusUndetermined {
+		t.Fatalf("status = %s, want undetermined", res.Status)
+	}
+	if !strings.Contains(res.Reason, "probe deadline") {
+		t.Errorf("reason %q must mention probe deadline", res.Reason)
 	}
 }
