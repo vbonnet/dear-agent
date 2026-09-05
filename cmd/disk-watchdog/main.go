@@ -644,7 +644,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 	type absenceReport struct {
 		Stale      bool   `json:"stale"`
 		TickTime   string `json:"tick_time,omitempty"`
-		AgeSeconds int64  `json:"age_seconds,omitempty"`
+		AgeSeconds *int64 `json:"age_seconds,omitempty"`
 		Reason     string `json:"reason,omitempty"`
 	}
 	type report struct {
@@ -676,7 +676,8 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		ar = &absenceReport{Stale: absence.Stale, Reason: absence.Reason}
 		if !absence.TickTime.IsZero() {
 			ar.TickTime = absence.TickTime.UTC().Format(time.RFC3339)
-			ar.AgeSeconds = int64(absence.Age.Seconds())
+			ageSecs := int64(absence.Age.Seconds())
+			ar.AgeSeconds = &ageSecs
 		}
 	}
 	rep := report{

@@ -31,6 +31,10 @@ type absenceHealth struct {
 }
 
 func defaultAbsenceHeartbeatPath() string {
+	stateHome := os.Getenv("XDG_STATE_HOME")
+	if stateHome != "" {
+		return filepath.Join(stateHome, "dear-agent", "absence-alarm.heartbeat.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -70,9 +74,6 @@ func checkAbsenceAlarmHealth(cfg config, now time.Time) *absenceHealth {
 	}
 
 	tickTime, err := time.Parse(time.RFC3339Nano, hb.TickTime)
-	if err != nil {
-		tickTime, err = time.Parse(time.RFC3339, hb.TickTime)
-	}
 	if err != nil {
 		return &absenceHealth{
 			Stale:  true,

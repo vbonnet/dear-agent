@@ -302,3 +302,46 @@ func TestRun_AbsenceHeartbeatJSONOutput(t *testing.T) {
 		t.Errorf("expected AgeSeconds ~2400 (40m), got %d", rep.AbsenceAlarm.AgeSeconds)
 	}
 }
+
+func TestDefaultAbsenceHeartbeatPath_RespectsXDGStateHome(t *testing.T) {
+	customState := filepath.Join(t.TempDir(), "custom-state")
+	t.Setenv("XDG_STATE_HOME", customState)
+
+	got := defaultAbsenceHeartbeatPath()
+	want := filepath.Join(customState, "dear-agent", "absence-alarm.heartbeat.json")
+	if got != want {
+		t.Errorf("defaultAbsenceHeartbeatPath() = %q, want %q", got, want)
+	}
+}
+
+func TestRun_AbsenceHeartbeatJSONOutput_ZeroAgeRetained(t *testing.T) {
+	var out bytes.Buffer
+	now := time.Now()
+	// Fresh heartbeat timestamped now -> age is 0s
+	hbPath := writeAbsenceHeartbeat(t, absenceHeartbeatJSON(now))
+
+	args := append(hermeticRunArgsWithAbsence(t, hbPath, "30m"), "--json")
+	code, err := run(args, &out)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal json: %v", err)
+	}
+	aa, ok := raw["absence_alarm"].(map[string]any)
+	if !ok || aa == nil {
+		t.Fatalf("expected absence_alarm in JSON output: %v", raw)
+	}
+	ageVal, hasAge := aa["age_seconds"]
+	if !hasAge {
+		t.Errorf("expected age_seconds to be present in absence_alarm even when 0: %v", aa)
+	}
+	if ageVal.(float64) != 0 {
+		t.Errorf("expected age_seconds to be 0, got %v", ageVal)
+	}
+}
