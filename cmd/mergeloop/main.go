@@ -12,6 +12,7 @@
 // Usage:
 //
 //	mergeloop tick [--repo owner/name] [--cap N] [--max-attempts N] [--dry-run] [--enable-agents]
+//	               [--rebase-cooldown D]
 //	mergeloop run  [--interval 10m] [...same flags]
 package main
 
@@ -41,6 +42,7 @@ type options struct {
 	repo           string
 	interval       time.Duration
 	cap            int
+	rebaseCooldown time.Duration
 	maxAttempts    int
 	stallThreshold time.Duration
 	dryRun         bool
@@ -125,6 +127,7 @@ func run(argv []string) error {
 		Deps:           deps,
 		Cap:            opts.cap,
 		StallThreshold: opts.stallThreshold,
+		RebaseCooldown: opts.rebaseCooldown,
 	}
 
 	switch opts.mode {
@@ -143,6 +146,7 @@ func newMergeLoopFlagSet(mode string, opts *options) *flag.FlagSet {
 	fs.IntVar(&opts.cap, "cap", 50, "backpressure: skip the tick above this many open PRs")
 	fs.IntVar(&opts.maxAttempts, "max-attempts", mergeloop.DefaultMaxAgentAttempts, "max agent fix attempts per PR before escalation")
 	fs.DurationVar(&opts.stallThreshold, "stall-threshold", time.Hour, "a PR actionable but untouched longer than this is counted as stalled")
+	fs.DurationVar(&opts.rebaseCooldown, "rebase-cooldown", mergeloop.DefaultRebaseCooldown, "minimum delay between two rebases of the same PR; must exceed the slowest required check so CI can finish (0 disables)")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "classify and report; perform no rebases/merges/spawns")
 	fs.BoolVar(&opts.enableAgents, "enable-agents", false, "spawn AGM agents to fix CI/conflicts; off → defer those PRs")
 	fs.StringVar(&opts.agentHarness, "agent-harness", "claude-code", "AGM harness for repair agents")

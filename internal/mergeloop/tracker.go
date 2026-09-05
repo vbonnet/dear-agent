@@ -20,6 +20,7 @@ type PRRecord struct {
 	FirstSeenAt      time.Time `json:"first_seen_at"`
 	EscalatedAt      time.Time `json:"escalated_at,omitzero"`
 	EscalationReason string    `json:"escalation_reason,omitempty"`
+	LastRebaseAt     time.Time `json:"last_rebase_at,omitzero"`
 }
 
 // Tracker persists per-PR attempt and timing state to a JSON file so the loop
@@ -145,6 +146,9 @@ func (t *Tracker) RecordAction(num int, state State, now time.Time) {
 	}
 	r.LastActionAt = now
 	r.LastState = state
+	if state == StateBehind {
+		r.LastRebaseAt = now
+	}
 }
 
 // RecordEscalation marks a PR as escalated to a human with a reason.

@@ -381,3 +381,105 @@ func TestThreadResolverErrorDoesNotBlockMerge(t *testing.T) {
 		t.Error("expected thread_resolve_error audit event")
 	}
 }
+
+// A PR that is BEHIND must not be rebased again until the CI run the previous
+// rebase started has had time to finish. Rebasing sooner discards that run and
+// restarts the wait, which is how the loop can tick forever and merge nothing.
+func TestRebaseCooldownLetsCISettle(t *testing.T) {
+	prs := []PR{{Number: 1, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}}
+	reb := &fakeRebaser{}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	deps := &Deps{Rebaser: reb, Clock: func() time.Time { return now }}
+	d, _ := newTestDriver(t, prs, deps)
+	d.RebaseCooldown = 30 * time.Minute
+
+	mustTick := func(label string) TickResult {
+		t.Helper()
+		res, err := d.Tick(context.Background())
+		if err != nil {
+			t.Fatalf("Tick (%s): %v", label, err)
+		}
+		return res
+	}
+
+	if res := mustTick("first"); res.Rebased != 1 {
+		t.Fatalf("first tick Rebased = %d, want 1", res.Rebased)
+	}
+
+	// A tick inside the cooldown window leaves the branch alone.
+	now = now.Add(10 * time.Minute)
+	res := mustTick("within cooldown")
+	if res.Rebased != 0 {
+		t.Errorf("tick within cooldown Rebased = %d, want 0", res.Rebased)
+	}
+	if res.Skipped != 1 {
+		t.Errorf("tick within cooldown Skipped = %d, want 1", res.Skipped)
+	}
+	if len(reb.calls) != 1 {
+		t.Errorf("rebaser calls = %v, want a single call from the first tick", reb.calls)
+	}
+
+	// Once the window elapses the PR is still BEHIND, so it is rebased again.
+	now = now.Add(21 * time.Minute)
+	if res := mustTick("after cooldown"); res.Rebased != 1 {
+		t.Errorf("tick after cooldown Rebased = %d, want 1", res.Rebased)
+	}
+	if len(reb.calls) != 2 {
+		t.Errorf("rebaser calls = %v, want two calls", reb.calls)
+	}
+}
+
+// The cooldown is opt-in: a zero value preserves the rebase-every-tick default.
+func TestRebaseCooldownZeroRebasesEveryTick(t *testing.T) {
+	prs := []PR{{Number: 1, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}}
+	reb := &fakeRebaser{}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	d, _ := newTestDriver(t, prs, &Deps{Rebaser: reb, Clock: func() time.Time { return now }})
+
+	for i := range 3 {
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("Tick %d: %v", i, err)
+		}
+		now = now.Add(time.Minute)
+	}
+	if len(reb.calls) != 3 {
+		t.Errorf("rebaser calls = %v, want three", reb.calls)
+	}
+}
+
+// Intermediate actions such as agent spawns update LastActionAt, but must not
+// delay or extend the rebase cooldown calculation, which is keyed on LastRebaseAt.
+func TestRebaseCooldownUnaffectedByAgentSpawn(t *testing.T) {
+	prs := []PR{{Number: 1, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}}
+	reb := &fakeRebaser{}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	deps := &Deps{Rebaser: reb, Clock: func() time.Time { return now }}
+	d, _ := newTestDriver(t, prs, deps)
+	d.RebaseCooldown = 30 * time.Minute
+
+	// First tick rebases the PR and records LastRebaseAt = 12:00.
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if len(reb.calls) != 1 {
+		t.Fatalf("rebaser calls = %d, want 1", len(reb.calls))
+	}
+
+	// 10 minutes later, an agent spawn occurs and updates LastActionAt.
+	agentSpawnTime := now.Add(10 * time.Minute)
+	d.Tracker.RecordAgentSpawn(1, "failure-sig", "session-1", agentSpawnTime)
+
+	// 31 minutes after the original rebase (but only 21 minutes after the agent spawn),
+	// the rebase cooldown has expired and another rebase is allowed.
+	now = now.Add(31 * time.Minute)
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("tick after cooldown: %v", err)
+	}
+	if res.Rebased != 1 {
+		t.Errorf("Rebased = %d, want 1", res.Rebased)
+	}
+	if len(reb.calls) != 2 {
+		t.Errorf("rebaser calls = %d, want 2", len(reb.calls))
+	}
+}
