@@ -166,7 +166,10 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 		fmt.Fprintf(stderr, "recovery-loop: %v (proceeding with empty state)\n", stateErr)
 	}
 
-	alarmingPulses, _ := recoveryloop.LoadAbsenceAlarms(opts.absenceJournal)
+	alarmingPulses, err := recoveryloop.LoadAbsenceAlarms(opts.absenceJournal)
+	if err != nil {
+		fmt.Fprintf(stderr, "recovery-loop: load absence alarms: %v\n", err)
+	}
 
 	ctx := context.Background()
 	launchdJobs, listErr := host.LaunchdList(ctx)
@@ -251,7 +254,7 @@ func processJob(
 	cancel()
 
 	if execErr == nil {
-		recordSuccess(job, action, reason, now, state, rep, opts.journalPath)
+		recordSuccess(job, action, reason, now, state, rep, opts.journalPath, stderr)
 	} else {
 		recordFailure(job, action, reason, execErr, now, state, rep, opts.journalPath, notifyFn, stderr)
 	}
@@ -265,6 +268,7 @@ func recordSuccess(
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	journalPath string,
+	stderr io.Writer,
 ) {
 	state.Jobs[job.Name] = recoveryloop.JobState{
 		ConsecutiveFailures: 0,
@@ -280,7 +284,7 @@ func recordSuccess(
 		Reason: reason,
 	})
 	rep.Recovered++
-	_ = recoveryloop.AppendJournal(journalPath, recoveryloop.JournalRecord{
+	if err := recoveryloop.AppendJournal(journalPath, recoveryloop.JournalRecord{
 		Time:        now,
 		Kind:        "recovery.attempt",
 		Job:         job.Name,
@@ -289,7 +293,9 @@ func recordSuccess(
 		Attempt:     1,
 		HumanNeeded: false,
 		Reason:      reason,
-	})
+	}); err != nil {
+		fmt.Fprintf(stderr, "recovery-loop: append journal: %v\n", err)
+	}
 }
 
 func recordFailure(
@@ -330,7 +336,7 @@ func recordFailure(
 		dispatchEscalation(job.Name, action, attempts, execErr, notifyFn, stderr)
 	}
 
-	_ = recoveryloop.AppendJournal(journalPath, recoveryloop.JournalRecord{
+	if err := recoveryloop.AppendJournal(journalPath, recoveryloop.JournalRecord{
 		Time:        now,
 		Kind:        "recovery.attempt",
 		Job:         job.Name,
@@ -340,7 +346,9 @@ func recordFailure(
 		HumanNeeded: humanNeeded,
 		Reason:      reason,
 		Error:       execErr.Error(),
-	})
+	}); err != nil {
+		fmt.Fprintf(stderr, "recovery-loop: append journal: %v\n", err)
+	}
 }
 
 func dispatchEscalation(
