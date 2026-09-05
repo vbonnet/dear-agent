@@ -29,15 +29,35 @@ jobs:
   size-scope:
     name: Size and scope signal
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 20, not 5. The crap-lint step runs the changed packages' tests to measure
+    # coverage, which can take minutes. At 5 the runner would cancel the whole
+    # job mid-measurement, and a cancelled job skips the comment steps entirely,
+    # so the step's continue-on-error would not preserve the advisory behavior.
+    # crap-lint bounds its own coverage run well inside this budget.
+    timeout-minutes: 20
     outputs:
       should_comment: ${{ steps.scope.outputs.should_comment }}
       mixed_concern: ${{ steps.concern.outputs.mixed_concern }}
+      crap_flagged: ${{ steps.crap.outputs.crap_flagged }}
+      crap_unknown: ${{ steps.crap.outputs.crap_unknown }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The PR head itself, not the default merge commit. The crap-lint
+          # step measures coverage by running the changed packages' tests
+          # against the checkout, and it refuses to score at all when the
+          # checkout is not the head revision, so on the merge commit it would
+          # silently measure nothing. The scope and concern steps below are
+          # unaffected: they name base and head as explicit revisions and never
+          # read the working tree.
+          #
+          # Checking out PR head code is safe here because this job holds no
+          # secret beyond the default GITHUB_TOKEN and never runs on
+          # pull_request_target. The tests it runs are the PR's own, which the
+          # ordinary CI workflow already runs on the same code.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Compute PR scope
         id: scope
@@ -150,7 +170,80 @@ jobs:
             -min-new-logic "$MIN_NEW_LOGIC_LINES" \
             -github-output >> "$GITHUB_OUTPUT"
 
-      - name: Comment with split suggestion
+      # Neither threshold above can see complexity that no test exercises. A
+      # 40-line diff can add a branchy function to a package whose tests build
+      # the binary and exec it, which reads as 0% covered while the zero-test
+      # scan in cmd/structural-health sees test files and stays quiet. This
+      # step joins gocyclo-equivalent complexity with go cover on the changed
+      # functions and reports the join.
+      #
+      # It deliberately does not re-check discarded error returns or raw
+      # complexity: errcheck and gocyclo already own those in .golangci.yml,
+      # already diff-scoped via new-from-merge-base, and already hard-gating.
+      #
+      # Advisory by construction: the command exits 0 either way, so it can
+      # never become the reason a PR cannot merge. It runs the changed
+      # packages' tests to measure coverage, so it is bounded and allowed to
+      # fail without failing the job.
+      # CRAPLENS-05 claims the lens counts complexity the same way the gocyclo
+      # that golangci-lint runs does. That claim is checked against the real
+      # binary by TestComplexityParityWithGocycloBinary, which SKIPS when
+      # gocyclo is absent — so without this step the claim could drift with no
+      # test failing anywhere. Pinned rather than @latest so a gocyclo release
+      # cannot silently change what parity means.
+      - name: Install gocyclo for the parity check
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
+
+      - name: Verify complexity parity with gocyclo
+        run: |
+          # The default shell here is `bash -e {0}`, which does not imply
+          # pipefail: without it, a failing `go test` is masked by `tee`'s
+          # own success, so this step would go green on the exact test
+          # failure it exists to catch. set -o pipefail makes the pipeline's
+          # exit status the test's, so -e can still stop the step on it.
+          set -o pipefail
+          go test ./internal/craplens/ -run TestComplexityParityWithGocycloBinary -count=1 -v 2>&1 | tee /tmp/parity.log
+          if grep -q -- "--- SKIP" /tmp/parity.log; then
+            echo "::error::the gocyclo parity check skipped; CRAPLENS-05 was not verified"
+            exit 1
+          fi
+          # A renamed or deleted test leaves -run matching nothing: go test
+          # still exits 0 and prints no SKIP marker, so the check above alone
+          # would go green without ever running CRAPLENS-05's verification.
+          # Require the exact PASS record instead of trusting the exit code.
+          if ! grep -qF -- "--- PASS: TestComplexityParityWithGocycloBinary" /tmp/parity.log; then
+            echo "::error::TestComplexityParityWithGocycloBinary did not run (renamed, deleted, or -run matched nothing); CRAPLENS-05 was not verified"
+            exit 1
+          fi
+
+      - name: Score changed functions for complexity against coverage
+        id: crap
+        if: '!cancelled()'
+        continue-on-error: true
+        env:
+          CI: "true"
+          CI_SKIP_TMUX: "true"
+          # The repository's CI contract is the single root module. Without
+          # this, a PR that adds a go.work file would have that
+          # candidate-controlled workspace auto-enabled for both the go run
+          # and the coverage tests, so the lens would measure a different
+          # package and dependency set than every other gate.
+          GOWORK: "off"
+        run: |
+          go run ./tools/crap-lint \
+            -base "${{ github.event.pull_request.base.sha }}" \
+            -head "${{ github.event.pull_request.head.sha }}" \
+            -github-output >> "$GITHUB_OUTPUT"
+
+      - name: Update PR size, scope, and code-health comment
+        # tools/pr-size-comment now returns a distinct non-zero status when a
+        # gh operation it depends on fails, instead of always returning 0 —
+        # so this step can genuinely fail for the first time. continue-on-error
+        # keeps that advisory (a lost comment update never blocks the merge,
+        # this step isn't in the required-checks list), but the step itself
+        # still shows red in the run: that visible failure is exactly the
+        # signal this fix exists to expose, where before there was none.
+        continue-on-error: true
         # A pull_request run from a fork, or one opened by Dependabot (whose
         # workflow runs also get a read-only GITHUB_TOKEN even though the head
         # branch lives in this repo), can't post/delete comments; skip rather
@@ -161,71 +254,89 @@ jobs:
         # PR flips actor to that human while the token stays read-only — the
         # step would then run and fail. The author is stable across every event
         # on the PR.
-        if: (steps.scope.outputs.should_comment == 'true' || steps.concern.outputs.mixed_concern == 'true') && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        #
+        # The decision (update the comment, delete a stale one, or do
+        # nothing), the prior-section recovery across a crap run that could
+        # not re-measure, and the comment body itself all live in
+        # tools/pr-size-comment now: this used to be two bash steps, and the
+        # second one had grown well past what a workflow step should carry —
+        # API reads, prior-section recovery, rendering, and patch/create/
+        # dedupe selection.
+        #
+        # !cancelled(), not the bare expression: an `if:` with no status
+        # function implies success(), so a failure in "Install gocyclo" or
+        # "Verify complexity parity" — upstream of this step, neither
+        # continue-on-error — would skip this step entirely despite its own
+        # continue-on-error, silently losing the already-computed size and
+        # mixed-concern results and leaving the sticky comment unable to
+        # recover or self-correct on the next push.
+        if: (!cancelled()) && (!github.event.pull_request.head.repo.fork) && github.event.pull_request.user.login != 'dependabot[bot]'
+        # Every value below arrives via env, not interpolated directly into
+        # this script: several (CRAP_REPORT, REASONS, a diff-derived file
+        # path in TOP_LEVEL_AREAS) come from repository content a PR author
+        # controls, and splicing "${{ ... }}" straight into a run: block is
+        # the classic Actions script-injection shape. An env var's value is
+        # never re-parsed as shell syntax, no matter what it contains.
+        #
+        # Security: this step runs with a write-scoped GH_TOKEN (issues:
+        # write, pull-requests: write). The checkout above is the PR's own
+        # HEAD, so for a same-repository PR (not just a fork — the fork
+        # guard above does not cover this) the PR author can modify
+        # tools/pr-size-comment itself. `go run ./tools/pr-size-comment`
+        # would then compile and execute that candidate-controlled code
+        # with this job's write token in its environment, letting a
+        # crafted PR perform arbitrary GitHub API calls as this workflow.
+        # Build the binary from the PR's BASE revision instead — code
+        # already on the protected branch, never the candidate — so no
+        # PR-controlled code ever runs with GH_TOKEN present. A PR that
+        # introduces or changes this tool (like this one) has no trusted
+        # prior copy to build from yet; skip posting rather than fall back
+        # to the untrusted head in that case; the workflow behaves normally
+        # again on every PR after this one merges.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHOULD_COMMENT: ${{ steps.scope.outputs.should_comment }}
+          MIXED_CONCERN: ${{ steps.concern.outputs.mixed_concern }}
+          CRAP_FLAGGED: ${{ steps.crap.outputs.crap_flagged }}
+          CRAP_UNKNOWN: ${{ steps.crap.outputs.crap_unknown }}
+          CRAP_OUTCOME: ${{ steps.crap.outcome }}
           CHANGED_LINES: ${{ steps.scope.outputs.changed_lines }}
           CHANGED_FILES: ${{ steps.scope.outputs.changed_files }}
           TOP_LEVEL_AREAS: ${{ steps.scope.outputs.top_level_areas }}
           REASONS: ${{ steps.scope.outputs.reasons }}
           CONCERN_REASON: ${{ steps.concern.outputs.reason }}
+          CRAP_REPORT: ${{ steps.crap.outputs.crap_report }}
+          CRAP_SUMMARY: ${{ steps.crap.outputs.crap_summary }}
+          SCOPE_OUTCOME: ${{ steps.scope.outcome }}
+          CONCERN_OUTCOME: ${{ steps.concern.outcome }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          set -euo pipefail
-          body=/tmp/pr-size-scope-comment.md
-          {
-            echo "<!-- pr-size-scope -->"
-            echo "## PR size and scope signal"
-            echo
-            echo "This PR tripped a deterministic split-suggestion signal:"
-            echo
-            [ -n "$REASONS" ] && printf '%s\n' "$REASONS"
-            [ -n "$CONCERN_REASON" ] && printf '%s\n' "$CONCERN_REASON"
-            echo
-            echo "Current scope: ${CHANGED_LINES} changed lines, ${CHANGED_FILES} changed files, ${TOP_LEVEL_AREAS} top-level areas."
-            echo
-            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands."
-          } > "$body"
-
-          # Edit the existing marker comment in place when there is one. The
-          # previous post-then-delete-the-rest order re-notified every PR
-          # subscriber on each synchronize; an edit notifies nobody, so the
-          # signal stops training people to mute the thread.
-          mapfile -t existing < <(
-            gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
-              --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id'
-          )
-
-          if [ "${#existing[@]}" -gt 0 ]; then
-            gh api --method PATCH "repos/$REPO/issues/comments/${existing[0]}" \
-              -F "body=@$body" > /dev/null
-          else
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body"
+          trusted_dir=$(mktemp -d)
+          git worktree add --detach --quiet "$trusted_dir" "$BASE_SHA"
+          if [ ! -f "$trusted_dir/tools/pr-size-comment/main.go" ]; then
+            echo "::notice::tools/pr-size-comment does not exist at this PR's base revision yet; skipping the comment update rather than building candidate-controlled code with a write-scoped token."
+            exit 0
           fi
-
-          # Collapse any duplicates left by earlier revisions of this workflow.
-          for comment_id in "${existing[@]:1}"; do
-            [ -n "$comment_id" ] || continue
-            gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
-          done
-
-      - name: Remove stale split-suggestion comment
-        # A later synchronize run can drop below every threshold; clear any
-        # marker comment left by an earlier, larger revision of this PR.
-        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id' |
-            while IFS= read -r comment_id; do
-              [ -n "$comment_id" ] || continue
-              gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
-            done
+          go build -C "$trusted_dir" -o /tmp/pr-size-comment ./tools/pr-size-comment
+          /tmp/pr-size-comment \
+            -repo "$REPO" \
+            -pr "$PR_NUMBER" \
+            -should-comment="$SHOULD_COMMENT" \
+            -mixed-concern="$MIXED_CONCERN" \
+            -crap-flagged="$CRAP_FLAGGED" \
+            -crap-unknown="$CRAP_UNKNOWN" \
+            -crap-outcome="$CRAP_OUTCOME" \
+            -changed-lines="$CHANGED_LINES" \
+            -changed-files="$CHANGED_FILES" \
+            -top-level-areas="$TOP_LEVEL_AREAS" \
+            -reasons="$REASONS" \
+            -concern-reason="$CONCERN_REASON" \
+            -crap-report="$CRAP_REPORT" \
+            -crap-summary="$CRAP_SUMMARY" \
+            -scope-outcome="$SCOPE_OUTCOME" \
+            -concern-outcome="$CONCERN_OUTCOME"
 
   # ---------------------------------------------------------------------------
   # The deterministic job above states THAT a PR is too big. It cannot say what
@@ -247,6 +358,7 @@ jobs:
     name: Split request
     needs: size-scope
     if: |
+      always() && needs.size-scope.result != 'cancelled' &&
       (needs.size-scope.outputs.should_comment == 'true' ||
        needs.size-scope.outputs.mixed_concern == 'true') &&
       github.event.pull_request.draft == false &&
