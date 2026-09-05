@@ -197,3 +197,20 @@ artifacts:
     deployed: ~/go/bin/merge-health
     mode: "0755"
     remediation: make install-merge-health
+  # The systemic merge-gate probe (ce-737id). Registered here because a probe
+  # that is built but not deployed is the failure this detector exists to end:
+  # the 2026-09-03 govulncheck deadlock ran 9.3h while the alarm written for it
+  # sat unmerged. `dear-deploy status` now reports gate-health as NOT DEPLOYED
+  # or STALE, so "written" and "running" stop being indistinguishable.
+  #
+  # The scheduler that ticks it is the absence-alarm pulse registry
+  # (deploy/absence-alarm/pulses.json), where gate-health is registered as the
+  # merge-gate-not-systemically-failing command pulse. gate-health shares the
+  # 0/1/2/3 probe exit contract with jaeger-health and merge-health, so the
+  # registry runs it with no probe-specific logic.
+  - name: gate-health
+    kind: binary
+    source: cmd/gate-health
+    deployed: ~/go/bin/gate-health
+    mode: "0755"
+    remediation: make install-gate-health

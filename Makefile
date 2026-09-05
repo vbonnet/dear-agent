@@ -67,6 +67,7 @@ override _GOVERNED_BUILD_TARGETS := \
 	health-check \
 	build-absence-alarm \
 	build-merge-health \
+	build-gate-health \
 	build-reaper-e2e \
 	build-routing-guard \
 	build-stamp-test-probe \
@@ -197,6 +198,8 @@ override _GOVERNED_BUILD_TARGETS := \
 #   install-vroom-prompt-gen Install vroom-prompt-gen to ~/go/bin
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
+#   build-gate-health       Build gate-health: systemic merge-gate failure probe
+#   install-gate-health     Install gate-health to ~/go/bin
 #   build-merge-audit       Build merge-audit: safe-merge P6 detection tier
 #   install-merge-audit     Install merge-audit to ~/go/bin
 #   build-merge-health      Build merge-health: merge-pipeline absence probe (jaeger-health sibling)
@@ -221,6 +224,7 @@ override _GOVERNED_BUILD_TARGETS := \
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: build-absence-alarm install-absence-alarm install-absence-alarm-launchagent uninstall-absence-alarm-launchagent
 .PHONY: build-merge-health install-merge-health
+.PHONY: build-gate-health install-gate-health
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
@@ -873,6 +877,16 @@ build-merge-health:
 
 install-merge-health: build-merge-health
 	$(call install-go-bin,bin/merge-health)
+# Build gate-health: the systemic merge-gate failure probe. Sibling of
+# jaeger-health and merge-health, sharing their exit contract so absence-alarm
+# can schedule it as a command pulse. See cmd/gate-health/SPEC.md.
+build-gate-health:
+	@echo "Building gate-health..."
+	go build $(BUILD_STAMP_FLAGS) -o bin/gate-health ./cmd/gate-health/
+	@echo "Built: bin/gate-health"
+
+install-gate-health: build-gate-health
+	$(call install-go-bin,bin/gate-health)
 
 # Build dear-deploy: the write-side counterpart to drift-check. It deploys host
 # artifacts (launchd plists, Claude Code hooks) from deploy/manifest.yaml through
