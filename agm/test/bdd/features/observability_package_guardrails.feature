@@ -12,6 +12,7 @@
 # RELATED-SPEC: cmd/gate-health/SPEC.md
 # RELATED-SPEC: cmd/bead-health/SPEC.md
 # RELATED-SPEC: cmd/sweep-health/SPEC.md
+# RELATED-SPEC: pkg/recoveryloop/SPEC.md
 Feature: Observability package guardrails
   Observability packages must keep executable SPEC traceability because quota,
   drift, trace, and agent-runtime monitoring need the same contracts across
@@ -38,6 +39,7 @@ Feature: Observability package guardrails
       | internal/telemetry/errors     |
       | pkg/gatehealth                |
       | pkg/otelsetup                 |
+      | pkg/recoveryloop              |
 
   Scenario Outline: Observability specifications define cancellation and timeout edges
     Given observability package "<package>" is configured
@@ -55,3 +57,4 @@ Feature: Observability package guardrails
       | cmd/gate-health             | GHC-03         | exit 2                  |
       | cmd/bead-health             | BH-05          | in the future           |
       | cmd/sweep-health            | SWEEP-05       | in the future           |
+      | pkg/recoveryloop            | RL-21          | bound execution with a timeout |
