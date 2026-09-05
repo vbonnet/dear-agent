@@ -38,11 +38,18 @@ type AuditsSection struct {
 	Trees          []Tree                      `yaml:"trees,omitempty"`
 }
 
-// SeverityRule mirrors the per-severity policy block.
+// SeverityRule is the complete per-severity policy shape. Load expands
+// field-level YAML overrides against package defaults before returning it.
 type SeverityRule struct {
 	FailRun   bool   `yaml:"fail-run"`
 	Remediate string `yaml:"remediate,omitempty"`
 	Notify    bool   `yaml:"notify,omitempty"`
+}
+
+type severityRuleYAML struct {
+	FailRun   yaml.Node `yaml:"fail-run"`
+	Remediate yaml.Node `yaml:"remediate"`
+	Notify    yaml.Node `yaml:"notify"`
 }
 
 // ScheduledCheck is one row under audits.schedule.<cadence>:.
@@ -74,10 +81,95 @@ func Load(repoRoot string) (*File, error) {
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("audit/config: parse %s: %w", path, err)
 	}
+	if err := normalizeLoadedSeverityPolicy(data, &f); err != nil {
+		return nil, fmt.Errorf("audit/config: parse severity-policy in %s: %w", path, err)
+	}
 	if f.Version == 0 {
 		f.Version = 1
 	}
 	return &f, nil
+}
+
+// normalizeLoadedSeverityPolicy expands field-level YAML overrides into the
+// public complete-rule shape without adding presence state to exported types.
+// Programmatically constructed File values continue to use complete rules.
+func normalizeLoadedSeverityPolicy(data []byte, f *File) error {
+	if f.Audits == nil || f.Audits.SeverityPolicy == nil {
+		return nil
+	}
+	var raw struct {
+		Audits *struct {
+			SeverityPolicy map[string]yaml.Node `yaml:"severity-policy"`
+		} `yaml:"audits"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Audits == nil {
+		return nil
+	}
+	defaults := defaultSeverityPolicy()
+	for key, ruleNode := range raw.Audits.SeverityPolicy {
+		fields, err := decodeSeverityRuleYAML(key, ruleNode)
+		if err != nil {
+			return err
+		}
+		rule := f.Audits.SeverityPolicy[key]
+		if defaultRule, ok := defaults[audit.Severity(key)]; ok {
+			rule = fillOmittedSeverityDefaults(rule, fields, defaultRule)
+		}
+		f.Audits.SeverityPolicy[key] = rule
+	}
+	return nil
+}
+
+func decodeSeverityRuleYAML(key string, node yaml.Node) (severityRuleYAML, error) {
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = *node.Alias
+	}
+	if node.Tag == "!!null" {
+		return severityRuleYAML{}, fmt.Errorf("severity-policy[%s] must not be null", key)
+	}
+	if node.Kind != yaml.MappingNode {
+		return severityRuleYAML{}, fmt.Errorf("severity-policy[%s] must be a mapping", key)
+	}
+	var fields severityRuleYAML
+	if err := node.Decode(&fields); err != nil {
+		return severityRuleYAML{}, fmt.Errorf("severity-policy[%s]: %w", key, err)
+	}
+	for _, field := range []struct {
+		name string
+		node yaml.Node
+	}{
+		{name: "fail-run", node: fields.FailRun},
+		{name: "remediate", node: fields.Remediate},
+		{name: "notify", node: fields.Notify},
+	} {
+		if field.node.Kind == yaml.AliasNode && field.node.Alias != nil {
+			field.node = *field.node.Alias
+		}
+		if field.node.Kind != 0 && field.node.Tag == "!!null" {
+			return severityRuleYAML{}, fmt.Errorf("severity-policy[%s].%s must not be null", key, field.name)
+		}
+	}
+	return fields, nil
+}
+
+func fillOmittedSeverityDefaults(
+	rule SeverityRule,
+	fields severityRuleYAML,
+	defaults audit.SeverityRule,
+) SeverityRule {
+	if fields.FailRun.Kind == 0 {
+		rule.FailRun = defaults.FailRun
+	}
+	if fields.Remediate.Kind == 0 {
+		rule.Remediate = string(defaults.DefaultStrategy)
+	}
+	if fields.Notify.Kind == 0 {
+		rule.Notify = defaults.Notify
+	}
+	return rule
 }
 
 // BuildPlan converts a loaded File into an audit.Plan for the given
@@ -252,7 +344,7 @@ func mergeSeverityPolicy(dst map[audit.Severity]audit.SeverityRule, src map[stri
 			return fmt.Errorf("audit/config: severity-policy: unknown severity %q", k)
 		}
 		strategy := audit.Strategy(v.Remediate)
-		if !strategy.IsValid() {
+		if strategy == audit.StrategyUnspecified || !strategy.IsValid() {
 			return fmt.Errorf("audit/config: severity-policy[%s].remediate: invalid strategy %q", k, v.Remediate)
 		}
 		dst[sev] = audit.SeverityRule{

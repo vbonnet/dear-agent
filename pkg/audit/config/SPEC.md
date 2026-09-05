@@ -1,6 +1,6 @@
 # Audit Config Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-08-28 -->
 
 ## Overview
 
@@ -35,6 +35,13 @@ plan resolution.
 
 **AUDIT-CONFIG-12** When severity-policy overrides contain an invalid remediation strategy, the system shall return an error.
 
+**AUDIT-CONFIG-13** When a `.dear-agent.yml` severity-policy override omits fail-run, remediate, or notify, the system shall preserve the package default for each omitted field while applying explicitly supplied true, false, or strategy values.
+
+**AUDIT-CONFIG-14** When a `.dear-agent.yml` severity-policy rule or field is explicitly null, the system shall reject the configuration instead of treating it as omitted.
+
 ## BDD Traceability
 
-- `agm/test/bdd/features/audit_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Feature: `agm/test/bdd/features/audit_package_guardrails.feature`
+- Test consequence: Deterministic unit tests in `config_test.go` cover complete
+  severity-policy validation and YAML omission, explicit false, and explicit
+  null semantics.
