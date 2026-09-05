@@ -1,4 +1,4 @@
-# SPEC: engram/internal/retrieval/SPEC.md
+# SPEC: engram/retrieval/SPEC.md
 # RELATED-SPEC: engram/internal/document/SPEC.md
 # RELATED-SPEC: engram/internal/corpus/SPEC.md
 Feature: Engram knowledge guardrails
@@ -13,7 +13,6 @@ Feature: Engram knowledge guardrails
 
     Examples:
       | package                   |
-      | engram/internal/retrieval |
+      | engram/retrieval          |
       | engram/internal/document  |
       | engram/internal/corpus    |
-

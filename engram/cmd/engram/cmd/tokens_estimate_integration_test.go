@@ -145,6 +145,45 @@ func assertCommandError(t *testing.T, err error, output, expectedMsg string) {
 func TestTokensEstimate_Integration(t *testing.T) {
 	env := setupTokensTest(t)
 
+	t.Run("retrieval mode", func(t *testing.T) {
+		engramDir := t.TempDir()
+		engramPath := filepath.Join(engramDir, "testing-pattern.ai.md")
+		engramContent := `---
+type: pattern
+title: Testing Pattern
+description: A deterministic retrieval fixture
+tags:
+  - testing
+agents:
+  - codex
+---
+# Testing Pattern
+
+Use focused tests to prove the migrated retrieval consumer.
+`
+		if err := os.WriteFile(engramPath, []byte(engramContent), 0o644); err != nil {
+			t.Fatalf("Failed to create retrieval fixture: %v", err)
+		}
+
+		output, err := runTokensCommand(
+			t,
+			env.bin,
+			"--query", "testing",
+			"--path", engramDir,
+			"--limit", "1",
+			"--json",
+		)
+		if err != nil {
+			t.Fatalf("Retrieval-mode command failed: %v", err)
+		}
+
+		result := parseTokensJSON(t, output)
+		if result.Query != "testing" {
+			t.Fatalf("Query = %q, want testing", result.Query)
+		}
+		assertJSONFileOutput(t, result, engramPath, len(engramContent))
+	})
+
 	t.Run("single file text output", func(t *testing.T) {
 		output, err := runTokensCommand(t, env.bin, env.file1)
 		if err != nil {
