@@ -1,8 +1,8 @@
 # Hermetic Git Test Sandbox Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-10 -->
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Baseline
 **Scope:** `internal/gittest`.
 
@@ -29,6 +29,11 @@ callers:
    production Git wrappers build their own `*exec.Cmd` and never set
    `Cmd.Env`, so a test that points one at a temporary repository would
    otherwise re-create the same hazard inside the code under test.
+4. Automatic Git maintenance, including legacy auto-gc and the newer
+   maintenance runner, is disabled for both package-built commands and
+   production Git wrappers pointed at sandboxed repositories. Foreground
+   command completion therefore owns the complete process lifecycle; no
+   detached maintenance child can keep mutating a test-owned object database.
 
 ## EARS Requirements
 
@@ -50,6 +55,8 @@ callers:
 
 **GITTEST-09** When a caller overrides the hooks path on the command line for a sandboxed repository, the system shall allow that caller's own hooks to run.
 
+**GITTEST-10** When a test invokes Git against a sandboxed repository, the system shall disable automatic repository maintenance for package-built commands and production Git wrappers, so command completion leaves no detached process able to mutate the test-owned repository.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/internal_foundation_guardrails.feature`
@@ -70,3 +77,7 @@ callers:
   configuration outranks global configuration, which is what closes it.
 - `TestSandboxRepoStillAllowsItsOwnHooks` covers GITTEST-09 and keeps
   GITTEST-08 from becoming a blanket ban.
+- `TestSandboxedRepositoriesDoNotStartAutomaticMaintenance` covers GITTEST-10.
+  Its foreground positive control proves the Git process trace can observe an
+  automatic maintenance child before the sandbox and production-wrapper paths
+  assert that no such child starts.

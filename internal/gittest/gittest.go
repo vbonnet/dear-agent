@@ -113,7 +113,12 @@ func (s *Sandbox) buildArgs() []string {
 		"-c", "init.defaultBranch=main",
 		"-c", "commit.gpgsign=false",
 		"-c", "tag.gpgsign=false",
+		// Keep both switches: older Git honors gc.auto, while Git 2.54 can
+		// still detach `git maintenance run --auto` unless maintenance.auto
+		// is disabled explicitly. A detached child can outlive a foreground
+		// command and race the owning test's TempDir cleanup.
 		"-c", "gc.auto=0",
+		"-c", "maintenance.auto=false",
 		"-c", "advice.detachedHead=false",
 		"-c", "protocol.file.allow=always",
 		"-c", "user.name=dear-agent test",
@@ -159,9 +164,10 @@ func (s *Sandbox) Output(dir string, args ...string) (string, error) {
 	return string(raw), err
 }
 
-// HardenRepo writes the sandbox's empty hooks path and test-only author
-// identity into an existing repository's own config and installs the hooks
-// path in the test process's command-scope Git configuration.
+// HardenRepo writes the sandbox's empty hooks path, test-only author identity,
+// and automatic-maintenance controls into an existing repository's own config
+// and installs the safety controls in the test process's command-scope Git
+// configuration.
 //
 // Env() and Command() only protect commands this package builds. Production
 // Git wrappers build their own *exec.Cmd and leave Cmd.Env unset, so when a
@@ -174,6 +180,11 @@ func (s *Sandbox) Output(dir string, args ...string) (string, error) {
 // GIT_CONFIG_PARAMETERS values. That protects production wrappers under test
 // whose exec.Cmd deliberately inherits the process environment.
 //
+// Both gc.auto=0 and maintenance.auto=false are installed at repository and
+// command scope. The pair covers Git versions that use legacy auto-gc as well
+// as Git 2.54, which requires the maintenance-specific switch to prevent a
+// detached auto-maintenance child.
+//
 // Command-line configuration still outranks the repository, so a test that
 // needs its own hooks to fire can pass `-c core.hooksPath=...` for that one
 // invocation.
@@ -183,14 +194,20 @@ func (s *Sandbox) HardenRepo(t testing.TB, dir string) {
 	s.Run(t, dir, "config", "core.hooksPath", s.HooksDir)
 	s.Run(t, dir, "config", "user.name", "dear-agent test")
 	s.Run(t, dir, "config", "user.email", "test@dear-agent.invalid")
+	s.Run(t, dir, "config", "gc.auto", "0")
+	s.Run(t, dir, "config", "maintenance.auto", "false")
 }
 
 func (s *Sandbox) hardenProcessGitConfig(t testing.TB) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_PARAMETERS", "")
-	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "3")
 	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
 	t.Setenv("GIT_CONFIG_VALUE_0", s.HooksDir)
+	t.Setenv("GIT_CONFIG_KEY_1", "maintenance.auto")
+	t.Setenv("GIT_CONFIG_VALUE_1", "false")
+	t.Setenv("GIT_CONFIG_KEY_2", "gc.auto")
+	t.Setenv("GIT_CONFIG_VALUE_2", "0")
 }
 
 // InitRepo initializes a sandboxed repository in dir, creating dir if needed,
