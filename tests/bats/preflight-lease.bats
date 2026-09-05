@@ -60,13 +60,15 @@ EOF
 hold_lease_background() {
     local lock_file="$1"
     local duration="$2"
-    if command -v lockf >/dev/null 2>&1; then
-        lockf -k "$lock_file" sleep "$duration" &
-    elif flock --help 2>&1 | grep -q -- '-w'; then
-        flock -x "$lock_file" sleep "$duration" &
-    else
-        flock "$lock_file" sleep "$duration" &
-    fi
+    (
+        exec 200>"$lock_file"
+        if command -v lockf >/dev/null 2>&1; then
+            lockf -k 200
+        elif command -v flock >/dev/null 2>&1; then
+            flock 200
+        fi
+        exec sleep "$duration"
+    ) &
 }
 
 @test "full preflight acquires lease and serializes concurrent runs" {

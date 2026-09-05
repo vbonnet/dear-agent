@@ -95,6 +95,8 @@ if [[ "$MODE" == "full" ]]; then
     touch "$LEASE_FILE"
     ACQUIRED_FILE="$LEASE_DIR/preflight-full.acquired.$$"
     rm -f "$ACQUIRED_FILE"
+    PREFLIGHT_INNER_PID_FILE="$LEASE_DIR/preflight-full.pid.$$"
+    rm -f "$PREFLIGHT_INNER_PID_FILE"
 
     # shellcheck disable=SC2317,SC2329
     on_lease_cancel() {
@@ -102,16 +104,25 @@ if [[ "$MODE" == "full" ]]; then
       local owner_diag
       owner_diag="$(format_owner_info)"
       warn "cancelled while waiting for full-preflight lease (${owner_diag})"
+      if [[ -f "${PREFLIGHT_INNER_PID_FILE:-}" ]]; then
+        local inner_pid
+        inner_pid=$(cat "$PREFLIGHT_INNER_PID_FILE" 2>/dev/null)
+        if [[ -n "$inner_pid" ]]; then
+          kill "$inner_pid" 2>/dev/null || true
+        fi
+      fi
       if [[ -n "${LOCK_PID:-}" ]]; then
         kill "$LOCK_PID" 2>/dev/null || true
         wait "$LOCK_PID" 2>/dev/null || true
       fi
+      rm -f "$ACQUIRED_FILE" "${PREFLIGHT_INNER_PID_FILE:-}" 2>/dev/null || true
       exit 130
     }
     trap on_lease_cancel INT TERM
 
     export PREFLIGHT_LOCKED=true
     export PREFLIGHT_ACQUIRED_FILE="$ACQUIRED_FILE"
+    export PREFLIGHT_INNER_PID_FILE="$PREFLIGHT_INNER_PID_FILE"
 
     if command -v lockf >/dev/null 2>&1; then
       if ! lockf -s -t 0 "$LEASE_FILE" true 2>/dev/null; then
@@ -135,19 +146,23 @@ if [[ "$MODE" == "full" ]]; then
         RC=$?
         set -e
       else
+        flock "$LEASE_FILE" "$0" "$@" &
+        LOCK_PID=$!
         elapsed=0
-        while ! flock -n "$LEASE_FILE" true 2>/dev/null; do
+        while [[ ! -f "$ACQUIRED_FILE" ]]; do
           if [[ "$elapsed" -eq 0 ]]; then
             warn "waiting for full-preflight lease $(format_owner_info)..."
           fi
           sleep 0.2
           elapsed=$((elapsed + 1))
           if [[ "$elapsed" -ge $((LEASE_TIMEOUT * 5)) ]]; then
+            kill "$LOCK_PID" 2>/dev/null || true
             fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
           fi
+          if ! kill -0 "$LOCK_PID" 2>/dev/null; then
+            break
+          fi
         done
-        flock "$LEASE_FILE" "$0" "$@" &
-        LOCK_PID=$!
         set +e
         wait "$LOCK_PID"
         RC=$?
@@ -160,12 +175,15 @@ if [[ "$MODE" == "full" ]]; then
     if [[ ! -f "$ACQUIRED_FILE" ]]; then
       fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
     fi
-    rm -f "$ACQUIRED_FILE" 2>/dev/null || true
+    rm -f "$ACQUIRED_FILE" "${PREFLIGHT_INNER_PID_FILE:-}" 2>/dev/null || true
     exit $RC
   else
     # Inner re-executed shell holding the lock
     if [[ -n "${PREFLIGHT_ACQUIRED_FILE:-}" ]]; then
       touch "$PREFLIGHT_ACQUIRED_FILE"
+    fi
+    if [[ -n "${PREFLIGHT_INNER_PID_FILE:-}" ]]; then
+      echo "$$" > "$PREFLIGHT_INNER_PID_FILE"
     fi
 
     # Restore standard signal traps now that lease is acquired
