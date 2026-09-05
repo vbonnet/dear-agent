@@ -223,13 +223,13 @@ func TestInstall_InvalidHarness(t *testing.T) {
 }
 
 func TestInstall_ValidHarness(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	harnessTypes := []HarnessType{HarnessCodex, HarnessGemini, HarnessOpenCode, HarnessPi}
 
 	for _, harness := range harnessTypes {
 		t.Run(string(harness), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
 			installed, _, err := IsInstalled(ctx, harness)
 			if err != nil {
 				t.Fatalf("IsInstalled(%s) error = %v", harness, err)
