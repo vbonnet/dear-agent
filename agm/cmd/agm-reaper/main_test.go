@@ -1,14 +1,94 @@
 package main
 
 import (
+	"flag"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // TestBuildSentinel verifies the agm-reaper binary compiles.
 func TestBuildSentinel(t *testing.T) {}
+
+func TestParseReaperOutcome(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  manifest.SessionOutcome
+	}{
+		{name: "legacy empty", want: manifest.OutcomeUnknown},
+		{name: "completed", value: "completed", want: manifest.OutcomeCompleted},
+		{name: "crashed", value: "crashed", want: manifest.OutcomeCrashed},
+		{name: "killed", value: "killed", want: manifest.OutcomeKilled},
+		{name: "gc stale", value: "gc-stale", want: manifest.OutcomeGCStale},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseReaperOutcome(tc.value)
+			if err != nil {
+				t.Fatalf("parseReaperOutcome(%q) error = %v", tc.value, err)
+			}
+			if got != tc.want {
+				t.Errorf("parseReaperOutcome(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
+	}
+
+	if _, err := parseReaperOutcome("unknown"); err == nil || !strings.Contains(err.Error(), "invalid --outcome") {
+		t.Fatalf("parseReaperOutcome(unknown) error = %v, want invalid --outcome", err)
+	}
+}
+
+func TestRunRejectsUnknownOutcomeBeforeSideEffects(t *testing.T) {
+	startupReader, startupWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = startupReader.Close() }()
+	defer func() { _ = startupWriter.Close() }()
+
+	originalCommandLine := flag.CommandLine
+	originalArgs := os.Args
+	t.Cleanup(func() {
+		flag.CommandLine = originalCommandLine
+		os.Args = originalArgs
+	})
+	commandLine := flag.NewFlagSet("agm-reaper", flag.ContinueOnError)
+	commandLine.SetOutput(io.Discard)
+	flag.CommandLine = commandLine
+	logFile := filepath.Join(t.TempDir(), "reaper.log")
+	os.Args = []string{
+		"agm-reaper",
+		"--session-id", "stable-id",
+		"--session", "resolved-tmux",
+		"--outcome", "unknown",
+		"--log-file", logFile,
+		"--startup-fd", strconv.Itoa(int(startupWriter.Fd())),
+	}
+
+	err = run()
+	if err == nil || !strings.Contains(err.Error(), "invalid --outcome") {
+		t.Fatalf("run() error = %v, want invalid outcome rejection", err)
+	}
+	if _, statErr := os.Stat(logFile); !os.IsNotExist(statErr) {
+		t.Fatalf("log file status after rejected outcome = %v, want file to remain absent", statErr)
+	}
+	if closeErr := startupWriter.Close(); closeErr != nil {
+		t.Fatalf("close startup writer: %v", closeErr)
+	}
+	got, readErr := io.ReadAll(startupReader)
+	if readErr != nil {
+		t.Fatalf("read startup acknowledgement: %v", readErr)
+	}
+	if len(got) != 0 {
+		t.Fatalf("startup acknowledgement after rejected outcome = %q, want none", got)
+	}
+}
 
 func TestValidateResolvedTargets(t *testing.T) {
 	tests := []struct {
