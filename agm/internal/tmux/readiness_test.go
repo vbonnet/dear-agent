@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/vbonnet/dear-agent/agm/internal/lock"
 )
 
 func TestHandleHarnessStartupStateWaitsForSlowInitialProcess(t *testing.T) {
@@ -194,7 +197,7 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "Codex closed hooks dashboard yields to working turn",
 			harness: "codex-cli",
 			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n› inspect the release\n• Working (3s • esc to interrupt)\ngpt-5.6 high · ~/src/project",
-			state:   HarnessInputBusy,
+			state:   HarnessInputProcessing,
 		},
 		{
 			name:    "resolved Codex onboarding before live composer",
@@ -276,7 +279,7 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "Claude composer running a turn is not ready",
 			harness: "claude-code",
 			content: "❯ \n  ✻ Working… (12s · esc to interrupt)\n  vbonnet@mac:/private/tmp/wd",
-			state:   HarnessInputBusy,
+			state:   HarnessInputProcessing,
 		},
 		{
 			// Active output beneath an empty ❯ that merely contains a slash token
@@ -568,7 +571,7 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "stale Pi ready status before working status",
 			harness: "pi-cli",
 			content: "AGM plan/ready launch-old\nAGM plan/working launch-current",
-			state:   HarnessInputBusy,
+			state:   HarnessInputProcessing,
 		},
 		{
 			name:    "Pi queued AGM paste is positively identified",
@@ -674,6 +677,151 @@ func TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor(t *testing.T)
 				t.Fatalf("ClassifyHarnessInput() = (%t, %q), want (false, %q)", ready, state, HarnessInputQueuedAGM)
 			}
 		})
+	}
+}
+
+func TestClassifyHarnessInputDistinguishesHumanDraftFromNativeProcessingTail(t *testing.T) {
+	tests := []struct {
+		name    string
+		harness string
+		content string
+		state   string
+	}{
+		{
+			name:    "Codex native active tail",
+			harness: "codex-cli",
+			content: "› compact this session\n• Working (3s • esc to interrupt)\ngpt-5.6 xhigh · ~/src/project",
+			state:   HarnessInputProcessing,
+		},
+		{
+			name:    "Codex human draft containing Working",
+			harness: "codex-cli",
+			content: "› Working on the release notes\ngpt-5.6 xhigh · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Codex arbitrary Working prose lacks native control",
+			harness: "codex-cli",
+			content: "Working (3s)\ngpt-5.6 xhigh · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude native active tail",
+			harness: "claude-code",
+			content: "❯ /compact\n✻ Compacting… (2s · esc to interrupt)\nvbonnet@mac:/private/tmp/wd",
+			state:   HarnessInputProcessing,
+		},
+		{
+			name:    "Claude human draft is not active evidence",
+			harness: "claude-code",
+			content: "❯ Working on compaction\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude native-looking history without current footer fails closed",
+			harness: "claude-code",
+			content: "✻ Working… (2s · esc to interrupt)\nordinary model output",
+			state:   HarnessInputBusy,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			ready, state, err := ClassifyHarnessInput(testCase.content, testCase.harness)
+			if err != nil {
+				t.Fatalf("ClassifyHarnessInput() error = %v", err)
+			}
+			if ready || state != testCase.state {
+				t.Fatalf("ClassifyHarnessInput() = (%t, %q), want (false, %q)", ready, state, testCase.state)
+			}
+		})
+	}
+}
+
+func TestCheckExpectedHarnessInputForPaneDoesNotFollowActivePaneFocusChange(t *testing.T) {
+	const targetPane = "%7"
+	activePane := activePaneTarget{ID: "%8", RootPID: 800}
+	runtime := harnessInputObservationRuntime{
+		resolveActive: func(context.Context, string) (activePaneTarget, bool, error) {
+			t.Fatalf("exact-target observation followed active pane %q", activePane.ID)
+			return activePaneTarget{}, false, nil
+		},
+		resolvePane: func(_ context.Context, paneID string) (activePaneTarget, bool, error) {
+			if paneID != targetPane {
+				t.Fatalf("resolvePane(%q), want %q despite active pane %q", paneID, targetPane, activePane.ID)
+			}
+			return activePaneTarget{ID: targetPane, RootPID: 700}, true, nil
+		},
+		liveness: func(_ context.Context, pane activePaneTarget, harness string) (PaneLiveness, error) {
+			if pane.ID != targetPane || harness != "codex-cli" {
+				t.Fatalf("liveness target = %#v/%q", pane, harness)
+			}
+			return PaneLiveness{SessionExists: true, HarnessAlive: true, HarnessPID: 701}, nil
+		},
+		capture: func(_ context.Context, paneID string) (string, error) {
+			if paneID != targetPane {
+				t.Fatalf("capture target = %q, want %q", paneID, targetPane)
+			}
+			return "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n›", nil
+		},
+	}
+
+	got, err := checkExpectedHarnessInputForPane(t.Context(), targetPane, 701, "codex-cli", runtime)
+	if err != nil {
+		t.Fatalf("CheckExpectedHarnessInputForPane() error = %v", err)
+	}
+	if !got.Ready || got.TargetPane != targetPane || got.TargetPID != 701 {
+		t.Fatalf("exact-target readiness = %#v, want ready on %s/701", got, targetPane)
+	}
+}
+
+func TestCheckExpectedHarnessInputForPaneRejectsReplacedForegroundHarnessPID(t *testing.T) {
+	captured := false
+	runtime := harnessInputObservationRuntime{
+		resolvePane: func(context.Context, string) (activePaneTarget, bool, error) {
+			return activePaneTarget{ID: "%7", RootPID: 700}, true, nil
+		},
+		liveness: func(context.Context, activePaneTarget, string) (PaneLiveness, error) {
+			return PaneLiveness{SessionExists: true, HarnessAlive: true, HarnessPID: 702}, nil
+		},
+		capture: func(context.Context, string) (string, error) {
+			captured = true
+			return "", nil
+		},
+	}
+
+	got, err := checkExpectedHarnessInputForPane(t.Context(), "%7", 701, "codex-cli", runtime)
+	if err != nil {
+		t.Fatalf("CheckExpectedHarnessInputForPane() error = %v", err)
+	}
+	if got.Ready || got.State != HarnessInputNotFound || got.TargetPane != "%7" || got.TargetPID != 701 {
+		t.Fatalf("replaced foreground harness readiness = %#v, want NOT_FOUND on original target", got)
+	}
+	if captured {
+		t.Fatal("replaced foreground harness PID was allowed to contribute pane content")
+	}
+}
+
+func TestCheckExpectedHarnessInputForPaneRejectsDeletedPane(t *testing.T) {
+	runtime := harnessInputObservationRuntime{
+		resolvePane: func(context.Context, string) (activePaneTarget, bool, error) {
+			return activePaneTarget{}, false, nil
+		},
+		liveness: func(context.Context, activePaneTarget, string) (PaneLiveness, error) {
+			t.Fatal("deleted pane reached liveness scan")
+			return PaneLiveness{}, nil
+		},
+		capture: func(context.Context, string) (string, error) {
+			t.Fatal("deleted pane reached capture")
+			return "", nil
+		},
+	}
+
+	got, err := checkExpectedHarnessInputForPane(t.Context(), "%7", 701, "codex-cli", runtime)
+	if err != nil {
+		t.Fatalf("CheckExpectedHarnessInputForPane() error = %v", err)
+	}
+	if got.Ready || got.State != HarnessInputNotFound || got.TargetPane != "%7" || got.TargetPID != 701 {
+		t.Fatalf("deleted pane readiness = %#v, want NOT_FOUND on original target", got)
 	}
 }
 
@@ -875,6 +1023,382 @@ func TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue(t *testin
 	}
 }
 
+func TestCheckExpectedHarnessInputAndSendHonorsCancellationDuringTmuxLockContention(t *testing.T) {
+	ReleaseTmuxLock()
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	external, err := lock.New(filepath.Join(stateDir, "tmux-server.lock"))
+	if err != nil {
+		t.Fatalf("create external tmux lock: %v", err)
+	}
+	if err := external.TryLock(); err != nil {
+		t.Fatalf("acquire external tmux lock: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = external.Unlock()
+		_ = ReleaseTmuxLock()
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, callErr := CheckExpectedHarnessInputAndSend(ctx, "contended", "codex-cli", "/compact", InputDeliveryOptions{})
+		done <- callErr
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for TmuxConcurrentOps() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if TmuxConcurrentOps() == 0 {
+		cancel()
+		t.Fatal("atomic delivery never reached the contended tmux lock")
+	}
+	select {
+	case callErr := <-done:
+		cancel()
+		t.Fatalf("contended delivery returned before cancellation: %v", callErr)
+	default:
+	}
+
+	cancel()
+	select {
+	case callErr := <-done:
+		if !errors.Is(callErr, context.Canceled) {
+			t.Fatalf("CheckExpectedHarnessInputAndSend() error = %v, want context.Canceled", callErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("CheckExpectedHarnessInputAndSend wedged on flock after cancellation")
+	}
+	if got := TmuxConcurrentOps(); got != 0 {
+		t.Fatalf("tmux semaphore count after cancellation = %d, want 0", got)
+	}
+}
+
+func TestAtomicExpectedHarnessDeliveryReprovesExactTargetBeforeSend(t *testing.T) {
+	delivered := false
+	runtime := harnessInputDeliveryRuntime{
+		check: func(context.Context, string, string) (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+		},
+		recheckExact: func(_ context.Context, paneID string, harnessPID int, harness string) (HarnessInputReadiness, error) {
+			if paneID != "%7" || harnessPID != 701 || harness != "codex-cli" {
+				t.Fatalf("exact recheck = %q/%d/%q", paneID, harnessPID, harness)
+			}
+			return HarnessInputReadiness{State: HarnessInputNotFound, TargetPane: paneID, TargetPID: harnessPID}, nil
+		},
+		deliver: func(context.Context, HarnessInputReadiness, string, string, bool, bool) error {
+			delivered = true
+			return nil
+		},
+	}
+
+	got, err := checkExpectedHarnessInputAndSendLocked(t.Context(), "session", "codex-cli", "/compact", InputDeliveryOptions{}, runtime)
+	if err != nil {
+		t.Fatalf("atomic delivery error = %v", err)
+	}
+	if delivered {
+		t.Fatal("delivery proceeded after exact harness PID was no longer present")
+	}
+	if got.Ready || got.State != HarnessInputNotFound || got.TargetPane != "%7" || got.TargetPID != 701 {
+		t.Fatalf("recheck outcome = %#v, want non-ready original target", got)
+	}
+}
+
+func TestAtomicExpectedHarnessDeliveryPreservesSubmissionUncertainty(t *testing.T) {
+	ackLost := errors.New("tmux acknowledgement lost")
+	strictConfirmation := false
+	rawBracketedPaste := false
+	runtime := harnessInputDeliveryRuntime{
+		check: func(context.Context, string, string) (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+		},
+		recheckExact: func(context.Context, string, int, string) (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+		},
+		deliver: func(_ context.Context, _ HarnessInputReadiness, _, _ string, requireObservedSubmission, rawBracketed bool) error {
+			strictConfirmation = requireObservedSubmission
+			rawBracketedPaste = rawBracketed
+			return MarkPromptSubmissionUncertain(ackLost)
+		},
+	}
+
+	got, err := checkExpectedHarnessInputAndSendLocked(t.Context(), "session", "codex-cli", "/compact", InputDeliveryOptions{
+		RequireSubmissionConfirmation: true,
+		RawBracketedPaste:             true,
+	}, runtime)
+	if !errors.Is(err, ackLost) {
+		t.Fatalf("atomic delivery error = %v, want lost acknowledgement", err)
+	}
+	if got.Ready || !got.MayHaveStarted || got.TargetPane != "%7" || got.TargetPID != 701 {
+		t.Fatalf("uncertain submission outcome = %#v, want may-have-started exact target", got)
+	}
+	if !strictConfirmation {
+		t.Fatal("atomic delivery did not propagate strict post-Enter confirmation")
+	}
+	if !rawBracketedPaste {
+		t.Fatal("atomic delivery did not propagate raw bracketed paste")
+	}
+}
+
+func TestAtomicExpectedHarnessDeliveryStrictlyReprovesExactTargetAfterSubmit(t *testing.T) {
+	postSubmitProofs := []struct {
+		name                     string
+		harness                  string
+		observation              HarnessInputReadiness
+		wantPostSubmitProcessing bool
+	}{
+		{
+			name:                     "native processing",
+			harness:                  "codex-cli",
+			observation:              HarnessInputReadiness{State: HarnessInputProcessing, TargetPane: "%7", TargetPID: 701},
+			wantPostSubmitProcessing: true,
+		},
+		{
+			name:        "live ready",
+			harness:     "codex-cli",
+			observation: HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701},
+		},
+	}
+	for _, proof := range postSubmitProofs {
+		t.Run(proof.name, func(t *testing.T) {
+			var events []string
+			rechecks := 0
+			runtime := harnessInputDeliveryRuntime{
+				check: func(context.Context, string, string) (HarnessInputReadiness, error) {
+					events = append(events, "check")
+					return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+				},
+				recheckExact: func(_ context.Context, paneID string, harnessPID int, harness string) (HarnessInputReadiness, error) {
+					rechecks++
+					events = append(events, fmt.Sprintf("recheck-%d", rechecks))
+					if paneID != "%7" || harnessPID != 701 || harness != proof.harness {
+						t.Fatalf("exact recheck = %q/%d/%q", paneID, harnessPID, harness)
+					}
+					if rechecks == 1 {
+						return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: paneID, TargetPID: harnessPID}, nil
+					}
+					return proof.observation, nil
+				},
+				deliver: func(context.Context, HarnessInputReadiness, string, string, bool, bool) error {
+					events = append(events, "deliver")
+					return nil
+				},
+			}
+
+			got, err := checkExpectedHarnessInputAndSendLocked(t.Context(), "session", proof.harness, "/compact", InputDeliveryOptions{
+				RequireSubmissionConfirmation: true,
+			}, runtime)
+			if err != nil {
+				t.Fatalf("strict atomic delivery error = %v", err)
+			}
+			if !got.Ready || got.MayHaveStarted || got.TargetPane != "%7" || got.TargetPID != 701 ||
+				got.PostSubmitProcessing != proof.wantPostSubmitProcessing {
+				t.Fatalf("strict atomic delivery = %#v, want confirmed exact target", got)
+			}
+			wantEvents := []string{"check", "recheck-1", "deliver", "recheck-2"}
+			if !slices.Equal(events, wantEvents) {
+				t.Fatalf("strict atomic delivery events = %#v, want %#v", events, wantEvents)
+			}
+		})
+	}
+}
+
+func TestAtomicExpectedHarnessDeliveryTreatsPostSubmitReproofFailureAsUncertain(t *testing.T) {
+	observationErr := errors.New("post-submit tmux observation failed")
+	tests := []struct {
+		name     string
+		observed HarnessInputReadiness
+		err      error
+	}{
+		{
+			name:     "generic busy after command-shaped human draft",
+			observed: HarnessInputReadiness{State: HarnessInputBusy, TargetPane: "%7", TargetPID: 701},
+		},
+		{
+			name:     "foreground PID changed",
+			observed: HarnessInputReadiness{State: HarnessInputProcessing, TargetPane: "%7", TargetPID: 702},
+		},
+		{
+			name:     "expected harness disappeared",
+			observed: HarnessInputReadiness{State: HarnessInputWrongHarness, TargetPane: "%7"},
+		},
+		{
+			name:     "pane disappeared",
+			observed: HarnessInputReadiness{State: HarnessInputNotFound, TargetPane: "%7", TargetPID: 701},
+		},
+		{
+			name:     "queued AGM composer is not submission proof",
+			observed: HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: "%7", TargetPID: 701},
+		},
+		{
+			name:     "permission prompt is not submission proof",
+			observed: HarnessInputReadiness{State: HarnessInputPermission, TargetPane: "%7", TargetPID: 701},
+		},
+		{
+			name:     "overlay is not submission proof",
+			observed: HarnessInputReadiness{State: HarnessInputOverlay, TargetPane: "%7", TargetPID: 701},
+		},
+		{
+			name:     "onboarding is not submission proof",
+			observed: HarnessInputReadiness{State: HarnessInputOnboarding, TargetPane: "%7", TargetPID: 701},
+		},
+		{
+			name: "observation failed",
+			err:  observationErr,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rechecks := 0
+			deliveries := 0
+			runtime := harnessInputDeliveryRuntime{
+				check: func(context.Context, string, string) (HarnessInputReadiness, error) {
+					return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+				},
+				recheckExact: func(context.Context, string, int, string) (HarnessInputReadiness, error) {
+					rechecks++
+					if rechecks == 1 {
+						return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+					}
+					return test.observed, test.err
+				},
+				deliver: func(context.Context, HarnessInputReadiness, string, string, bool, bool) error {
+					deliveries++
+					return nil
+				},
+			}
+
+			got, err := checkExpectedHarnessInputAndSendLocked(t.Context(), "session", "codex-cli", "/compact", InputDeliveryOptions{
+				RequireSubmissionConfirmation: true,
+			}, runtime)
+			if err == nil || !PromptSubmissionMayHaveOccurred(err) {
+				t.Fatalf("post-submit identity loss error = %v, want marked submission uncertainty", err)
+			}
+			if test.err != nil && !errors.Is(err, test.err) {
+				t.Fatalf("post-submit observation error = %v, want cause %v", err, test.err)
+			}
+			if got.Ready || !got.MayHaveStarted || got.TargetPane != "%7" || got.TargetPID != 701 {
+				t.Fatalf("post-submit identity loss result = %#v, want uncertain original receipt", got)
+			}
+			if deliveries != 1 || rechecks != 2 {
+				t.Fatalf("deliveries/rechecks = %d/%d, want 1/2", deliveries, rechecks)
+			}
+		})
+	}
+}
+
+func TestAtomicExpectedHarnessDeliveryLegacySkipsPostSubmitIdentityReproof(t *testing.T) {
+	rechecks := 0
+	runtime := harnessInputDeliveryRuntime{
+		check: func(context.Context, string, string) (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+		},
+		recheckExact: func(context.Context, string, int, string) (HarnessInputReadiness, error) {
+			rechecks++
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+		},
+		deliver: func(context.Context, HarnessInputReadiness, string, string, bool, bool) error { return nil },
+	}
+
+	got, err := checkExpectedHarnessInputAndSendLocked(t.Context(), "session", "codex-cli", "ordinary prompt", InputDeliveryOptions{}, runtime)
+	if err != nil {
+		t.Fatalf("legacy atomic delivery error = %v", err)
+	}
+	if !got.Ready || rechecks != 1 {
+		t.Fatalf("legacy atomic delivery = %#v with %d rechecks, want one pre-submit recheck", got, rechecks)
+	}
+}
+
+func TestAtomicExpectedHarnessDeliveryRequiresStableSessionBinding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		initialStable string
+		recheckStable string
+		wantDelivered bool
+	}{
+		{name: "matching binding", initialStable: "stable-session", recheckStable: "stable-session", wantDelivered: true},
+		{name: "missing binding"},
+		{name: "wrong binding", initialStable: "replacement-session"},
+		{name: "replacement before send", initialStable: "stable-session", recheckStable: "replacement-session"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			deliveries := 0
+			rechecks := 0
+			runtime := harnessInputDeliveryRuntime{
+				check: func(context.Context, string, string) (HarnessInputReadiness, error) {
+					return HarnessInputReadiness{
+						Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPanePID: 77, TargetPID: 701,
+						HarnessStartTime: "Thu Aug 27 07:00:00 2026",
+						TargetSessionID:  "$1", StableSessionID: test.initialStable,
+					}, nil
+				},
+				recheckExact: func(context.Context, string, int, string) (HarnessInputReadiness, error) {
+					rechecks++
+					return HarnessInputReadiness{
+						Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPanePID: 77, TargetPID: 701,
+						HarnessStartTime: "Thu Aug 27 07:00:00 2026",
+						TargetSessionID:  "$1", StableSessionID: test.recheckStable,
+					}, nil
+				},
+				deliver: func(context.Context, HarnessInputReadiness, string, string, bool, bool) error {
+					deliveries++
+					return nil
+				},
+			}
+
+			got, err := checkExpectedHarnessInputAndSendLocked(
+				t.Context(), "session", "codex-cli", "/compact",
+				InputDeliveryOptions{ExpectedStableSessionID: "stable-session"}, runtime,
+			)
+			if test.wantDelivered {
+				if err != nil || !got.Ready || deliveries != 1 || rechecks != 1 {
+					t.Fatalf("matching stable delivery = %#v, %v; deliveries/rechecks=%d/%d", got, err, deliveries, rechecks)
+				}
+				return
+			}
+			if err == nil || got.Ready || deliveries != 0 {
+				t.Fatalf("mismatched stable delivery = %#v, %v; deliveries=%d, want fail before mutation", got, err, deliveries)
+			}
+		})
+	}
+}
+
+func TestAtomicExpectedHarnessDeliveryPreservesSendOnLockReleaseFailure(t *testing.T) {
+	t.Parallel()
+
+	unlockErr := errors.New("unlock failed")
+	runtime := harnessInputDeliveryRuntime{
+		check: func(context.Context, string, string) (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+		},
+		recheckExact: func(context.Context, string, int, string) (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
+		},
+		deliver: func(context.Context, HarnessInputReadiness, string, string, bool, bool) error { return nil },
+	}
+	withUnlockFailure := func(_ context.Context, fn func() error) error {
+		if err := fn(); err != nil {
+			return err
+		}
+		return unlockErr
+	}
+
+	got, err := checkExpectedHarnessInputAndSendAtBoundary(
+		t.Context(), "session", "codex-cli", "/compact", InputDeliveryOptions{}, runtime, withUnlockFailure,
+	)
+	if !errors.Is(err, unlockErr) || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("lock release error = %v, want marked submission uncertainty preserving cause", err)
+	}
+	if got.Ready || !got.MayHaveStarted || got.TargetPane != "%7" || got.TargetPID != 701 {
+		t.Fatalf("lock release result = %#v, want uncertain exact delivery receipt", got)
+	}
+}
+
 func TestQueuedAGMRecoveryClearsBeforeReplacement(t *testing.T) {
 	t.Parallel()
 
@@ -890,15 +1414,15 @@ func TestQueuedAGMRecoveryClearsBeforeReplacement(t *testing.T) {
 		},
 		recheck: func() (HarnessInputReadiness, error) {
 			events = append(events, "recheck")
-			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", Content: "empty composer"}, nil
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701, Content: "empty composer"}, nil
 		},
-		deliver: func(_ context.Context, pane, command string) error {
+		deliver: func(_ context.Context, pane, command string) (HarnessInputReadiness, error) {
 			events = append(events, "deliver:"+pane+":"+command)
-			return nil
+			return HarnessInputReadiness{}, nil
 		},
 	}
 
-	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", 701, "replacement", runtime)
 	if err != nil {
 		t.Fatalf("replaceQueuedAGMInputLocked() error = %v", err)
 	}
@@ -910,7 +1434,7 @@ func TestQueuedAGMRecoveryClearsBeforeReplacement(t *testing.T) {
 	if !slices.Equal(events, want) {
 		t.Fatalf("replacement events = %#v, want %#v", events, want)
 	}
-	if !got.Ready || got.State != HarnessInputReady || !got.Forced || got.TargetPane != "%7" {
+	if !got.Ready || got.State != HarnessInputReady || !got.Forced || got.TargetPane != "%7" || got.TargetPID != 701 {
 		t.Fatalf("replacement readiness = %#v, want forced ready on %%7", got)
 	}
 }
@@ -922,9 +1446,10 @@ func TestQueuedAGMRecoveryDoesNotReplaceUntilExactPaneIsEmpty(t *testing.T) {
 		name    string
 		recheck HarnessInputReadiness
 	}{
-		{name: "queue remains", recheck: HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: "%7"}},
-		{name: "human input appears", recheck: HarnessInputReadiness{State: HarnessInputBusy, TargetPane: "%7"}},
-		{name: "active pane changes", recheck: HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%8"}},
+		{name: "queue remains", recheck: HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: "%7", TargetPID: 701}},
+		{name: "human input appears", recheck: HarnessInputReadiness{State: HarnessInputBusy, TargetPane: "%7", TargetPID: 701}},
+		{name: "active pane changes", recheck: HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%8", TargetPID: 801}},
+		{name: "pane process changes", recheck: HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 702}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -933,12 +1458,12 @@ func TestQueuedAGMRecoveryDoesNotReplaceUntilExactPaneIsEmpty(t *testing.T) {
 				sendKey: func(context.Context, string, string) error { return nil },
 				wait:    func(context.Context, time.Duration) error { return nil },
 				recheck: func() (HarnessInputReadiness, error) { return tt.recheck, nil },
-				deliver: func(context.Context, string, string) error {
+				deliver: func(context.Context, string, string) (HarnessInputReadiness, error) {
 					delivered = true
-					return nil
+					return HarnessInputReadiness{}, nil
 				},
 			}
-			got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+			got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", 701, "replacement", runtime)
 			if err == nil {
 				t.Fatal("replaceQueuedAGMInputLocked() error = nil, want failed closed")
 			}
@@ -959,11 +1484,13 @@ func TestQueuedAGMRecoveryDoesNotReportReadyWhenReplacementFails(t *testing.T) {
 		sendKey: func(context.Context, string, string) error { return nil },
 		wait:    func(context.Context, time.Duration) error { return nil },
 		recheck: func() (HarnessInputReadiness, error) {
-			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7"}, nil
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", TargetPID: 701}, nil
 		},
-		deliver: func(context.Context, string, string) error { return errors.New("paste failed") },
+		deliver: func(context.Context, string, string) (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{}, errors.New("paste failed")
+		},
 	}
-	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", 701, "replacement", runtime)
 	if err == nil || !strings.Contains(err.Error(), "paste failed") {
 		t.Fatalf("replaceQueuedAGMInputLocked() error = %v, want paste failure", err)
 	}

@@ -453,11 +453,22 @@ func sendPromptLiteral(target, prompt string, shouldInterrupt bool, harness stri
 }
 
 func pasteBufferArgs(socketPath, target, harness string) []string {
-	deleteFlag := "-d"
-	if harness == "agy" {
-		deleteFlag = "-dpr"
+	return pasteBufferArgsForDelivery(socketPath, target, harness, false)
+}
+
+func pasteBufferArgsForDelivery(socketPath, target, harness string, rawBracketedPaste bool) []string {
+	return pasteBufferArgsForNamedDelivery(socketPath, "agm-cmd", target, harness, rawBracketedPaste)
+}
+
+func pasteBufferArgsForNamedDelivery(socketPath, bufferName, target, harness string, rawBracketedPaste bool) []string {
+	return []string{"-S", socketPath, "paste-buffer", "-b", bufferName, "-t", target, pasteBufferDeleteFlag(harness, rawBracketedPaste)}
+}
+
+func pasteBufferDeleteFlag(harness string, rawBracketedPaste bool) string {
+	if harness == "agy" || rawBracketedPaste {
+		return "-dpr"
 	}
-	return []string{"-S", socketPath, "paste-buffer", "-b", "agm-cmd", "-t", target, deleteFlag}
+	return "-d"
 }
 
 // checkPaneForQueuedInput examines an ANSI pane capture and returns an error if

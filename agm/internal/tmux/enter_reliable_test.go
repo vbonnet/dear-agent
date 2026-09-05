@@ -89,6 +89,68 @@ func TestVerifyingEnter_CaptureFailureIsBestEffort(t *testing.T) {
 	}
 }
 
+func TestVerifyingEnter_StrictCaptureFailureIsSubmissionUncertain(t *testing.T) {
+	enters := 0
+	sendEnter := func() error {
+		enters++
+		return nil
+	}
+	captureErr := errors.New("capture-pane acknowledgement lost")
+	capture := func() (string, error) { return "", captureErr }
+	config := fastConfig()
+	config.requireObservedSubmission = true
+
+	err := verifyingEnter(sendEnter, capture, config)
+	if err == nil || !PromptSubmissionMayHaveOccurred(err) || !errors.Is(err, captureErr) {
+		t.Fatalf("strict capture failure = %v, want submission uncertainty preserving capture cause", err)
+	}
+	if enters != 1 {
+		t.Fatalf("strict capture failure sent Enter %d times, want exactly once", enters)
+	}
+}
+
+func TestVerifyingEnterCancellationBeforeFirstEnterIsDefiniteNotSent(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	enters := 0
+	config := fastConfig()
+	config.initialSettle = time.Hour
+
+	err := verifyingEnterContext(ctx, func() error {
+		enters++
+		return nil
+	}, func() (string, error) {
+		return codexRunning, nil
+	}, config)
+	if !errors.Is(err, context.Canceled) || PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("pre-Enter cancellation = %v, want definite context cancellation", err)
+	}
+	if enters != 0 {
+		t.Fatalf("pre-Enter cancellation sent Enter %d times", enters)
+	}
+}
+
+func TestVerifyingEnterCancellationAfterAcceptedEnterIsUncertain(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	enters := 0
+	config := fastConfig()
+	config.backoffs = []time.Duration{time.Hour}
+
+	err := verifyingEnterContext(ctx, func() error {
+		enters++
+		cancel()
+		return nil
+	}, func() (string, error) {
+		return codexRunning, nil
+	}, config)
+	if !errors.Is(err, context.Canceled) || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("post-Enter cancellation = %v, want marked submission uncertainty", err)
+	}
+	if enters != 1 {
+		t.Fatalf("post-Enter cancellation sent Enter %d times, want one", enters)
+	}
+}
+
 // TestVerifyingEnter_SendError propagates a real send-keys failure.
 func TestVerifyingEnter_SendError(t *testing.T) {
 	sendEnter := func() error { return errors.New("tmux: server not found") }

@@ -110,6 +110,43 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-51** When a readiness or pane-liveness scan invokes multiple sequential tmux or process-table observations, the system shall bound the complete scan with an internal deadline that accommodates the full observation sequence under loaded-host contention while an earlier caller cancellation or deadline remains authoritative; exhausting either deadline or failing any observation shall return an operational error and shall never fabricate absence, wrong-harness state, or readiness.
 
+**TMUX-52** When exact-harness readiness classifies a non-ready pane, the system shall report `PROCESSING` only for a current-tail native Codex, Claude, or managed Pi active-work signal; an occupied human composer, queued AGM paste, historical or arbitrary working text, unsupported harness output, and unrecognized content shall remain distinct non-processing states that cannot prove a compaction transition.
+
+**TMUX-53** When atomic exact-pane delivery waits for the tmux mutation lock, the system shall honor caller cancellation; after the first ready capture and immediately before submission it shall re-prove the same pane and foreground harness PID, abort without sending when either changed, and, when strict submission confirmation is requested, preserve that exact target plus an explicit may-have-started outcome when the irreversible submission acknowledgement or every post-Enter observation is lost.
+
+**TMUX-54** When atomic delivery is asked to preserve multiline composer input as one submission, the system shall invoke tmux paste-buffer with raw bracketed-paste semantics so embedded line feeds remain paste content until the separately verified Enter boundary.
+
+**TMUX-55** When strict submission confirmation succeeds, the system shall retain the tmux mutation lock while proving from the exact pane's complete logical history that the complete delivery-owned command left its parked shape after an accepted Enter, then re-proving the same pane ID, pane-root PID, tmux session ID, stable AGM binding, foreground harness PID and process birth time, and expected harness. Mere absence, an empty composer, alternate-screen disappearance, exact-command prefix followed by arbitrary output, or generic busy is not positive submission continuity because a concurrent human clear or appended multiline draft can produce those shapes. Only live-ready or native-processing evidence on that unchanged runtime confirms continuity. A partial or different occupied composer, truncated or ambiguous capture, missing or changed identity, queued composer, permission or overlay state, generic busy state, or failed post-submit observation shall return marked may-have-started uncertainty with the original exact receipt, while callers that do not request strict confirmation shall retain legacy delivery without an added post-submit observation.
+
+**TMUX-56** When AGM creates or explicitly adopts a tmux session for a registered stable session, the system shall persist that stable ID as a session-local tmux binding without overwriting a different binding; adoption shall condition one queued claim on the observed session name and ID, pane ID and root PID, and empty binding, and shall write a random adoption identity with the stable ID so a lost acknowledgement can be reconciled only to that exact claim. Exact delivery shall require the expected binding on the resolved tmux session at initial readiness, immediately before submission, and during strict post-submit reproof, treating a missing or changed pre-submit binding as definite non-delivery and a missing or changed post-submit binding as marked uncertainty.
+
+**TMUX-57** When raw multiline delivery depends on bracketed-paste framing, the system shall include `bracket_paste_flag=1` in the same tmux-server conditional command that verifies exact target identity and pastes the uniquely named buffer; a disabled or changed flag shall stop before prompt bytes or Enter and remain definite not sent.
+
+**TMUX-58** When strict delivery is canceled before exact paste mutation it shall remain definite non-delivery. Once the exact paste succeeds, cancellation before Enter or during capture backoff shall preserve marked uncertainty because the parked command can later be submitted; after an accepted Enter, a lost or ambiguous observation shall stop without another Enter, and a retry shall occur only when the complete exact command is positively still parked.
+
+**TMUX-59** When exact delivery has already crossed the irreversible submission boundary but releasing its tmux mutation lock fails, the system shall preserve the exact delivery receipt, mark `MayHaveStarted`, and return uncertainty instead of downgrading the outcome to safe non-delivery or success.
+
+**TMUX-60** When strict post-submit reproof positively observes native processing on the exact stable-bound pane and foreground harness PID, the system shall return that observation separately from submission acknowledgement so a completion verifier can preserve the transition without inferring it from a later idle frame.
+
+**TMUX-61** When strict delivery is attempted, the system shall use one random tmux buffer per attempt, condition both paste-buffer and every Enter retry inside tmux's command queue on the exact pane ID, pane-root PID, tmux session ID, stable AGM session binding, and zero attached tmux clients, and require a structural exact-command occurrence created after the complete pre-paste history baseline before accepting submission proof. A strict compaction request shall refuse with an actionable detach instruction whenever a client is attached at either mutation boundary. A prior identical command echo, pane replacement, server restart, attached-client input, or identity drift between observation and mutation shall not redirect or falsely confirm prompt bytes or Enter; a lost reply after a conditional mutation starts shall remain uncertain and prohibit automatic retry.
+
+### Open terminal-input boundary
+
+TMUX-61 is defense in depth, not an exclusive composer or foreground-harness
+lease. Tmux exposes neither a terminal-content fingerprint nor the foreground
+child PID and birth marker in the queued format condition: an external writer
+can issue `send-keys`, or attach, type, and detach, after AGM's empty-composer
+recheck but before the conditional paste, and the foreground harness can also
+exit or restart in that interval. The conditioned pane-root and session
+identities can remain unchanged while AGM appends to foreign input or targets a
+different foreground process. Closing this boundary requires a harness-native
+input transaction/lease or an equivalent mutation-time content and process
+authority; callers and reviewers must not represent the current terminal
+transport as proving composer or foreground-harness immutability across that
+interval. On macOS, `ps lstart` is also only second-resolution, so the recorded
+birth marker reduces ordinary PID-reuse risk but cannot distinguish the
+pathological case of the same PID being recycled within the same second.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
@@ -127,3 +164,4 @@ because the tmux server's own cwd has been deleted.
 - Package tests: `agm/internal/tmux/pi_prompt_test.go`
 - Package tests: `agm/internal/tmux/readiness_test.go`
 - Integration tests: `agm/internal/session/tmux_real_readiness_test.go`
+- Related feature: `agm/test/bdd/features/agm_runtime_package_guardrails.feature` (TMUX-52 through TMUX-61)

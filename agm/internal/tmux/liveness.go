@@ -36,13 +36,14 @@ const livenessScanTimeout = 5 * time.Second
 // for input-readiness scans, which must distinguish a foreground harness from
 // a stopped or background descendant. Comm may be a bare name or a full path.
 type ProcEntry struct {
-	PID   int
-	PPID  int
-	PGID  int
-	TPGID int
-	State string
-	Comm  string
-	Args  string
+	PID       int
+	PPID      int
+	PGID      int
+	TPGID     int
+	State     string
+	StartTime string
+	Comm      string
+	Args      string
 }
 
 // procCommandEntry is one process-table row with the full command line. Pi's
@@ -54,6 +55,21 @@ type procCommandEntry struct {
 	Command       string
 	Args          []string
 	ArgvInspected bool
+}
+
+// processIdentity joins observations made by separate ps invocations. PID
+// alone is not an identity: the kernel may recycle it after the foreground
+// snapshot and before the argv snapshot. LongStart is ps's stable process
+// birth timestamp (lstart), so a recycled PID cannot donate argv to the
+// process observed in the first snapshot.
+type processIdentity struct {
+	PID       int
+	LongStart string
+}
+
+type identifiedProcEntry struct {
+	Identity processIdentity
+	Process  ProcEntry
 }
 
 // PaneLiveness is the verdict of a harness-process liveness scan for one
@@ -68,6 +84,13 @@ type PaneLiveness struct {
 	// tree.
 	// This is the only signal that proves the session is genuinely alive.
 	HarnessAlive bool
+	// HarnessPID is the first matching harness process in the pane walk. Exact
+	// delivery receipts retain it so verification cannot adopt a restarted
+	// harness in the same pane.
+	HarnessPID int
+	// HarnessStartTime is ps lstart for HarnessPID. PID alone can be recycled
+	// between delivery and a later completion poll.
+	HarnessStartTime string
 	// ZombieWriter reports the ce-qkf7 failure mode: no harness process is
 	// alive, but an agm process is still running in the pane tree — the
 	// likely orphaned writer keeping a heartbeat file falsely fresh.
@@ -249,6 +272,10 @@ func observePaneProcess(verdict *PaneLiveness, process ProcEntry, isHarness func
 	}
 	if isHarness(process) {
 		verdict.HarnessAlive = true
+		if verdict.HarnessPID == 0 {
+			verdict.HarnessPID = process.PID
+			verdict.HarnessStartTime = process.StartTime
+		}
 	} else if filepath.Base(process.Comm) == "agm" {
 		verdict.ZombieWriter = true
 	}
@@ -281,8 +308,45 @@ func ParsePSArgsTable(out string) map[int]string {
 }
 
 type activePaneTarget struct {
-	ID      string
-	RootPID int
+	ID              string
+	RootPID         int
+	SessionID       string
+	StableSessionID string
+}
+
+// resolvePaneTarget re-resolves one exact pane identity. It is used after an
+// atomic delivery so later observations stay pinned to the delivered pane
+// instead of following session focus.
+func resolvePaneTarget(ctx context.Context, paneID, socketPath string) (activePaneTarget, bool, error) {
+	if !isPaneID(paneID) {
+		return activePaneTarget{}, false, fmt.Errorf("invalid tmux pane ID %q", paneID)
+	}
+	format := "#{pane_id}|#{pane_pid}|#{session_id}|#{" + stableSessionIdentityOption + "}"
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "display-message", "-p", "-t", paneID, format)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if isMissingSessionOutput(out) {
+			return activePaneTarget{}, false, nil
+		}
+		return activePaneTarget{}, false, tmuxCommandError("resolve pane", paneID, out, err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return activePaneTarget{}, false, nil
+	}
+	fields := strings.Split(strings.TrimRight(string(out), "\r\n"), "|")
+	if len(fields) == 4 && fields[0] == "" && fields[1] == "" && fields[2] == "" && fields[3] == "" {
+		return activePaneTarget{}, false, nil
+	}
+	if len(fields) != 4 || fields[0] != paneID || !IsSessionID(fields[2]) {
+		return activePaneTarget{}, true, fmt.Errorf("invalid tmux pane identity %q", strings.TrimSpace(string(out)))
+	}
+	pid, err := strconv.Atoi(fields[1])
+	if err != nil || pid <= 0 {
+		return activePaneTarget{}, true, fmt.Errorf("invalid tmux pane PID %q", fields[1])
+	}
+	return activePaneTarget{
+		ID: paneID, RootPID: pid, SessionID: fields[2], StableSessionID: fields[3],
+	}, true, nil
 }
 
 // resolveActivePaneTarget resolves the one pane that an unqualified tmux
@@ -299,21 +363,26 @@ func resolveActivePaneTarget(ctx context.Context, sessionName, socketPath string
 	// so a tab-separated format collapses "%1<tab>54721" into the single token
 	// "%1_54721" and the parse below fails with "invalid active tmux pane
 	// identity". A space survives verbatim and cannot appear in either field:
-	// pane_id is "%N" and pane_pid is an integer.
-	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalized), "-f", "#{pane_active}", "-F", "#{pane_id} #{pane_pid}")
+	// pane_id is "%N", pane_pid is an integer, session_id is "$N", and the
+	// stable AGM identity is constrained to exclude the pipe delimiter.
+	format := "#{pane_id}|#{pane_pid}|#{session_id}|#{" + stableSessionIdentityOption + "}"
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalized), "-f", "#{pane_active}",
+		"-F", format)
 	out, err := cmd.Output()
 	if err != nil {
 		return activePaneTarget{}, true, fmt.Errorf("resolve active tmux pane: %w", err)
 	}
-	fields := strings.Fields(strings.TrimSpace(string(out)))
-	if len(fields) != 2 || !isPaneID(fields[0]) {
+	fields := strings.Split(strings.TrimRight(string(out), "\r\n"), "|")
+	if len(fields) != 4 || !isPaneID(fields[0]) || !IsSessionID(fields[2]) {
 		return activePaneTarget{}, true, fmt.Errorf("invalid active tmux pane identity %q", strings.TrimSpace(string(out)))
 	}
 	pid, err := strconv.Atoi(fields[1])
 	if err != nil || pid <= 0 {
 		return activePaneTarget{}, true, fmt.Errorf("invalid active tmux pane PID %q", fields[1])
 	}
-	return activePaneTarget{ID: fields[0], RootPID: pid}, true, nil
+	return activePaneTarget{
+		ID: fields[0], RootPID: pid, SessionID: fields[2], StableSessionID: fields[3],
+	}, true, nil
 }
 
 // listPanePIDs returns the pane root PIDs for sessionName on socketPath.
@@ -841,22 +910,96 @@ func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
 }
 
 func readProcessTableWithArgs(ctx context.Context) ([]ProcEntry, error) {
-	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=,pgid=,tpgid=,stat=,comm=")
-	out, err := cmd.Output()
+	return readProcessTableWithArgsUsing(ctx, func(ctx context.Context, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, "ps", args...).Output()
+	})
+}
+
+func readProcessTableWithArgsUsing(
+	ctx context.Context,
+	runPS func(context.Context, ...string) ([]byte, error),
+) ([]ProcEntry, error) {
+	out, err := runPS(ctx, "-axo", "pid=,ppid=,pgid=,tpgid=,stat=,lstart=,comm=")
 	if err != nil {
 		return nil, fmt.Errorf("ps foreground table: %w", err)
 	}
-	procs := ParsePSForegroundTable(string(out))
-	cmd = exec.CommandContext(ctx, "ps", "-axo", "pid=,args=")
-	out, err = cmd.Output()
+	identified := parsePSForegroundIdentityTable(string(out))
+	out, err = runPS(ctx, "-ww", "-axo", "pid=,lstart=,args=")
 	if err != nil {
 		return nil, fmt.Errorf("ps args: %w", err)
 	}
-	argsByPID := ParsePSArgsTable(string(out))
-	for i := range procs {
-		procs[i].Args = argsByPID[procs[i].PID]
+	argsByIdentity := parsePSArgsIdentityTable(string(out))
+	procs := make([]ProcEntry, 0, len(identified))
+	for _, observed := range identified {
+		observed.Process.Args = argsByIdentity[observed.Identity]
+		procs = append(procs, observed.Process)
 	}
 	return procs, nil
+}
+
+// ps lstart consists of five whitespace-delimited fields: weekday, month,
+// day, time, and year. Keeping the complete value avoids the rollover and
+// formatting ambiguity of elapsed-time fields.
+const psLongStartFields = 5
+
+func parsePSForegroundIdentityTable(out string) []identifiedProcEntry {
+	var entries []identifiedProcEntry
+	for line := range strings.SplitSeq(out, "\n") {
+		prefix, comm, ok := splitPSPrefix(line, 5+psLongStartFields)
+		if !ok || comm == "" {
+			continue
+		}
+		pid, pidErr := strconv.Atoi(prefix[0])
+		ppid, ppidErr := strconv.Atoi(prefix[1])
+		pgid, pgidErr := strconv.Atoi(prefix[2])
+		tpgid, tpgidErr := strconv.Atoi(prefix[3])
+		if pidErr != nil || ppidErr != nil || pgidErr != nil || tpgidErr != nil {
+			continue
+		}
+		entries = append(entries, identifiedProcEntry{
+			Identity: processIdentity{PID: pid, LongStart: strings.Join(prefix[5:], " ")},
+			Process: ProcEntry{
+				PID: pid, PPID: ppid, PGID: pgid, TPGID: tpgid,
+				State: prefix[4], StartTime: strings.Join(prefix[5:], " "), Comm: comm,
+			},
+		})
+	}
+	return entries
+}
+
+func parsePSArgsIdentityTable(out string) map[processIdentity]string {
+	entries := make(map[processIdentity]string)
+	for line := range strings.SplitSeq(out, "\n") {
+		prefix, args, ok := splitPSPrefix(line, 1+psLongStartFields)
+		if !ok || args == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(prefix[0])
+		if err != nil {
+			continue
+		}
+		identity := processIdentity{PID: pid, LongStart: strings.Join(prefix[1:], " ")}
+		entries[identity] = args
+	}
+	return entries
+}
+
+func splitPSPrefix(line string, count int) ([]string, string, bool) {
+	line = strings.TrimSpace(line)
+	prefix := make([]string, 0, count)
+	for len(prefix) < count {
+		line = strings.TrimLeft(line, " \t")
+		if line == "" {
+			return nil, "", false
+		}
+		end := strings.IndexAny(line, " \t")
+		if end < 0 {
+			return nil, "", false
+		}
+		prefix = append(prefix, line[:end])
+		line = line[end:]
+	}
+	return prefix, strings.TrimSpace(line), true
 }
 
 // CheckPaneLiveness runs the real harness-liveness scan for sessionName on

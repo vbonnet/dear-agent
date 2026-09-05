@@ -65,6 +65,8 @@ func HasSessionStrictContext(ctx context.Context, name string) (bool, error) {
 
 const sessionIdentityCreationPrefix = "agm-create-"
 const sessionRenameIdentityOption = "@agm_rename_identity"
+const stableSessionIdentityOption = "@agm_stable_session_id"
+const stableSessionAdoptionIdentityOption = "@agm_stable_adoption_identity"
 
 // SessionIdentity identifies one specific tmux session creation. ID is local
 // to a tmux server generation and may be reused after a server restart. Token
@@ -289,9 +291,267 @@ func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
 	return false, tmuxCommandError("check session identity", identity.ID, output, err)
 }
 
+// BindStableSessionIDContext adopts one existing tmux session into a newly
+// created durable AGM identity. An existing different binding is never
+// overwritten. The bool reports whether this call wrote the option, including
+// when the write succeeded but lock release later failed so rollback can clear
+// the exact value conservatively.
+func BindStableSessionIDContext(ctx context.Context, name, stableSessionID string) (newlyBound bool, resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateStableSessionID(stableSessionID); err != nil {
+		return false, err
+	}
+	normalized := NormalizeTmuxSessionName(name)
+	if SanitizeSessionName(normalized) != normalized {
+		return false, fmt.Errorf("cannot safely bind malformed tmux session name %q", normalized)
+	}
+	resultErr = withTmuxLockContext(ctx, func() error {
+		target, exists, err := inspectStableSessionAdoptionTargetContext(ctx, normalized, normalized)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("cannot bind absent tmux session %q", normalized)
+		}
+		if target.StableSessionID == stableSessionID {
+			return nil
+		}
+		if target.StableSessionID != "" {
+			return fmt.Errorf("tmux session %q is already bound to stable AGM session %q", normalized, target.StableSessionID)
+		}
+		newlyBound, err = claimStableSessionAdoptionContext(ctx, target, stableSessionID)
+		return err
+	})
+	return newlyBound, resultErr
+}
+
+// stableSessionAdoptionTarget is the full tmux incarnation observed before an
+// existing session is adopted. Server-local session and pane IDs can both be
+// reused after a tmux restart, so the queued claim also binds the name and pane
+// root process. The random adoption token written with the durable binding lets
+// a caller reconcile a lost command acknowledgement without trusting the value
+// alone.
+type stableSessionAdoptionTarget struct {
+	Name             string
+	SessionID        string
+	PaneID           string
+	PanePID          int
+	StableSessionID  string
+	AdoptionIdentity string
+}
+
+func claimStableSessionAdoptionContext(ctx context.Context, target stableSessionAdoptionTarget, stableSessionID string) (bool, error) {
+	identity, err := newSessionIdentity()
+	if err != nil {
+		return false, fmt.Errorf("generate stable AGM adoption identity: %w", err)
+	}
+	ack := "AGM_STABLE_BIND_OK_" + identity.Token
+	refused := "AGM_STABLE_BIND_REFUSED_" + identity.Token
+	condition := stableSessionAdoptionCondition(target, "", "")
+	bindCommand := fmt.Sprintf(
+		"set-option -t %s %s %s ; set-option -t %s %s %s ; display-message -p %s",
+		strconv.Quote(target.SessionID), stableSessionIdentityOption, strconv.Quote(stableSessionID),
+		strconv.Quote(target.SessionID), stableSessionAdoptionIdentityOption, strconv.Quote(identity.Token),
+		strconv.Quote(ack),
+	)
+	refuseCommand := fmt.Sprintf("display-message -p %s", strconv.Quote(refused))
+	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(),
+		"if-shell", "-F", "-t", target.PaneID, condition, bindCommand, refuseCommand)
+
+	// Reconcile by the complete observed incarnation and our random token. This
+	// makes a lost ACK safe: only the exact claim issued above can report success.
+	observed, exists, inspectErr := inspectStableSessionAdoptionTargetContext(ctx, target.PaneID, target.Name)
+	if inspectErr == nil && exists && sameStableSessionAdoptionIncarnation(target, observed) &&
+		observed.StableSessionID == stableSessionID && observed.AdoptionIdentity == identity.Token {
+		return true, nil
+	}
+	if runErr != nil {
+		return false, tmuxCommandError("atomically bind stable AGM session", target.Name, output, runErr)
+	}
+	if inspectErr != nil {
+		return false, inspectErr
+	}
+	if strings.TrimSpace(string(output)) == refused {
+		return false, fmt.Errorf("tmux session %q changed incarnation before stable AGM binding", target.Name)
+	}
+	return false, fmt.Errorf(
+		"stable AGM session binding for %q was not confirmed (acknowledgement %q)",
+		target.Name, strings.TrimSpace(string(output)),
+	)
+}
+
+func stableSessionAdoptionCondition(target stableSessionAdoptionTarget, stableSessionID, adoptionIdentity string) string {
+	conditions := []string{
+		fmt.Sprintf("#{==:#{session_name},%s}", target.Name),
+		fmt.Sprintf("#{==:#{session_id},%s}", target.SessionID),
+		fmt.Sprintf("#{==:#{pane_id},%s}", target.PaneID),
+		fmt.Sprintf("#{==:#{pane_pid},%d}", target.PanePID),
+		fmt.Sprintf("#{==:#{%s},%s}", stableSessionIdentityOption, stableSessionID),
+		fmt.Sprintf("#{==:#{%s},%s}", stableSessionAdoptionIdentityOption, adoptionIdentity),
+	}
+	condition := conditions[len(conditions)-1]
+	for i := len(conditions) - 2; i >= 0; i-- {
+		condition = fmt.Sprintf("#{&&:%s,%s}", conditions[i], condition)
+	}
+	return condition
+}
+
+func sameStableSessionAdoptionIncarnation(expected, observed stableSessionAdoptionTarget) bool {
+	return observed.Name == expected.Name && observed.SessionID == expected.SessionID &&
+		observed.PaneID == expected.PaneID && observed.PanePID == expected.PanePID
+}
+
+// ClearStableSessionIDContext compensates only the exact stable value written
+// while adopting a reused tmux session. A missing session is already clean; a
+// different binding is preserved and reported rather than overwritten.
+func ClearStableSessionIDContext(ctx context.Context, name, stableSessionID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateStableSessionID(stableSessionID); err != nil {
+		return err
+	}
+	normalized := NormalizeTmuxSessionName(name)
+	if SanitizeSessionName(normalized) != normalized {
+		return fmt.Errorf("cannot safely clear malformed tmux session name %q", normalized)
+	}
+	return withTmuxLockContext(ctx, func() error {
+		return clearStableSessionIDLocked(ctx, normalized, stableSessionID)
+	})
+}
+
+func clearStableSessionIDLocked(ctx context.Context, normalized, stableSessionID string) error {
+	target, exists, err := inspectStableSessionAdoptionTargetContext(ctx, normalized, normalized)
+	if err != nil || !exists {
+		return err
+	}
+	if target.StableSessionID == "" {
+		return nil
+	}
+	if target.StableSessionID != stableSessionID {
+		return fmt.Errorf(
+			"refuse to clear tmux session %q binding %q while compensating %q",
+			normalized, target.StableSessionID, stableSessionID,
+		)
+	}
+	return clearStableSessionAdoptionTarget(ctx, normalized, target)
+}
+
+func clearStableSessionAdoptionTarget(ctx context.Context, normalized string, target stableSessionAdoptionTarget) error {
+	identity, err := newSessionIdentity()
+	if err != nil {
+		return fmt.Errorf("generate stable AGM clear acknowledgement: %w", err)
+	}
+	ack := "AGM_STABLE_CLEAR_OK_" + identity.Token
+	refused := "AGM_STABLE_CLEAR_REFUSED_" + identity.Token
+	condition := stableSessionAdoptionCondition(target, target.StableSessionID, target.AdoptionIdentity)
+	clearCommand := fmt.Sprintf(
+		"set-option -u -t %s %s ; set-option -u -t %s %s ; display-message -p %s",
+		strconv.Quote(target.SessionID), stableSessionIdentityOption,
+		strconv.Quote(target.SessionID), stableSessionAdoptionIdentityOption,
+		strconv.Quote(ack),
+	)
+	refuseCommand := fmt.Sprintf("display-message -p %s", strconv.Quote(refused))
+	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(),
+		"if-shell", "-F", "-t", target.PaneID, condition, clearCommand, refuseCommand)
+	observed, observedExists, inspectErr := inspectStableSessionAdoptionTargetContext(ctx, target.PaneID, target.Name)
+	if stableSessionBindingWasCleared(target, observed, observedExists, inspectErr) {
+		return nil
+	}
+	if runErr != nil {
+		return tmuxCommandError("atomically clear stable AGM session binding", normalized, output, runErr)
+	}
+	if inspectErr != nil {
+		return inspectErr
+	}
+	if strings.TrimSpace(string(output)) == refused {
+		return fmt.Errorf("tmux session %q changed incarnation before stable AGM binding cleanup", normalized)
+	}
+	return fmt.Errorf("stable AGM session binding cleanup for %q was not confirmed", normalized)
+}
+
+func stableSessionBindingWasCleared(
+	expected, observed stableSessionAdoptionTarget,
+	observedExists bool,
+	inspectErr error,
+) bool {
+	return inspectErr == nil && (!observedExists ||
+		sameStableSessionAdoptionIncarnation(expected, observed) &&
+			observed.StableSessionID == "" && observed.AdoptionIdentity == "")
+}
+
+func inspectStableSessionIDContext(ctx context.Context, name string) (stableSessionID string, exists bool, err error) {
+	_, stableSessionID, exists, err = inspectStableSessionIdentityContext(ctx, name, name)
+	return stableSessionID, exists, err
+}
+
+func inspectStableSessionAdoptionTargetContext(ctx context.Context, target, expectedName string) (stableSessionAdoptionTarget, bool, error) {
+	format := "#{session_name}|#{session_id}|#{pane_id}|#{pane_pid}|#{" + stableSessionIdentityOption + "}|#{" + stableSessionAdoptionIdentityOption + "}"
+	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(),
+		"display-message", "-p", "-t", target, format)
+	if runErr != nil {
+		if isMissingSessionOutput(output) {
+			return stableSessionAdoptionTarget{}, false, nil
+		}
+		return stableSessionAdoptionTarget{}, false, tmuxCommandError("inspect stable AGM adoption target", target, output, runErr)
+	}
+	parts := strings.Split(strings.TrimRight(string(output), "\r\n"), "|")
+	if len(parts) != 6 || parts[0] != expectedName || !IsSessionID(parts[1]) || !isPaneID(parts[2]) {
+		return stableSessionAdoptionTarget{}, true, fmt.Errorf("tmux returned malformed stable AGM adoption target for %q", expectedName)
+	}
+	panePID, err := strconv.Atoi(parts[3])
+	if err != nil || panePID <= 0 {
+		return stableSessionAdoptionTarget{}, true, fmt.Errorf("tmux returned invalid pane process identity for %q", expectedName)
+	}
+	if parts[4] != "" {
+		if err := validateStableSessionID(parts[4]); err != nil {
+			return stableSessionAdoptionTarget{}, true, fmt.Errorf("tmux session %q has malformed stable AGM binding: %w", expectedName, err)
+		}
+	}
+	if parts[5] != "" {
+		decoded, decodeErr := hex.DecodeString(parts[5])
+		if decodeErr != nil || len(decoded) != 16 {
+			return stableSessionAdoptionTarget{}, true, fmt.Errorf("tmux session %q has malformed stable AGM adoption identity", expectedName)
+		}
+	}
+	return stableSessionAdoptionTarget{
+		Name:             parts[0],
+		SessionID:        parts[1],
+		PaneID:           parts[2],
+		PanePID:          panePID,
+		StableSessionID:  parts[4],
+		AdoptionIdentity: parts[5],
+	}, true, nil
+}
+
+func inspectStableSessionIdentityContext(ctx context.Context, target, expectedName string) (tmuxSessionID, stableSessionID string, exists bool, err error) {
+	format := "#{session_name}|#{session_id}|#{" + stableSessionIdentityOption + "}"
+	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(),
+		"display-message", "-p", "-t", target, format)
+	if runErr != nil {
+		if isMissingSessionOutput(output) {
+			return "", "", false, nil
+		}
+		return "", "", false, tmuxCommandError("inspect stable AGM session binding", target, output, runErr)
+	}
+	parts := strings.Split(strings.TrimRight(string(output), "\r\n"), "|")
+	if len(parts) != 3 || parts[0] != expectedName || !IsSessionID(parts[1]) {
+		return "", "", true, fmt.Errorf("tmux returned malformed stable AGM session binding for %q", expectedName)
+	}
+	if parts[2] != "" {
+		if err := validateStableSessionID(parts[2]); err != nil {
+			return "", "", true, fmt.Errorf("tmux session %q has malformed stable AGM binding: %w", expectedName, err)
+		}
+	}
+	return parts[1], parts[2], true, nil
+}
+
 func isMissingSessionOutput(output []byte) bool {
 	lowerOutput := strings.ToLower(string(output))
 	return strings.Contains(lowerOutput, "can't find session") ||
+		strings.Contains(lowerOutput, "can't find pane") ||
 		strings.Contains(lowerOutput, "no current target")
 }
 
@@ -450,7 +710,21 @@ func EnableAutoRespawn(sessionName string) error {
 
 // NewSession creates a new tmux session with optimized settings.
 func NewSession(name string, workDir string) error {
-	identity, err := NewSessionWithIdentity(name, workDir)
+	identity, err := newSessionWithIdentity(name, workDir, "")
+	if err == nil || !identity.Cleanable() {
+		return err
+	}
+	if cleanupErr := KillSessionIdentityChecked(identity); cleanupErr != nil {
+		return errors.Join(err, fmt.Errorf("clean up partially created tmux session: %w", cleanupErr))
+	}
+	return err
+}
+
+// NewSessionBound creates a tmux session whose runtime identity is bound to
+// one durable AGM session ID in the same command queue as creation. A later
+// same-named tmux session does not inherit this option.
+func NewSessionBound(name, workDir, stableSessionID string) error {
+	identity, err := NewSessionWithIdentityBound(name, workDir, stableSessionID)
 	if err == nil || !identity.Cleanable() {
 		return err
 	}
@@ -470,6 +744,20 @@ func NewSession(name string, workDir string) error {
 // If initialization fails after tmux created the session, the returned
 // identity remains non-empty so the caller can compensate the exact resource.
 func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error) {
+	return newSessionWithIdentity(name, workDir, "")
+}
+
+// NewSessionWithIdentityBound is the transactional creation form used by AGM
+// lifecycle operations. The random token remains the rollback capability;
+// stableSessionID is the durable delivery binding checked by later commands.
+func NewSessionWithIdentityBound(name, workDir, stableSessionID string) (SessionIdentity, error) {
+	if err := validateStableSessionID(stableSessionID); err != nil {
+		return SessionIdentity{}, err
+	}
+	return newSessionWithIdentity(name, workDir, stableSessionID)
+}
+
+func newSessionWithIdentity(name, workDir, stableSessionID string) (SessionIdentity, error) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
 	identity, err := newSessionIdentity()
@@ -484,107 +772,9 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 	// between a stale-socket probe and creation would let another process unlink
 	// the newly-created server socket.
 	err = withTmuxLock(func() error {
-		if err := cleanStaleSocketLocked(); err != nil {
-			return fmt.Errorf("failed to clean stale socket: %w", err)
-		}
-
-		// Create under the random provisional name before storing the same token
-		// and renaming. If either later command fails, the surviving session still
-		// has an ownership marker that strict compensation can prove.
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
-			"new-session", "-d", "-P", "-F", "#{session_id}", "-s", identity.CreationName, "-c", workDir,
-			";", "set-option", "@agm_session_identity", identity.Token,
-			";", "rename-session", sanitizedName)
-		defer cancel()
-		output, err := cmd.Output()
-		// A tmux command queue can create the session and print its ID before a
-		// later command (the identity option write here) fails. Capture that ID
-		// before returning the queue error so the caller can compensate the
-		// partially created resource.
-		identity.ID = strings.TrimSpace(string(output))
-		if err != nil {
-			// Check for timeout
-			if ctx.Err() == context.DeadlineExceeded {
-				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
-					Duration: globalTimeout,
-				}
-			}
-			return fmt.Errorf("failed to create tmux session: %w", err)
-		}
-		if !identity.Valid() {
-			return fmt.Errorf("tmux created session %q but returned invalid session identity %q", sanitizedName, identity.ID)
-		}
-
-		// Inject tmux settings for better UX
-		// These settings improve multi-device usage, copy/paste, and mouse support
-		// IMPORTANT: Run as actual tmux commands, NOT via send-keys (which sends to bash shell)
-		type tmuxSetting struct {
-			args        []string
-			description string
-		}
-		settings := []tmuxSetting{
-			// Server-global crash prevention: without these, tmux server exits when
-			// all clients detach (e.g., SSH drops), killing every session.
-			// Root cause of mass session crashes identified 2026-04-02.
-			{[]string{"set", "-g", "exit-empty", "off"}, "Prevent server exit when all sessions detach (crash fix)"},
-			{[]string{"set", "-g", "destroy-unattached", "off"}, "Keep sessions alive when clients disconnect (crash fix)"},
-			// Per-session UX settings
-			{[]string{"set-window-option", "-t", sanitizedName, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
-			{[]string{"set-option", "-t", sanitizedName, "window-size", "latest"}, "Force window to fit current screen"},
-			{[]string{"set", "-t", sanitizedName, "mouse", "on"}, "Enable mouse scrolling"},
-			{[]string{"set", "-s", "set-clipboard", "on"}, "Enable OSC 52 for Cmd-C over SSH"},
-			{[]string{"set", "-s", "escape-time", "10"}, "Reduce Escape key delay for copy-mode (default 500ms causes lag)"},
-		}
-
-		// Set build environment variables so worker sessions share Go caches
-		// and limit parallelism to avoid CPU contention across concurrent workers.
-		homeDir, _ := os.UserHomeDir()
-		goCache := filepath.Join(homeDir, ".cache", "go-build")
-		goModCache := filepath.Join(homeDir, "go", "pkg", "mod")
-		// Limit worker parallelism: use half the available cores (min 1),
-		// capped at 4 to avoid CPU contention across concurrent workers.
-		maxProcs := strconv.Itoa(min(max(runtime.NumCPU()/2, 1), 4))
-		buildEnv := map[string]string{
-			"GOCACHE":    goCache,
-			"GOMODCACHE": goModCache,
-			"GOMAXPROCS": maxProcs,
-			"GOWORK":     "off",
-		}
-		// Propagate autonomous mode so sessions spawned by an autonomous
-		// supervisor inherit the flag durably (pane-level os.Getenv check).
-		if v := os.Getenv("AGM_AUTONOMOUS"); v != "" {
-			buildEnv["AGM_AUTONOMOUS"] = v
-		}
-		for k, v := range buildEnv {
-			cmdArgs := []string{"-S", socketPath, "set-environment", "-t", sanitizedName, k, v}
-			envCmd, envCancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
-			if err := envCmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to set env %s=%s: %v\n", k, v, err)
-			}
-			envCancel()
-		}
-
-		for _, setting := range settings {
-			// Build full command args: ["tmux", "-S", socketPath, ...setting.args]
-			cmdArgs := append([]string{"-S", socketPath}, setting.args...)
-			cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
-			if err := cmd.Run(); err != nil {
-				// Log warning but don't fail - these are UX improvements, not critical
-				fmt.Fprintf(os.Stderr, "Warning: Failed to apply tmux setting '%s': %v\n", setting.description, err)
-			}
-			cancel()
-		}
-
-		// Enable auto-respawn for supervisor sessions so they recover from crashes
-		if IsSupervisorSession(name) {
-			if err := EnableAutoRespawn(sanitizedName); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to enable auto-respawn for supervisor session %q: %v\n", sanitizedName, err)
-			}
-		}
-
-		return nil
+		return createSessionWithIdentityLocked(
+			ctx, socketPath, name, sanitizedName, workDir, stableSessionID, &identity,
+		)
 	})
 	if err != nil {
 		return identity, err
@@ -599,6 +789,121 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 		return identity, err
 	}
 	return identity, nil
+}
+
+type tmuxSetting struct {
+	args        []string
+	description string
+}
+
+func createSessionWithIdentityLocked(
+	ctx context.Context,
+	socketPath, requestedName, sanitizedName, workDir, stableSessionID string,
+	identity *SessionIdentity,
+) error {
+	if err := cleanStaleSocketLocked(); err != nil {
+		return fmt.Errorf("failed to clean stale socket: %w", err)
+	}
+	if err := createOwnedTmuxSession(ctx, socketPath, sanitizedName, workDir, stableSessionID, identity); err != nil {
+		return err
+	}
+	configureNewTmuxSession(ctx, socketPath, requestedName, sanitizedName)
+	return nil
+}
+
+func createOwnedTmuxSession(
+	ctx context.Context,
+	socketPath, sanitizedName, workDir, stableSessionID string,
+	identity *SessionIdentity,
+) error {
+	// Create under the random provisional name before storing the same token
+	// and renaming. If either later command fails, the surviving session still
+	// has an ownership marker that strict compensation can prove.
+	args := []string{
+		"-S", socketPath,
+		"new-session", "-d", "-P", "-F", "#{session_id}", "-s", identity.CreationName, "-c", workDir,
+		";", "set-option", "@agm_session_identity", identity.Token,
+	}
+	if stableSessionID != "" {
+		args = append(args, ";", "set-option", stableSessionIdentityOption, stableSessionID)
+	}
+	args = append(args, ";", "rename-session", sanitizedName)
+	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", args...)
+	defer cancel()
+	output, err := cmd.Output()
+	// A tmux command queue can create the session and print its ID before a later
+	// command fails. Retain that ID so callers can compensate the exact resource.
+	identity.ID = strings.TrimSpace(string(output))
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
+				Duration: globalTimeout,
+			}
+		}
+		return fmt.Errorf("failed to create tmux session: %w", err)
+	}
+	if !identity.Valid() {
+		return fmt.Errorf("tmux created session %q but returned invalid session identity %q", sanitizedName, identity.ID)
+	}
+	return nil
+}
+
+func configureNewTmuxSession(ctx context.Context, socketPath, requestedName, sanitizedName string) {
+	for key, value := range newSessionBuildEnvironment() {
+		cmdArgs := []string{"-S", socketPath, "set-environment", "-t", sanitizedName, key, value}
+		envCmd, envCancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
+		if err := envCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to set env %s=%s: %v\n", key, value, err)
+		}
+		envCancel()
+	}
+
+	for _, setting := range newSessionSettings(sanitizedName) {
+		cmdArgs := append([]string{"-S", socketPath}, setting.args...)
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to apply tmux setting '%s': %v\n", setting.description, err)
+		}
+		cancel()
+	}
+
+	if IsSupervisorSession(requestedName) {
+		if err := EnableAutoRespawn(sanitizedName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to enable auto-respawn for supervisor session %q: %v\n", sanitizedName, err)
+		}
+	}
+}
+
+func newSessionBuildEnvironment() map[string]string {
+	homeDir, _ := os.UserHomeDir()
+	buildEnv := map[string]string{
+		"GOCACHE":    filepath.Join(homeDir, ".cache", "go-build"),
+		"GOMODCACHE": filepath.Join(homeDir, "go", "pkg", "mod"),
+		"GOMAXPROCS": strconv.Itoa(min(max(runtime.NumCPU()/2, 1), 4)),
+		"GOWORK":     "off",
+	}
+	// Propagate autonomous mode so sessions spawned by an autonomous supervisor
+	// inherit the flag durably (pane-level os.Getenv check).
+	if value := os.Getenv("AGM_AUTONOMOUS"); value != "" {
+		buildEnv["AGM_AUTONOMOUS"] = value
+	}
+	return buildEnv
+}
+
+func newSessionSettings(sanitizedName string) []tmuxSetting {
+	return []tmuxSetting{
+		// Server-global crash prevention: without these, tmux exits when all
+		// clients detach (for example, when SSH drops), killing every session.
+		{[]string{"set", "-g", "exit-empty", "off"}, "Prevent server exit when all sessions detach (crash fix)"},
+		{[]string{"set", "-g", "destroy-unattached", "off"}, "Keep sessions alive when clients disconnect (crash fix)"},
+		{[]string{"set-window-option", "-t", sanitizedName, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
+		{[]string{"set-option", "-t", sanitizedName, "window-size", "latest"}, "Force window to fit current screen"},
+		{[]string{"set", "-t", sanitizedName, "mouse", "on"}, "Enable mouse scrolling"},
+		{[]string{"set", "-s", "set-clipboard", "on"}, "Enable OSC 52 for Cmd-C over SSH"},
+		{[]string{"set", "-s", "escape-time", "10"}, "Reduce Escape key delay for copy-mode (default 500ms causes lag)"},
+	}
 }
 
 // IsSessionID reports whether target is a tmux server-local session identity.
@@ -719,9 +1024,16 @@ func AttachSession(name string) error {
 // buffer was never cleaned up. Under high load with many concurrent sessions, orphaned
 // buffers accumulated and contributed to tmux server memory pressure and eventual crash.
 func deleteBuffer() {
+	deleteNamedBuffer("agm-cmd")
+}
+
+// deleteNamedBuffer best-effort removes one delivery-owned buffer. Strict
+// delivery gives every attempt a random buffer name so an unrelated tmux
+// client cannot replace the bytes between load-buffer and paste-buffer.
+func deleteNamedBuffer(bufferName string) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
-	cmd, cancel := CommandWithTimeout(ctx, 2*time.Second, "tmux", "-S", socketPath, "delete-buffer", "-b", "agm-cmd")
+	cmd, cancel := CommandWithTimeout(ctx, 2*time.Second, "tmux", "-S", socketPath, "delete-buffer", "-b", bufferName)
 	defer cancel()
 	_ = cmd.Run() // Best-effort: buffer may already be deleted by -d flag
 }
@@ -772,7 +1084,84 @@ func sendCommandToTargetLocked(ctx context.Context, target, command string) erro
 // native paste semantics required by harness while the caller owns both the
 // tmux concurrency slot and server-mutation lock.
 func sendCommandToTargetForHarnessLocked(ctx context.Context, target, command, harness string) error {
+	return sendCommandToTargetForHarnessLockedWithOptions(ctx, target, command, harness, false, false)
+}
+
+func sendCommandToTargetForHarnessLockedWithOptions(
+	ctx context.Context,
+	target, command, harness string,
+	requireObservedSubmission, rawBracketedPaste bool,
+) error {
+	return sendCommandToExactTargetForHarnessLockedWithOptions(
+		ctx,
+		exactPasteTarget{PaneID: target},
+		command,
+		harness,
+		requireObservedSubmission,
+		rawBracketedPaste,
+	)
+}
+
+// exactPasteTarget is the complete tmux identity proved immediately before a
+// strict delivery. Pane IDs and server-local session IDs can be reused after a
+// server restart, so strict callers bind the mutation to all four fields.
+// Legacy SendCommand callers intentionally provide only PaneID.
+type exactPasteTarget struct {
+	PaneID                   string
+	PanePID                  int
+	SessionID                string
+	StableSessionID          string
+	RequireNoAttachedClients bool
+	// Strict confirmation compares post-Enter structural command anchors with
+	// the complete pre-paste capture. An old identical /compact echo must not
+	// become proof for a newly pasted command that was concurrently cleared.
+	SubmissionBaselineCaptured bool
+	BaselineCommandAnchors     int
+}
+
+func (target exactPasteTarget) strict() bool {
+	return target.PanePID > 0 || target.SessionID != "" || target.StableSessionID != ""
+}
+
+func (target exactPasteTarget) validate() error {
+	if !target.strict() {
+		if strings.TrimSpace(target.PaneID) == "" {
+			return errors.New("tmux delivery target is required")
+		}
+		return nil
+	}
+	if !isPaneID(target.PaneID) {
+		return fmt.Errorf("invalid tmux pane ID %q", target.PaneID)
+	}
+	if target.PanePID <= 0 {
+		return fmt.Errorf("invalid tmux pane process ID %d", target.PanePID)
+	}
+	if !IsSessionID(target.SessionID) {
+		return fmt.Errorf("invalid tmux session ID %q", target.SessionID)
+	}
+	if err := validateStableSessionID(target.StableSessionID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func sendCommandToExactTargetForHarnessLockedWithOptions(
+	ctx context.Context,
+	target exactPasteTarget,
+	command, harness string,
+	requireObservedSubmission, rawBracketedPaste bool,
+) error {
+	if err := target.validate(); err != nil {
+		return err
+	}
+	if requireObservedSubmission && target.strict() && !target.SubmissionBaselineCaptured {
+		return errors.New("strict submission confirmation requires a pre-paste command baseline")
+	}
 	socketPath := GetSocketPath()
+	bufferName, err := deliveryBufferName(target)
+	if err != nil {
+		return err
+	}
 
 	// Ensure buffer is cleaned up on any error path.
 	// The -d flag on paste-buffer only deletes on success; if paste fails
@@ -780,26 +1169,45 @@ func sendCommandToTargetForHarnessLocked(ctx context.Context, target, command, h
 	bufferLoaded := false
 	defer func() {
 		if bufferLoaded {
-			deleteBuffer()
+			deleteNamedBuffer(bufferName)
 		}
 	}()
 
-	// Step 1: Load command text into tmux paste buffer via stdin
-	// This avoids command-line length limits and special character escaping issues
+	if err := loadCommandBuffer(ctx, socketPath, bufferName, command); err != nil {
+		return err
+	}
+	bufferLoaded = true
+
+	if err := pasteLoadedCommandBuffer(ctx, socketPath, bufferName, target, harness, rawBracketedPaste); err != nil {
+		return err
+	}
+	bufferLoaded = false // paste-buffer -d already deleted it
+	return submitPastedCommand(ctx, socketPath, target, command, harness, requireObservedSubmission)
+}
+
+func deliveryBufferName(target exactPasteTarget) (string, error) {
+	if !target.strict() {
+		return "agm-cmd", nil
+	}
+	identity, err := newSessionIdentity()
+	if err != nil {
+		return "", fmt.Errorf("generate unique tmux delivery buffer: %w", err)
+	}
+	return "agm-cmd-" + identity.Token, nil
+}
+
+func loadCommandBuffer(ctx context.Context, socketPath, bufferName, command string) error {
 	timeout := getAdaptiveTimeout()
-	cmdLoad, cancel1 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "load-buffer", "-b", "agm-cmd", "-")
-	defer cancel1()
+	cmdLoad, cancel := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "load-buffer", "-b", bufferName, "-")
+	defer cancel()
 
 	stdin, err := cmdLoad.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdin pipe for load-buffer: %w", err)
 	}
-
 	if err := cmdLoad.Start(); err != nil {
 		return fmt.Errorf("failed to start load-buffer: %w", err)
 	}
-
-	// Write command to buffer via stdin
 	if _, err := stdin.Write([]byte(command)); err != nil {
 		stdin.Close()
 		cmdLoad.Wait()
@@ -817,12 +1225,30 @@ func sendCommandToTargetForHarnessLocked(ctx context.Context, target, command, h
 		}
 		return fmt.Errorf("failed to load command into tmux buffer: %w", err)
 	}
-	bufferLoaded = true
+	return nil
+}
 
-	// Step 2: Paste buffer to session (atomic operation, -d deletes buffer after paste)
-	// Note: paste-buffer targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-	cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", pasteBufferArgs(socketPath, target, harness)...)
-	defer cancel2()
+func pasteLoadedCommandBuffer(
+	ctx context.Context,
+	socketPath, bufferName string,
+	target exactPasteTarget,
+	harness string,
+	rawBracketedPaste bool,
+) error {
+	// Raw multiline legacy delivery must prove application-owned bracketed-paste
+	// mode. Strict delivery folds that flag into its atomic identity condition.
+	if rawBracketedPaste && !target.strict() {
+		if err := requireBracketedPasteMode(ctx, socketPath, target.PaneID); err != nil {
+			return err
+		}
+	}
+	if target.strict() {
+		return pasteBufferToExactTarget(ctx, socketPath, bufferName, target, harness, rawBracketedPaste)
+	}
+
+	timeout := getAdaptiveTimeout()
+	cmdPaste, cancel := CommandWithTimeout(ctx, timeout, "tmux", pasteBufferArgsForNamedDelivery(socketPath, bufferName, target.PaneID, harness, rawBracketedPaste)...)
+	defer cancel()
 	if err := cmdPaste.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return &TimeoutError{
@@ -833,17 +1259,133 @@ func sendCommandToTargetForHarnessLocked(ctx context.Context, target, command, h
 		}
 		return fmt.Errorf("failed to paste buffer to tmux session: %w", err)
 	}
-	bufferLoaded = false // paste-buffer -d already deleted it
+	return nil
+}
 
-	// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
-	// sendEnterReliable waits 100ms, sends -H 0d, then auto-retries
-	// once if the Enter didn't register (replaces the old 50ms + C-m +
-	// retryEnterAfterPaste sequence).
-	if err := sendEnterReliableContext(ctx, socketPath, target); err != nil {
+func submitPastedCommand(
+	ctx context.Context,
+	socketPath string,
+	target exactPasteTarget,
+	command, harness string,
+	requireObservedSubmission bool,
+) error {
+	var classifySubmission func(string) submissionObservation
+	if requireObservedSubmission {
+		classifySubmission = func(content string) submissionObservation {
+			return classifyExactCommandSubmissionAfterBaseline(
+				content, harness, command, target.BaselineCommandAnchors,
+			)
+		}
+	}
+	if err := sendEnterReliableContextWithProbe(
+		ctx, socketPath, target, requireObservedSubmission, 5, classifySubmission,
+	); err != nil {
+		if target.strict() && !PromptSubmissionMayHaveOccurred(err) {
+			// The exact paste already mutated the verified composer. Even when
+			// cancellation or identity drift prevents AGM from sending Enter, the
+			// parked command can later be submitted by a human or another keypress;
+			// anti-loop accounting must therefore remain conservative.
+			return MarkPromptSubmissionUncertain(err)
+		}
 		return err
 	}
 
 	return nil
+}
+
+func pasteBufferToExactTarget(
+	ctx context.Context,
+	socketPath, bufferName string,
+	target exactPasteTarget,
+	harness string,
+	rawBracketedPaste bool,
+) error {
+	identity, err := newSessionIdentity()
+	if err != nil {
+		return fmt.Errorf("generate tmux paste acknowledgement: %w", err)
+	}
+	ack := "AGM_PASTE_OK_" + identity.Token
+	refused := "AGM_PASTE_REFUSED_" + identity.Token
+	condition := exactPasteTargetCondition(target, rawBracketedPaste)
+	pasteCommand := fmt.Sprintf(
+		"paste-buffer -b %s -t %s %s ; display-message -p %s",
+		strconv.Quote(bufferName), strconv.Quote(target.PaneID),
+		pasteBufferDeleteFlag(harness, rawBracketedPaste), strconv.Quote(ack),
+	)
+	refuseCommand := fmt.Sprintf("display-message -p %s", strconv.Quote(refused))
+	output, runErr := RunWithTimeout(ctx, getAdaptiveTimeout(), "tmux", "-S", socketPath,
+		"if-shell", "-F", "-t", target.PaneID, condition, pasteCommand, refuseCommand)
+	marker := strings.TrimSpace(string(output))
+	if runErr != nil {
+		// The client started a command whose true branch mutates the pane. A lost
+		// response cannot prove whether the command bytes were pasted, so strict
+		// callers must retain uncertainty and must not retry automatically.
+		return MarkPromptSubmissionUncertain(fmt.Errorf("atomic exact-target paste acknowledgement lost: %w", runErr))
+	}
+	switch marker {
+	case ack:
+		return nil
+	case refused:
+		detail := "target identity changed or bracketed-paste mode was lost"
+		if target.RequireNoAttachedClients {
+			detail = "target identity changed, bracketed-paste mode was lost, or a tmux client attached; detach all clients before strict compaction"
+		}
+		return fmt.Errorf(
+			"verified tmux target %q/%d/%s/%s refused paste before mutation: %s",
+			target.PaneID, target.PanePID, target.SessionID, target.StableSessionID, detail,
+		)
+	default:
+		return MarkPromptSubmissionUncertain(fmt.Errorf(
+			"atomic exact-target paste returned unrecognized acknowledgement %q", marker,
+		))
+	}
+}
+
+func exactPasteTargetCondition(target exactPasteTarget, rawBracketedPaste bool) string {
+	conditions := []string{
+		fmt.Sprintf("#{==:#{pane_id},%s}", target.PaneID),
+		fmt.Sprintf("#{==:#{pane_pid},%d}", target.PanePID),
+		fmt.Sprintf("#{==:#{session_id},%s}", target.SessionID),
+		fmt.Sprintf("#{==:#{%s},%s}", stableSessionIdentityOption, target.StableSessionID),
+	}
+	if target.RequireNoAttachedClients {
+		conditions = append(conditions, "#{==:#{session_attached},0}")
+	}
+	if rawBracketedPaste {
+		conditions = append(conditions, "#{==:#{bracket_paste_flag},1}")
+	}
+	condition := conditions[len(conditions)-1]
+	for i := len(conditions) - 2; i >= 0; i-- {
+		condition = fmt.Sprintf("#{&&:%s,%s}", conditions[i], condition)
+	}
+	return condition
+}
+
+func requireBracketedPasteMode(ctx context.Context, socketPath, target string) error {
+	output, err := RunWithTimeout(ctx, getAdaptiveTimeout(), "tmux", "-S", socketPath,
+		"display-message", "-p", "-t", target, "#{bracket_paste_flag}")
+	if err != nil {
+		return tmuxCommandError("inspect bracketed-paste mode", target, output, err)
+	}
+	enabled, err := parseBracketedPasteFlag(output)
+	if err != nil {
+		return fmt.Errorf("inspect bracketed-paste mode for pane %q: %w", target, err)
+	}
+	if !enabled {
+		return fmt.Errorf("pane %q does not have bracketed-paste mode enabled; refusing raw multiline delivery", target)
+	}
+	return nil
+}
+
+func parseBracketedPasteFlag(output []byte) (bool, error) {
+	switch strings.TrimSpace(string(output)) {
+	case "1":
+		return true, nil
+	case "0", "":
+		return false, nil
+	default:
+		return false, fmt.Errorf("tmux returned malformed bracket_paste_flag %q", strings.TrimSpace(string(output)))
+	}
 }
 
 // Version returns tmux version

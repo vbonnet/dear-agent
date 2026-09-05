@@ -49,6 +49,7 @@ type resumeTestTmux struct {
 	literalKeys       []string
 	inputReadiness    session.InputReadiness
 	inputErr          error
+	stableBinding     string
 }
 
 func (f *resumeTestTmux) HasSession(string) (bool, error) {
@@ -88,8 +89,9 @@ func (f *resumeTestTmux) SendKeys(_ string, keys string) error {
 	return nil
 }
 
-func (f *resumeTestTmux) CreateSessionWithIdentity(string, string) (tmux.SessionIdentity, error) {
+func (f *resumeTestTmux) CreateSessionWithIdentity(_, _, stableSessionID string) (tmux.SessionIdentity, error) {
 	f.created++
+	f.stableBinding = stableSessionID
 	f.exists = true
 	f.identityStillLive = true
 	return resumeTestIdentity(), f.createErr
@@ -336,6 +338,9 @@ func TestResumeSessionColdStartCommitsPublicOutcome(t *testing.T) {
 	}
 	if fakeTmux.created != 1 || fakeTmux.killed || fakeTmux.readinessCalls != 1 {
 		t.Fatalf("tmux outcome = created %d killed %v readiness %d", fakeTmux.created, fakeTmux.killed, fakeTmux.readinessCalls)
+	}
+	if fakeTmux.stableBinding != m.SessionID {
+		t.Fatalf("cold-resume stable binding = %q, want %q", fakeTmux.stableBinding, m.SessionID)
 	}
 	if len(fakeTmux.commands) != 1 || !strings.Contains(fakeTmux.commands[0], "opencode attach") {
 		t.Fatalf("resume commands = %v, want canonical OpenCode attach", fakeTmux.commands)
