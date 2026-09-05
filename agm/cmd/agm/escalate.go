@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -461,7 +462,7 @@ func runEscalateAsk(cmd *cobra.Command, args []string) error {
 		Context:         escContext,
 	})
 	if err != nil {
-		return err
+		return reportCommittedEscalation(esc, err)
 	}
 
 	fmt.Printf("escalation %s — %s\n", esc.ID, esc.Phase)
@@ -500,7 +501,7 @@ func runEscalateAnswer(cmd *cobra.Command, args []string) error {
 	}
 	esc, err := env.eng.Answer(cmd.Context(), id, byID, byRole, answer)
 	if err != nil {
-		return err
+		return reportCommittedEscalation(esc, err)
 	}
 	fmt.Printf("escalation %s — %s (answered by %s)\n", esc.ID, esc.Phase, esc.AnsweredByRole)
 	return nil
@@ -523,7 +524,7 @@ func runEscalateForward(cmd *cobra.Command, args []string) error {
 	}
 	esc, err := env.eng.Forward(cmd.Context(), id, fromID, fromRole, escNote)
 	if err != nil {
-		return err
+		return reportCommittedEscalation(esc, err)
 	}
 	fmt.Printf("escalation %s — %s", esc.ID, esc.Phase)
 	if esc.Phase == escalation.PhaseDispatchedToHuman {
@@ -553,7 +554,7 @@ func runEscalateVote(cmd *cobra.Command, args []string) error {
 	}
 	esc, err := env.eng.CastVote(cmd.Context(), id, byID, byRole, vote, escAnswer, escNote)
 	if err != nil {
-		return err
+		return reportCommittedEscalation(esc, err)
 	}
 
 	//nolint:exhaustive // only the resolved phases get bespoke text; the rest fall to default.
@@ -573,6 +574,19 @@ func runEscalateVote(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+func reportCommittedEscalation(esc *escalation.Escalation, err error) error {
+	var committed *escalation.CommittedEffectError
+	if esc != nil && errors.As(err, &committed) {
+		fmt.Fprintf(
+			os.Stderr,
+			"escalation %s — %s (state committed; post-commit delivery failed, inspect before retrying)\n",
+			esc.ID,
+			esc.Phase,
+		)
+	}
+	return err
 }
 
 func runEscalateList(cmd *cobra.Command, _ []string) error {
