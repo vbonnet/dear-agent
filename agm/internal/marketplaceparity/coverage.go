@@ -3,7 +3,6 @@
 package marketplaceparity
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,8 +23,8 @@ const (
 	ClaudeCatalogPath = ".claude-plugin/marketplace.json"
 )
 
-var requiredPluginNames = []string{"agm", "wayfinder", "youtube", "research-pipeline"}
-var requiredPluginCapabilities = map[string][]string{
+var requiredNeutralPluginNames = []string{"agm", "wayfinder", "youtube", "research-pipeline"}
+var requiredNeutralPluginCapabilities = map[string][]string{
 	"agm":               {"commands", "skills"},
 	"wayfinder":         {"skills"},
 	"youtube":           {"commands"},
@@ -43,13 +42,23 @@ type Owner struct {
 	Email string `json:"email"`
 }
 
+// PluginAuthor identifies the source authority declared by a plugin.
+type PluginAuthor struct {
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
+	URL   string `json:"url,omitempty"`
+}
+
 // PluginEntry describes one published plugin in a marketplace catalog.
 type PluginEntry struct {
-	Name         string   `json:"name"`
-	Source       string   `json:"source"`
-	Description  string   `json:"description"`
-	Version      string   `json:"version"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	Name         string       `json:"name"`
+	Source       string       `json:"source"`
+	Description  string       `json:"description"`
+	Version      string       `json:"version"`
+	Author       PluginAuthor `json:"author,omitzero"`
+	Repository   string       `json:"repository,omitempty"`
+	License      string       `json:"license,omitempty"`
+	Capabilities []string     `json:"capabilities,omitempty"`
 }
 
 // HarnessSurface describes a harness marketplace discovery surface.
@@ -69,18 +78,6 @@ type Catalog struct {
 	Harnesses     []HarnessSurface `json:"harnesses"`
 }
 
-type claudeCatalog struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Owner       Owner         `json:"owner"`
-	Plugins     []PluginEntry `json:"plugins"`
-}
-
-type claudePluginManifest struct {
-	Name   string   `json:"name"`
-	Skills []string `json:"skills"`
-}
-
 type piSettings struct {
 	Skills []string `json:"skills"`
 }
@@ -93,7 +90,7 @@ type exportedSkill struct {
 // LoadCatalog reads the harness-neutral marketplace catalog from root.
 func LoadCatalog(root string) (Catalog, error) {
 	var catalog Catalog
-	if err := readJSON(filepath.Join(root, NeutralCatalogPath), &catalog); err != nil {
+	if err := readJSONWithin(root, NeutralCatalogPath, &catalog); err != nil {
 		return Catalog{}, err
 	}
 	return catalog, nil
@@ -106,6 +103,10 @@ func ValidateCatalog(root string) error {
 	if err != nil {
 		return err
 	}
+	return validateCatalogSnapshot(root, catalog)
+}
+
+func validateCatalogSnapshot(root string, catalog Catalog) error {
 	if catalog.SchemaVersion != "dear-agent.marketplace/v1" {
 		return fmt.Errorf("marketplace schema_version = %q, want dear-agent.marketplace/v1", catalog.SchemaVersion)
 	}
@@ -118,31 +119,52 @@ func ValidateCatalog(root string) error {
 	if err := validateRequiredPlugins(catalog); err != nil {
 		return err
 	}
+	plugins, err := indexPlugins(catalog.Plugins, "neutral marketplace")
+	if err != nil {
+		return err
+	}
+	if err := validateNeutralCanonicalExclusion(root, plugins); err != nil {
+		return err
+	}
 	for _, plugin := range catalog.Plugins {
 		if err := validatePlugin(root, plugin); err != nil {
 			return err
 		}
 	}
-	return ValidateHarnessSurfaces(root)
+	return validateHarnessSurfacesSnapshot(root, catalog)
 }
 
 func validateRequiredPlugins(catalog Catalog) error {
-	present := make(map[string]PluginEntry, len(catalog.Plugins))
-	for _, plugin := range catalog.Plugins {
-		present[plugin.Name] = plugin
+	present, err := indexPlugins(catalog.Plugins, "neutral marketplace")
+	if err != nil {
+		return err
 	}
-	for _, name := range requiredPluginNames {
+	if err := validateNeutralCanonicalLexicalExclusion(present); err != nil {
+		return err
+	}
+	for _, name := range requiredNeutralPluginNames {
 		plugin, ok := present[name]
 		if !ok {
 			return fmt.Errorf("marketplace catalog missing required plugin %q", name)
 		}
-		for _, capability := range requiredPluginCapabilities[name] {
+		for _, capability := range requiredNeutralPluginCapabilities[name] {
 			if !slices.Contains(plugin.Capabilities, capability) {
 				return fmt.Errorf("marketplace catalog required plugin %q missing capability %q", name, capability)
 			}
 		}
 	}
 	return nil
+}
+
+func indexPlugins(plugins []PluginEntry, catalogName string) (map[string]PluginEntry, error) {
+	byName := make(map[string]PluginEntry, len(plugins))
+	for _, plugin := range plugins {
+		if _, duplicate := byName[plugin.Name]; duplicate {
+			return nil, fmt.Errorf("%s contains duplicate plugin %q", catalogName, plugin.Name)
+		}
+		byName[plugin.Name] = plugin
+	}
+	return byName, nil
 }
 
 // ValidateHarnessSurfaces verifies every active harness has a declared
@@ -152,6 +174,10 @@ func ValidateHarnessSurfaces(root string) error {
 	if err != nil {
 		return err
 	}
+	return validateHarnessSurfacesSnapshot(root, catalog)
+}
+
+func validateHarnessSurfacesSnapshot(root string, catalog Catalog) error {
 	for _, harness := range agent.ActiveHarnesses() {
 		surface, ok := SurfaceForHarness(catalog, harness)
 		if !ok {
@@ -221,7 +247,11 @@ func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skil
 		return "", fmt.Errorf("pi skill settings %q: %w", surface.Catalog, err)
 	}
 	var settings piSettings
-	if err := readJSON(settingsPath, &settings); err != nil {
+	settingsRelative, err := filepath.Rel(root, settingsPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve Pi skill settings %q: %w", surface.Catalog, err)
+	}
+	if err := readJSONWithin(root, filepath.ToSlash(settingsRelative), &settings); err != nil {
 		return "", fmt.Errorf("read Pi skill settings: %w", err)
 	}
 	if len(settings.Skills) == 0 {
@@ -258,12 +288,15 @@ func requireNativeSkillEntrypoint(root, entrypoint, pluginName, skillName string
 }
 
 func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error) {
+	if plugin.Name == canonicalPluginName {
+		return loadCanonicalExportedSkills(root, plugin)
+	}
 	source := filepath.Join(root, filepath.FromSlash(plugin.Source))
 	resolvedSource, err := resolvedPathWithin(root, source)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q source %q: %w", plugin.Name, plugin.Source, err)
 	}
-	manifest, err := loadClaudePluginManifest(resolvedSource, plugin.Name)
+	manifest, err := loadClaudePluginManifest(resolvedSource, plugin)
 	if err != nil {
 		return nil, err
 	}
@@ -298,20 +331,21 @@ func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error
 	return exported, nil
 }
 
-func loadClaudePluginManifest(source, pluginName string) (claudePluginManifest, error) {
+func loadClaudePluginManifest(source string, plugin PluginEntry) (claudePluginManifest, error) {
 	var manifest claudePluginManifest
-	manifestPath := filepath.Join(source, ".claude-plugin", "plugin.json")
-	if _, err := resolvedPathWithin(source, manifestPath); err != nil {
-		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest path: %w", pluginName, err)
+	if err := readJSONWithin(source, ".claude-plugin/plugin.json", &manifest); err != nil {
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest: %w", plugin.Name, err)
 	}
-	if err := readJSON(manifestPath, &manifest); err != nil {
-		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest: %w", pluginName, err)
+	if manifest.Name != plugin.Name {
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest has mismatched name %q", plugin.Name, manifest.Name)
 	}
-	if manifest.Name != pluginName {
-		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest has mismatched name %q", pluginName, manifest.Name)
+	if plugin.Name == canonicalPluginName {
+		if err := validateCanonicalManifest(plugin, manifest); err != nil {
+			return claudePluginManifest{}, err
+		}
 	}
 	if len(manifest.Skills) == 0 {
-		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest exports no skills", pluginName)
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest exports no skills", plugin.Name)
 	}
 	return manifest, nil
 }
@@ -397,21 +431,22 @@ func exportedSkillFromFile(root, pluginName, skillFile string) (exportedSkill, e
 }
 
 func readSkillName(path string) (string, error) {
-	violations, err := skilllint.CheckFile(path)
-	if err != nil {
-		return "", err
-	}
-	if len(violations) > 0 {
-		return "", fmt.Errorf("invalid skill: %s", violations[0].Reason)
-	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
+	return readSkillNameFromData(path, data)
+}
+
+func readSkillNameFromData(path string, data []byte) (string, error) {
+	violations := skilllint.CheckContent(path, data)
+	if len(violations) > 0 {
+		return "", fmt.Errorf("invalid skill: %s", violations[0].Reason)
+	}
 	var metadata struct {
 		Name string `yaml:"name"`
 	}
-	// skilllint.CheckFile above tolerates CRLF frontmatter, so normalize here
+	// skilllint.CheckContent above tolerates CRLF frontmatter, so normalize here
 	// too: otherwise a Windows checkout (core.autocrlf=true) passes the lint
 	// gate and then fails catalog validation on a valid skill.
 	parts := strings.SplitN(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n---", 2)
@@ -618,42 +653,16 @@ func SurfaceForHarness(catalog Catalog, harness string) (HarnessSurface, bool) {
 	return HarnessSurface{}, false
 }
 
-// ValidateClaudeMarketplaceMirror verifies the native Claude marketplace is a
-// projection of the harness-neutral catalog.
-func ValidateClaudeMarketplaceMirror(root string) error {
-	neutral, err := LoadCatalog(root)
-	if err != nil {
-		return err
-	}
-	var claude claudeCatalog
-	if err := readJSON(filepath.Join(root, ClaudeCatalogPath), &claude); err != nil {
-		return err
-	}
-	if neutral.Name != claude.Name {
-		return fmt.Errorf("claude marketplace name = %q, want %q", claude.Name, neutral.Name)
-	}
-	byName := make(map[string]PluginEntry, len(claude.Plugins))
-	for _, plugin := range claude.Plugins {
-		byName[plugin.Name] = plugin
-	}
-	for _, plugin := range neutral.Plugins {
-		claudePlugin, ok := byName[plugin.Name]
-		if !ok {
-			return fmt.Errorf("claude marketplace missing plugin %q", plugin.Name)
-		}
-		if claudePlugin.Source != plugin.Source {
-			return fmt.Errorf("claude marketplace plugin %q source = %q, want %q", plugin.Name, claudePlugin.Source, plugin.Source)
-		}
-		if claudePlugin.Version != plugin.Version {
-			return fmt.Errorf("claude marketplace plugin %q version = %q, want %q", plugin.Name, claudePlugin.Version, plugin.Version)
-		}
-	}
-	return nil
-}
-
 func validatePlugin(root string, plugin PluginEntry) error {
 	if plugin.Name == "" || plugin.Source == "" || plugin.Version == "" {
 		return fmt.Errorf("marketplace plugin has empty required field: %+v", plugin)
+	}
+	if plugin.Name == canonicalPluginName {
+		exported, err := loadCanonicalExportedSkills(root, plugin)
+		if err != nil {
+			return fmt.Errorf("marketplace plugin %q canonical source: %w", plugin.Name, err)
+		}
+		return validateRequiredSkillInventory(plugin.Name, exported)
 	}
 	source := filepath.Join(root, plugin.Source)
 	info, err := os.Stat(source)
@@ -690,17 +699,6 @@ func requireDir(path string) error {
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("%s is not a directory", path)
-	}
-	return nil
-}
-
-func readJSON(path string, dst any) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-	if err := json.Unmarshal(data, dst); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	return nil
 }
