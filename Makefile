@@ -930,11 +930,15 @@ uninstall-fd-limit-launchdaemon:
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
 # gates Edit/Write/MultiEdit, pretool-bash-write-guard gates Bash. They are
 # the Go replacements for the lost ai-tools Python stopgaps.
+# pretool-force-push-guard rides along: .claude/hooks/pretool-bypass-guard
+# delegates the force-push decision to it, and falls back to a narrower text
+# check when it is not installed.
 build-write-guards:
-	@echo "Building pretool-fs-write-guard, pretool-bash-write-guard..."
+	@echo "Building pretool-fs-write-guard, pretool-bash-write-guard, pretool-force-push-guard..."
 	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-fs-write-guard ./cmd/pretool-fs-write-guard/
 	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-bash-write-guard ./cmd/pretool-bash-write-guard/
-	@echo "Built: bin/pretool-fs-write-guard bin/pretool-bash-write-guard"
+	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-force-push-guard ./cmd/pretool-force-push-guard/
+	@echo "Built: bin/pretool-fs-write-guard bin/pretool-bash-write-guard bin/pretool-force-push-guard"
 
 # Install the write-guard hooks where settings.json references them
 # (~/.config/claude-code/hooks). Override the dir with HOOKS_DIR=/path.
@@ -943,6 +947,7 @@ install-write-guards: build-write-guards
 	@mkdir -p $(HOOKS_DIR)
 	$(call install-go-bin,bin/pretool-fs-write-guard,$(HOOKS_DIR))
 	$(call install-go-bin,bin/pretool-bash-write-guard,$(HOOKS_DIR))
+	$(call install-go-bin,bin/pretool-force-push-guard,$(HOOKS_DIR))
 
 # Uninstall AGM components
 uninstall:
