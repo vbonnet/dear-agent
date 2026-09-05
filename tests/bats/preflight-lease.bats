@@ -40,7 +40,7 @@ stub_toolchain() {
     local sleep_sec="${1:-0}"
     for tool in go make golangci-lint govulncheck jq; do
         cat >"$MOCK_BIN/$tool" <<EOF
-#!/usr/bin/env bash
+#!/bin/sh
 if [ "$tool" = "golangci-lint" ] && [ "\${1:-}" = "version" ]; then
     echo "stub golangci-lint"
     exit 0
@@ -55,6 +55,18 @@ exit 0
 EOF
         chmod +x "$MOCK_BIN/$tool"
     done
+}
+
+hold_lease_background() {
+    local lock_file="$1"
+    local duration="$2"
+    if command -v lockf >/dev/null 2>&1; then
+        lockf -k "$lock_file" sleep "$duration" &
+    elif flock --help 2>&1 | grep -q -- '-w'; then
+        flock -x "$lock_file" sleep "$duration" &
+    else
+        flock "$lock_file" sleep "$duration" &
+    fi
 }
 
 @test "full preflight acquires lease and serializes concurrent runs" {
@@ -72,7 +84,7 @@ EOF
     local pid1=$!
 
     # Give worker 1 time to acquire the lease and enter work
-    sleep 0.2
+    sleep 0.5
 
     (
         env PATH="$MOCK_BIN:$PATH" PREFLIGHT_LEASE_DIR="$PREFLIGHT_LEASE_DIR" "$SCRIPT" --full >"$log2" 2>&1
@@ -106,14 +118,10 @@ WORKTREE=/fake/worktree
 COMMAND=scripts/preflight.sh --full
 EOF
 
-    # Hold the advisory lock using lockf or flock
-    if command -v lockf >/dev/null 2>&1; then
-        lockf -k "$lock_file" sleep 2 &
-    else
-        flock -x "$lock_file" sleep 2 &
-    fi
+    # Hold the advisory lock
+    hold_lease_background "$lock_file" 2
     local holder_pid=$!
-    sleep 0.2
+    sleep 0.5
 
     run env PATH="$MOCK_BIN:$PATH" PREFLIGHT_LEASE_DIR="$PREFLIGHT_LEASE_DIR" PREFLIGHT_LEASE_TIMEOUT=1 "$SCRIPT" --full
 
@@ -137,19 +145,15 @@ WORKTREE=/holder/worktree
 COMMAND=scripts/preflight.sh --full
 EOF
 
-    if command -v lockf >/dev/null 2>&1; then
-        lockf -k "$lock_file" sleep 15 &
-    else
-        flock -x "$lock_file" sleep 15 &
-    fi
+    hold_lease_background "$lock_file" 15
     local holder_pid=$!
-    sleep 0.2
+    sleep 0.5
 
     local waiter_log="$TEST_DIR/waiter.log"
     env PATH="$MOCK_BIN:$PATH" PREFLIGHT_LEASE_DIR="$PREFLIGHT_LEASE_DIR" PREFLIGHT_LEASE_TIMEOUT=10 "$SCRIPT" --full >"$waiter_log" 2>&1 &
     local waiter_pid=$!
 
-    sleep 0.3
+    sleep 0.5
     kill -TERM "$waiter_pid"
     wait "$waiter_pid" || true
 
@@ -170,19 +174,15 @@ EOF
     local owner_file="$PREFLIGHT_LEASE_DIR/preflight-full.owner"
     touch "$lock_file"
 
-    if command -v lockf >/dev/null 2>&1; then
-        lockf -k "$lock_file" sleep 20 &
-    else
-        flock -x "$lock_file" sleep 20 &
-    fi
+    hold_lease_background "$lock_file" 20
     local holder_pid=$!
-    sleep 0.2
+    sleep 0.5
 
     local waiter_log="$TEST_DIR/waiter-death.log"
     env PATH="$MOCK_BIN:$PATH" PREFLIGHT_LEASE_DIR="$PREFLIGHT_LEASE_DIR" PREFLIGHT_LEASE_TIMEOUT=5 "$SCRIPT" --full >"$waiter_log" 2>&1 &
     local waiter_pid=$!
 
-    sleep 0.3
+    sleep 0.5
     # Abruptly kill the holder
     kill -9 "$holder_pid"
     wait "$holder_pid" 2>/dev/null || true
@@ -199,13 +199,9 @@ EOF
     local lock_file="$PREFLIGHT_LEASE_DIR/preflight-full.lock"
     touch "$lock_file"
 
-    if command -v lockf >/dev/null 2>&1; then
-        lockf -k "$lock_file" sleep 3 &
-    else
-        flock -x "$lock_file" sleep 3 &
-    fi
+    hold_lease_background "$lock_file" 3
     local holder_pid=$!
-    sleep 0.2
+    sleep 0.5
 
     # Fast preflight should succeed immediately without waiting
     run env PATH="$MOCK_BIN:$PATH" PREFLIGHT_LEASE_DIR="$PREFLIGHT_LEASE_DIR" "$SCRIPT" --fast

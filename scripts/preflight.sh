@@ -76,7 +76,7 @@ format_owner_info() {
   printf 'held by another process'
 }
 
-# Cleanup handler for owner metadata, lease descriptor, and temporary scan files.
+# Cleanup handler for owner metadata and temporary scan files.
 cleanup_preflight() {
   if [[ -n "${OWNER_FILE:-}" && -f "$OWNER_FILE" ]]; then
     if grep -q "^PID=$$$" "$OWNER_FILE" 2>/dev/null; then
@@ -86,53 +86,98 @@ cleanup_preflight() {
   if [[ -n "${TMP_VULN:-}" && -f "${TMP_VULN:-}" ]]; then
     rm -f "$TMP_VULN" 2>/dev/null || true
   fi
-  exec 200>&- 2>/dev/null || true
 }
 trap cleanup_preflight EXIT
 
 if [[ "$MODE" == "full" ]]; then
-  mkdir -p "$LEASE_DIR"
-  touch "$LEASE_FILE"
+  if [[ "${PREFLIGHT_LOCKED:-}" != "true" ]]; then
+    mkdir -p "$LEASE_DIR"
+    touch "$LEASE_FILE"
+    ACQUIRED_FILE="$LEASE_DIR/preflight-full.acquired.$$"
+    rm -f "$ACQUIRED_FILE"
 
-  exec 200>"$LEASE_FILE"
+    # shellcheck disable=SC2317,SC2329
+    on_lease_cancel() {
+      trap - INT TERM
+      local owner_diag
+      owner_diag="$(format_owner_info)"
+      warn "cancelled while waiting for full-preflight lease (${owner_diag})"
+      if [[ -n "${LOCK_PID:-}" ]]; then
+        kill "$LOCK_PID" 2>/dev/null || true
+        wait "$LOCK_PID" 2>/dev/null || true
+      fi
+      exit 130
+    }
+    trap on_lease_cancel INT TERM
 
-  # shellcheck disable=SC2317,SC2329
-  on_lease_cancel() {
-    trap - INT TERM
-    local owner_diag
-    owner_diag="$(format_owner_info)"
-    warn "cancelled while waiting for full-preflight lease (${owner_diag})"
-    exit 130
-  }
-  trap on_lease_cancel INT TERM
+    export PREFLIGHT_LOCKED=true
+    export PREFLIGHT_ACQUIRED_FILE="$ACQUIRED_FILE"
 
-  if command -v lockf >/dev/null 2>&1; then
-    if ! lockf -s -t 0 200 2>/dev/null; then
-      warn "waiting for full-preflight lease $(format_owner_info)..."
+    if command -v lockf >/dev/null 2>&1; then
+      if ! lockf -s -t 0 "$LEASE_FILE" true 2>/dev/null; then
+        warn "waiting for full-preflight lease $(format_owner_info)..."
+      fi
+      lockf -s -k -t "$LEASE_TIMEOUT" "$LEASE_FILE" "$0" "$@" &
+      LOCK_PID=$!
+      set +e
+      wait "$LOCK_PID"
+      RC=$?
+      set -e
+    elif command -v flock >/dev/null 2>&1; then
+      if flock --help 2>&1 | grep -q -- '-w'; then
+        if ! flock -n -x "$LEASE_FILE" true 2>/dev/null; then
+          warn "waiting for full-preflight lease $(format_owner_info)..."
+        fi
+        flock -x -w "$LEASE_TIMEOUT" "$LEASE_FILE" "$0" "$@" &
+        LOCK_PID=$!
+        set +e
+        wait "$LOCK_PID"
+        RC=$?
+        set -e
+      else
+        elapsed=0
+        while ! flock -n "$LEASE_FILE" true 2>/dev/null; do
+          if [[ "$elapsed" -eq 0 ]]; then
+            warn "waiting for full-preflight lease $(format_owner_info)..."
+          fi
+          sleep 0.2
+          elapsed=$((elapsed + 1))
+          if [[ "$elapsed" -ge $((LEASE_TIMEOUT * 5)) ]]; then
+            fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
+          fi
+        done
+        flock "$LEASE_FILE" "$0" "$@" &
+        LOCK_PID=$!
+        set +e
+        wait "$LOCK_PID"
+        RC=$?
+        set -e
+      fi
+    else
+      fail "neither lockf nor flock is available for lease serialization"
     fi
-    if ! lockf -s -t "$LEASE_TIMEOUT" 200; then
+
+    if [[ ! -f "$ACQUIRED_FILE" ]]; then
       fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
     fi
-  elif command -v flock >/dev/null 2>&1; then
-    if ! flock -n -x 200 2>/dev/null; then
-      warn "waiting for full-preflight lease $(format_owner_info)..."
-    fi
-    if ! flock -x -w "$LEASE_TIMEOUT" 200; then
-      fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
-    fi
+    rm -f "$ACQUIRED_FILE" 2>/dev/null || true
+    exit $RC
   else
-    fail "neither lockf nor flock is available for lease serialization"
-  fi
+    # Inner re-executed shell holding the lock
+    if [[ -n "${PREFLIGHT_ACQUIRED_FILE:-}" ]]; then
+      touch "$PREFLIGHT_ACQUIRED_FILE"
+    fi
 
-  # Restore standard signal traps now that lease is acquired
-  trap cleanup_preflight EXIT INT TERM
+    # Restore standard signal traps now that lease is acquired
+    trap cleanup_preflight EXIT INT TERM
 
-  cat > "$OWNER_FILE" <<EOF
+    cat > "$OWNER_FILE" <<EOF
 PID=$$
 STARTED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 WORKTREE=$REPO_ROOT
 COMMAND=$0 $*
 EOF
+  fi
 fi
 
 # Mirror CI: GOWORK=off so we don't accidentally pull in unrelated modules.
