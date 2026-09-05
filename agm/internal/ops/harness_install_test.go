@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestValidateHarness(t *testing.T) {
@@ -98,7 +99,8 @@ func TestHarnessInstallResult_JSON(t *testing.T) {
 }
 
 func TestGetHarnessPath(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// Test that we can call the function without crashing
 	// Don't assert specific return values since they depend on system state
@@ -109,34 +111,46 @@ func TestGetHarnessPath(t *testing.T) {
 }
 
 func TestInstallCodex_AlreadyInstalled(t *testing.T) {
-	// This test will only pass if codex is already installed
-	// We'll just verify the function runs without crashing
-	ctx := context.Background()
-	result := InstallCodex(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	installed, _, err := IsInstalled(ctx, HarnessCodex)
+	if err != nil {
+		t.Fatalf("IsInstalled(HarnessCodex) error = %v", err)
+	}
+	if !installed {
+		t.Skip("Codex CLI is not installed; skipping already-installed test")
+	}
+
+	result := InstallCodex(ctx)
 	if result == nil {
 		t.Fatal("InstallCodex() returned nil")
-		return
 	}
 
 	if result.Harness != string(HarnessCodex) {
 		t.Fatalf("InstallCodex() harness = %s, expected %s", result.Harness, HarnessCodex)
 	}
 
-	// result.Success could be true or false depending on whether codex is installed
-	// Just verify the result is populated
 	if result.Message == "" {
 		t.Fatal("InstallCodex() message is empty")
 	}
 }
 
 func TestInstallGemini_AlreadyInstalled(t *testing.T) {
-	ctx := context.Background()
-	result := InstallGemini(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	installed, _, err := IsInstalled(ctx, HarnessGemini)
+	if err != nil {
+		t.Fatalf("IsInstalled(HarnessGemini) error = %v", err)
+	}
+	if !installed {
+		t.Skip("Gemini CLI is not installed; skipping already-installed test")
+	}
+
+	result := InstallGemini(ctx)
 	if result == nil {
 		t.Fatal("InstallGemini() returned nil")
-		return
 	}
 
 	if result.Harness != string(HarnessGemini) {
@@ -149,12 +163,20 @@ func TestInstallGemini_AlreadyInstalled(t *testing.T) {
 }
 
 func TestInstallOpenCode_AlreadyInstalled(t *testing.T) {
-	ctx := context.Background()
-	result := InstallOpenCode(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	installed, _, err := IsInstalled(ctx, HarnessOpenCode)
+	if err != nil {
+		t.Fatalf("IsInstalled(HarnessOpenCode) error = %v", err)
+	}
+	if !installed {
+		t.Skip("OpenCode CLI is not installed; skipping already-installed test")
+	}
+
+	result := InstallOpenCode(ctx)
 	if result == nil {
 		t.Fatal("InstallOpenCode() returned nil")
-		return
 	}
 
 	if result.Harness != string(HarnessOpenCode) {
@@ -167,9 +189,18 @@ func TestInstallOpenCode_AlreadyInstalled(t *testing.T) {
 }
 
 func TestInstallPi_AlreadyInstalled(t *testing.T) {
-	ctx := context.Background()
-	result := InstallPi(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	installed, _, err := IsInstalled(ctx, HarnessPi)
+	if err != nil {
+		t.Fatalf("IsInstalled(HarnessPi) error = %v", err)
+	}
+	if !installed {
+		t.Skip("Pi CLI is not installed; skipping already-installed test")
+	}
+
+	result := InstallPi(ctx)
 	if result == nil {
 		t.Fatal("InstallPi() returned nil")
 	}
@@ -182,30 +213,38 @@ func TestInstallPi_AlreadyInstalled(t *testing.T) {
 }
 
 func TestInstall_InvalidHarness(t *testing.T) {
-	ctx := context.Background()
-	_, err := Install(ctx, HarnessType("invalid"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	_, err := Install(ctx, HarnessType("invalid"))
 	if err == nil {
 		t.Fatal("Install() should error for invalid harness")
 	}
 }
 
 func TestInstall_ValidHarness(t *testing.T) {
-	ctx := context.Background()
-
 	harnessTypes := []HarnessType{HarnessCodex, HarnessGemini, HarnessOpenCode, HarnessPi}
 
 	for _, harness := range harnessTypes {
 		t.Run(string(harness), func(t *testing.T) {
-			result, err := Install(ctx, harness)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
+			installed, _, err := IsInstalled(ctx, harness)
+			if err != nil {
+				t.Fatalf("IsInstalled(%s) error = %v", harness, err)
+			}
+			if !installed {
+				t.Skipf("%s CLI is not installed; skipping install test", harness)
+			}
+
+			result, err := Install(ctx, harness)
 			if err != nil {
 				t.Fatalf("Install() error = %v", err)
 			}
 
 			if result == nil {
 				t.Fatal("Install() returned nil result")
-				return
 			}
 
 			if result.Harness != string(harness) {
@@ -216,6 +255,26 @@ func TestInstall_ValidHarness(t *testing.T) {
 				t.Fatal("Install() message is empty")
 			}
 		})
+	}
+}
+
+func TestGetVersion_UnknownHarness(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := GetVersion(ctx, HarnessType("unknown"))
+	if err == nil {
+		t.Fatal("GetVersion() should error for unknown harness")
+	}
+}
+
+func TestGetVersion_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := GetVersion(ctx, HarnessCodex)
+	if err == nil {
+		t.Fatal("GetVersion() should return error for canceled context")
 	}
 }
 
