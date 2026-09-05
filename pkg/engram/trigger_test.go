@@ -13,7 +13,7 @@ description: A pattern with triggers
 tags:
   - test
 triggers:
-  - on: phase.started
+  - on: wayfinder.phase.started
     match:
       phase: planning
     scope: project
@@ -42,8 +42,8 @@ This engram has triggers.
 
 	// Verify first trigger
 	t1 := eng.Frontmatter.Triggers[0]
-	if t1.On != "phase.started" {
-		t.Errorf("Triggers[0].On = %q, want %q", t1.On, "phase.started")
+	if t1.On != "wayfinder.phase.started" {
+		t.Errorf("Triggers[0].On = %q, want %q", t1.On, "wayfinder.phase.started")
 	}
 	if t1.Scope != "project" {
 		t.Errorf("Triggers[0].Scope = %q, want %q", t1.Scope, "project")

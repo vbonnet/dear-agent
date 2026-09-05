@@ -3,7 +3,7 @@ package engram
 // TriggerSpec defines when an engram should be injected into context.
 type TriggerSpec struct {
 	// On is the event type that activates this trigger.
-	// Values: "phase.started", "phase.completed", "task.assigned", "task.started", "event"
+	// Values: "wayfinder.phase.started", "wayfinder.phase.completed", "task.assigned", "task.started", "event"
 	On string `yaml:"on"`
 
 	// Match defines conditions that must be true for the trigger to fire.

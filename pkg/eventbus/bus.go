@@ -32,6 +32,8 @@ const (
 	ChannelAudit Channel = "audit"
 	// ChannelHeartbeat is for liveness signals (fire-and-forget).
 	ChannelHeartbeat Channel = "heartbeat"
+	// ChannelWayfinder is for wayfinder lifecycle events.
+	ChannelWayfinder Channel = "wayfinder"
 )
 
 // IsDurable returns true if the channel requires persistence before dispatch.
@@ -61,9 +63,12 @@ const (
 	TypeTelemetryBusLimitHit  = "telemetry.bus.limit_hit"
 	TypeTelemetryBusSizeLimit = "telemetry.bus.size_limit"
 
+	// Wayfinder events
+	TypeWayfinderPhaseStarted   = "wayfinder.phase.started"
+	TypeWayfinderPhaseCompleted = "wayfinder.phase.completed"
+
 	// Notification events
-	TypeNotificationPhaseComplete = "notification.phase.complete"
-	TypeNotificationSessionEnd    = "notification.session.end"
+	TypeNotificationSessionEnd = "notification.session.end"
 
 	// Audit events
 	TypeAuditConfigChange = "audit.config.change"

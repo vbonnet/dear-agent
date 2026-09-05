@@ -31,7 +31,7 @@ var (
 var CompletePhaseCmd = &cobra.Command{
 	Use:   "complete-phase <phase-name>",
 	Short: "Mark a phase as completed",
-	Long: `Update WAYFINDER-STATUS.md, publish phase.completed event, and optionally commit to git.
+	Long: `Update WAYFINDER-STATUS.md, publish wayfinder.phase.completed event, and optionally commit to git.
 
 Example:
   wayfinder session complete-phase PROBLEM --outcome success
@@ -124,9 +124,9 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 		metadata["tests_written"] = countTestFiles(projectDir)
 	}
 
-	// Publish phase.completed event
+	// Publish wayfinder.phase.completed event
 	if err := tr.CompletePhase(phaseName, phaseOutcome, metadata); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to publish phase.completed event: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to publish wayfinder.phase.completed event: %v\n", err)
 	}
 
 	// Log phase completed to history
@@ -134,7 +134,7 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 		"outcome": phaseOutcome,
 	}
 	if err := hist.AppendEvent(history.EventTypePhaseCompleted, phaseName, completedData); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to log phase.completed to history: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to log wayfinder.phase.completed to history: %v\n", err)
 	}
 
 	// Write updated STATUS to project directory

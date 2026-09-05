@@ -27,7 +27,7 @@ var (
 var StartPhaseCmd = &cobra.Command{
 	Use:   "start-phase <phase-name>",
 	Short: "Mark a phase as started",
-	Long: `Update WAYFINDER-STATUS.md and publish phase.started event.
+	Long: `Update WAYFINDER-STATUS.md and publish wayfinder.phase.started event.
 
 Example:
   wayfinder session start-phase PROBLEM
@@ -113,14 +113,14 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		ensureSessionBead(cmd.Context(), st)
 	}
 
-	// Publish phase.started event
+	// Publish wayfinder.phase.started event
 	if err := tr.StartPhase(phaseName); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to publish phase.started event: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to publish wayfinder.phase.started event: %v\n", err)
 	}
 
 	// Log phase started to history
 	if err := hist.AppendEvent(history.EventTypePhaseStarted, phaseName, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to log phase.started to history: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to log wayfinder.phase.started to history: %v\n", err)
 	}
 
 	// Write updated STATUS to project directory

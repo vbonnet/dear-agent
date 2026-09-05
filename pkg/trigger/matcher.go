@@ -8,7 +8,7 @@ import (
 
 // TriggerEvent is a normalized event envelope for trigger evaluation.
 type TriggerEvent struct {
-	Type      string                 // "phase.started", "task.assigned", etc.
+	Type      string                 // "wayfinder.phase.started", "task.assigned", etc.
 	Data      map[string]interface{} // Event-specific data
 	ProjectID string                 // For scope filtering
 	SessionID string
