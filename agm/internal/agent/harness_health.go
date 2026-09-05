@@ -1,9 +1,6 @@
 package agent
 
-import (
-	"os"
-	"path/filepath"
-)
+import "path/filepath"
 
 // HarnessHealth is a per-harness health summary produced for `agm admin doctor`.
 //
@@ -69,14 +66,15 @@ func harnessConfigDir(home, harness string) string {
 	}
 }
 
-// CheckHarnessHealth inspects a single harness for `agm admin doctor`.
+// CheckHarnessHealthAtHome inspects a single harness for `agm admin doctor`
+// against one selected HOME.
 //
 // It never returns an error: every failure mode is captured in the returned
-// struct so the caller can report all harnesses in one pass. Auth is delegated
-// to ValidateHarnessAvailability, which treats a harness whose binary is on
-// PATH as available (the CLI manages its own auth) — keeping the Claude path's
-// behaviour unchanged.
-func CheckHarnessHealth(harness string) HarnessHealth {
+// struct so the caller can report all harnesses in one pass. Auth uses the
+// matching home-aware availability seam, which treats a harness whose binary
+// is on PATH as available because the CLI manages its own auth. A non-absolute
+// HOME produces no filesystem-backed config or credential evidence.
+func CheckHarnessHealthAtHome(harness, home string) HarnessHealth {
 	harness = NormalizeHarnessName(harness)
 	h := HarnessHealth{Harness: harness}
 
@@ -88,16 +86,16 @@ func CheckHarnessHealth(harness string) HarnessHealth {
 		}
 	}
 
-	if err := ValidateHarnessAvailability(harness); err != nil {
+	if err := validateHarnessAvailabilityAtHome(harness, home); err != nil {
 		h.AuthHint = err.Error()
 	} else {
 		h.AuthConfigured = true
 	}
 
-	if home, err := os.UserHomeDir(); err == nil {
+	if filepath.IsAbs(home) {
 		if dir := harnessConfigDir(home, harness); dir != "" {
 			h.ConfigDir = dir
-			if _, statErr := os.Stat(dir); statErr == nil {
+			if _, statErr := statPath(dir); statErr == nil {
 				h.ConfigDirFound = true
 			}
 		}

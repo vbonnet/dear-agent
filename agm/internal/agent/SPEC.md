@@ -174,6 +174,8 @@ compatibility.
 
 **AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
 
+**AGP-70** When harness health is requested with a selected HOME, the system shall use only an absolute selected home for every filesystem-backed advisory config-directory and Codex OAuth check, and shall perform no such lookup or report such evidence when that value is non-absolute.
+
 ### BDD Enforcement
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.
@@ -184,6 +186,15 @@ compatibility.
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`, `agm/internal/agent/gemini_import_history_test.go`, `agm/internal/agent/gemini_cli_adapter_test.go`
+
+### No-BDD rationale for AGP-70
+
+AGP-70 is a deterministic filesystem-authority contract rather than a new
+harness capability or parity-matrix behavior. It is verified directly by
+`harness_health_test.go` and `validate_test.go`, which place contradictory
+Codex state beneath synthetic retained and drift homes and reject relative
+paths before any filesystem call. A scenario would add process-global harness
+setup without strengthening that path-selection proof.
 
 ### No-BDD rationale for AGP-63 through AGP-69
 

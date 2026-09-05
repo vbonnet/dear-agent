@@ -138,11 +138,11 @@ func (d *InboxDrainer) Drain(ctx context.Context) (DrainResult, error) {
 		var actErr error
 		switch decision.Action {
 		case DrainAnswer:
-			if _, actErr = d.inbox.Answer(ctx, esc.ID, d.sessionID, d.role, decision.Text); actErr == nil {
+			if _, actErr = d.inbox.Answer(ctx, esc.ID, d.sessionID, d.role, decision.Text); actErr == nil || transitionCommitted(actErr) {
 				res.Answered++
 			}
 		case DrainForward:
-			if _, actErr = d.inbox.Forward(ctx, esc.ID, d.sessionID, d.role, decision.Text); actErr == nil {
+			if _, actErr = d.inbox.Forward(ctx, esc.ID, d.sessionID, d.role, decision.Text); actErr == nil || transitionCommitted(actErr) {
 				res.Forwarded++
 			}
 		case DrainSkip:
@@ -161,6 +161,11 @@ func (d *InboxDrainer) Drain(ctx context.Context) (DrainResult, error) {
 		}
 	}
 	return res, firstErr
+}
+
+func transitionCommitted(err error) bool {
+	var committed *escalation.CommittedEffectError
+	return errors.As(err, &committed)
 }
 
 var _ EscalationDrainer = (*InboxDrainer)(nil)

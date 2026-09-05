@@ -1,19 +1,19 @@
 package audit
 
-import (
-	"fmt"
-)
+import "fmt"
 
-// Strategy names how a Finding's Remediation is proposed to be applied. The
-// default for a finding without an explicit Remediation is determined by the
-// severity-policy in .dear-agent.yml > audits.severity-policy; the runner
-// consults the policy when Strategy is the zero value StrategyUnspecified.
+// Strategy is a closed hint for how an external system might handle a
+// Finding's Remediation. It does not prove that the suggestion is applicable
+// or authorize a side effect. The default for a finding without an explicit
+// strategy is determined by the severity-policy in .dear-agent.yml >
+// audits.severity-policy; the runner consults the policy when Strategy is the
+// zero value StrategyUnspecified.
 type Strategy string
 
 // Remediation strategies.
 const (
 	StrategyUnspecified Strategy = ""      // fall through to severity-policy default
-	StrategyAuto        Strategy = "auto"  // suggestion is eligible for external automation
+	StrategyAuto        Strategy = "auto"  // external automation handling hint
 	StrategyPR          Strategy = "pr"    // proposal for an external PR-producing workflow
 	StrategyIssue       Strategy = "issue" // proposal for an external issue-producing workflow
 	StrategyNoop        Strategy = "noop"  // record the proposal without applying it
@@ -30,20 +30,19 @@ func (s Strategy) IsValid() bool {
 	return false
 }
 
-// Remediation describes a proposed way to fix a Finding. The shape is
-// small on purpose: a check's job is to find, the operator's job is to
-// fix, and the substrate's job is to record. Concrete fields:
+// Remediation describes an inert handling suggestion for a Finding. The shape
+// is small on purpose: a check's job is to find, the operator's job is to fix,
+// and the substrate's job is to record. Concrete fields:
 //
-//   - Strategy: how to apply (see Strategy enum).
-//   - Command: proposed shell command for StrategyAuto. The audit package
-//     records it but never executes it.
-//   - Patch: proposed unified diff for StrategyPR. The audit package
-//     records it but does not apply it or open a PR.
-//   - Title / Body: PR title/body or issue title/body for StrategyPR
-//     / StrategyIssue. Required for those strategies.
+//   - Strategy: a handling hint (see Strategy enum).
+//   - Command: optional shell-command context for StrategyAuto.
+//   - Patch: optional unified-diff context for StrategyPR.
+//   - Title / Body: optional operator context for StrategyPR / StrategyIssue.
 //
-// No strategy is dispatched by this package. Side-effecting consumers belong
-// in a separately chartered durable module.
+// Payload fields are optional: for example, a patchless StrategyPR can
+// recommend investigation or PR-producing work. No strategy is dispatched by
+// this package. Applicability, authority, revision binding, idempotency, and
+// reconciliation belong in a separately chartered durable consumer.
 type Remediation struct {
 	Strategy Strategy
 	Command  string
@@ -52,7 +51,8 @@ type Remediation struct {
 	Body     string
 }
 
-// IsZero reports whether r is the empty value.
+// IsZero reports whether r contains neither a handling hint nor operator
+// context.
 func (r Remediation) IsZero() bool {
 	return r.Strategy == StrategyUnspecified &&
 		r.Command == "" &&
@@ -61,30 +61,11 @@ func (r Remediation) IsZero() bool {
 		r.Body == ""
 }
 
-// Validate returns a non-nil error when the strategy ↔ field
-// combination is incoherent (e.g. StrategyAuto with no Command).
+// Validate returns a non-nil error when Strategy is not part of the closed
+// vocabulary. Payload fields are optional and do not prove applicability.
 func (r Remediation) Validate() error {
 	if !r.Strategy.IsValid() {
 		return fmt.Errorf("audit: Remediation.Strategy %q invalid", r.Strategy)
-	}
-	switch r.Strategy {
-	case StrategyUnspecified, StrategyNoop:
-		// No required fields; both are valid empty-effect strategies.
-	case StrategyAuto:
-		if r.Command == "" {
-			return fmt.Errorf("audit: Remediation.Strategy=auto requires Command")
-		}
-	case StrategyPR:
-		if r.Patch == "" {
-			return fmt.Errorf("audit: Remediation.Strategy=pr requires Patch")
-		}
-		if r.Title == "" {
-			return fmt.Errorf("audit: Remediation.Strategy=pr requires Title")
-		}
-	case StrategyIssue:
-		if r.Title == "" {
-			return fmt.Errorf("audit: Remediation.Strategy=issue requires Title")
-		}
 	}
 	return nil
 }

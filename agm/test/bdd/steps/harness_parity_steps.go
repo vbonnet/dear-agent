@@ -785,7 +785,7 @@ func agmResolvesDoctorHealthForConfiguredHarness(ctx context.Context) error {
 	if state.configuredHarness == "" {
 		return fmt.Errorf("no harness configured")
 	}
-	state.harnessHealth = agent.CheckHarnessHealth(state.configuredHarness)
+	state.harnessHealth = checkHarnessHealthForScenario(state.configuredHarness)
 	return nil
 }
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -176,5 +177,151 @@ audits:
 	}
 	if _, err := BuildPlan(cfg, dir, audit.CadenceDaily, reg, "test"); err == nil {
 		t.Error("invalid severity key should fail BuildPlan")
+	}
+}
+
+func TestBuildPlanRejectsInvalidRemediationStrategy(t *testing.T) {
+	for _, value := range []string{`""`, "future"} {
+		t.Run(value, func(t *testing.T) {
+			dir := t.TempDir()
+			yml := fmt.Sprintf(`version: 1
+audits:
+  severity-policy:
+    P1:
+      remediate: %s
+`, value)
+			if err := os.WriteFile(filepath.Join(dir, ".dear-agent.yml"), []byte(yml), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			cfg, err := Load(dir)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if _, err := BuildPlan(cfg, dir, audit.CadenceDaily, audit.NewRegistry(), "test"); err == nil {
+				t.Fatalf("BuildPlan accepted remediation strategy %s", value)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsNullSeverityFields(t *testing.T) {
+	for _, field := range []string{"fail-run", "remediate", "notify"} {
+		t.Run(field, func(t *testing.T) {
+			dir := t.TempDir()
+			yml := fmt.Sprintf(`version: 1
+audits:
+  severity-policy:
+    P1:
+      %s: null
+`, field)
+			if err := os.WriteFile(filepath.Join(dir, ".dear-agent.yml"), []byte(yml), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if _, err := Load(dir); err == nil {
+				t.Fatalf("Load accepted null %s", field)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsNullSeverityRule(t *testing.T) {
+	dir := t.TempDir()
+	yml := `version: 1
+audits:
+  severity-policy:
+    P1: null
+`
+	if err := os.WriteFile(filepath.Join(dir, ".dear-agent.yml"), []byte(yml), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("Load accepted a null severity rule")
+	}
+}
+
+func TestBuildPlanProgrammaticSeverityRuleIsComplete(t *testing.T) {
+	cfg := &File{Audits: &AuditsSection{SeverityPolicy: map[string]SeverityRule{
+		"P2": {FailRun: true, Remediate: "noop", Notify: true},
+	}}}
+	plan, err := BuildPlan(cfg, t.TempDir(), audit.CadenceDaily, audit.NewRegistry(), "test")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	got := plan.SeverityPolicy[audit.SeverityP2]
+	want := (audit.SeverityRule{FailRun: true, DefaultStrategy: audit.StrategyNoop, Notify: true})
+	if got != want {
+		t.Fatalf("programmatic p2 rule = %+v, want %+v", got, want)
+	}
+
+	cfg.Audits.SeverityPolicy["P2"] = SeverityRule{FailRun: true}
+	if _, err := BuildPlan(cfg, t.TempDir(), audit.CadenceDaily, audit.NewRegistry(), "test"); err == nil {
+		t.Fatal("BuildPlan accepted an incomplete programmatic severity rule")
+	}
+}
+
+func TestBuildPlanSeverityOverridePreservesDefaultStrategyWhenRemediateOmitted(t *testing.T) {
+	dir := t.TempDir()
+	yml := `version: 1
+audits:
+  severity-policy:
+    P2:
+      fail-run: true
+      notify: true
+  schedule:
+    daily: []
+`
+	if err := os.WriteFile(filepath.Join(dir, ".dear-agent.yml"), []byte(yml), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	plan, err := BuildPlan(cfg, dir, audit.CadenceDaily, audit.NewRegistry(), "test")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	got := plan.SeverityPolicy[audit.SeverityP2]
+	if got.DefaultStrategy != audit.StrategyIssue {
+		t.Errorf("p2 default strategy = %q, want %q", got.DefaultStrategy, audit.StrategyIssue)
+	}
+	if !got.FailRun || !got.Notify {
+		t.Errorf("p2 boolean overrides not retained: %+v", got)
+	}
+}
+
+func TestBuildPlanSeverityOverridePreservesOmittedBooleanDefaults(t *testing.T) {
+	dir := t.TempDir()
+	yml := `version: 1
+audits:
+  severity-policy:
+    P0:
+      remediate: issue
+    P1:
+      fail-run: false
+      notify: false
+  schedule:
+    daily: []
+`
+	if err := os.WriteFile(filepath.Join(dir, ".dear-agent.yml"), []byte(yml), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	plan, err := BuildPlan(cfg, dir, audit.CadenceDaily, audit.NewRegistry(), "test")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	p0 := plan.SeverityPolicy[audit.SeverityP0]
+	if !p0.FailRun || !p0.Notify || p0.DefaultStrategy != audit.StrategyIssue {
+		t.Errorf("p0 override = %+v, want retained gates with issue strategy", p0)
+	}
+	p1 := plan.SeverityPolicy[audit.SeverityP1]
+	if p1.FailRun || p1.Notify || p1.DefaultStrategy != audit.StrategyPR {
+		t.Errorf("p1 override = %+v, want explicit false gates with retained PR strategy", p1)
 	}
 }

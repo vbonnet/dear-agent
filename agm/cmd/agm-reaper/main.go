@@ -52,6 +52,10 @@ func run() error {
 		flag.Usage()
 		return err
 	}
+	archiveOutcome, err := parseReaperOutcome(*outcome)
+	if err != nil {
+		return err
+	}
 
 	// Set up logging
 	if *logFile != "" {
@@ -79,7 +83,7 @@ func run() error {
 		SessionID:           *sessionID,
 		Force:               *force,
 		KeepSandbox:         *keepSandbox,
-		Outcome:             manifest.SessionOutcome(*outcome),
+		Outcome:             archiveOutcome,
 		AllowSupervisorReap: reapAllowed,
 	})
 	if err := r.Run(); err != nil {
@@ -88,6 +92,14 @@ func run() error {
 
 	logger.Info("Reaper completed successfully")
 	return nil
+}
+
+func parseReaperOutcome(value string) (manifest.SessionOutcome, error) {
+	outcome, err := manifest.ParseSessionOutcome(value)
+	if err != nil {
+		return manifest.OutcomeUnknown, fmt.Errorf("invalid --outcome: %w", err)
+	}
+	return outcome, nil
 }
 
 func validateResolvedTargets(sessionID, tmuxSession string) error {
