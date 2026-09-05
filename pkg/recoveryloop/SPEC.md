@@ -89,6 +89,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Package tests: `pkg/recoveryloop/loop_test.go` (RL-01..RL-10, RL-18..RL-22)
 - CLI tests: `cmd/recovery-loop/main_test.go` (RL-11..RL-17)
 
