@@ -43,14 +43,14 @@ report.
 4. Resolve the authenticated distribution root for the installed package that
    supplied this skill. The installer or activation layer must authenticate
    that exact package tree before use; do not infer it from the current working
-   directory, a source checkout, or `PATH`. Invoke its bundled executable by
-   absolute path:
+   directory, a source checkout, or `PATH`. The bundled executable must be
+   invoked through this absolute-path template:
 
    ```sh
    "<distribution-root>/bin/specaudit" inventory \
-     -repo <repository-path> \
-     -repository <owner/name> \
-     -revision <40-hex-sha> > inventory.json
+     -repo "<repository-path>" \
+     -repository "<owner/name>" \
+     -revision "<40-hex-sha>" > inventory.json
    ```
 
    Inventory reads tracked Git objects at the pinned revision, so dirty
@@ -94,12 +94,12 @@ report.
    "<distribution-root>/bin/specaudit" validate \
      -input findings.json \
      -inventory inventory.json \
-     -repo <repository-path>
+     -repo "<repository-path>"
 
    "<distribution-root>/bin/specaudit" render \
      -input findings.json \
      -inventory inventory.json \
-     -repo <repository-path> > report.html
+     -repo "<repository-path>" > report.html
    ```
 
    Validation rejects mismatched evidence and incomplete decision structure. It

@@ -31,12 +31,15 @@ import (
 	gherkin "github.com/cucumber/gherkin/go/v26"
 	"github.com/cucumber/messages/go/v21"
 	"github.com/vbonnet/dear-agent/internal/earslint"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const schemaVersion = "spec-audit/v3"
 
 const gitEvidenceTrustDisclosure = "The collector trusts the PATH-selected Git executable, repository Git metadata, the common object store, and configured object alternates. It disables replacement objects and lazy fetching and resolves evidence from the pinned commit through Git; it does not independently authenticate source provenance or object-store integrity."
 const runtimeStatusUnverified = "UNVERIFIED"
+const authenticatedSpecauditCommand = `"<distribution-root>/bin/specaudit"`
+const reproducibleRepositoryPath = `"<repository-path>"`
 
 const (
 	activeHarnessUnavailableLimitation     = "Active harness inventory was unavailable at the pinned revision."
@@ -682,6 +685,13 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 	if limits.wallTime <= 0 {
 		return report{}, errors.New("SPEC audit inventory wall-time limit must be positive")
 	}
+	if repository == "" || strings.TrimSpace(repository) != repository {
+		return report{}, errors.New("repository label must be nonempty without surrounding whitespace")
+	}
+	quotedRepository, err := quoteReproductionArgument(repository)
+	if err != nil {
+		return report{}, fmt.Errorf("quote repository label for reproduction command: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), limits.wallTime)
 	defer cancel()
 	executable, err := trustedGitExecutable()
@@ -812,7 +822,7 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 	}
 	return report{
 		SchemaVersion: schemaVersion,
-		Snapshot:      snapshot{Repository: strings.TrimSpace(repository), Revision: commit, RevisionCommittedAt: revisionCommittedAt},
+		Snapshot:      snapshot{Repository: repository, Revision: commit, RevisionCommittedAt: revisionCommittedAt},
 		Scope:         scope{Roots: []string{"."}, Excluded: []exclusion{}, ActiveMembers: active, AdapterScopes: adapterScopes},
 		Summary:       summary{SpecFiles: len(files), Requirements: requirementCount, Diagnostics: diagnosticCount, CandidateCount: 0, ByVerdict: map[string]int{}},
 		Methodology: methodology{
@@ -822,7 +832,7 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 			RuntimeStatus:    runtimeStatusUnverified,
 			GitEvidenceTrust: gitEvidenceTrustDisclosure,
 			GitTrustInputs:   gitTrustInputs,
-			Reproduce:        []string{fmt.Sprintf("specaudit inventory -repo . -repository %s -revision %s", strings.TrimSpace(repository), commit)},
+			Reproduce:        []string{fmt.Sprintf("%s inventory -repo %s -repository %s -revision %s", authenticatedSpecauditCommand, reproducibleRepositoryPath, quotedRepository, commit)},
 		},
 		Inventory:     files,
 		Features:      features,
@@ -831,6 +841,10 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 		NonCandidates: []finding{},
 		Limitations:   activeLimitations,
 	}, nil
+}
+
+func quoteReproductionArgument(value string) (string, error) {
+	return syntax.Quote(value, syntax.LangPOSIX)
 }
 
 func selectPinnedBlobs(treeOutput []byte, budget *corpusBudget) ([]pinnedBlob, error) {
