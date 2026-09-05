@@ -41,6 +41,8 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 **SGC-17** When a requested reap is downgraded to a scan under SGC-16, the system shall report the refusal to the caller as an explicit `reap_refused` reason in the machine-readable result, in addition to the warning, so that an automated caller cannot read the refusal as an ordinary preview run nor read the resulting would-reap count as sandboxes deleted.
 
+**SGC-18** When a destructive sandbox sweep cannot authenticate every configured session-store endpoint, the system shall report an error before consulting any endpoint or examining or changing any sandbox.
+
 ### Live-Process Gate
 
 **SGC-06** When any process holds a working directory or an open file descriptor at or under the sandbox, the system shall refuse the reap before attempting any unmount.
@@ -57,7 +59,7 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 ### Probe-Failure Reporting
 
-**SGC-15** When a fail-closed refusal (SGC-04, SGC-07, SGC-10) is raised because a safety check could not run, rather than because it positively found the sandbox live, mounted, or referenced, the system shall mark the `RefusalError` as a probe failure so that callers can distinguish "not evaluated" from "evaluated and kept" instead of accreting silently into a heartbeat that then reads as healthy.
+**SGC-15** When a fail-closed refusal (SGC-04, SGC-07, SGC-10, or SGC-19) is raised because a safety check could not run, rather than because it positively found the sandbox live, mounted, or referenced, the system shall mark the `RefusalError` as a probe failure so that callers can distinguish "not evaluated" from "evaluated and kept" instead of accreting silently into a heartbeat that then reads as healthy.
 
 ### Sweep Behaviour
 
@@ -71,9 +73,14 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 **SGC-14** When a caller supplies a bounded reap context, the system shall propagate its deadline into process and mount inspection, fail closed on cancellation, re-check the context before unmount and recursive removal, and never authorize removal from a safety scan that completed after the caller's budget expired.
 
+**SGC-19** When caller cancellation is observed before a periodic sandbox sweep commits its completion record, the system shall abort instead of classifying cancellation as a kept candidate, retain cancellation together with any concurrent operation error, return a partial result that preserves every completed or failed removal receipt, durably record failed removal attempts before emitting a terminal error instead of a completion record, carry the runner identity on every durable removal receipt so self-remediation cannot become schedule-liveness evidence, and, when cancellation is already observable before command setup or live-session inventory, consult neither.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature` (changed-package SPEC coverage gate)
 - Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, deadline-bounded process and mount inspection, store-down, path escapes), `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage), and `agm/cmd/agm/sandbox_gc_test.go` (configured workspace missing-database degradation).
 - SGC-16 evidence: `agm/cmd/agm/sandbox_gc_test.go::TestEffectiveSandboxGCReapRefusesPartialInventory` (a requested reap with any skipped workspace yields scan-only plus a notice; a complete inventory reaps as asked).
 - SGC-17 evidence: `agm/internal/ops/sandbox_gc_test.go::TestSandboxGCResultPublishesTheRefusalOnTheWire` and `::TestSandboxGCResultOmitsTheRefusalWhenItReaped` (the refusal, and only a real refusal, reaches the caller as `reap_refused`); the reciprocal consumer check is `cmd/disk-watchdog/reaper_liveness_honesty_test.go::TestSweepMergedWorktrees_RefusedReapIsARemediationFailure`, which asserts the watchdog treats it as failed remediation rather than a completed sweep.
+- Test consequence: No new BDD feature is required because SGC-18 governs one native CLI command boundary whose pre-configuration refusal and preserved read-only path are proven more directly by deterministic command-tree and unit tests.
+- SGC-18 evidence: `agm/cmd/agm/sandbox_gc_transport_containment_test.go::TestSandboxGCReapRefusesBeforeInventoryOrCandidateMutation` (direct execution refuses before command-local inventory, store, sweep, sandbox-GC log, or candidate mutation), `::TestSandboxGCReapRefusesBeforeRootPreRun` (the public command refuses before inherited root configuration and its `~/.agm` or configured centralized-storage mutation), and `::TestSandboxGCDryRunRemainsAvailable` (the existing SGC-11 read-only path remains available). Process-global package initialization is outside this command-boundary claim. Focused command-seam tests are the deterministic proof because the requirement governs one native command boundary rather than cross-harness behavior.
+- SGC-19 evidence: `agm/internal/sandboxgc/sandboxgc_test.go::TestReapContextBoundsInFlightSafetyScans`, `agm/internal/ops/sandbox_gc_test.go::TestSandboxGCPropagatesContextThroughSafetyGates`, `::TestSandboxGCPreCanceledContextSkipsInventoryAndCandidates`, `::TestSandboxGCRecordsSuccessfulReapBeforeReturningCancellation`, and `::TestSandboxGCRecordsRemovalErrorBeforeReturningCancellation`, plus `agm/cmd/agm/sandbox_gc_transport_containment_test.go::TestSandboxGCPreCanceledDryRunSkipsInventoryAndSweep`, `::TestSandboxGCPreCanceledDryRunRefusesBeforeRootPreRun`, and `::TestSandboxGCCancellationBeforeCompletionCommitLogsOnlyError`. Cancellation observed before the completion commit aborts instead of becoming a per-entry keep, preserves completed and failed removal receipts in the partial result, carries runner identity into the successful receipt, and refuses before inherited command setup when already canceled. The context check immediately before the append-only completion log is the linearization point; cancellation after it does not retroactively invalidate a completed sweep. Consumer evidence in `cmd/disk-watchdog/reaper_liveness_review_test.go::TestCheckGCHealth_NewerErrorInvalidatesLegacyReapFallback` and `::TestCheckGCHealth_SelfRemediationReapCannotBecomeLegacyProof` proves neither an aborted scheduled sweep nor a watchdog-triggered reap can become healthy legacy fallback evidence.

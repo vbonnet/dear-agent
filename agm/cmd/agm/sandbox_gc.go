@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -38,7 +39,12 @@ var (
 		// missing database never reaches this auto-start path.
 		return dolt.New(config)
 	}
+	runSandboxGCSweep = ops.SandboxGC
 	logSandboxGCEntry = logSandboxGCEntryDefault
+)
+
+var errSandboxGCReapTransportUnavailable = errors.New(
+	"sandbox GC reaping is disabled: authenticated session-store endpoint transport is not configured; run without --reap for a read-only scan",
 )
 
 var sandboxCmd = &cobra.Command{
@@ -48,12 +54,18 @@ var sandboxCmd = &cobra.Command{
 
 var sandboxGCCmd = &cobra.Command{
 	Use:   "gc",
-	Short: "Reap sandbox dirs of archived/dead sessions (dry-run by default)",
-	Long: `Sweep ~/.agm/sandboxes and reap every sandbox that provably belongs to
-no live session (ce-uxju: a 2.3T / 541-dir sandbox leak crashed the host).
+	Short: "Inspect orphaned sandboxes (destructive mode currently contained)",
+	Long: `Inspect ~/.agm/sandboxes and, once destructive authority is available,
+reap every sandbox that provably belongs to no live session (ce-uxju: a 2.3T /
+541-dir sandbox leak crashed the host).
 
 DRY-RUN BY DEFAULT: without --reap nothing is deleted; the sweep only reports
 what it would do.
+
+DESTRUCTIVE MODE IS CONTAINED: --reap currently exits non-zero before reading
+session stores or examining sandbox candidates. It remains unavailable until
+every configured session-store endpoint can supply authenticated transport
+authority (SGC-18).
 
 A sandbox is reaped ONLY when ALL safety gates pass:
   - path validation: the target is directly under ~/.agm/sandboxes
@@ -72,15 +84,45 @@ Examples:
   # Preview (dry-run, default)
   agm sandbox gc
 
-  # Actually delete eligible sandboxes
+  # Request destructive cleanup. This currently exits non-zero until
+  # authenticated session-store endpoint transport is configured.
   agm sandbox gc --reap
 
-  # Machine-readable output for the launchd sweep
-  agm sandbox gc --reap --json`,
+  # Machine-readable read-only report
+  agm sandbox gc --json`,
+	Args: validateSandboxGCArgs,
 	RunE: runSandboxGC,
 }
 
+func validateSandboxGCArgs(cmd *cobra.Command, _ []string) error {
+	if err := requireSandboxGCReapAuthority(); err != nil {
+		return err
+	}
+	return sandboxGCCommandContextError(cmd, "before command setup")
+}
+
+func requireSandboxGCReapAuthority() error {
+	if sandboxGCReap {
+		return errSandboxGCReapTransportUnavailable
+	}
+	return nil
+}
+
 func runSandboxGC(cmd *cobra.Command, args []string) error {
+	// ce-1hu9.68.6: a loopback TCP listener plus database credentials does not
+	// authenticate the process serving the live-session inventory. Until that
+	// command receives an endpoint-bound capability, destructive execution must
+	// stop before session-store discovery, store opens, sandbox-GC logging, or
+	// sandbox examination begins. Args enforces this before inherited Cobra
+	// pre-run hooks; this check keeps direct callers fail-closed as defense in
+	// depth. Process-global package initialization is outside this command seam.
+	if err := requireSandboxGCReapAuthority(); err != nil {
+		return err
+	}
+	if err := sandboxGCCommandContextError(cmd, "before live-session inventory"); err != nil {
+		return err
+	}
+
 	var minAge time.Duration
 	var err error
 	if sandboxGCMinAge != "" {
@@ -103,13 +145,26 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 				ui.PrintWarning(warning)
 			}
 		}
+		inventoryErr := fmt.Errorf("failed to build live-session inventory: %w", err)
+		if ctxErr := sandboxGCCommandContextError(cmd, "while building live-session inventory"); ctxErr != nil {
+			inventoryErr = errors.Join(ctxErr, inventoryErr)
+		}
 		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "live_session_inventory_failed",
+			Error:     inventoryErr.Error(),
+			DryRun:    !sandboxGCReap,
+		})
+		return inventoryErr
+	}
+	if err := sandboxGCCommandContextError(cmd, "after building live-session inventory"); err != nil {
+		logSandboxGCEntryTagged(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "request_context_ended",
 			Error:     err.Error(),
 			DryRun:    !sandboxGCReap,
 		})
-		return fmt.Errorf("failed to build live-session inventory: %w", err)
+		return err
 	}
 	for _, warning := range warnings {
 		logSandboxGCEntryTagged(gclog.Entry{
@@ -125,7 +180,8 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	// workspace looks unowned and can pass the remaining gates — deleting a
 	// live session's sandbox because we could not read the store that proves
 	// it is live. Downgrade the run to a scan and say so loudly; the operator
-	// fixes the topology, and the next tick reaps normally.
+	// fixes the topology, and a later tick may reap once authenticated endpoint
+	// authority permits destructive execution again.
 	reap, notice := effectiveSandboxGCReap(sandboxGCReap, warnings)
 	if notice != "" {
 		logSandboxGCEntryTagged(gclog.Entry{
@@ -141,22 +197,41 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	result, err := ops.SandboxGC(&ops.OpContext{}, &ops.SandboxGCRequest{
+	if err := sandboxGCCommandContextError(cmd, "before sandbox sweep"); err != nil {
+		logSandboxGCEntryTagged(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "request_context_ended",
+			Error:     err.Error(),
+			DryRun:    !sandboxGCReap,
+		})
+		return err
+	}
+
+	result, err := runSandboxGCSweep(&ops.OpContext{Context: cmd.Context()}, &ops.SandboxGCRequest{
 		Reap:           reap,
 		MinAge:         minAge,
 		LiveSessionIDs: constantLiveSessionIDs(liveSessionIDs),
 		Warnings:       warnings,
+		Source:         strings.TrimSpace(os.Getenv(sandboxGCSourceEnv)),
 	})
+	// A sweep can accumulate failed removal attempts before a later candidate
+	// cancels the run. Preserve each mutation receipt durably even though an
+	// aborted command intentionally emits no JSON/text success result.
+	logSandboxGCRemovalErrors(result)
 	if err != nil {
-		logSandboxGCEntryTagged(gclog.Entry{
+		if ctxErr := sandboxGCCommandContextError(cmd, "during sandbox sweep"); ctxErr != nil {
+			err = errors.Join(ctxErr, err)
+		}
+		entry := gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "sweep_failed",
 			Error:     err.Error(),
 			DryRun:    !sandboxGCReap,
-		})
+		}
+		addSandboxGCPartialCounts(&entry, result)
+		logSandboxGCEntryTagged(entry)
 		return handleError(err)
 	}
-
 	// Carry the refusal into the machine-readable result. `dry_run: true` alone
 	// is ambiguous — it is the ordinary shape of a preview run — so an automated
 	// caller that asked for --reap and got a scan would otherwise read a refusal
@@ -164,8 +239,25 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	// would-reap) as deleted sandboxes.
 	result.ReapRefused = notice
 
-	// Heartbeat: a sweep that reaps nothing is still a healthy sweep, and until
-	// now it left no trace at all. Without a record for the reap-nothing case,
+	// Linearize completion immediately before its durable record. Cancellation
+	// observed before this point is an aborted sweep and writes only an error;
+	// once this check passes, the completed sweep commits even if cancellation
+	// races with the contextless append-only logger itself.
+	if err := sandboxGCCommandContextError(cmd, "before committing sandbox sweep completion"); err != nil {
+		entry := gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "request_context_ended",
+			Error:     err.Error(),
+			DryRun:    !sandboxGCReap,
+		}
+		addSandboxGCPartialCounts(&entry, result)
+		logSandboxGCEntryTagged(entry)
+		return err
+	}
+
+	// Once authenticated authority lets a destructive request reach this point,
+	// a sweep that reaps nothing is still a healthy sweep. Without a record for
+	// the reap-nothing case,
 	// "the reaper last ran at T" is indistinguishable from "the reaper has been
 	// dead since T" — which is exactly how the hourly sandbox GC stayed broken
 	// from 2026-07-05 to 2026-08-07 while ~/.agm/sandboxes grew to 239 GB.
@@ -196,10 +288,47 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func sandboxGCCommandContextError(cmd *cobra.Command, phase string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("sandbox GC context ended %s: %w", phase, err)
+	}
+	return nil
+}
+
+func logSandboxGCRemovalErrors(result *ops.SandboxGCResult) {
+	if result == nil {
+		return
+	}
+	for _, entry := range result.Entries {
+		if entry.Action != "error" {
+			continue
+		}
+		logSandboxGCEntryTagged(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "candidate_removal_failed",
+			SessionID: entry.Name,
+			Error:     entry.Reason,
+			DryRun:    result.DryRun,
+		})
+	}
+}
+
+func addSandboxGCPartialCounts(entry *gclog.Entry, result *ops.SandboxGCResult) {
+	if result == nil {
+		return
+	}
+	entry.Errors = result.Errors
+	entry.ProbeFailures = result.ProbeFailures
+}
+
 // printSandboxGCText renders the human-readable sweep report.
 func printSandboxGCText(result *ops.SandboxGCResult) {
 	if result.DryRun {
-		fmt.Println("DRY RUN — no sandboxes were removed (use --reap to delete)")
+		fmt.Println("DRY RUN — no sandboxes were removed (--reap is unavailable until session-store transport is authenticated)")
 	}
 	for _, warning := range result.Warnings {
 		ui.PrintWarning(warning)
@@ -402,7 +531,7 @@ func logSandboxGCEntryDefault(entry gclog.Entry) {
 
 func init() {
 	sandboxGCCmd.Flags().BoolVar(&sandboxGCReap, "reap", false,
-		"Actually delete eligible sandboxes (default: dry-run)")
+		"Request deletion; currently unavailable until session-store endpoints have authenticated transport (default: dry-run)")
 	sandboxGCCmd.Flags().StringVar(&sandboxGCMinAge, "min-age", "",
 		"Never touch sandboxes modified more recently than this (default: 1h)")
 	sandboxGCCmd.Flags().BoolVar(&sandboxGCJSON, "json", false,

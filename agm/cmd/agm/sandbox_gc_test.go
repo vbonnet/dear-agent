@@ -31,11 +31,19 @@ func restoreSandboxGCDepsForTest(t *testing.T) {
 	t.Helper()
 	oldConfigs := sandboxGCStoreConfigs
 	oldOpen := openSandboxGCStore
+	oldSweep := runSandboxGCSweep
 	oldLog := logSandboxGCEntry
+	oldReap := sandboxGCReap
+	oldMinAge := sandboxGCMinAge
+	oldJSON := sandboxGCJSON
 	t.Cleanup(func() {
 		sandboxGCStoreConfigs = oldConfigs
 		openSandboxGCStore = oldOpen
+		runSandboxGCSweep = oldSweep
 		logSandboxGCEntry = oldLog
+		sandboxGCReap = oldReap
+		sandboxGCMinAge = oldMinAge
+		sandboxGCJSON = oldJSON
 	})
 	logSandboxGCEntry = func(entry gclog.Entry) {}
 }

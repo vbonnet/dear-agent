@@ -443,14 +443,13 @@ func reportPostCleanup(pc *ops.CleanupResult) {
 		if detail == "" {
 			detail = "no reason was reported"
 		}
-		// The periodic GC is an opt-in launch agent that an operator must
-		// bootstrap by hand, and it does not exist at all off macOS. Promising
-		// an automatic retry here would leave the sandbox leaking on every
-		// host where it was never activated.
+		// Destructive periodic and manual GC are fail-closed under SGC-18 until
+		// session-store endpoint transport is authenticated. Do not advertise a
+		// retry path that is intentionally unavailable or imply automatic cleanup.
 		ui.PrintError(fmt.Errorf("sandbox directory existed but could not be removed: %s", detail),
 			"Sandbox cleanup failed during archive",
-			"  • Retry manually: agm sandbox gc --reap\n"+
-				"  • The periodic sandbox GC sweep will retry only if the launch agent is installed and bootstrapped\n"+
+			"  • Inspect candidates with the read-only scan: agm sandbox gc\n"+
+				"  • Manual and scheduled --reap remain unavailable until authenticated session-store transport is configured\n"+
 				"  • Full cleanup history: ~/.agm/logs/cleanup.jsonl")
 	}
 }
