@@ -45,7 +45,7 @@ func (a *Adapter) GetParent(sessionID string) (*manifest.Manifest, error) {
 	parent, err := a.GetSession(parentID.String)
 	if err != nil {
 		// Parent was deleted (orphaned child) - return nil parent
-		if errors.Is(err, sql.ErrNoRows) || fmt.Sprint(err) == fmt.Sprintf("session not found: %s", parentID.String) {
+		if errors.Is(err, ErrSessionNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get parent session: %w", err)
