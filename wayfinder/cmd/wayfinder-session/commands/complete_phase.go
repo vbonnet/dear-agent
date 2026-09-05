@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,8 +95,12 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Update phase status
+	// Update phase status and move the session pointer forward.
 	st.UpdatePhase(phaseName, status.PhaseStatusCompleted, phaseOutcome)
+	advancedTo, err := advanceWaypoint(st, phaseName)
+	if err != nil {
+		return err
+	}
 
 	// Initialize tracker
 	tr, err := tracker.New(st.GetSessionID())
@@ -137,17 +142,83 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
 
+	// Read the canonical status back and confirm the transition actually
+	// landed. Reporting "✅ Phase X completed" and exiting 0 on a write that
+	// changed nothing is the fail-silent shape this command was reported for
+	// (ce-2sgej); a completion that did not persist must fail loud instead.
+	if err := verifyCompletionPersisted(projectDir, phaseName, advancedTo); err != nil {
+		return err
+	}
+
 	// Create git commit if in a git repository
 	gitIntegrator := git.New(projectDir)
 	if gitIntegrator.IsGitRepo() {
-		if err := gitIntegrator.CommitPhaseCompletion(phaseName, phaseOutcome, phaseContext); err != nil {
+		committed, err := gitIntegrator.CommitPhaseCompletion(phaseName, phaseOutcome, phaseContext)
+		switch {
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "Warning: failed to create git commit: %v\n", err)
-		} else {
+		case committed:
 			fmt.Println("📝 Git commit created")
+		default:
+			fmt.Println("📝 No git commit: the repository ignores the Wayfinder markers")
 		}
 	}
 
 	fmt.Printf("✅ Phase %s completed (%s)\n", phaseName, phaseOutcome)
+	if advancedTo != phaseName {
+		fmt.Printf("➡️  Current waypoint: %s\n", advancedTo)
+	} else {
+		fmt.Printf("➡️  Current waypoint: %s (final waypoint; close with 'session end')\n", advancedTo)
+	}
+	return nil
+}
+
+// advanceWaypoint moves the session pointer past the phase that just completed
+// and returns the waypoint the session now sits on.
+//
+// Before ce-2sgej nothing in the forward lifecycle ever wrote current_waypoint
+// except start-phase, so completing a phase left the pointer parked on it and
+// left session status on "planning" for the life of the session. Every read of
+// WAYFINDER-STATUS.md then described a session that had never moved, which is
+// what made complete-phase read as a silent no-op.
+//
+// Completing a phase behind the pointer (an out-of-order backfill) leaves the
+// pointer where it is: it is already ahead.
+func advanceWaypoint(st *status.StatusV2, completedPhase string) (string, error) {
+	current := st.GetCurrentWaypoint()
+	if current != completedPhase {
+		return current, nil
+	}
+
+	next, err := st.NextWaypoint()
+	if err != nil {
+		if errors.Is(err, status.ErrFinalWaypoint) {
+			// RETRO is the last waypoint; `session end` owns closing the session.
+			return completedPhase, nil
+		}
+		return "", fmt.Errorf("advance session past %s: %w", completedPhase, err)
+	}
+
+	st.SetCurrentWaypoint(next)
+	if st.Status == status.StatusV2Planning {
+		st.Status = status.StatusV2InProgress
+	}
+	return next, nil
+}
+
+// verifyCompletionPersisted re-reads the canonical status from disk and
+// confirms the completion and the pointer advance both survived the write.
+func verifyCompletionPersisted(projectDir, phaseName, advancedTo string) error {
+	persisted, err := status.ParseV2FromDir(projectDir)
+	if err != nil {
+		return fmt.Errorf("verify %s completion: re-read canonical status: %w", phaseName, err)
+	}
+	if got := persisted.GetPhaseStatus(phaseName); got != status.PhaseStatusCompleted {
+		return fmt.Errorf("verify %s completion: canonical status still reports phase %q after write", phaseName, got)
+	}
+	if got := persisted.GetCurrentWaypoint(); got != advancedTo {
+		return fmt.Errorf("verify %s completion: current_waypoint is %q after write, want %q", phaseName, got, advancedTo)
+	}
 	return nil
 }
 

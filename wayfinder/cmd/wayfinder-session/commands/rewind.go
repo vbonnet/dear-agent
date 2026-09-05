@@ -156,7 +156,7 @@ func runRewind(cmd *cobra.Command, args []string) (runErr error) {
 
 type rewindCommitter interface {
 	CheckGitRepo() (bool, error)
-	CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) error
+	CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) (bool, error)
 }
 
 func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string, archiveRef archive.ArchiveRef, stdout io.Writer) error {
@@ -167,8 +167,13 @@ func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string
 	if !isRepo {
 		return nil
 	}
-	if err := integrator.CommitRewind(fromPhase, targetPhase, archiveRef); err != nil {
+	committed, err := integrator.CommitRewind(fromPhase, targetPhase, archiveRef)
+	if err != nil {
 		return fmt.Errorf("commit rewind trace: %w", err)
+	}
+	if !committed {
+		fmt.Fprintln(stdout, "📝 No rewind commit: the repository ignores the Wayfinder markers")
+		return nil
 	}
 	fmt.Fprintln(stdout, "📝 Rewind state committed")
 	return nil

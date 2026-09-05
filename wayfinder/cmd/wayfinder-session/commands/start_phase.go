@@ -134,10 +134,14 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 	// This mirrors the auto-commit that complete-phase already performs.
 	gitIntegrator := git.New(projectDir)
 	if gitIntegrator.IsGitRepo() {
-		if err := gitIntegrator.CommitPhaseStart(phaseName); err != nil {
+		committed, err := gitIntegrator.CommitPhaseStart(phaseName)
+		switch {
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "Warning: failed to create git commit: %v\n", err)
-		} else {
+		case committed:
 			fmt.Println("📝 Git commit created")
+		default:
+			fmt.Println("📝 No git commit: the repository ignores the Wayfinder markers")
 		}
 	}
 

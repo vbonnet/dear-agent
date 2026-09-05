@@ -144,7 +144,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// sessions even after the PR #488 auto-commit fix (which only covers
 	// subsequent phase transitions, not the initial session creation).
 	gitIntegrator := git.New(projectDir)
-	if err := gitIntegrator.CommitSessionInit(projectName); err != nil {
+	if _, err := gitIntegrator.CommitSessionInit(projectName); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to commit session init: %v\n", err)
 	}
 

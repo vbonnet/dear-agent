@@ -20,9 +20,12 @@
 
 **REPO-SCRIPT-09** When full preflight runs, the system shall acquire an exclusive host-scoped advisory lease before dependency download, compilation, lint, and test execution, serialize concurrent executions across worktrees, report owner information upon contention, timeout, or cancellation without terminating the active leaseholder, and release the lease upon process termination.
 
+**REPO-SCRIPT-10** When a local preflight gate fails, the system shall record the failing gate name, and the names of the failing tests when that gate collected them, to the report file the calling tool reads, and shall determine test failure from the test command's own exit status rather than the enclosing pipeline's.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 - Feature: `tests/bats/isolated-preflight.bats` (REPO-SCRIPT-08)
 - Feature: `tests/bats/preflight-lease.bats` (REPO-SCRIPT-09)
+- Feature: `tests/bats/preflight-gate.bats` (REPO-SCRIPT-10)
