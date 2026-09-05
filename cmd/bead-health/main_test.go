@@ -43,21 +43,39 @@ func captureStdout(fn func()) string {
 	return <-outC
 }
 
+type mockDirInfo struct{}
+
+func (mockDirInfo) Name() string       { return ".beads" }
+func (mockDirInfo) Size() int64        { return 0 }
+func (mockDirInfo) Mode() os.FileMode  { return os.ModeDir }
+func (mockDirInfo) ModTime() time.Time { return fixedTime() }
+func (mockDirInfo) IsDir() bool        { return true }
+func (mockDirInfo) Sys() any           { return nil }
+
+func mockStatDir(string) (os.FileInfo, error) {
+	return mockDirInfo{}, nil
+}
+
+func testDeps(query func(ctx context.Context, db string) ([]BeadRecord, error)) deps {
+	return deps{
+		now:               fixedTime,
+		statDB:            mockStatDir,
+		queryLatestClosed: query,
+	}
+}
+
 func TestRun_HealthyInsideLookback(t *testing.T) {
 	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return []BeadRecord{
-				{
-					ID:       "ce-test1",
-					Title:    "Test bead closure",
-					Status:   "closed",
-					ClosedAt: now.Add(-2 * time.Hour).Format(time.RFC3339),
-				},
-			}, nil
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return []BeadRecord{
+			{
+				ID:       "ce-test1",
+				Title:    "Test bead closure",
+				Status:   "closed",
+				ClosedAt: now.Add(-2 * time.Hour).Format(time.RFC3339),
+			},
+		}, nil
+	})
 
 	out := captureStdout(func() {
 		code := run([]string{"--lookback", "24h"}, d)
@@ -73,19 +91,16 @@ func TestRun_HealthyInsideLookback(t *testing.T) {
 
 func TestRun_DegradedOlderThanLookback(t *testing.T) {
 	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return []BeadRecord{
-				{
-					ID:       "ce-test2",
-					Title:    "Old bead closure",
-					Status:   "closed",
-					ClosedAt: now.Add(-50 * time.Hour).Format(time.RFC3339),
-				},
-			}, nil
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return []BeadRecord{
+			{
+				ID:       "ce-test2",
+				Title:    "Old bead closure",
+				Status:   "closed",
+				ClosedAt: now.Add(-50 * time.Hour).Format(time.RFC3339),
+			},
+		}, nil
+	})
 
 	out := captureStdout(func() {
 		code := run([]string{"--lookback", "48h"}, d)
@@ -100,13 +115,9 @@ func TestRun_DegradedOlderThanLookback(t *testing.T) {
 }
 
 func TestRun_DegradedZeroClosedBeads(t *testing.T) {
-	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return []BeadRecord{}, nil
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return []BeadRecord{}, nil
+	})
 
 	out := captureStdout(func() {
 		code := run([]string{"--lookback", "24h"}, d)
@@ -121,20 +132,16 @@ func TestRun_DegradedZeroClosedBeads(t *testing.T) {
 }
 
 func TestRun_DegradedEmptyClosedAt(t *testing.T) {
-	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return []BeadRecord{
-				{
-					ID:       "ce-empty-ts",
-					Title:    "Missing closed_at",
-					Status:   "closed",
-					ClosedAt: "",
-				},
-			}, nil
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return []BeadRecord{
+			{
+				ID:       "ce-empty-ts",
+				Title:    "Missing closed_at",
+				Status:   "closed",
+				ClosedAt: "",
+			},
+		}, nil
+	})
 
 	out := captureStdout(func() {
 		code := run([]string{"--lookback", "24h"}, d)
@@ -149,13 +156,9 @@ func TestRun_DegradedEmptyClosedAt(t *testing.T) {
 }
 
 func TestRun_DownQueryError(t *testing.T) {
-	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return nil, errors.New("dolt database locked")
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return nil, errors.New("dolt database locked")
+	})
 
 	out := captureStdout(func() {
 		code := run([]string{"--lookback", "24h"}, d)
@@ -170,20 +173,16 @@ func TestRun_DownQueryError(t *testing.T) {
 }
 
 func TestRun_DownInvalidTimestampFormat(t *testing.T) {
-	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return []BeadRecord{
-				{
-					ID:       "ce-bad-ts",
-					Title:    "Corrupt timestamp",
-					Status:   "closed",
-					ClosedAt: "not-a-valid-timestamp",
-				},
-			}, nil
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return []BeadRecord{
+			{
+				ID:       "ce-bad-ts",
+				Title:    "Corrupt timestamp",
+				Status:   "closed",
+				ClosedAt: "not-a-valid-timestamp",
+			},
+		}, nil
+	})
 
 	out := captureStdout(func() {
 		code := run([]string{"--lookback", "24h"}, d)
@@ -199,19 +198,16 @@ func TestRun_DownInvalidTimestampFormat(t *testing.T) {
 
 func TestRun_DownFutureClosureClockSkew(t *testing.T) {
 	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return []BeadRecord{
-				{
-					ID:       "ce-future",
-					Title:    "Future timestamp",
-					Status:   "closed",
-					ClosedAt: now.Add(10 * time.Minute).Format(time.RFC3339),
-				},
-			}, nil
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return []BeadRecord{
+			{
+				ID:       "ce-future",
+				Title:    "Future timestamp",
+				Status:   "closed",
+				ClosedAt: now.Add(10 * time.Minute).Format(time.RFC3339),
+			},
+		}, nil
+	})
 
 	out := captureStdout(func() {
 		code := run([]string{"--lookback", "24h"}, d)
@@ -246,19 +242,16 @@ func TestRun_UsageBadLookback(t *testing.T) {
 
 func TestRun_JSONReport(t *testing.T) {
 	now := fixedTime()
-	d := deps{
-		now: func() time.Time { return now },
-		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
-			return []BeadRecord{
-				{
-					ID:       "ce-json",
-					Title:    "JSON report check",
-					Status:   "closed",
-					ClosedAt: now.Add(-30 * time.Minute).Format(time.RFC3339),
-				},
-			}, nil
-		},
-	}
+	d := testDeps(func(ctx context.Context, db string) ([]BeadRecord, error) {
+		return []BeadRecord{
+			{
+				ID:       "ce-json",
+				Title:    "JSON report check",
+				Status:   "closed",
+				ClosedAt: now.Add(-30 * time.Minute).Format(time.RFC3339),
+			},
+		}, nil
+	})
 
 	var r Report
 	out := captureStdout(func() {
@@ -320,5 +313,34 @@ func TestRun_HomeDirErrorOnTildePath(t *testing.T) {
 	code := run([]string{"--db", "~/test"}, d)
 	if code != 3 {
 		t.Fatalf("run() = %d, want 3", code)
+	}
+}
+
+type mockFileInfo struct{}
+
+func (mockFileInfo) Name() string       { return "file" }
+func (mockFileInfo) Size() int64        { return 10 }
+func (mockFileInfo) Mode() os.FileMode  { return 0644 }
+func (mockFileInfo) ModTime() time.Time { return fixedTime() }
+func (mockFileInfo) IsDir() bool        { return false }
+func (mockFileInfo) Sys() any           { return nil }
+
+func TestRun_DownDBNotADir(t *testing.T) {
+	d := deps{
+		now: fixedTime,
+		statDB: func(path string) (os.FileInfo, error) {
+			return mockFileInfo{}, nil
+		},
+	}
+
+	out := captureStdout(func() {
+		code := run([]string{"--db", "/path/to/file"}, d)
+		if code != 2 {
+			t.Fatalf("run() = %d, want 2", code)
+		}
+	})
+
+	if !bytes.Contains([]byte(out), []byte("is not a directory")) {
+		t.Errorf("stdout = %q, want is not a directory", out)
 	}
 }
