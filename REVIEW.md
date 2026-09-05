@@ -253,6 +253,35 @@ The semantic reviewer must keep uncertain ownership separate from confirmed
 defects: incomplete or low-confidence semantic evidence is
 `needs-human-review`, not an invented canonical owner or a blocking conclusion.
 
+### Routine dependency updates
+
+The dependency-graph paths are a §3 trigger because the reviewer builds from
+them, but "the file changed at all" is the wrong boundary. It escalated every
+routine bump to a human, including the OpenTelemetry family bump in PR 1434
+and the `x/crypto` and `fast-uri` security patches in PR 1441, whose only
+finding was that `go.mod` had changed. A security patch that has to wait on a
+sleeping maintainer is a hazard, not a control.
+
+The plan therefore proves the delta rather than the filename. A dependency
+change is routine, and records no maintainer requirement, when every changed
+dependency path is a plainly modified root `go.mod` (optionally with `go.sum`),
+both manifests parse, at least one already-required module changes version,
+every version change stays inside the same semver major, no direct requirement
+is added or removed, no `replace` directive exists on either side, the `go` and
+`toolchain` directives and every other non-require directive are unchanged, and
+no retained `go.sum` checksum is rewritten. Requirements marked indirect may be
+added, removed, or reclassified, because that is what resolving a bump does.
+
+Routine updates take the ordinary path: green CI, the five-dimension review,
+and the vulnerability scans, with no human decision. They are not exempt from
+review, only from mandatory escalation. Everything else keeps the fail-closed
+maintainer requirement and now says why in the escalation itself: a new direct
+dependency, a major-version move, a `replace` directive, a `go` or `toolchain`
+change, a workspace or vendored input, an added or deleted manifest, a rewritten
+checksum, or a manifest that does not parse. Escalations from any other trigger
+are unaffected, so a dependency bump paired with a SPEC, policy, or workflow
+change still requires a human.
+
 ### Authenticated dependency automation
 
 A dependency version bump does not change a SPEC contract. The trusted review

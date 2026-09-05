@@ -41,7 +41,7 @@ separate provider-enforcement rollout is verified.
 
 **AIREV-15** When the command invokes Git to inspect a pull request revision, the command shall enforce time and output limits, shall expose only an allowlisted non-credential environment to the subprocess, and shall read exact committed object bytes without applying revision-controlled export transformations.
 
-**AIREV-16** When a pull request changes the canonical SPEC authoring entry point, template, write or audit workflow and reference files, active harness registry, trusted review workflow or ruleset, review implementation, deterministic Markdown or EARS parsers, Go build manifests, workspace manifests, or vendored dependencies used by that implementation, the command shall record a maintainer-review requirement rather than allow the revision to approve its own enforcement change. Protected file and directory identities shall match normalized Unicode case-fold exact, ancestor, and descendant paths—including the slashless `vendor` root—so a file/directory alias cannot evade the boundary. The command shall distinguish reviewer dependency inputs from SPEC contract changes and only the trusted workflow may convert the exact AIREV-24 dependency-automation case to neutral.
+**AIREV-16** When a pull request changes the canonical SPEC authoring entry point, template, write or audit workflow and reference files, active harness registry, trusted review workflow or ruleset, review implementation, deterministic Markdown or EARS parsers, Go build manifests, workspace manifests, or vendored dependencies used by that implementation, the command shall record a maintainer-review requirement rather than allow the revision to approve its own enforcement change. Protected file and directory identities shall match normalized Unicode case-fold exact, ancestor, and descendant paths—including the slashless `vendor` root—so a file/directory alias cannot evade the boundary. The command shall distinguish reviewer dependency inputs from SPEC contract changes, shall record no maintainer requirement for a dependency-graph change that AIREV-33 proves routine, and only the trusted workflow may convert the exact AIREV-24 dependency-automation case to neutral.
 
 **AIREV-17** When a changed SPEC or protected enforcement owner is reviewed from a head that does not contain the current protected base, the command shall require the branch to be updated and shall not bind policy or corpus evidence to the stale merge base.
 
@@ -76,6 +76,8 @@ This requirement classifies changed workflow YAML blobs only. Direct reusable-ca
 
 **AIREV-32** When a changed workflow identity's canonical content differs across the compared revisions and the identity is an enumerated owner of a provider-required branch-protection status context, the command shall force needs-human-review regardless of the permission scopes, trigger events, or schedule the workflow declares. Ownership is authority-bearing independent of any write scope: a job can be rewritten into an unconditional pass without ever touching a secret, permission, or privileged event, silently neutralizing the required context it publishes. This trigger applies before AIREV-27's permission- and schedule-based classification and is not satisfied by, nor does it satisfy, AIREV-27's carveouts.
 
+**AIREV-33** When the authenticated Git plan classifies the dependency-graph paths of a changed revision, the command shall prove the parsed manifest delta rather than the changed filename and shall record no maintainer requirement for those paths when every one of them is a plainly modified root `go.mod`, optionally with `go.sum`, both manifests parse as regular text blobs in both revisions, at least one already-required module changes version, every changed requirement version stays within the same canonical semantic-versioning major, no direct requirement is added or removed, no replace directive exists in either revision, the module identity and the go, toolchain, exclude, retract, and every other non-require directive and require-block annotation remain unchanged, and no checksum retained in `go.sum` is rewritten. Requirements marked indirect may be added, removed, or reclassified as part of that proof. When the proof does not hold, the command shall record the maintainer requirement for every dependency-graph path in the delta and shall name the specific refused difference in that requirement rather than only the changed path. A workspace manifest, a vendored path, an added, deleted, or retyped manifest, a modified `go.sum` without a modified `go.mod`, and an unreadable or unparsable manifest shall each fail closed, and this proof shall be local to the reviewer-dependency trigger so an independent SPEC, ownership, permission, workflow, or explicit escalation trigger on the same revision still requires human review.
+
 ## Enforcement wiring
 
 - `.github/workflows/review.yml` invokes this command from trusted
@@ -83,6 +85,12 @@ This requirement classifies changed workflow YAML blobs only. Direct reusable-ca
   head under the unique `SPEC Contract Review` check context. The workflow's
   native `AI review orchestration` job has a distinct name and fails if
   creation or publication of that semantic check fails.
+- The command decides the AIREV-33 reviewer-dependency trigger from the parsed
+  `go.mod` and `go.sum` delta, not from the fact that a dependency file
+  changed. A routine version update of already-required modules records no
+  maintainer requirement and takes the ordinary review path; every other
+  dependency-graph change keeps the requirement and names the refused
+  difference. The proof is local to this trigger and suppresses no other.
 - The command classifies only the Git shape of a possible
   dependency-version-led module update. The trusted workflow separately
   resolves the current PR revision from GitHub's API and authenticates

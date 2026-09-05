@@ -276,6 +276,7 @@ type reviewPlan struct {
 	ReviewNeeded                  bool                           `json:"review_needed"`
 	ReviewRelevant                bool                           `json:"review_relevant"`
 	DependabotModuleOnlyCandidate bool                           `json:"dependabot_module_only_candidate"`
+	DependencyGraphDelta          dependencyGraphDelta           `json:"dependency_graph_delta"`
 	EscalationTriggers            []string                       `json:"escalation_triggers"`
 	HumanReasons                  []string                       `json:"human_reasons"`
 }
@@ -344,12 +345,14 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		return reviewPlan{}, errors.New("changed-path count exceeds the review limit")
 	}
 	changedPaths := make([]string, 0, len(fields)/2)
+	changedStatuses := make(map[string]string, len(fields)/2)
 	for i := 0; i < len(fields); i += 2 {
 		status, path := string(fields[i]), string(fields[i+1])
 		if len(status) != 1 || !safeGitPath(path) {
 			return reviewPlan{}, errors.New("unsafe changed path evidence")
 		}
 		changedPaths = append(changedPaths, path)
+		changedStatuses[path] = status
 	}
 	// An authenticated empty diff has no path, blob, or checkout identity to
 	// classify. Preserve explicit PR/commit escalation markers, but avoid
@@ -375,6 +378,13 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 	if err != nil {
 		return reviewPlan{}, fmt.Errorf("authenticate SPEC control path identities: %w", err)
 	}
+	// AIREV-33: the dependency-graph slice is proven once, before any path
+	// escalates. A version-only update to already-required modules is ordinary
+	// work for the review gate; anything else keeps its maintainer requirement.
+	plan.DependencyGraphDelta, err = classifyDependencyGraphDelta(ctx, mergeBase, head, changedStatuses)
+	if err != nil {
+		return reviewPlan{}, fmt.Errorf("classify dependency graph delta: %w", err)
+	}
 	riskPaths := make([]string, 0, len(specControlRisks))
 	for path := range specControlRisks {
 		riskPaths = append(riskPaths, path)
@@ -388,8 +398,8 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		if specReviewOwnerPathAuthenticated(path, treeIdentities) {
 			plan.HumanReasons = append(plan.HumanReasons, "SPEC review enforcement owner change requires maintainer review ("+path+")")
 		}
-		if specReviewDependencyPath(path) {
-			plan.HumanReasons = append(plan.HumanReasons, "SPEC reviewer dependency graph change requires maintainer review ("+path+")")
+		if specReviewDependencyPath(path) && !plan.DependencyGraphDelta.Routine {
+			plan.HumanReasons = append(plan.HumanReasons, reviewerDependencyReason(path, plan.DependencyGraphDelta.cause(path)))
 		}
 		// Noncanonical case/normalization aliases can shadow a canonical SPEC
 		// control file on supported checkouts while Git reports only the alias.
@@ -798,7 +808,7 @@ func onlyReviewerDependencyReasons(reasons []string) bool {
 		return false
 	}
 	for _, reason := range reasons {
-		if !strings.HasPrefix(reason, "SPEC reviewer dependency graph change requires maintainer review (") {
+		if !strings.HasPrefix(reason, reviewerDependencyReasonPrefix) {
 			return false
 		}
 	}

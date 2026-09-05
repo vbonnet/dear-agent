@@ -361,6 +361,8 @@ func TestBuildReviewPlan_FailsClosedWithoutProtectedBaseHarnessRegistry(t *testi
 func TestBuildReviewPlan_RequiresHumanForReviewEnforcementChanges(t *testing.T) {
 	for _, tc := range []struct {
 		path       string
+		before     string
+		after      string
 		wantReview bool
 		reason     string
 	}{
@@ -383,19 +385,31 @@ func TestBuildReviewPlan_RequiresHumanForReviewEnforcementChanges(t *testing.T) 
 		{path: "internal/earslint/lint.go", wantReview: true, reason: "enforcement owner change"},
 		{path: "internal/markdownvisible/markdown.go", wantReview: true, reason: "enforcement owner change"},
 		{path: ".github/rulesets/main.json", wantReview: true, reason: "enforcement owner change"},
-		{path: "go.mod", wantReview: true, reason: "reviewer dependency graph change"},
+		// AIREV-33: a routine dependency version update is ordinary work for
+		// the review gate. Only a foundational module change still escalates.
+		{path: "go.mod"},
+		{
+			path:       "go.mod",
+			before:     dependabotCandidateBaseGoMod,
+			after:      strings.Replace(dependabotCandidateBaseGoMod, "\n)", "\n\texample.com/added v1.0.0\n)", 1),
+			wantReview: true,
+			reason:     "reviewer dependency graph change requires maintainer review (go.mod: adds direct requirement example.com/added)",
+		},
 		{path: "go.sum", wantReview: true, reason: "reviewer dependency graph change"},
 		{path: "go.work", wantReview: true, reason: "reviewer dependency graph change"},
 		{path: "go.work.sum", wantReview: true, reason: "reviewer dependency graph change"},
 		{path: "vendor/example/module.go", wantReview: true, reason: "reviewer dependency graph change"},
 		{path: "docs/ordinary.md"},
 	} {
-		t.Run(tc.path, func(t *testing.T) {
+		t.Run(tc.path+"/"+tc.reason, func(t *testing.T) {
 			repo := newReviewRepo(t)
 			before, after := "before\n", "after\n"
 			if tc.path == "go.mod" {
 				before = dependabotCandidateBaseGoMod
 				after = strings.Replace(dependabotCandidateBaseGoMod, "v1.2.3", "v1.2.4", 1)
+			}
+			if tc.before != "" {
+				before, after = tc.before, tc.after
 			}
 			if tc.path != specAuthoringPolicyPath && tc.path != activeHarnessRegistryPath {
 				writeReviewFile(t, repo, tc.path, before)
@@ -426,7 +440,7 @@ func TestBuildReviewPlan_RequiresHumanForReviewEnforcementChanges(t *testing.T) 
 	}
 }
 
-func TestBuildReviewPlanMarksOnlySafeModuleDeltaAsDependabotCandidate(t *testing.T) {
+func TestBuildReviewPlanClearsRoutineDependencyUpdates(t *testing.T) {
 	repo := newReviewRepo(t)
 	baseSum := "example.com/direct v1.2.3 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
 	writeReviewFile(t, repo, "go.mod", dependabotCandidateBaseGoMod)
@@ -447,19 +461,50 @@ func TestBuildReviewPlanMarksOnlySafeModuleDeltaAsDependabotCandidate(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.DependabotModuleOnlyCandidate || !plan.ReviewNeeded || !plan.ReviewRelevant || !plan.needsHuman() {
-		t.Fatalf("dependency-version-led module plan = %#v", plan)
+	if !plan.DependencyGraphDelta.Routine {
+		t.Fatalf("routine dependency update was not proven: %#v", plan.DependencyGraphDelta)
 	}
-	if len(plan.HumanReasons) != 2 || !onlyReviewerDependencyReasons(plan.HumanReasons) {
-		t.Fatalf("dependency-version-led module reasons = %v", plan.HumanReasons)
+	if plan.needsHuman() || plan.ReviewNeeded || plan.ReviewRelevant {
+		t.Fatalf("routine dependency update still forces governance review: %#v", plan)
 	}
 
+	// An explicit escalation marker is independent of the dependency proof.
 	marked, err := buildReviewPlanWithPRBody(context.Background(), base, head, "HUMAN REVIEW REQUIRED")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if marked.DependabotModuleOnlyCandidate || len(marked.EscalationTriggers) == 0 {
-		t.Fatalf("explicit escalation entered dependency automation path: %#v", marked)
+	if len(marked.EscalationTriggers) == 0 || !marked.ReviewRelevant {
+		t.Fatalf("explicit escalation was cleared by the dependency proof: %#v", marked)
+	}
+}
+
+func TestBuildReviewPlanEscalatesFoundationalDependencyChangesWithCause(t *testing.T) {
+	repo := newReviewRepo(t)
+	writeReviewFile(t, repo, "go.mod", dependabotCandidateBaseGoMod)
+	gittest.Run(t, repo, "add", "go.mod")
+	gittest.Run(t, repo, "commit", "-m", "add module input")
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+
+	writeReviewFile(t, repo, "go.mod", strings.Replace(dependabotCandidateBaseGoMod, "v0.4.5", "v1.0.0", 1))
+	gittest.Run(t, repo, "add", "go.mod")
+	gittest.Run(t, repo, "commit", "-m", "bump a major version")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.DependencyGraphDelta.Routine || !plan.needsHuman() || !plan.ReviewNeeded || !plan.ReviewRelevant {
+		t.Fatalf("major-version bump did not require maintainer review: %#v", plan)
+	}
+	want := "SPEC reviewer dependency graph change requires maintainer review " +
+		"(go.mod: changes the major version of requirement example.com/indirect)"
+	if len(plan.HumanReasons) != 1 || plan.HumanReasons[0] != want {
+		t.Fatalf("HumanReasons = %v, want exactly %q", plan.HumanReasons, want)
+	}
+	if !onlyReviewerDependencyReasons(plan.HumanReasons) {
+		t.Fatalf("cause-bearing reason lost its stable classification prefix: %v", plan.HumanReasons)
 	}
 }
 
