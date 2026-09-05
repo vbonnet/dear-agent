@@ -147,7 +147,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
-	state := workflow.RunState(r.URL.Query().Get("state"))
+	state, err := workflow.ParseRunStateFilterValues(r.URL.Query()["state"])
+	if err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_state", err)
+		return
+	}
 	limit := parseLimit(r.URL.Query().Get("limit"), 50, 500)
 	runs, err := workflow.List(r.Context(), s.RunsDB, workflow.ListOptions{State: state, Limit: limit})
 	if err != nil {

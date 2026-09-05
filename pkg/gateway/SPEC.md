@@ -35,6 +35,9 @@ share one in-process command contract.
 
 **GATEWAY-CORE-12** When cancel handling is invoked before workflow cancel support exists, the system shall return `CodeUnavailable`.
 
+**GATEWAY-CORE-13** When workflow list handling receives a `state` argument that is present but not a string, or a run-state filter that WFLOW-08 rejects, the system shall return `CodeInvalidArgs`.
+
 ## BDD Traceability
 
-- `agm/test/bdd/features/api_gateway_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Feature: `agm/test/bdd/features/api_gateway_package_guardrails.feature`
+- Test consequence: Deterministic unit tests in `pkg/gateway/run_state_test.go` prove GATEWAY-CORE-13 by returning `CodeInvalidArgs` for an unknown filter despite closed storage while preserving the empty filter; this in-process adapter boundary needs no additional Gherkin scenario.

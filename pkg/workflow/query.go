@@ -147,6 +147,12 @@ func Status(ctx context.Context, db *sql.DB, runID string) (*RunStatus, error) {
 // List returns recent runs, optionally filtered by state. Default ordering
 // is most-recent-first.
 func List(ctx context.Context, db *sql.DB, opts ListOptions) ([]RunSummary, error) {
+	state, err := ParseRunStateFilter(string(opts.State))
+	if err != nil {
+		return nil, fmt.Errorf("workflow: List: %w", err)
+	}
+	opts.State = state
+
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 50
