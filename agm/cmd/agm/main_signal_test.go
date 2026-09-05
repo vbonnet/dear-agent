@@ -37,8 +37,8 @@ func TestLongRunningCommandsConsumeRootContext(t *testing.T) {
 		"heartbeat.go":       {"ctx := cmd.Context()"},
 		"watch.go":           {"w.Run(cmd.Context())"},
 		"watch_stalled.go":   {"ctx := cmd.Context()"},
-		"send_compact.go":    {"verifyCompaction(ctx,"},
-		"session_compact.go": {"monitorCompaction(cmd.Context(),"},
+		"send_compact.go":    {"ctx := cmd.Context()", "finishSendCompactionSuccess(ctx,"},
+		"session_compact.go": {"opCtx.Context = cmd.Context()", "cmd.Context(), confirmed"},
 	}
 	for file, snippets := range required {
 		data, err := os.ReadFile(filepath.Clean(file))

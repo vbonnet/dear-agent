@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,22 +11,28 @@ import (
 
 func TestStableErrorCodesAreUnique(t *testing.T) {
 	codes := map[string]string{
-		"session not found":   ErrCodeSessionNotFound,
-		"session archived":    ErrCodeSessionArchived,
-		"tmux not running":    ErrCodeTmuxNotRunning,
-		"dolt unavailable":    ErrCodeDoltUnavailable,
-		"invalid input":       ErrCodeInvalidInput,
-		"permission denied":   ErrCodePermissionDenied,
-		"session exists":      ErrCodeSessionExists,
-		"harness unavailable": ErrCodeHarnessUnavailable,
-		"workspace not found": ErrCodeWorkspaceNotFound,
-		"uuid not associated": ErrCodeUUIDNotAssociated,
-		"storage error":       ErrCodeStorageError,
-		"verification failed": ErrCodeVerificationFailed,
-		"kill protected":      ErrCodeKillProtected,
-		"active session kill": ErrCodeActiveSessionKill,
-		"lock timeout":        ErrCodeLockTimeout,
-		"dry run":             ErrCodeDryRun,
+		"session not found":     ErrCodeSessionNotFound,
+		"session archived":      ErrCodeSessionArchived,
+		"tmux not running":      ErrCodeTmuxNotRunning,
+		"dolt unavailable":      ErrCodeDoltUnavailable,
+		"invalid input":         ErrCodeInvalidInput,
+		"permission denied":     ErrCodePermissionDenied,
+		"session exists":        ErrCodeSessionExists,
+		"harness unavailable":   ErrCodeHarnessUnavailable,
+		"workspace not found":   ErrCodeWorkspaceNotFound,
+		"uuid not associated":   ErrCodeUUIDNotAssociated,
+		"storage error":         ErrCodeStorageError,
+		"verification failed":   ErrCodeVerificationFailed,
+		"kill protected":        ErrCodeKillProtected,
+		"active session kill":   ErrCodeActiveSessionKill,
+		"lock timeout":          ErrCodeLockTimeout,
+		"session not ready":     ErrCodeSessionNotReady,
+		"output unavailable":    ErrCodeOutputUnavailable,
+		"delivery uncertain":    ErrCodeDeliveryUncertain,
+		"delivery accounting":   ErrCodeDeliveryAccounting,
+		"compaction policy":     ErrCodeCompactionPolicy,
+		"compaction unverified": ErrCodeCompactionUnverified,
+		"dry run":               ErrCodeDryRun,
 	}
 	owners := make(map[string]string, len(codes))
 	for owner, code := range codes {
@@ -33,6 +40,22 @@ func TestStableErrorCodesAreUnique(t *testing.T) {
 			t.Errorf("stable error code %s is shared by %q and %q", code, previous, owner)
 		}
 		owners[code] = owner
+	}
+}
+
+func TestCompactionPolicyErrorPreservesStableIdentity(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("cooldown remains active")
+	err := ErrCompactionPolicy("worker", cause)
+	if err.Code != ErrCodeCompactionPolicy || err.Type != "session/compaction_policy" || err.Status != 409 {
+		t.Fatalf("error identity = %#v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatal("compaction policy error did not preserve its cause")
+	}
+	if strings.Contains(strings.ToLower(err.Detail), "may already") {
+		t.Fatalf("pre-delivery policy rejection implies uncertain submission: %q", err.Detail)
 	}
 }
 
@@ -54,6 +77,32 @@ func TestNewDryRunPreview(t *testing.T) {
 	}
 }
 
+func TestCompactionDeliveryOutcomeErrorsForbidAutomaticRetry(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("backend acknowledgement lost")
+	tests := []struct {
+		name string
+		err  *OpError
+		code string
+	}{
+		{name: "submission uncertain", err: ErrDeliveryUncertain("worker", cause), code: ErrCodeDeliveryUncertain},
+		{name: "accounting incomplete", err: ErrDeliveryAccounting("worker", cause), code: ErrCodeDeliveryAccounting},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if test.err.Code != test.code || !errors.Is(test.err, cause) {
+				t.Fatalf("error identity = %#v, want code %s and preserved cause", test.err, test.code)
+			}
+			guidance := strings.ToLower(test.err.Detail + " " + strings.Join(test.err.Suggestions, " "))
+			if !strings.Contains(guidance, "do not retry") {
+				t.Fatalf("error guidance invites an unsafe retry: %q", guidance)
+			}
+		})
+	}
+}
+
 // TestErrorCatalogPublishesTheActualProblemType guards the cross-surface
 // promise AGENTIC-API.md makes: the codes and types it lists are stable
 // identifiers agents match on programmatically. A catalog row whose `type`
@@ -67,9 +116,13 @@ func TestErrorCatalogPublishesTheActualProblemType(t *testing.T) {
 	}
 
 	published := map[string]string{
-		ErrCodeOutputUnavailable: ErrOutputUnavailable("s", "r", nil).Type,
-		ErrCodeSessionNotReady:   ErrSessionNotReady("s", "r").Type,
-		ErrCodeTmuxNotRunning:    ErrTmuxNotRunning().Type,
+		ErrCodeOutputUnavailable:    ErrOutputUnavailable("s", "r", nil).Type,
+		ErrCodeSessionNotReady:      ErrSessionNotReady("s", "r").Type,
+		ErrCodeTmuxNotRunning:       ErrTmuxNotRunning().Type,
+		ErrCodeDeliveryUncertain:    ErrDeliveryUncertain("s", nil).Type,
+		ErrCodeDeliveryAccounting:   ErrDeliveryAccounting("s", nil).Type,
+		ErrCodeCompactionPolicy:     ErrCompactionPolicy("s", nil).Type,
+		ErrCodeCompactionUnverified: ErrCompactionVerification("s", "timeout", nil).Type,
 	}
 
 	for line := range strings.SplitSeq(string(catalog), "\n") {

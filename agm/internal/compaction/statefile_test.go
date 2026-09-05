@@ -10,6 +10,7 @@ import (
 func TestLoadSessionState_SpecificFile(t *testing.T) {
 	dir := t.TempDir()
 	stateJSON := `{
+		"session_id": "stable-session-id",
 		"orchestrator_session": "orchestrator",
 		"managed_sessions": {
 			"worker-1": {"status": "ACTIVE", "notes": "doing stuff"},
@@ -22,12 +23,15 @@ func TestLoadSessionState_SpecificFile(t *testing.T) {
 	}`
 	os.WriteFile(filepath.Join(dir, "my-session-state.json"), []byte(stateJSON), 0o644)
 
-	state, path, err := LoadSessionState(dir, "my-session")
+	state, path, err := LoadSessionState(dir, "stable-session-id", "my-session")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.HasSuffix(path, "my-session-state.json") {
 		t.Errorf("path = %q, want suffix my-session-state.json", path)
+	}
+	if state.SessionID != "stable-session-id" {
+		t.Errorf("SessionID = %q, want stable-session-id", state.SessionID)
 	}
 	if state.OrchestratorSession != "orchestrator" {
 		t.Errorf("OrchestratorSession = %q, want orchestrator", state.OrchestratorSession)
@@ -48,11 +52,11 @@ func TestLoadSessionState_SpecificFile(t *testing.T) {
 
 func TestLoadSessionState_OrchestratorDirect(t *testing.T) {
 	dir := t.TempDir()
-	stateJSON := `{"orchestrator_session": "orchestrator", "completed_this_session_count": 10}`
+	stateJSON := `{"session_id": "stable-orchestrator-id", "orchestrator_session": "orchestrator", "completed_this_session_count": 10}`
 	os.WriteFile(filepath.Join(dir, "orchestrator-state.json"), []byte(stateJSON), 0o644)
 
 	// Session "orchestrator" should find orchestrator-state.json directly
-	state, path, err := LoadSessionState(dir, "orchestrator")
+	state, path, err := LoadSessionState(dir, "stable-orchestrator-id", "orchestrator")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +74,7 @@ func TestLoadSessionState_NoFallbackToOrchestrator(t *testing.T) {
 	stateJSON := `{"orchestrator_session": "orchestrator", "completed_this_session_count": 10}`
 	os.WriteFile(filepath.Join(dir, "orchestrator-state.json"), []byte(stateJSON), 0o644)
 
-	_, _, err := LoadSessionState(dir, "some-worker")
+	_, _, err := LoadSessionState(dir, "stable-worker-id", "some-worker")
 	if err == nil {
 		t.Fatal("expected error: should not fall back to orchestrator-state.json for non-orchestrator session")
 		return
@@ -82,7 +86,7 @@ func TestLoadSessionState_NoFallbackToOrchestrator(t *testing.T) {
 
 func TestLoadSessionState_NoStateFile(t *testing.T) {
 	dir := t.TempDir()
-	_, _, err := LoadSessionState(dir, "nonexistent")
+	_, _, err := LoadSessionState(dir, "stable-nonexistent-id", "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for missing state file")
 		return
@@ -191,12 +195,82 @@ func TestGeneratePreservePrompt_UsesTargetIdentity(t *testing.T) {
 func TestLoadSessionState_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "bad-state.json"), []byte("not json"), 0o644)
-	_, _, err := LoadSessionState(dir, "bad")
+	_, _, err := LoadSessionState(dir, "stable-bad-id", "bad")
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 		return
 	}
 	if !strings.Contains(err.Error(), "parse state file") {
 		t.Errorf("error = %q, want 'parse state file'", err.Error())
+	}
+}
+
+func TestLoadSessionState_RequiresExactStableSessionOwnership(t *testing.T) {
+	tests := []struct {
+		name      string
+		stateJSON string
+		wantError string
+	}{
+		{
+			name:      "legacy name-only state is ambiguous",
+			stateJSON: `{"orchestrator_session":"orchestrator","queued":["old-private-task"]}`,
+			wantError: "missing stable session_id",
+		},
+		{
+			name:      "archived owner does not match replacement session",
+			stateJSON: `{"session_id":"archived-session-id","queued":["old-private-task"]}`,
+			wantError: `stable session_id "archived-session-id" does not match resolved session "replacement-session-id"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "reused-name-state.json")
+			if err := os.WriteFile(path, []byte(tt.stateJSON), 0o600); err != nil {
+				t.Fatalf("write state file: %v", err)
+			}
+
+			state, loadedPath, err := LoadSessionState(dir, "replacement-session-id", "reused-name")
+			if err == nil {
+				t.Fatalf("LoadSessionState() = (%#v, %q, nil), want ownership error", state, loadedPath)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("LoadSessionState() error = %q, want %q", err, tt.wantError)
+			}
+			if state != nil || loadedPath != "" {
+				t.Fatalf("LoadSessionState() leaked rejected state: state=%#v path=%q", state, loadedPath)
+			}
+		})
+	}
+}
+
+func TestLoadSessionState_RejectsMissingResolvedStableID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "worker-state.json")
+	if err := os.WriteFile(path, []byte(`{"session_id":"stable-worker-id"}`), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	_, _, err := LoadSessionState(dir, "", "worker")
+	if err == nil || !strings.Contains(err.Error(), "session ID is empty") {
+		t.Fatalf("LoadSessionState() error = %v, want missing stable ID rejection", err)
+	}
+}
+
+func TestLoadSessionState_RejectsPathTraversalBeforeRead(t *testing.T) {
+	dir := t.TempDir()
+	outsidePath := filepath.Join(filepath.Dir(dir), "outside-state.json")
+	if err := os.WriteFile(outsidePath, []byte(`{"session_id":"stable-worker-id","queued":["private"]}`), 0o600); err != nil {
+		t.Fatalf("write outside state: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(outsidePath) })
+
+	state, loadedPath, err := LoadSessionState(dir, "stable-worker-id", "../outside")
+	if err == nil || !strings.Contains(err.Error(), "unsafe display name") {
+		t.Fatalf("LoadSessionState() = (%#v, %q, %v), want path traversal rejection", state, loadedPath, err)
+	}
+	if state != nil || loadedPath != "" {
+		t.Fatalf("LoadSessionState() leaked traversal state: state=%#v path=%q", state, loadedPath)
 	}
 }

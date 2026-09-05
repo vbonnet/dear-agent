@@ -79,6 +79,11 @@ All errors use stable codes that agents can match on programmatically.
 | AGM-015 | 409 | `session/lock_timeout` | Session lock timeout | Another lifecycle mutation owns the stable session lock | Wait for it to finish and retry |
 | AGM-016 | 409 | `session/not_ready` | Session not ready | The exact target harness cannot safely receive input | Wait for the harness composer to become ready and retry |
 | AGM-017 | 503 | `session/output_unavailable` | Session output unavailable | The tmux backend could not answer for the session — the socket was unreachable, or a live capture failed while the session is still running — so no durable capture can stand in for the current task | Transient — retry; if it persists, check the tmux socket and permissions |
+| AGM-018 | 409 | `session/delivery_uncertain` | Delivery outcome is uncertain | The irreversible submission boundary was crossed but its final acknowledgement was lost | Inspect the exact pane and do not retry automatically |
+| AGM-019 | 500 | `session/delivery_accounting_failed` | Delivery accounting is incomplete | Compaction delivery succeeded but the durable attempt record could not be finalized | Inspect the exact pane, repair the ledger, and do not retry |
+| AGM-020 | 409 | `session/compaction_policy` | Compaction policy rejected the attempt | Durable anti-loop accounting rejected a new attempt before delivery | Wait for the policy window or use an audited force override |
+| AGM-021 | 409 | `session/compaction_unverified` | Compaction completion is unverified | Delivery succeeded but the exact runtime did not produce positive completion proof | Inspect the exact pane and do not retry automatically |
+| AGM-022 | 500 | `command/compaction_failed` | Compaction command failed | A compaction command failed without a typed operation outcome | Inspect the session and audit state before deciding whether a retry is safe |
 | AGM-100 | 200 | `dry_run` | Dry run | `--dry-run` flag is set | Remove flag to execute |
 
 ## RFC 7807 Error Format
@@ -134,6 +139,99 @@ $ agm session list -o json
 When `--output json` is set, errors go to stderr as RFC 7807 JSON.
 Non-interactive mode is automatically enabled.
 
+### Registered compaction results
+
+`agm send compact` and `agm session compact` emit one compaction result object
+to stdout after confirmed delivery. This success envelope is not an RFC 7807
+Problem Details object. Its `status` is exactly one of:
+
+| Status | Meaning | Command path |
+|--------|---------|--------------|
+| `dry_run` | The command was validated and its stable-ID-keyed prompt audit was saved, but nothing was delivered | `agm send compact --dry-run` |
+| `sent` | Delivery and durable attempt accounting were confirmed; completion monitoring was not requested | `agm send compact` without `--verify`, or `agm session compact --monitor=false` |
+| `verified` | Delivery was confirmed and the exact bound runtime subsequently produced positive completion proof | `agm send compact --verify`, or the default monitored `agm session compact` |
+
+A `dry_run` result has this exact shape (`delivery` and `verification` are
+JSON `null`):
+
+```json
+{
+  "operation": "deliver_session_compaction",
+  "status": "dry_run",
+  "delivery": null,
+  "verification": null,
+  "command": "/compact preserve context",
+  "prompt_file": "/home/agent/.agm/compaction-prompts/stable-session-id-compact-1.md"
+}
+```
+
+`command` is present only for `dry_run`. `prompt_file` is always present at
+the top level and identifies the durable prompt audit. A confirmed `sent` or
+`verified` result instead includes the delivery receipt and omits `command`:
+
+```json
+{
+  "operation": "deliver_session_compaction",
+  "status": "verified",
+  "delivery": {
+    "operation": "deliver_session_compaction",
+    "session_id": "stable-session-id",
+    "name": "worker",
+    "tmux_name": "runtime",
+    "harness": "codex-cli",
+    "pane_id": "%7",
+    "pane_pid": 700,
+    "target_pid": 707,
+    "harness_start_time": "Thu Aug 27 12:00:00 2026",
+    "tmux_session_id": "$3",
+    "prompt_file": "/home/agent/.agm/compaction-prompts/stable-session-id-compact-1.md",
+    "attempt_id": "attempt-7",
+    "attempt_outcome": "confirmed",
+    "delivered": true,
+    "may_have_started": true,
+    "post_submit_processing_observed": true,
+    "accounting_pending": false
+  },
+  "verification": {
+    "proof": "busy_then_stable_ready",
+    "elapsed_ms": 1250
+  },
+  "prompt_file": "/home/agent/.agm/compaction-prompts/stable-session-id-compact-1.md"
+}
+```
+
+The delivery `session_id` is the stable AGM session identity;
+`tmux_session_id`, `pane_id`, `pane_pid`, `target_pid`, and
+`harness_start_time` bind the receipt to the exact tmux incarnation, pane root,
+and foreground harness process birth identity that
+accepted Enter. The nested and
+top-level `prompt_file` values are identical. The optional
+`post_submit_processing_observed` field is emitted only when the atomic send
+observed native processing immediately after submission; when false, the field
+is absent. A `sent` result has the same delivery receipt, `status: "sent"`, and
+`verification: null`. A `verified` result includes `verification.proof` and
+elapsed milliseconds; the currently defined proof is
+`busy_then_stable_ready`, where `busy` means positively classified native
+`PROCESSING`, never an arbitrary occupied or generic-busy composer.
+
+Strict terminal compaction refuses paste and Enter while any tmux client is
+attached, and the error instructs the operator to detach. This is defense in
+depth rather than an exclusive composer lease: a detached external
+`tmux send-keys` writer can still alter terminal input between readiness and
+mutation without changing the receipt identities, and tmux's queued condition
+cannot bind the foreground child PID/birth if the harness exits or restarts in
+that interval. Until a harness-native input transaction is available, callers
+must coordinate external terminal writers and must not treat this transport as
+proof that composer or foreground-harness identity was immutable across that
+interval. On macOS, `ps lstart` is second-resolution; the receipt therefore
+cannot distinguish the pathological case of the same PID being recycled within
+the same second.
+
+Failures, including a requested verification that cannot establish positive
+completion evidence, do not use this success envelope. They emit one RFC 7807
+object to stderr with a stable AGM error code and do not append success prose
+or a success object to stdout.
+
 ## Field Masks
 
 Use `--fields` to request only specific fields, reducing token consumption:
@@ -175,7 +273,8 @@ $ agm session archive my-project --dry-run -o json
 }
 ```
 
-Dry-run returns an AGM-100 `OpError` with status 200. Agents can parse
+Except for the registered compaction result documented above, dry-run returns
+an AGM-100 `OpError` with status 200. Agents can parse
 the `detail` and `parameters` fields to confirm the exact resolved target before
 re-running without the flag. Single-session archive previews execute the shared
 archive guards but return before any AGM, provider, process, worktree, branch,

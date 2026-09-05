@@ -136,7 +136,7 @@ Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
 	Args: cobra.ArbitraryArgs, // Allow any arguments to reach runDefaultCommand
 	RunE: runDefaultCommand,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+	PersistentPreRunE: withRootCompactionJSONErrorBoundary(func(cmd *cobra.Command, args []string) error {
 		// Handle --list-commands-json early (before normal execution)
 		if listCommandsJSON {
 			return printCommandsJSON(cmd.Root())
@@ -163,7 +163,7 @@ Global Flags:
 
 		// Load configuration first
 		var err error
-		cfg, err = loadConfigWithFlags()
+		cfg, err = loadConfigWithFlagsForCommand(cmd)
 		if err != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ Global Flags:
 		// Print header (version and binary location) for all commands except version and status-line
 		// status-line is excluded because it's designed for machine parsing (tmux status bar)
 		// Suppressed in agent mode to save tokens.
-		if cmd.Name() != "version" && cmd.Name() != "status-line" && outputMode == ModeHuman {
+		if cmd.Name() != "version" && cmd.Name() != "status-line" && outputMode == ModeHuman && !isCompactionJSONCommand(cmd) {
 			executable, err := os.Executable()
 			if err != nil {
 				executable = "unknown"
@@ -216,7 +216,7 @@ Global Flags:
 			strings.HasPrefix(cmdPath, "agm session resume") {
 			if repoPath, err := freshness.FindRepoPath(); err == nil {
 				result := freshness.Check(repoPath, GitCommit)
-				if result.Stale {
+				if result.Stale && !isCompactionJSONCommand(cmd) {
 					fmt.Fprintf(os.Stderr, "\n⚠ WARNING: agm binary is stale\n")
 					fmt.Fprintf(os.Stderr, "  Binary commit: %s\n", result.BinaryCommit)
 					fmt.Fprintf(os.Stderr, "  Repo HEAD:     %s\n", result.RepoHEAD)
@@ -226,7 +226,7 @@ Global Flags:
 		}
 
 		return nil
-	},
+	}),
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		duration := time.Since(commandStartTime).Milliseconds()
 
@@ -237,7 +237,7 @@ Global Flags:
 				Args:     args,
 				Duration: duration,
 				Success:  true,
-			}); err != nil {
+			}); err != nil && !isCompactionJSONCommand(cmd) {
 				fmt.Fprintf(os.Stderr, "Warning: failed to track usage: %v\n", err)
 			}
 		}
@@ -254,7 +254,7 @@ Global Flags:
 				Result:     "success",
 				DurationMs: duration,
 			}
-			if err := auditLogger.Log(event); err != nil {
+			if err := auditLogger.Log(event); err != nil && !isCompactionJSONCommand(cmd) {
 				fmt.Fprintf(os.Stderr, "Warning: failed to write audit log: %v\n", err)
 			}
 		}
@@ -356,6 +356,14 @@ func buildCommandInfo(cmd *cobra.Command) CommandInfo {
 }
 
 func loadConfigWithFlags() (*config.Config, error) {
+	return loadConfigWithFlagsAndWarnings(true)
+}
+
+func loadConfigWithFlagsForCommand(cmd *cobra.Command) (*config.Config, error) {
+	return loadConfigWithFlagsAndWarnings(!isCompactionJSONCommand(cmd))
+}
+
+func loadConfigWithFlagsAndWarnings(showBestEffortWarnings bool) (*config.Config, error) {
 	// Pass an explicit source through unchanged so config.Load can distinguish it
 	// from the ordinarily absent canonical default.
 	cfg, err := config.Load(cfgFile)
@@ -373,7 +381,7 @@ func loadConfigWithFlags() (*config.Config, error) {
 		cfg.SessionsDir = sessionsDir
 	}
 	// --debug flag takes precedence over --log-level
-	if debugMode {
+	if debugMode && showBestEffortWarnings {
 		cfg.LogLevel = "debug"
 	} else if logLevel != "" {
 		cfg.LogLevel = logLevel
@@ -402,14 +410,18 @@ func loadConfigWithFlags() (*config.Config, error) {
 	// 3. If successful: Set cfg.Workspace and override SessionsDir to {workspace_root}/.agm/sessions
 	// 4. If failed: Fall back to default ~/sessions (backward compatible)
 	if sessionsDir == "" && cfg.Workspace == "" {
-		detectWorkspace(cfg, workspaceFlag)
+		detectWorkspaceWithWarnings(cfg, workspaceFlag, showBestEffortWarnings)
 	}
 
 	// Centralized storage support: Create symlink if centralized mode is enabled
 	// This ensures transparent redirection from ~/.agm to centralized storage location
 	// (e.g., ~/src/ws/oss/repos/engram-research/.agm)
 	if cfg.Storage.Mode == "centralized" {
-		if err := config.EnsureSymlinkBootstrap(cfg); err != nil {
+		bootstrap := config.EnsureSymlinkBootstrap
+		if !showBestEffortWarnings {
+			bootstrap = config.EnsureSymlinkBootstrapQuiet
+		}
+		if err := bootstrap(cfg); err != nil {
 			return nil, fmt.Errorf("setup centralized storage: %w", err)
 		}
 	}
@@ -454,63 +466,29 @@ func loadConfigWithFlags() (*config.Config, error) {
 //   - Leaves cfg.SessionsDir at default ~/.claude/sessions
 //   - No error returned (graceful degradation)
 func detectWorkspace(cfg *config.Config, workspaceFlag string) {
-	// Determine workspace config path (default: ~/.agm/config.yaml)
-	workspaceConfigPath := cfg.WorkspaceConfigPath
-	if workspaceConfigPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			// Can't determine home directory - skip workspace detection
-			if debugMode {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to get home directory for workspace config: %v\n", err)
-			}
-			return
-		}
-		workspaceConfigPath = filepath.Join(home, ".agm", "config.yaml")
-	}
+	detectWorkspaceWithWarnings(cfg, workspaceFlag, true)
+}
 
-	// Check if workspace config exists
-	if _, err := os.Stat(workspaceConfigPath); os.IsNotExist(err) {
-		// Config file doesn't exist - this is OK, use default sessions dir
-		if debugMode {
-			fmt.Fprintf(os.Stderr, "Info: No workspace config found at %s, using default sessions dir\n", workspaceConfigPath)
-		}
+func detectWorkspaceWithWarnings(cfg *config.Config, workspaceFlag string, showBestEffortWarnings bool) {
+	workspaceConfigPath, ok := workspaceDetectionConfigPath(cfg, showBestEffortWarnings)
+	if !ok || !workspaceDetectionConfigExists(workspaceConfigPath, showBestEffortWarnings) {
 		return
 	}
 
-	// Create workspace detector (non-interactive mode)
 	detector, err := workspace.NewDetectorWithInteractive(workspaceConfigPath, false)
 	if err != nil {
-		// Config exists but is invalid/corrupted
-		fmt.Fprintf(os.Stderr, "Warning: Failed to load workspace config from %s: %v\n", workspaceConfigPath, err)
-		fmt.Fprintf(os.Stderr, "         Using default sessions directory. Fix config or remove it to clear this warning.\n")
+		reportWorkspaceConfigFailure(workspaceConfigPath, err, showBestEffortWarnings)
 		return
 	}
 
-	// Get current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		// Can't determine current directory - unusual but handle gracefully
-		if debugMode {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to get current directory: %v\n", err)
-		}
+	cwd, ok := workspaceDetectionDirectory(showBestEffortWarnings)
+	if !ok {
 		return
 	}
 
-	// Attempt workspace detection
 	ws, err := detector.Detect(cwd, workspaceFlag)
 	if err != nil {
-		// Detection failed - could be:
-		// - No matching workspace for current directory
-		// - Invalid workspace specified in --workspace flag
-		// - No workspaces configured/enabled
-		if workspaceFlag != "" {
-			// Explicit flag provided but failed - this is an error worth showing
-			fmt.Fprintf(os.Stderr, "Warning: Workspace '%s' not found or disabled: %v\n", workspaceFlag, err)
-			fmt.Fprintf(os.Stderr, "         Using default sessions directory.\n")
-		} else if debugMode {
-			// Auto-detection failed silently (expected if not in workspace)
-			fmt.Fprintf(os.Stderr, "Info: No workspace detected for %s: %v\n", cwd, err)
-		}
+		reportWorkspaceDetectionFailure(cwd, workspaceFlag, err, showBestEffortWarnings)
 		return
 	}
 
@@ -518,9 +496,63 @@ func detectWorkspace(cfg *config.Config, workspaceFlag string) {
 	cfg.Workspace = ws.Name
 	cfg.SessionsDir = workspaceSessionsDir(ws)
 
-	if debugMode {
+	if debugMode && showBestEffortWarnings {
 		fmt.Fprintf(os.Stderr, "Info: Detected workspace '%s' at %s\n", ws.Name, ws.Root)
 		fmt.Fprintf(os.Stderr, "      Using sessions directory: %s\n", cfg.SessionsDir)
+	}
+}
+
+func workspaceDetectionConfigPath(cfg *config.Config, showBestEffortWarnings bool) (string, bool) {
+	if cfg.WorkspaceConfigPath != "" {
+		return cfg.WorkspaceConfigPath, true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		if debugMode && showBestEffortWarnings {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to get home directory for workspace config: %v\n", err)
+		}
+		return "", false
+	}
+	return filepath.Join(home, ".agm", "config.yaml"), true
+}
+
+func workspaceDetectionConfigExists(path string, showBestEffortWarnings bool) bool {
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		return true
+	}
+	if debugMode && showBestEffortWarnings {
+		fmt.Fprintf(os.Stderr, "Info: No workspace config found at %s, using default sessions dir\n", path)
+	}
+	return false
+}
+
+func reportWorkspaceConfigFailure(path string, err error, showBestEffortWarnings bool) {
+	if !showBestEffortWarnings {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Warning: Failed to load workspace config from %s: %v\n", path, err)
+	fmt.Fprintln(os.Stderr, "         Using default sessions directory. Fix config or remove it to clear this warning.")
+}
+
+func workspaceDetectionDirectory(showBestEffortWarnings bool) (string, bool) {
+	cwd, err := os.Getwd()
+	if err == nil {
+		return cwd, true
+	}
+	if debugMode && showBestEffortWarnings {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to get current directory: %v\n", err)
+	}
+	return "", false
+}
+
+func reportWorkspaceDetectionFailure(cwd, workspaceFlag string, err error, showBestEffortWarnings bool) {
+	if workspaceFlag != "" && showBestEffortWarnings {
+		fmt.Fprintf(os.Stderr, "Warning: Workspace '%s' not found or disabled: %v\n", workspaceFlag, err)
+		fmt.Fprintln(os.Stderr, "         Using default sessions directory.")
+		return
+	}
+	if workspaceFlag == "" && debugMode && showBestEffortWarnings {
+		fmt.Fprintf(os.Stderr, "Info: No workspace detected for %s: %v\n", cwd, err)
 	}
 }
 
@@ -672,6 +704,11 @@ func runNewSessionFlow(suggestedName *string) error {
 //	error - Command execution error (nil on success)
 func ExecuteWithDeps(tmux session.TmuxInterface) error {
 	tmuxClient = tmux
+	// Cobra parses flags before PersistentPreRunE. Pre-resolve only the output
+	// intent needed by compaction's flag-error owner so a bad local flag cannot
+	// turn an explicitly machine-facing invocation back into prose merely
+	// because --output/--agent appeared later in argv.
+	prepareCompactionFlagErrorOutput(os.Args[1:])
 	return executeWithSignalContext(context.Background(), rootCmd.ExecuteContext, os.Interrupt, syscall.SIGTERM)
 }
 

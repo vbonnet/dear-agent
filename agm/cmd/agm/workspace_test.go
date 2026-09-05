@@ -3,11 +3,48 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 )
+
+func TestDetectWorkspaceSuppressesSuccessfulDebugDiagnosticsAtJSONBoundary(t *testing.T) {
+	t.Setenv("WORKSPACE", "")
+	tmpDir := t.TempDir()
+	workspaceRoot := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("create workspace root: %v", err)
+	}
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := workspace.SaveConfig(configPath, &workspace.Config{
+		Version:    1,
+		Workspaces: []workspace.Workspace{{Name: "json-ws", Root: workspaceRoot, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("save workspace config: %v", err)
+	}
+	t.Chdir(workspaceRoot)
+
+	originalDebug := debugMode
+	debugMode = true
+	t.Cleanup(func() { debugMode = originalDebug })
+	cfg := config.Default()
+	cfg.WorkspaceConfigPath = configPath
+	stderr, err := captureCompactionStderr(t, func() error {
+		detectWorkspaceWithWarnings(cfg, "", false)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("detect workspace: %v", err)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("suppressed JSON-boundary workspace detection emitted stderr: %q", stderr)
+	}
+	if cfg.Workspace != "json-ws" {
+		t.Fatalf("detected workspace = %q, want json-ws", cfg.Workspace)
+	}
+}
 
 // TestDetectWorkspace_NoConfigFile tests graceful handling when config file doesn't exist.
 func TestDetectWorkspace_NoConfigFile(t *testing.T) {

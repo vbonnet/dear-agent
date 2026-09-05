@@ -126,72 +126,86 @@ func hasWorkspaceMarker(dir, targetName string) bool {
 // EnsureSymlinkBootstrap creates a symlink from dotfile location to centralized storage
 // This is called when centralized mode is enabled to ensure transparent redirection
 func EnsureSymlinkBootstrap(cfg *Config) error {
-	authority, err := cfg.RuntimeAuthority()
+	return ensureSymlinkBootstrap(cfg, false)
+}
+
+// EnsureSymlinkBootstrapQuiet performs the same required storage bootstrap
+// without writing its best-effort migration notice to stderr. Machine-facing
+// command surfaces use this when stderr is reserved for one structured record.
+func EnsureSymlinkBootstrapQuiet(cfg *Config) error {
+	return ensureSymlinkBootstrap(cfg, true)
+}
+
+func ensureSymlinkBootstrap(cfg *Config, quiet bool) error {
+	dotfilePath, centralizedPath, centralized, err := centralizedBootstrapPaths(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to resolve runtime authority: %w", err)
+		return err
 	}
-	if !authority.centralized {
+	if !centralized {
 		return nil
 	}
-	home, err := authority.Home()
-	if err != nil {
-		return fmt.Errorf("failed to resolve retained home: %w", err)
-	}
-	homeDir, err := home.Path()
-	if err != nil {
-		return fmt.Errorf("failed to resolve retained home path: %w", err)
-	}
-	storage, err := authority.Storage()
-	if err != nil {
-		return fmt.Errorf("failed to resolve retained storage: %w", err)
-	}
-	centralizedPath, err := storage.Path()
-	if err != nil {
-		return fmt.Errorf("failed to resolve retained storage path: %w", err)
-	}
-	dotfilePath := filepath.Join(homeDir, ".agm")
 
-	// Step 1: Check if dotfile path exists
 	info, err := os.Lstat(dotfilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Path doesn't exist - create symlink directly
 			return createSymlink(centralizedPath, dotfilePath)
 		}
 		return fmt.Errorf("failed to check dotfile path: %w", err)
 	}
 
-	// Step 2: Handle existing symlink
 	if info.Mode()&os.ModeSymlink != 0 {
-		// Already a symlink - verify it points to correct location
-		target, err := os.Readlink(dotfilePath)
-		if err != nil {
-			return fmt.Errorf("failed to read symlink: %w", err)
-		}
-
-		absoluteTarget := target
-		if !filepath.IsAbs(absoluteTarget) {
-			absoluteTarget = filepath.Join(filepath.Dir(dotfilePath), absoluteTarget)
-		}
-		absoluteTarget = filepath.Clean(absoluteTarget)
-		resolvedTarget, resolveErr := resolvePhysicalDirectory(absoluteTarget)
-		if resolveErr == nil && resolvedTarget == centralizedPath {
-			// Already configured correctly
-			if err := os.MkdirAll(centralizedPath, 0o700); err != nil {
-				return fmt.Errorf("failed to ensure centralized target: %w", err)
-			}
-			return nil
-		}
-
-		// Symlink points to wrong location - remove and recreate
-		if err := os.Remove(dotfilePath); err != nil {
-			return fmt.Errorf("failed to remove old symlink: %w", err)
-		}
-		return createSymlink(centralizedPath, dotfilePath)
+		return ensureCentralizedSymlink(dotfilePath, centralizedPath)
 	}
+	return migrateToSymlink(dotfilePath, centralizedPath, quiet)
+}
 
-	// Step 3: Handle existing directory - migrate data
-	return migrateToSymlink(dotfilePath, centralizedPath)
+func centralizedBootstrapPaths(cfg *Config) (dotfilePath, centralizedPath string, centralized bool, err error) {
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to resolve runtime authority: %w", err)
+	}
+	if !authority.centralized {
+		return "", "", false, nil
+	}
+	home, err := authority.Home()
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to resolve retained home: %w", err)
+	}
+	homeDir, err := home.Path()
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to resolve retained home path: %w", err)
+	}
+	storage, err := authority.Storage()
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to resolve retained storage: %w", err)
+	}
+	centralizedPath, err = storage.Path()
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to resolve retained storage path: %w", err)
+	}
+	return filepath.Join(homeDir, ".agm"), centralizedPath, true, nil
+}
+
+func ensureCentralizedSymlink(dotfilePath, centralizedPath string) error {
+	target, err := os.Readlink(dotfilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read symlink: %w", err)
+	}
+	absoluteTarget := target
+	if !filepath.IsAbs(absoluteTarget) {
+		absoluteTarget = filepath.Join(filepath.Dir(dotfilePath), absoluteTarget)
+	}
+	resolvedTarget, resolveErr := resolvePhysicalDirectory(filepath.Clean(absoluteTarget))
+	if resolveErr == nil && resolvedTarget == centralizedPath {
+		if err := os.MkdirAll(centralizedPath, 0o700); err != nil {
+			return fmt.Errorf("failed to ensure centralized target: %w", err)
+		}
+		return nil
+	}
+	if err := os.Remove(dotfilePath); err != nil {
+		return fmt.Errorf("failed to remove old symlink: %w", err)
+	}
+	return createSymlink(centralizedPath, dotfilePath)
 }
 
 // createSymlink creates a symlink and ensures the target directory exists
@@ -210,7 +224,7 @@ func createSymlink(target, link string) error {
 }
 
 // migrateToSymlink migrates data from dotfile to centralized location and creates symlink
-func migrateToSymlink(dotfilePath, centralizedPath string) error {
+func migrateToSymlink(dotfilePath, centralizedPath string, quiet bool) error {
 	// Backup existing dotfile directory
 	backupPath := fmt.Sprintf("%s.backup.%s", dotfilePath, fmt.Sprintf("%d", os.Getpid()))
 
@@ -243,7 +257,9 @@ func migrateToSymlink(dotfilePath, centralizedPath string) error {
 	}
 
 	// Success - keep backup for safety
-	fmt.Fprintf(os.Stderr, "Migrated AGM data from %s to %s (backup: %s)\n", dotfilePath, centralizedPath, backupPath)
+	if !quiet {
+		fmt.Fprintf(os.Stderr, "Migrated AGM data from %s to %s (backup: %s)\n", dotfilePath, centralizedPath, backupPath)
+	}
 	return nil
 }
 

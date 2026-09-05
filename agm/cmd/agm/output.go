@@ -100,7 +100,7 @@ func handleError(err error) error {
 	var opErr *ops.OpError
 	if errors.As(err, &opErr) {
 		printOpError(opErr)
-		return &exitError{code: exitCodeForStatus(opErr.Status), msg: opErr.Code}
+		return &exitError{code: exitCodeForStatus(opErr.Status), msg: opErr.Code, rendered: true}
 	}
 	return err
 }

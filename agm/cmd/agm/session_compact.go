@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/compaction"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
-	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
@@ -24,11 +24,12 @@ var sessionCompactCmd = &cobra.Command{
 	Short: "Trigger context compaction and monitor for completion",
 	Long: `Trigger /compact in a running session with state detection and optional monitoring.
 
-This is a higher-level wrapper around 'agm send compact' that:
+This registered-session compaction surface:
   1. Resolves the session by name, ID, or UUID
-  2. Checks session state before sending (warns if busy)
-  3. Sends /compact with optional preservation instructions
-  4. Monitors for completion (polls until session returns to ready state)
+  2. Requires the registered harness to own an empty composer
+  3. Uses stable-ID prompt, anti-loop, and audit accounting before delivery
+  4. Atomically sends /compact to that exact pane
+  5. Verifies an active transition followed by stable readiness
 
 Examples:
   # Trigger compaction and wait for completion
@@ -41,13 +42,14 @@ Examples:
   agm session compact my-session --monitor=false
 
 See Also:
-  • agm send compact    - Low-level compact command (no state detection)
+  • agm send compact    - Same accounting path with prompt preservation and --force
   • agm session context - Show current context usage`,
-	Args: cobra.ExactArgs(1),
-	RunE: runSessionCompact,
+	Args: withCompactionJSONErrorBoundary(validateCompactionArgs),
+	RunE: withCompactionJSONErrorBoundary(runSessionCompact),
 }
 
 func init() {
+	sessionCompactCmd.SetFlagErrorFunc(handleCompactionFlagParseError)
 	sessionCompactCmd.Flags().StringVar(&sessionCompactArgs, "compact-args", "", "Compaction instructions (text appended after /compact)")
 	sessionCompactCmd.Flags().BoolVar(&sessionCompactMonitor, "monitor", true, "Wait for compaction to complete")
 	sessionCompactCmd.Flags().DurationVar(&sessionCompactTimeout, "timeout", 5*time.Minute, "Maximum time to wait for compaction")
@@ -56,6 +58,12 @@ func init() {
 
 func runSessionCompact(cmd *cobra.Command, args []string) error {
 	identifier := args[0]
+	if err := validateRawCompactionInput("compact_args", sessionCompactArgs); err != nil {
+		return err
+	}
+	if err := validateSessionCompactionOptions(); err != nil {
+		return handleError(err)
+	}
 
 	// Resolve session via Dolt
 	opCtx, cleanup, err := newOpContextWithStorage()
@@ -63,101 +71,104 @@ func runSessionCompact(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
 	defer cleanup()
+	opCtx.Context = cmd.Context()
+	opCtx.CompactionBaseDir = agmBaseDir()
 
 	getResult, opErr := ops.GetSession(opCtx, &ops.GetSessionRequest{
 		Identifier: identifier,
+		ActiveOnly: true,
 	})
 	if opErr != nil {
 		return handleError(opErr)
 	}
 
 	s := getResult.Session
+	if err := validateCompactionTarget(s); err != nil {
+		return handleError(err)
+	}
 	tmuxName := s.TmuxSession
 	if tmuxName == "" {
 		tmuxName = s.Name
 	}
-
-	// Check tmux session exists
-	exists, err := tmux.HasSession(tmuxName)
-	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
+	harness := s.Harness
+	if harness == "" {
+		harness = manifest.DefaultHarness
 	}
-	if !exists {
-		return fmt.Errorf("session '%s' is not running (tmux session '%s' not found).\n\nSuggestions:\n  - Resume session: agm session resume %s\n  - Check status: agm session get %s", s.Name, tmuxName, s.Name, s.Name)
-	}
-
-	// Detect current state
-	currentState, err := session.DetectState(tmuxName)
-	if err != nil {
-		ui.PrintWarning(fmt.Sprintf("Could not detect session state: %v (proceeding anyway)", err))
-	} else {
-		switch currentState {
-		case manifest.StateOffline:
-			return fmt.Errorf("session '%s' is offline.\n\nSuggestions:\n  - Resume session: agm session resume %s", s.Name, s.Name)
-		case manifest.StateUserPrompt:
-			return fmt.Errorf("session '%s' is waiting for user input. Resolve the prompt before compacting.\n\nSuggestions:\n  - Attach to session: agm session resume %s", s.Name, s.Name)
-		case manifest.StateWorking, manifest.StateCompacting:
-			ui.PrintWarning(fmt.Sprintf("Session '%s' appears busy (state: %s). Compaction may not start until current work completes.", s.Name, currentState))
-		case manifest.StateDone:
-			// Ready to compact
-		}
+	harness = agent.NormalizeHarnessName(harness)
+	if err := validateInitialCompactionReadiness(
+		cmd.Context(), s.Name, tmuxName, harness, compaction.ObserveExpectedHarnessSession,
+	); err != nil {
+		return handleError(err)
 	}
 
-	// Build and send /compact command
 	command := buildCompactCommand(sessionCompactArgs)
-	if err := tmux.SendSlashCommandSafeContext(cmd.Context(), tmuxName, command); err != nil {
-		return fmt.Errorf("failed to send compact command: %w", err)
+	if err := validateCompactionCommandForSurface(command); err != nil {
+		return err
 	}
-
-	ui.PrintSuccess(fmt.Sprintf("Sent %s to session '%s'", command, s.Name))
-
-	// Monitor for completion if requested
-	if !sessionCompactMonitor {
-		return nil
-	}
-
-	fmt.Println()
-	return monitorCompaction(cmd.Context(), tmuxName, s.Name, sessionCompactTimeout)
+	delivery, opErr := ops.DeliverSessionCompaction(opCtx, &ops.SessionCompactionDeliveryRequest{
+		Identifier: s.ID,
+		Command:    command,
+		Forced:     false,
+	})
+	return finishCompactionDelivery(delivery, opErr, func(confirmed *ops.SessionCompactionDeliveryResult) error {
+		return finishSessionCompactionSuccess(
+			cmd.Context(), confirmed, command, s.Name,
+			sessionCompactMonitor, sessionCompactTimeout, runCompactionVerifier,
+		)
+	})
 }
 
-// monitorCompaction polls session state until compaction completes or timeout.
-func monitorCompaction(ctx context.Context, tmuxName, displayName string, timeout time.Duration) error {
-	const pollInterval = 2 * time.Second
+func validateSessionCompactionOptions() error {
+	if sessionCompactMonitor && sessionCompactTimeout <= 0 {
+		return ops.ErrInvalidInput("timeout", "Compaction monitoring requires a positive --timeout duration.")
+	}
+	return nil
+}
 
-	start := time.Now()
-	deadline := start.Add(timeout)
-	lastState := ""
-
-	for time.Now().Before(deadline) {
-		timer := time.NewTimer(pollInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-
-		state, err := session.DetectState(tmuxName)
-		if err != nil {
-			// Transient error, keep polling
-			continue
-		}
-
-		elapsed := time.Since(start).Round(time.Second)
-
-		if state != lastState {
-			fmt.Printf("  [%s] State: %s\n", elapsed, state)
-			lastState = state
-		}
-
-		if state == manifest.StateDone {
-			ui.PrintSuccess(fmt.Sprintf("Compaction completed in %s", elapsed))
+func finishSessionCompactionSuccess(
+	ctx context.Context,
+	delivery *ops.SessionCompactionDeliveryResult,
+	command, displayName string,
+	monitor bool,
+	timeout time.Duration,
+	run compactionVerifierRunner,
+) error {
+	if !isJSONOutput() {
+		ui.PrintSuccess(fmt.Sprintf("Sent %s to session '%s' (prompt saved: %s)", command, displayName, delivery.PromptFile))
+		return runOptionalCompactionVerification(monitor, func() error {
+			fmt.Println()
+			if err := monitorCompactionWithRunner(ctx, verificationTarget(delivery), displayName, timeout, run); err != nil {
+				return handleCompactionVerificationFailure(delivery, err)
+			}
 			return nil
-		}
+		})
 	}
 
-	elapsed := time.Since(start).Round(time.Second)
-	ui.PrintWarning(fmt.Sprintf("Monitoring timed out after %s. Compaction may still be running.", elapsed))
-	fmt.Printf("\nCheck status:\n  agm session get %s\n  agm session context %s\n", displayName, displayName)
+	var verification *compaction.Verification
+	if monitor {
+		confirmed, err := run(ctx, verificationTarget(delivery), timeout, 2*time.Second)
+		if err != nil {
+			return handleCompactionVerificationFailure(delivery, err)
+		}
+		verification = &confirmed
+	}
+	return reportCompactionSuccess(delivery, verification, func() {})
+}
+
+// monitorCompaction requires a positive post-delivery transition and stable
+// live readiness before reporting completion.
+func monitorCompaction(ctx context.Context, target compaction.VerificationTarget, displayName string, timeout time.Duration) error {
+	return monitorCompactionWithRunner(ctx, target, displayName, timeout, runCompactionVerifier)
+}
+
+func monitorCompactionWithRunner(ctx context.Context, target compaction.VerificationTarget, displayName string, timeout time.Duration, run compactionVerifierRunner) error {
+	const pollInterval = 2 * time.Second
+
+	verification, err := run(ctx, target, timeout, pollInterval)
+	if err != nil {
+		fmt.Printf("\nCheck status:\n  agm session get %s\n  agm session context %s\n", displayName, displayName)
+		return err
+	}
+	ui.PrintSuccess(fmt.Sprintf("Compaction completed in %s", verification.Elapsed.Round(time.Second)))
 	return nil
 }

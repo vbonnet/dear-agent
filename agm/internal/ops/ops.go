@@ -20,14 +20,21 @@ import (
 type OpContext struct {
 	// Context carries request cancellation into external I/O performed by an
 	// operation. Nil preserves compatibility for non-request-scoped callers.
-	Context    context.Context
-	Storage    dolt.Storage
-	Tmux       session.TmuxInterface
-	Config     *config.Config
-	DryRun     bool
-	Fields     []string // field mask: if non-empty, only include these fields in output
-	OutputMode string   // "json", "text" (default: "json" for programmatic consumers)
-	Detailed   bool     // --detailed: re-enable IDs, full paths, and verbose hints in agent-mode output
+	Context context.Context
+	Storage dolt.Storage
+	Tmux    session.TmuxInterface
+	Config  *config.Config
+	// CompactionBaseDir is the trusted local root for stable-ID prompt and
+	// anti-loop accounting. Delivery-capable composition roots must set it;
+	// request payloads cannot choose an arbitrary filesystem destination.
+	CompactionBaseDir string
+	// compactionAccounting is the package-private persistence seam used by
+	// deterministic operation tests. Nil selects the durable production ledger.
+	compactionAccounting compactionDeliveryAccounting
+	DryRun               bool
+	Fields               []string // field mask: if non-empty, only include these fields in output
+	OutputMode           string   // "json", "text" (default: "json" for programmatic consumers)
+	Detailed             bool     // --detailed: re-enable IDs, full paths, and verbose hints in agent-mode output
 	// ExternalSessionArchiver synchronizes a successfully archived AGM session
 	// with its harness-specific desktop or remote representation. Nil selects
 	// the production dispatcher; tests inject a deterministic implementation.

@@ -3,7 +3,7 @@
 <!-- Last audited at: 2026-08-08 -->
 
 **Version**: 1.0
-**Last Updated**: 2026-08-17
+**Last Updated**: 2026-08-27
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Shared business-logic layer for AGM CLI, MCP, and Skills surfaces
 
@@ -41,7 +41,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-08** When `GetSession` is called with an exact session ID, the system shall return the matching session detail without performing a name scan.
 
-**OPS-09** When `GetSession` is called with a string that does not exactly match any session ID, the system shall perform a full-table name scan comparing `manifest.Name` and `manifest.Tmux.SessionName`.
+**OPS-09** When `GetSession`'s exact-ID storage lookup returns the typed Dolt not-found result, the system shall perform the permitted name scan comparing `manifest.Name` and `manifest.Tmux.SessionName` and may then attempt harness-UUID resolution; any other exact-ID backend error shall return the stable storage error before name, UUID, or tmux work.
 
 **OPS-10** When a session has no tmux interface, the system shall report its status as "unknown" rather than "active" or "stopped".
 
@@ -146,6 +146,28 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 **OPS-89** When `SendMessage` returns an outcome, the CLI and daemon adapters shall translate it into presentation, queue, defer, retry, and acknowledgment policy.
 
 **OPS-90** When `SendMessage` resolves a tmux-backed session, the operation shall lock its stable session ID, reload mutable lifecycle and delivery identity, and retain that lifecycle boundary across atomic readiness and exact-pane input.
+
+### Session Compaction Delivery
+
+**OPS-112** When either compaction CLI surface can deliver input, the system shall route stable-session resolution, lifecycle serialization, prompt auditing, attempt accounting, and atomic exact-pane delivery through `DeliverSessionCompaction` instead of owning a parallel delivery path in the command adapter.
+
+**OPS-113** When `DeliverSessionCompaction` prepares a request for delivery, the system shall require and bind the caller's expected registered stable session ID, fail closed without name fallback if that exact identity cannot be re-resolved, lock and reload the active interactive session under that ID, allocate a no-overwrite prompt audit keyed by that ID, and persist a pending attempt before submitting input.
+
+**OPS-114** When `DeliverSessionCompaction` receives a delivery outcome, the system shall persist the attempt as `confirmed`, `uncertain`, or `definite_not_sent`, count every structurally valid pending, confirmed, uncertain, or legacy attempt against anti-loop policy, reject malformed or unknown ledger outcomes without authorizing another attempt, and release anti-loop budget early only for `definite_not_sent`.
+
+**OPS-115** If atomic delivery loses acknowledgement after the irreversible submission boundary, then the system shall return stable error `AGM-018` with the exact pane, foreground harness PID, and `MayHaveStarted` receipt while prohibiting automatic retry and completion wording.
+
+**OPS-116** If input delivery is confirmed but the confirmed terminal outcome cannot be persisted, then the system shall return stable error `AGM-019` while prohibiting automatic retry and completion wording.
+
+**OPS-117** When pre-delivery compaction accounting is corrupt, unreadable, identity-ambiguous, or cannot persist its pending attempt, the system shall fail closed before input submission instead of treating the missing accounting evidence as an unused policy budget.
+
+**OPS-118** When shared creation allocates a new tmux session, adopts an explicitly reusable tmux session, or cold-resumes a registered session, the system shall bind that tmux incarnation to the stable AGM session ID before harness input; adoption shall atomically condition the claim on the full observed tmux session and pane-root incarnation and record a random claim identity, while a failed adopted-session transaction shall clear only the binding it created and preserve the pre-existing tmux session.
+
+**OPS-119** When `DeliverSessionCompaction` invokes atomic tmux delivery, the system shall require the reloaded stable session ID as the exact tmux binding, return a missing or mismatched pre-submit binding as definite non-delivery, preserve a post-submit binding failure as uncertainty, and carry an exact post-submit native-processing observation into the verifier target.
+
+**OPS-120** When either compaction command resolves a mutable display or tmux name, the system shall exclude every non-active identity, including reaping and archived identities, so an active replacement with the same name is selected; an explicit stable ID or harness UUID shall continue to resolve the exact non-active identity so the lifecycle guard can report that target precisely.
+
+**OPS-121** When `agm send compact` composes preservation instructions from resolved session metadata or a stable-ID-bound state file, `DeliverSessionCompaction` shall recompose those instructions from the locked manifest reload and current state file and require an exact match before allocating a prompt audit or pending attempt; changed prompt-relevant metadata, changed state, or changed state-file availability shall fail as definite non-delivery without sending input.
 
 ### Stall Detection
 
@@ -301,12 +323,18 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
   removed is a distinct, surfaced failure (OPS-108) — never conflated with
   "there was nothing to remove," and never only visible as an under-counted
   total.
+- **Compaction delivery has one transaction owner.** Both compaction CLI
+  surfaces delegate the registered stable-ID lock, prompt audit, pending-first
+  ledger, exact-pane delivery, and terminal accounting to the shared operation.
+  A command adapter may choose whether to verify completion after confirmed
+  delivery, but cannot bypass or replay that transaction.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/trust_protocol.feature`
 - Feature: `agm/test/bdd/features/scan_loop.feature`
 - Feature: `agm/test/bdd/features/stall_detection.feature`
+- Feature: `agm/test/bdd/features/agm_runtime_package_guardrails.feature` (OPS-112 through OPS-121)
 - Test consequence: the OPS-98 sandbox-ownership boundary is verified by deterministic unit tests rather than new scenarios — `agm/internal/ops/sandbox_ownership_test.go` covers the centralized-storage and symlinked-HOME spellings, the exact spelling, and the foreign, absent, wrong-session and out-of-base paths that stay disowned.
 
 ## Package Test Traceability

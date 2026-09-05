@@ -11,6 +11,7 @@ import (
 
 // SessionState represents the parsed content of an AGM state file.
 type SessionState struct {
+	SessionID           string                        `json:"session_id"`
 	OrchestratorSession string                        `json:"orchestrator_session"`
 	LastScan            string                        `json:"last_scan"`
 	ManagedSessions     map[string]ManagedSessionInfo `json:"managed_sessions"`
@@ -39,10 +40,17 @@ type StatusInfo struct {
 	Status string `json:"status"`
 }
 
-// LoadSessionState reads a session's own state file from ~/.agm.
-// It only loads {session}-state.json — no fallback to other sessions' state files,
-// which would produce wrong identity in compaction prompts.
-func LoadSessionState(baseDir, sessionName string) (*SessionState, string, error) {
+// LoadSessionState reads a session's own state file from ~/.agm. The
+// display-name-keyed file is trusted only when it explicitly binds itself to
+// the stable session ID resolved by AGM. This prevents an archived session's
+// state from being reused when a later session takes the same display name.
+func LoadSessionState(baseDir, sessionID, sessionName string) (*SessionState, string, error) {
+	if err := validateStorageKey("session ID", sessionID); err != nil {
+		return nil, "", fmt.Errorf("load state for session %q: %w", sessionName, err)
+	}
+	if sessionName == "" || filepath.IsAbs(sessionName) || filepath.Base(sessionName) != sessionName || strings.ContainsRune(sessionName, '\x00') {
+		return nil, "", fmt.Errorf("load state for stable session %q: unsafe display name %q", sessionID, sessionName)
+	}
 	path := filepath.Join(baseDir, sessionName+"-state.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -54,6 +62,12 @@ func LoadSessionState(baseDir, sessionName string) (*SessionState, string, error
 	var state SessionState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, "", fmt.Errorf("parse state file %s: %w", path, err)
+	}
+	if state.SessionID == "" {
+		return nil, "", fmt.Errorf("refuse ambiguous state file %s: missing stable session_id for session %q", path, sessionID)
+	}
+	if state.SessionID != sessionID {
+		return nil, "", fmt.Errorf("refuse state file %s: stable session_id %q does not match resolved session %q", path, state.SessionID, sessionID)
 	}
 	return &state, path, nil
 }

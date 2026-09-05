@@ -60,24 +60,28 @@ func (e *OpError) JSON() []byte {
 
 // Error catalog — stable codes that agents can match on.
 const (
-	ErrCodeSessionNotFound    = "AGM-001"
-	ErrCodeSessionArchived    = "AGM-002"
-	ErrCodeTmuxNotRunning     = "AGM-003"
-	ErrCodeDoltUnavailable    = "AGM-004"
-	ErrCodeInvalidInput       = "AGM-005"
-	ErrCodePermissionDenied   = "AGM-006"
-	ErrCodeSessionExists      = "AGM-007"
-	ErrCodeHarnessUnavailable = "AGM-008"
-	ErrCodeWorkspaceNotFound  = "AGM-009"
-	ErrCodeUUIDNotAssociated  = "AGM-010"
-	ErrCodeStorageError       = "AGM-011"
-	ErrCodeVerificationFailed = "AGM-012"
-	ErrCodeKillProtected      = "AGM-013"
-	ErrCodeActiveSessionKill  = "AGM-014"
-	ErrCodeLockTimeout        = "AGM-015"
-	ErrCodeSessionNotReady    = "AGM-016"
-	ErrCodeOutputUnavailable  = "AGM-017"
-	ErrCodeDryRun             = "AGM-100"
+	ErrCodeSessionNotFound      = "AGM-001"
+	ErrCodeSessionArchived      = "AGM-002"
+	ErrCodeTmuxNotRunning       = "AGM-003"
+	ErrCodeDoltUnavailable      = "AGM-004"
+	ErrCodeInvalidInput         = "AGM-005"
+	ErrCodePermissionDenied     = "AGM-006"
+	ErrCodeSessionExists        = "AGM-007"
+	ErrCodeHarnessUnavailable   = "AGM-008"
+	ErrCodeWorkspaceNotFound    = "AGM-009"
+	ErrCodeUUIDNotAssociated    = "AGM-010"
+	ErrCodeStorageError         = "AGM-011"
+	ErrCodeVerificationFailed   = "AGM-012"
+	ErrCodeKillProtected        = "AGM-013"
+	ErrCodeActiveSessionKill    = "AGM-014"
+	ErrCodeLockTimeout          = "AGM-015"
+	ErrCodeSessionNotReady      = "AGM-016"
+	ErrCodeOutputUnavailable    = "AGM-017"
+	ErrCodeDeliveryUncertain    = "AGM-018"
+	ErrCodeDeliveryAccounting   = "AGM-019"
+	ErrCodeCompactionPolicy     = "AGM-020"
+	ErrCodeCompactionUnverified = "AGM-021"
+	ErrCodeDryRun               = "AGM-100"
 )
 
 // Constructor functions for common errors.
@@ -233,6 +237,90 @@ func ErrSessionNotReady(name, readiness string) *OpError {
 			"session":   name,
 			"readiness": readiness,
 		},
+	}
+}
+
+// ErrDeliveryUncertain reports that submission crossed the irreversible
+// boundary but the final acknowledgement was lost. Automatic retry is unsafe
+// because it can submit the same command twice.
+func ErrDeliveryUncertain(name string, cause error) *OpError {
+	return &OpError{
+		Status:   409,
+		Type:     "session/delivery_uncertain",
+		Code:     ErrCodeDeliveryUncertain,
+		Title:    "Delivery outcome is uncertain",
+		Detail:   fmt.Sprintf("Compaction submission to session %q may already have started because its final acknowledgement was lost. Do not retry automatically.", name),
+		Instance: "session/compact",
+		Suggestions: []string{
+			"Inspect the exact pane and foreground PID in the returned delivery receipt; do not follow the session's current active-pane focus.",
+			"Allow the possible compaction to settle; do not submit another `/compact` from this error alone.",
+		},
+		Parameters: map[string]string{"session": name},
+		cause:      cause,
+	}
+}
+
+// ErrDeliveryAccounting reports that delivery was confirmed but its durable
+// attempt record could not be finalized. The pre-send pending record remains a
+// fail-closed anti-loop entry, so retrying would risk duplicate compaction.
+func ErrDeliveryAccounting(name string, cause error) *OpError {
+	return &OpError{
+		Status:   500,
+		Type:     "session/delivery_accounting_failed",
+		Code:     ErrCodeDeliveryAccounting,
+		Title:    "Delivery accounting is incomplete",
+		Detail:   fmt.Sprintf("Compaction was delivered to session %q, but its durable attempt record could not be finalized. Do not retry the compaction.", name),
+		Instance: "session/compact",
+		Suggestions: []string{
+			"Inspect the exact pane and foreground PID in the returned delivery receipt; do not follow the session's current active-pane focus.",
+			"Repair the compaction ledger before attempting another compaction.",
+		},
+		Parameters: map[string]string{"session": name},
+		cause:      cause,
+	}
+}
+
+// ErrCompactionPolicy reports that durable anti-loop accounting rejected a
+// new compaction before delivery. Unlike delivery-uncertain outcomes, this is
+// safe to retry after the stated policy window or with an audited --force.
+func ErrCompactionPolicy(name string, cause error) *OpError {
+	return &OpError{
+		Status:   409,
+		Type:     "session/compaction_policy",
+		Code:     ErrCodeCompactionPolicy,
+		Title:    "Compaction policy rejected the attempt",
+		Detail:   fmt.Sprintf("Compaction for session %q was not sent because its durable anti-loop policy rejected a new attempt: %v", name, cause),
+		Instance: "session/compact",
+		Suggestions: []string{
+			"Wait for the cooldown or rolling compaction window to expire, then retry.",
+			"If an immediate compaction is necessary, use `agm send compact --force --reason <justification>` so the override is audited.",
+		},
+		Parameters: map[string]string{"session": name},
+		cause:      cause,
+	}
+}
+
+// ErrCompactionVerification reports that a compaction request was durably
+// delivered but the exact runtime did not produce the positive transition and
+// stable-ready proof required to claim completion. Retrying the mutation from
+// this error would risk a duplicate compaction.
+func ErrCompactionVerification(name, reason string, cause error) *OpError {
+	return &OpError{
+		Status:   409,
+		Type:     "session/compaction_unverified",
+		Code:     ErrCodeCompactionUnverified,
+		Title:    "Compaction completion is unverified",
+		Detail:   fmt.Sprintf("Compaction was delivered to session %q, but positive completion proof was not established (%s). Do not retry the compaction automatically.", name, reason),
+		Instance: "session/compact/verify",
+		Suggestions: []string{
+			"Inspect the exact pane and foreground PID in the returned delivery receipt; do not follow the session's current active-pane focus.",
+			"Allow any possible compaction to settle and investigate the unverified reason before considering another compaction.",
+		},
+		Parameters: map[string]string{
+			"session": name,
+			"reason":  reason,
+		},
+		cause: cause,
 	}
 }
 
