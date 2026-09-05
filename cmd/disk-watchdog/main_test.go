@@ -81,7 +81,7 @@ func TestEmitReport_HealthyAndAlarm(t *testing.T) {
 
 	var healthy bytes.Buffer
 	emitReport(&healthy, supervisor.ResourceSnapshot{DiskFreeBytes: 500 * supervisor.GiB, DiskUsedFraction: 0.4},
-		supervisor.PressureNone, nil, nil, cfg, nil, nil, nil, nil)
+		supervisor.PressureNone, nil, nil, cfg, nil, nil, nil, nil, nil)
 	if !strings.Contains(healthy.String(), "Status: OK") {
 		t.Errorf("healthy report missing OK status:\n%s", healthy.String())
 	}
@@ -89,7 +89,7 @@ func TestEmitReport_HealthyAndAlarm(t *testing.T) {
 	var alarm bytes.Buffer
 	emitReport(&alarm, supervisor.ResourceSnapshot{DiskFreeBytes: 2 * supervisor.GiB, DiskUsedFraction: 0.99},
 		supervisor.PressureCritical, []string{"disk free 2.0GiB < 5GiB (critical)"},
-		&sweepResult{Removed: []string{"/x/a"}}, cfg, nil, nil, nil, nil)
+		&sweepResult{Removed: []string{"/x/a"}}, cfg, nil, nil, nil, nil, nil)
 	got := alarm.String()
 	if !strings.Contains(got, "Status: ALARM (critical)") {
 		t.Errorf("alarm report missing status:\n%s", got)
@@ -103,7 +103,7 @@ func TestEmitJSON_Shape(t *testing.T) {
 	cfg := config{path: "/", thresholds: supervisor.DefaultDiskAlertThresholds}
 	var buf bytes.Buffer
 	err := emitJSON(&buf, supervisor.ResourceSnapshot{DiskFreeBytes: 10 * supervisor.GiB, DiskUsedFraction: 0.9},
-		supervisor.PressureWarn, []string{"disk free 10.0GiB < 20GiB (warn)"}, nil, cfg, nil, nil, nil, nil)
+		supervisor.PressureWarn, []string{"disk free 10.0GiB < 20GiB (warn)"}, nil, cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("emitJSON: %v", err)
 	}
@@ -130,6 +130,7 @@ func TestRun_HealthyHostExitsZero(t *testing.T) {
 		// The reaper-liveness check reads an absolute default path under $HOME;
 		// disable it so this test stays hermetic and asserts only disk state.
 		"--gc-max-age", "0",
+		"--absence-max-age", "0",
 		// ~1 byte each: a sub-byte value would truncate to 0 and re-inherit the
 		// real defaults, which could trip on a genuinely low-disk CI host.
 		"--free-warn-gb", "0.000000001",
@@ -307,8 +308,9 @@ func TestRun_HealthyTickReleasesAStaleBrake(t *testing.T) {
 		"--trail", filepath.Join(t.TempDir(), "trail.jsonl"),
 		"--agm", filepath.Join(t.TempDir(), "no-such-agm"),
 		"--e2e-cache-dir", t.TempDir(),
-		// Hermetic: do not consult the real ~/.agm/logs/gc.jsonl.
+		// Hermetic: do not consult the real ~/.agm/logs/gc.jsonl or absence heartbeat.
 		"--gc-max-age", "0",
+		"--absence-max-age", "0",
 		"--free-warn-gb", "0.0001",
 		"--free-critical-gb", "0.0001",
 		"--inode-warn", "0.999999",
