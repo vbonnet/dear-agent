@@ -297,10 +297,10 @@ func (d *Driver) rebaseCoolingDown(rec *PRRecord, now time.Time) bool {
 	if d.RebaseCooldown <= 0 || rec == nil {
 		return false
 	}
-	if rec.LastState != StateBehind || rec.LastActionAt.IsZero() {
+	if rec.LastRebaseAt.IsZero() {
 		return false
 	}
-	return now.Sub(rec.LastActionAt) < d.RebaseCooldown
+	return now.Sub(rec.LastRebaseAt) < d.RebaseCooldown
 }
 
 func (d *Driver) doRebase(ctx context.Context, pr PR, now time.Time, res *TickResult) {
