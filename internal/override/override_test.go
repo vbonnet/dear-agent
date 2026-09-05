@@ -2,6 +2,7 @@ package override
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -144,6 +145,107 @@ func TestRequire_HonorsCustomJudge(t *testing.T) {
 	// "x" would be rejected by DefaultJudge but the custom judge allows it.
 	if err := Require(context.Background(), g, "x"); err != nil {
 		t.Fatalf("custom judge should have allowed, got %v", err)
+	}
+}
+
+func TestRequireAuditedFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
+	wantErr := errors.New("audit storage unavailable")
+	var captured auditEntry
+	g := Guard{
+		Tool: "agm send-compact", Flag: "--force", Gate: "anti-loop guard", Risk: RiskP0,
+		Judge: allowAllJudge{},
+		durableAuditSink: func(e auditEntry) error {
+			captured = e
+			return wantErr
+		},
+	}
+
+	err := RequireAudited(context.Background(), g, "host recovery requires one governed compaction")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("RequireAudited() error = %v, want audit failure", err)
+	}
+	if !captured.Allowed || captured.Judge != "allow-all" {
+		t.Fatalf("attempted durable audit = %+v, want allowed judge verdict", captured)
+	}
+}
+
+func TestRequireAuditedPersistsOwnerOnlyRecord(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "audit")
+	t.Setenv("OVERRIDE_AUDIT_DIR", dir)
+	g := Guard{
+		Tool: "agm send-compact", Flag: "--force", Gate: "anti-loop guard", Risk: RiskP0,
+		Judge: allowAllJudge{},
+	}
+	if err := RequireAudited(context.Background(), g, "host recovery requires one governed compaction"); err != nil {
+		t.Fatalf("RequireAudited() error = %v", err)
+	}
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("audit directory mode = %o, want 700", got)
+	}
+	path := filepath.Join(dir, "override-audit.jsonl")
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("audit file mode = %o, want 600", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry auditEntry
+	if err := json.Unmarshal(bytes.TrimSpace(data), &entry); err != nil {
+		t.Fatalf("decode durable audit: %v", err)
+	}
+	if !entry.Allowed || entry.Reason != "host recovery requires one governed compaction" || entry.Timestamp == "" {
+		t.Fatalf("durable audit entry = %+v", entry)
+	}
+}
+
+func TestRequireAuditedTightensExistingAuditPermissions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "audit")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "override-audit.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OVERRIDE_AUDIT_DIR", dir)
+
+	g := Guard{
+		Tool: "agm send-compact", Flag: "--force", Gate: "anti-loop guard", Risk: RiskP0,
+		Judge: allowAllJudge{},
+	}
+	if err := RequireAudited(context.Background(), g, "host recovery requires one governed compaction"); err != nil {
+		t.Fatalf("RequireAudited() error = %v", err)
+	}
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("audit directory mode = %o, want 700", got)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("audit file mode = %o, want 600", got)
 	}
 }
 
