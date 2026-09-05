@@ -4,21 +4,22 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/pkg/engram"
+	"github.com/vbonnet/dear-agent/pkg/eventbus"
 )
 
 func TestRegister(t *testing.T) {
 	r := NewTriggerRegistry()
 
 	triggers := []engram.TriggerSpec{
-		{On: "phase.started", Match: map[string]interface{}{"phase": "design"}, Priority: 80},
-		{On: "task.assigned", Match: map[string]interface{}{"role": "backend"}, Priority: 50},
+		{On: eventbus.TypeWayfinderPhaseStarted, Match: map[string]any{"phase": "design"}, Priority: 80},
+		{On: "task.assigned", Match: map[string]any{"role": "backend"}, Priority: 50},
 	}
 
 	r.Register("engrams/design-patterns.ai.md", triggers)
 
-	entries := r.Lookup("phase.started")
+	entries := r.Lookup(eventbus.TypeWayfinderPhaseStarted)
 	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry for phase.started, got %d", len(entries))
+		t.Fatalf("expected 1 entry for %s, got %d", eventbus.TypeWayfinderPhaseStarted, len(entries))
 	}
 	if entries[0].EngramPath != "engrams/design-patterns.ai.md" {
 		t.Errorf("expected engram path 'engrams/design-patterns.ai.md', got %q", entries[0].EngramPath)
@@ -49,19 +50,19 @@ func TestClear(t *testing.T) {
 	r := NewTriggerRegistry()
 
 	triggers := []engram.TriggerSpec{
-		{On: "phase.started", Priority: 50},
+		{On: eventbus.TypeWayfinderPhaseStarted, Priority: 50},
 		{On: "task.assigned", Priority: 50},
 	}
 	r.Register("engrams/test.ai.md", triggers)
 
 	// Verify entries exist.
-	if entries := r.Lookup("phase.started"); len(entries) == 0 {
+	if entries := r.Lookup(eventbus.TypeWayfinderPhaseStarted); len(entries) == 0 {
 		t.Fatal("expected entries before clear")
 	}
 
 	r.Clear()
 
-	if entries := r.Lookup("phase.started"); entries != nil {
+	if entries := r.Lookup(eventbus.TypeWayfinderPhaseStarted); entries != nil {
 		t.Errorf("expected nil after clear, got %v", entries)
 	}
 	if entries := r.Lookup("task.assigned"); entries != nil {

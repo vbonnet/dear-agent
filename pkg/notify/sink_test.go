@@ -58,7 +58,7 @@ func TestNotificationSink_HandleEvent_Dispatches(t *testing.T) {
 
 	event := &eventbus.Event{
 		ID:        "evt-1",
-		Type:      eventbus.TypeNotificationPhaseComplete,
+		Type:      eventbus.TypeNotificationSessionEnd,
 		Channel:   eventbus.ChannelNotification,
 		Source:    "test-source",
 		Timestamp: time.Now(),

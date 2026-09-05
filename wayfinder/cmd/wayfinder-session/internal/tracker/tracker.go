@@ -96,12 +96,12 @@ func (t *Tracker) StartSession(projectPath string) error {
 	return t.sessionTracker.StartSession(projectPath)
 }
 
-// StartPhase publishes phase.started event
+// StartPhase publishes wayfinder.phase.started event
 func (t *Tracker) StartPhase(phase string) error {
 	return t.sessionTracker.StartPhase(phase)
 }
 
-// CompletePhase publishes phase.completed event
+// CompletePhase publishes wayfinder.phase.completed event
 func (t *Tracker) CompletePhase(phase, outcome string, metadata map[string]interface{}) error {
 	return t.sessionTracker.CompletePhase(phase, outcome, metadata)
 }

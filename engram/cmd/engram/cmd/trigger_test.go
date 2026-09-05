@@ -48,7 +48,7 @@ title: Test Triggered Engram
 tags:
   - testing
 triggers:
-  - on: phase.started
+  - on: wayfinder.phase.started
     priority: 80
     scope: project
     cooldown: 1h
@@ -119,7 +119,7 @@ title: Phase Start Handler
 tags:
   - phases
 triggers:
-  - on: phase.started
+  - on: wayfinder.phase.started
     priority: 80
     scope: project
 ---
@@ -133,7 +133,7 @@ tags:
 triggers:
   - on: task.assigned
     priority: 60
-  - on: phase.started
+  - on: wayfinder.phase.started
     priority: 40
 ---
 # Task content
@@ -153,11 +153,11 @@ triggers:
 
 	registry := buildRegistryFromEntries(entries)
 
-	// Evaluate phase.started event.
-	t.Run("phase.started matches", func(t *testing.T) {
-		fromRegistry := registry.Lookup("phase.started")
+	// Evaluate wayfinder.phase.started event.
+	t.Run("wayfinder.phase.started matches", func(t *testing.T) {
+		fromRegistry := registry.Lookup("wayfinder.phase.started")
 		if len(fromRegistry) != 2 {
-			t.Fatalf("expected 2 entries for phase.started, got %d", len(fromRegistry))
+			t.Fatalf("expected 2 entries for wayfinder.phase.started, got %d", len(fromRegistry))
 		}
 	})
 
@@ -187,7 +187,7 @@ title: High Priority Handler
 tags:
   - testing
 triggers:
-  - on: phase.started
+  - on: wayfinder.phase.started
     priority: 90
 ---
 # High priority
@@ -198,7 +198,7 @@ title: Low Priority Handler
 tags:
   - testing
 triggers:
-  - on: phase.started
+  - on: wayfinder.phase.started
     priority: 20
 ---
 # Low priority
@@ -219,8 +219,8 @@ triggers:
 	matcher := trigger.NewTriggerMatcher(registry)
 
 	event := trigger.TriggerEvent{
-		Type: "phase.started",
-		Data: map[string]interface{}{},
+		Type: "wayfinder.phase.started",
+		Data: map[string]any{},
 	}
 
 	results := matcher.Match(event)
@@ -246,8 +246,8 @@ func TestTriggerHistoryCommand(t *testing.T) {
 
 	// Create a trigger-state.json with some history.
 	now := time.Now().Truncate(time.Second)
-	stateData := map[string]interface{}{
-		"last_injected": map[string]interface{}{
+	stateData := map[string]any{
+		"last_injected": map[string]any{
 			"engrams/patterns/error-handling.ai.md": now.Add(-1 * time.Hour).Format(time.RFC3339),
 			"engrams/strategies/testing.ai.md":      now.Add(-30 * time.Minute).Format(time.RFC3339),
 			"engrams/workflows/deploy.ai.md":        now.Format(time.RFC3339),
@@ -324,7 +324,7 @@ func TestTriggerCommandRegistration(t *testing.T) {
 		t.Error("evaluate command should require exactly 1 argument")
 	}
 
-	if err := triggerEvaluateCmd.Args(triggerEvaluateCmd, []string{"phase.started"}); err != nil {
+	if err := triggerEvaluateCmd.Args(triggerEvaluateCmd, []string{"wayfinder.phase.started"}); err != nil {
 		t.Errorf("evaluate command should accept 1 argument: %v", err)
 	}
 

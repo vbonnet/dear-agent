@@ -49,7 +49,7 @@ func (st *SessionTracker) SessionID() string {
 // Parameters:
 //   - projectPath: Working directory for the session
 func (st *SessionTracker) StartSession(projectPath string) error {
-	event := eventbus.NewEvent("wayfinder.session.started", "wayfinder", map[string]interface{}{
+	event := eventbus.NewEvent("wayfinder.session.started", "wayfinder", map[string]any{
 		"session_id":   st.sessionID,
 		"project_path": projectPath,
 		"event_topic":  "wayfinder.session.started",
@@ -58,39 +58,39 @@ func (st *SessionTracker) StartSession(projectPath string) error {
 	return st.publishEvent(event)
 }
 
-// StartPhase publishes a phase.started event.
+// StartPhase publishes a wayfinder.phase.started event.
 //
 // Parameters:
 //   - phase: Canonical phase identifier (for example, "PROBLEM", "RESEARCH", "PLAN")
 func (st *SessionTracker) StartPhase(phase string) error {
 	st.phaseStartTime = time.Now()
 
-	event := eventbus.NewEvent("wayfinder.phase.started", "wayfinder", map[string]interface{}{
+	event := eventbus.NewEvent(eventbus.TypeWayfinderPhaseStarted, "wayfinder", map[string]any{
 		"session_id":  st.sessionID,
 		"phase":       phase,
-		"event_topic": "wayfinder.phase.started",
+		"event_topic": eventbus.TypeWayfinderPhaseStarted,
 	})
 
 	st.currentPhase = phase
 	return st.publishEvent(event)
 }
 
-// CompletePhase publishes a phase.completed event.
+// CompletePhase publishes a wayfinder.phase.completed event.
 //
 // Parameters:
 //   - phase: Phase identifier (should match StartPhase call)
 //   - outcome: Phase result ("success", "failure", "partial", "skipped")
 //   - metadata: Optional metadata (engrams loaded, tokens, etc.)
-func (st *SessionTracker) CompletePhase(phase string, outcome string, metadata map[string]interface{}) error {
+func (st *SessionTracker) CompletePhase(phase string, outcome string, metadata map[string]any) error {
 	endTime := time.Now()
 	duration := endTime.Sub(st.phaseStartTime)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"session_id":  st.sessionID,
 		"phase":       phase,
 		"duration_ms": duration.Milliseconds(),
 		"outcome":     outcome,
-		"event_topic": "wayfinder.phase.completed",
+		"event_topic": eventbus.TypeWayfinderPhaseCompleted,
 	}
 
 	// Merge metadata if provided (files_modified, lines_added, etc.)
@@ -98,7 +98,7 @@ func (st *SessionTracker) CompletePhase(phase string, outcome string, metadata m
 		data[k] = v
 	}
 
-	event := eventbus.NewEvent("wayfinder.phase.completed", "wayfinder", data)
+	event := eventbus.NewEvent(eventbus.TypeWayfinderPhaseCompleted, "wayfinder", data)
 	return st.publishEvent(event)
 }
 
@@ -110,7 +110,7 @@ func (st *SessionTracker) EndSession(outcome string) error {
 	endTime := time.Now()
 	totalDuration := endTime.Sub(st.sessionStartTime)
 
-	event := eventbus.NewEvent("wayfinder.session.completed", "wayfinder", map[string]interface{}{
+	event := eventbus.NewEvent("wayfinder.session.completed", "wayfinder", map[string]any{
 		"session_id":        st.sessionID,
 		"total_duration_ms": totalDuration.Milliseconds(),
 		"status":            outcome,

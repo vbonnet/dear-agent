@@ -30,7 +30,7 @@ func TestIntegration_MultiSink(t *testing.T) {
 	// Emit events across channels
 	bus.Emit(context.Background(), NewEvent("telemetry.test", "pub", map[string]interface{}{"k": "v"}))
 	bus.Emit(context.Background(), NewEvent("audit.session.start", "pub", map[string]interface{}{"user": "test"}))
-	bus.Emit(context.Background(), NewEvent("notification.phase.complete", "pub", nil))
+	bus.Emit(context.Background(), NewEvent("notification.session.end", "pub", nil))
 	bus.Emit(context.Background(), NewEvent("heartbeat.agent", "pub", nil))
 
 	time.Sleep(100 * time.Millisecond)
