@@ -36,7 +36,11 @@ func ValidateGuard(ctx context.Context, repoRoot string, g *Guard) error {
 		return validatePathGuard(repoRoot, g)
 
 	default:
+		if g.Type != "" {
+			return fmt.Errorf("unknown guard type %q; must be one of (test, file, launchd, hook, workflow, lint, deferred)", g.Type)
+		}
 		if g.Path != "" {
+			g.Type = GuardTypeFile
 			return validatePathGuard(repoRoot, g)
 		}
 		if g.Label != "" {

@@ -136,12 +136,19 @@ func extractGuardsSection(body string) string {
 	var sectionLines []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if len(sectionLines) > 0 && strings.HasPrefix(trimmed, "## ") {
+		if len(sectionLines) > 0 && isHeaderLine(trimmed) {
 			break
 		}
 		sectionLines = append(sectionLines, line)
 	}
 	return strings.Join(sectionLines, "\n")
+}
+
+func isHeaderLine(s string) bool {
+	return strings.HasPrefix(s, "# ") ||
+		strings.HasPrefix(s, "## ") ||
+		strings.HasPrefix(s, "### ") ||
+		strings.HasPrefix(s, "#### ")
 }
 
 func parseYAMLGuardsBlock(retro *Retrospective, block string) bool {

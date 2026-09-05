@@ -386,3 +386,66 @@ func TestRLINT12_TimeoutBoundedExecution(t *testing.T) {
 		t.Fatalf("expected context canceled error, got nil")
 	}
 }
+
+func TestValidateGuard_RejectsUnknownType(t *testing.T) {
+	t.Parallel()
+	repoRoot := t.TempDir()
+	ctx := context.Background()
+
+	// 1. Unrecognized type should be rejected even if path is set
+	g := Guard{
+		Type: "invalid_type",
+		Path: "some/path.go",
+	}
+	err := ValidateGuard(ctx, repoRoot, &g)
+	if err == nil || !strings.Contains(err.Error(), "unknown guard type") {
+		t.Fatalf("expected unknown guard type error, got: %v", err)
+	}
+
+	// 2. Empty type with path should infer GuardTypeFile
+	existingFile := filepath.Join(repoRoot, "valid.go")
+	if err := os.WriteFile(existingFile, []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	g2 := Guard{
+		Path: "valid.go",
+	}
+	err = ValidateGuard(ctx, repoRoot, &g2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if g2.Type != GuardTypeFile {
+		t.Fatalf("expected inferred type %s, got %s", GuardTypeFile, g2.Type)
+	}
+}
+
+func TestExtractGuardsSection_TerminatesOnAnyHeaderLevel(t *testing.T) {
+	t.Parallel()
+	repoRoot := t.TempDir()
+	retroPath := filepath.Join(repoRoot, "subheaders.md")
+	content := `# Incident Retro
+Date: 2026-09-05
+
+## Guards
+- deferred: ce-12345 (Need release)
+
+### Next Section
+- test: should/not/be/parsed_as_guard.go
+`
+	if err := os.WriteFile(retroPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	retro, err := ParseRetrospective(ctx, strings.NewReader(content), retroPath)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	if len(retro.Guards) != 1 {
+		t.Fatalf("expected exactly 1 guard, got %d: %v", len(retro.Guards), retro.Guards)
+	}
+	if retro.Guards[0].Bead != "ce-12345" {
+		t.Fatalf("expected bead ce-12345, got %s", retro.Guards[0].Bead)
+	}
+}
