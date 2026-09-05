@@ -11,6 +11,7 @@
 # RELATED-SPEC: pkg/gatehealth/SPEC.md
 # RELATED-SPEC: cmd/gate-health/SPEC.md
 # RELATED-SPEC: cmd/bead-health/SPEC.md
+# RELATED-SPEC: cmd/sweep-health/SPEC.md
 Feature: Observability package guardrails
   Observability packages must keep executable SPEC traceability because quota,
   drift, trace, and agent-runtime monitoring need the same contracts across
@@ -25,6 +26,7 @@ Feature: Observability package guardrails
       | package                       |
       | cmd/gate-health               |
       | cmd/bead-health               |
+      | cmd/sweep-health              |
       | cmd/jaeger-health             |
       | pkg/absencealarm              |
       | cmd/merge-health              |
@@ -52,3 +54,4 @@ Feature: Observability package guardrails
       | pkg/gatehealth              | GH-05          | exclude that pull request |
       | cmd/gate-health             | GHC-03         | exit 2                  |
       | cmd/bead-health             | BH-05          | in the future           |
+      | cmd/sweep-health            | SWEEP-05       | in the future           |
