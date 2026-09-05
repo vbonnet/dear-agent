@@ -312,7 +312,9 @@ func readFileBounded(
 // extractJSONTimestamp parses JSON data and extracts the timestamp at fieldPath.
 func extractJSONTimestamp(data []byte, fieldPath string) (time.Time, error) {
 	var root any
-	if err := json.Unmarshal(data, &root); err != nil {
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.UseNumber()
+	if err := dec.Decode(&root); err != nil {
 		return time.Time{}, fmt.Errorf("parsing JSON: %w", err)
 	}
 	curr := root

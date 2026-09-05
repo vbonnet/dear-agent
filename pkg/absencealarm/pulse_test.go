@@ -504,17 +504,21 @@ func TestJSONTimestampPulse_NestedFieldAndFormats(t *testing.T) {
 	}
 
 	// Unix epoch integer seconds
-	epochSec := ts.Unix()
-	pr.ReadFile = func(string) ([]byte, error) {
-		return []byte(`{"epoch":` + time.Unix(epochSec, 0).Format("1136239445") + `}`), nil
-	}
-	// Let's use a json payload with the integer
 	pr.ReadFile = func(string) ([]byte, error) {
 		return []byte(`{"epoch":1788263880}`), nil
 	}
 	res = EvaluatePulse(context.Background(), Pulse{Name: "epoch", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "epoch", Window: "5m", window: 5 * time.Minute}, pr, "", nil)
 	if res.Status != StatusPresent {
 		t.Fatalf("epoch status = %s, want present", res.Status)
+	}
+
+	// Unix epoch integer nanoseconds (large integer requiring json.Number to preserve precision)
+	pr.ReadFile = func(string) ([]byte, error) {
+		return []byte(`{"epoch_ns":1788263880000000000}`), nil
+	}
+	res = EvaluatePulse(context.Background(), Pulse{Name: "epoch_ns", Type: PulseJSONTimestamp, Path: "/x/hb.json", Field: "epoch_ns", Window: "5m", window: 5 * time.Minute}, pr, "", nil)
+	if res.Status != StatusPresent {
+		t.Fatalf("epoch_ns status = %s, want present", res.Status)
 	}
 }
 
