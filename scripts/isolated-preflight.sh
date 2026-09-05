@@ -46,6 +46,9 @@ if [[ -n "$HOST_HOME" ]]; then
     fi
 fi
 
+# Preserve host-scoped preflight lease directory before isolating HOME
+export PREFLIGHT_LEASE_DIR="${PREFLIGHT_LEASE_DIR:-${XDG_STATE_HOME:-$HOST_HOME/.local/state}/dear-agent}"
+
 export HOME="$ISOLATED_HOME"
 export GOCACHE="$ISOLATED_GOCACHE"
 export TMPDIR="$ISOLATED_TMP"

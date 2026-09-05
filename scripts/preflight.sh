@@ -47,6 +47,94 @@ ok()   { printf '%s✓%s %s\n' "$G" "$N" "$*"; }
 warn() { printf '%s!%s %s\n' "$Y" "$N" "$*"; }
 fail() { printf '%s✗%s %s\n' "$R" "$N" "$*"; exit 1; }
 
+# Full preflight requires an exclusive host-scoped advisory lease so that
+# concurrent preflight-full runs across worktrees do not contend for memory,
+# CPU, or disk caches.
+LEASE_DIR="${PREFLIGHT_LEASE_DIR:-${_PREFLIGHT_LEASE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dear-agent}}"
+LEASE_FILE="$LEASE_DIR/preflight-full.lock"
+OWNER_FILE="$LEASE_DIR/preflight-full.owner"
+LEASE_TIMEOUT="${PREFLIGHT_LEASE_TIMEOUT:-3600}"
+
+format_owner_info() {
+  if [[ -f "$OWNER_FILE" ]]; then
+    local pid="" started="" worktree=""
+    while IFS='=' read -r k v || [[ -n "$k" ]]; do
+      case "$k" in
+        PID) pid="$v" ;;
+        STARTED) started="$v" ;;
+        WORKTREE) worktree="$v" ;;
+      esac
+    done < "$OWNER_FILE"
+    if [[ -n "$pid" && -n "$worktree" && -n "$started" ]]; then
+      printf 'held by PID %s (%s) since %s' "$pid" "$worktree" "$started"
+      return
+    elif [[ -n "$pid" ]]; then
+      printf 'held by PID %s' "$pid"
+      return
+    fi
+  fi
+  printf 'held by another process'
+}
+
+# Cleanup handler for owner metadata, lease descriptor, and temporary scan files.
+cleanup_preflight() {
+  if [[ -n "${OWNER_FILE:-}" && -f "$OWNER_FILE" ]]; then
+    if grep -q "^PID=$$$" "$OWNER_FILE" 2>/dev/null; then
+      rm -f "$OWNER_FILE" 2>/dev/null || true
+    fi
+  fi
+  if [[ -n "${TMP_VULN:-}" && -f "${TMP_VULN:-}" ]]; then
+    rm -f "$TMP_VULN" 2>/dev/null || true
+  fi
+  exec 200>&- 2>/dev/null || true
+}
+trap cleanup_preflight EXIT
+
+if [[ "$MODE" == "full" ]]; then
+  mkdir -p "$LEASE_DIR"
+  touch "$LEASE_FILE"
+
+  exec 200>"$LEASE_FILE"
+
+  # shellcheck disable=SC2317,SC2329
+  on_lease_cancel() {
+    trap - INT TERM
+    local owner_diag
+    owner_diag="$(format_owner_info)"
+    warn "cancelled while waiting for full-preflight lease (${owner_diag})"
+    exit 130
+  }
+  trap on_lease_cancel INT TERM
+
+  if command -v lockf >/dev/null 2>&1; then
+    if ! lockf -s -t 0 200 2>/dev/null; then
+      warn "waiting for full-preflight lease $(format_owner_info)..."
+    fi
+    if ! lockf -s -t "$LEASE_TIMEOUT" 200; then
+      fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
+    fi
+  elif command -v flock >/dev/null 2>&1; then
+    if ! flock -n -x 200 2>/dev/null; then
+      warn "waiting for full-preflight lease $(format_owner_info)..."
+    fi
+    if ! flock -x -w "$LEASE_TIMEOUT" 200; then
+      fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
+    fi
+  else
+    fail "neither lockf nor flock is available for lease serialization"
+  fi
+
+  # Restore standard signal traps now that lease is acquired
+  trap cleanup_preflight EXIT INT TERM
+
+  cat > "$OWNER_FILE" <<EOF
+PID=$$
+STARTED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+WORKTREE=$REPO_ROOT
+COMMAND=$0 $*
+EOF
+fi
+
 # Mirror CI: GOWORK=off so we don't accidentally pull in unrelated modules.
 export GOWORK=off
 
@@ -212,7 +300,7 @@ if [[ "$MODE" == "full" ]]; then
   # `-t prefix.XXX.json` template tripping GNU mktemp's "must end in XXX"
   # rule is not worth the prettier filename.
   TMP_VULN=$(mktemp)
-  trap 'rm -f "$TMP_VULN"' EXIT
+  # cleanup_preflight registered above removes TMP_VULN on exit.
   # govulncheck exit codes: 0 = no findings, 3 = findings (allowlisted or
   # not). Anything else (compile error, panic, module load failure) is a
   # real failure we must not mask. A blanket `|| true` would let those
