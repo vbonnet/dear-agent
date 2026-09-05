@@ -105,7 +105,7 @@ func main() {
 
 	registerMCPTools(server, cfg)
 
-	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session_metadata, agm_get_session_output, agm_archive_session, agm_kill_session, agm_create_session, agm_send_message, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
+	logger.Info("Registered MCP tools")
 	logger.Info("Wayfinder forwarding enabled", "engram_mcp_url", cfg.EngramMCPURL)
 
 	installGateway(server, *noGateway)
