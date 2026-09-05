@@ -1,6 +1,5 @@
 # SPEC: cmd/burndown-maint/SPEC.md
 # RELATED-SPEC: internal/burndownmaint/SPEC.md
-# RELATED-SPEC: cmd/merge-velocity/SPEC.md
 # RELATED-SPEC: cmd/pr-linkify/SPEC.md
 # RELATED-SPEC: internal/prlinkify/SPEC.md
 # RELATED-SPEC: cmd/src-recovery/SPEC.md
@@ -19,7 +18,6 @@ Feature: Root maintenance command guardrails
       | package                     |
       | cmd/burndown-maint          |
       | internal/burndownmaint      |
-      | cmd/merge-velocity          |
       | cmd/pr-linkify              |
       | internal/prlinkify          |
       | cmd/src-recovery            |
