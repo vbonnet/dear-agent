@@ -31,6 +31,13 @@ func captureStdout(fn func()) string {
 		outC <- buf.String()
 	}()
 
+	defer func() {
+		if r := recover(); r != nil {
+			_ = w.Close()
+			panic(r)
+		}
+	}()
+
 	fn()
 	_ = w.Close()
 	return <-outC
@@ -299,5 +306,19 @@ func TestRun_DownDBStatError(t *testing.T) {
 
 	if !bytes.Contains([]byte(out), []byte("DOWN: cannot access beads database")) {
 		t.Errorf("stdout = %q, want DOWN: cannot access beads database", out)
+	}
+}
+
+func TestRun_HomeDirErrorOnTildePath(t *testing.T) {
+	d := deps{
+		now: fixedTime,
+		userHomeDir: func() (string, error) {
+			return "", errors.New("cannot determine home directory")
+		},
+	}
+
+	code := run([]string{"--db", "~/test"}, d)
+	if code != 3 {
+		t.Fatalf("run() = %d, want 3", code)
 	}
 }

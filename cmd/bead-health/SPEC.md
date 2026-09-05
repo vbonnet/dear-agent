@@ -39,7 +39,7 @@ a single JSON report shape.
 
 **BH-05** When the latest closed bead closure time is more than the clock-skew tolerance (5 minutes) in the future, the system shall report down rather than healthy and exit 2.
 
-**BH-06** When the lookback window cannot be parsed or is not positive, the system shall report a usage error and exit 3.
+**BH-06** When the bead-health lookback window cannot be parsed or is not positive, the system shall report a usage error and exit 3.
 
 **BH-07** When JSON output mode is set, the system shall emit a single JSON report carrying status, database path, lookback window, latest closed bead ID, title, closure time, age, and any error message.
 

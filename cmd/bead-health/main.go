@@ -63,14 +63,16 @@ type BeadRecord struct {
 // deps are injectable host observations so tests never require a real database.
 type deps struct {
 	now               func() time.Time
+	userHomeDir       func() (string, error)
 	statDB            func(path string) (os.FileInfo, error)
 	queryLatestClosed func(ctx context.Context, db string) ([]BeadRecord, error)
 }
 
 func defaultDeps() deps {
 	return deps{
-		now:    time.Now,
-		statDB: os.Stat,
+		now:         time.Now,
+		userHomeDir: os.UserHomeDir,
+		statDB:      os.Stat,
 		queryLatestClosed: func(ctx context.Context, db string) ([]BeadRecord, error) {
 			args := []string{
 				"--db", db,
@@ -81,7 +83,6 @@ func defaultDeps() deps {
 				"--limit", "1",
 				"--json",
 			}
-			//nolint:gosec // G702: args contains vetted internal flags and user-provided db path
 			out, err := exec.CommandContext(ctx, "bd", args...).Output()
 			if err != nil {
 				var exitErr *exec.ExitError
@@ -101,29 +102,58 @@ func defaultDeps() deps {
 
 func main() { os.Exit(run(os.Args[1:], defaultDeps())) }
 
-func run(args []string, d deps) int {
+type cliConfig struct {
+	db       string
+	lookback string
+	window   time.Duration
+	asJSON   bool
+}
+
+func parseCLIArgs(args []string, d deps) (cliConfig, int) {
 	fs := flag.NewFlagSet("bead-health", flag.ContinueOnError)
-	home, _ := os.UserHomeDir()
+	userHome := d.userHomeDir
+	if userHome == nil {
+		userHome = os.UserHomeDir
+	}
+	home, homeErr := userHome()
 	defaultDB := os.Getenv("BEADS_DB")
-	if defaultDB == "" {
+	if defaultDB == "" && homeErr == nil {
 		defaultDB = filepath.Join(home, "beads", "context-engine", ".beads")
 	}
 	db := fs.String("db", defaultDB, "path to canonical beads database directory")
 	lookback := fs.String("lookback", "48h", "maximum silence window (e.g. 24h, 48h)")
 	asJSON := fs.Bool("json", false, "emit a JSON report to stdout instead of a human summary")
 	if err := fs.Parse(args); err != nil {
-		return 3
+		return cliConfig{}, 3
 	}
 
 	window, err := time.ParseDuration(*lookback)
 	if err != nil || window <= 0 {
 		fmt.Fprintf(os.Stderr, "bead-health: invalid --lookback %q\n", *lookback)
-		return 3
+		return cliConfig{}, 3
 	}
 
 	resolvedDB := *db
 	if strings.HasPrefix(resolvedDB, "~/") {
+		if homeErr != nil {
+			fmt.Fprintf(os.Stderr, "bead-health: cannot resolve home directory: %v\n", homeErr)
+			return cliConfig{}, 3
+		}
 		resolvedDB = filepath.Join(home, resolvedDB[2:])
+	}
+
+	return cliConfig{
+		db:       resolvedDB,
+		lookback: *lookback,
+		window:   window,
+		asJSON:   *asJSON,
+	}, 0
+}
+
+func run(args []string, d deps) int {
+	cfg, code := parseCLIArgs(args, d)
+	if code != 0 {
+		return code
 	}
 
 	// BH-09: One deadline covers subprocesses run by this probe. bead-health is
@@ -135,35 +165,35 @@ func run(args []string, d deps) int {
 	now := d.now()
 	r := Report{
 		CheckedAt: now.UTC().Format(time.RFC3339),
-		DB:        resolvedDB,
-		Lookback:  *lookback,
+		DB:        cfg.db,
+		Lookback:  cfg.lookback,
 	}
 
 	statDB := d.statDB
 	if statDB == nil {
 		statDB = os.Stat
 	}
-	if fi, err := statDB(resolvedDB); err != nil {
+	if fi, err := statDB(cfg.db); err != nil {
 		r.Status = "down"
 		r.Error = err.Error()
-		return emit(r, *asJSON, fmt.Sprintf("DOWN: cannot access beads database in %s: %v", resolvedDB, err), 2)
+		return emit(r, cfg.asJSON, fmt.Sprintf("DOWN: cannot access beads database in %s: %v", cfg.db, err), 2)
 	} else if !fi.IsDir() {
 		r.Status = "down"
 		r.Error = "beads path is not a directory"
-		return emit(r, *asJSON, fmt.Sprintf("DOWN: beads path %s is not a directory", resolvedDB), 2)
+		return emit(r, cfg.asJSON, fmt.Sprintf("DOWN: beads path %s is not a directory", cfg.db), 2)
 	}
 
-	records, err := d.queryLatestClosed(ctx, resolvedDB)
+	records, err := d.queryLatestClosed(ctx, cfg.db)
 	if err != nil {
 		r.Status = "down"
 		r.Error = err.Error()
-		return emit(r, *asJSON, fmt.Sprintf("DOWN: cannot query beads in %s: %v", resolvedDB, err), 2)
+		return emit(r, cfg.asJSON, fmt.Sprintf("DOWN: cannot query beads in %s: %v", cfg.db, err), 2)
 	}
 
 	if len(records) == 0 {
 		r.Status = "degraded"
 		r.Error = "no closed beads in database"
-		return emit(r, *asJSON, fmt.Sprintf("DEGRADED: no closed beads found in %s", resolvedDB), 1)
+		return emit(r, cfg.asJSON, fmt.Sprintf("DEGRADED: no closed beads found in %s", cfg.db), 1)
 	}
 
 	latest := records[0]
@@ -171,17 +201,22 @@ func run(args []string, d deps) int {
 	r.LatestTitle = latest.Title
 	r.LatestClosedAt = latest.ClosedAt
 
+	msg, exitCode := evaluateClosure(latest, now, cfg.window, cfg.lookback, &r)
+	return emit(r, cfg.asJSON, msg, exitCode)
+}
+
+func evaluateClosure(latest BeadRecord, now time.Time, window time.Duration, lookback string, r *Report) (string, int) {
 	if latest.ClosedAt == "" {
 		r.Status = "degraded"
 		r.Error = fmt.Sprintf("latest closed bead %s has empty closed_at", latest.ID)
-		return emit(r, *asJSON, fmt.Sprintf("DEGRADED: latest closed bead %s has no closure timestamp", latest.ID), 1)
+		return fmt.Sprintf("DEGRADED: latest closed bead %s has no closure timestamp", latest.ID), 1
 	}
 
 	closedTime, err := parseClosedTime(latest.ClosedAt)
 	if err != nil {
 		r.Status = "down"
 		r.Error = fmt.Sprintf("parse closure time: %v", err)
-		return emit(r, *asJSON, fmt.Sprintf("DOWN: cannot parse closed_at for %s: %v", latest.ID, err), 2)
+		return fmt.Sprintf("DOWN: cannot parse closed_at for %s: %v", latest.ID, err), 2
 	}
 
 	// BH-05: a future closure time is not proof of a live pipeline.
@@ -189,7 +224,7 @@ func run(args []string, d deps) int {
 		age := now.Sub(closedTime)
 		r.Status = "down"
 		r.Error = "closure timestamp is in the future"
-		return emit(r, *asJSON, fmt.Sprintf("DOWN: latest bead %s closure time %s is %s in the future", latest.ID, latest.ClosedAt, (-age).Round(time.Second)), 2)
+		return fmt.Sprintf("DOWN: latest bead %s closure time %s is %s in the future", latest.ID, latest.ClosedAt, (-age).Round(time.Second)), 2
 	}
 
 	age := now.Sub(closedTime)
@@ -197,13 +232,13 @@ func run(args []string, d deps) int {
 
 	if age > window {
 		r.Status = "degraded"
-		msg := fmt.Sprintf("DEGRADED: no bead closed in last %s (latest %s %q closed %s ago)", *lookback, latest.ID, latest.Title, r.LatestClosedAge)
-		return emit(r, *asJSON, msg, 1)
+		msg := fmt.Sprintf("DEGRADED: no bead closed in last %s (latest %s %q closed %s ago)", lookback, latest.ID, latest.Title, r.LatestClosedAge)
+		return msg, 1
 	}
 
 	r.Status = "healthy"
-	msg := fmt.Sprintf("HEALTHY: bead %s %q closed %s ago (window %s)", latest.ID, latest.Title, r.LatestClosedAge, *lookback)
-	return emit(r, *asJSON, msg, 0)
+	msg := fmt.Sprintf("HEALTHY: bead %s %q closed %s ago (window %s)", latest.ID, latest.Title, r.LatestClosedAge, lookback)
+	return msg, 0
 }
 
 func parseClosedTime(s string) (time.Time, error) {
