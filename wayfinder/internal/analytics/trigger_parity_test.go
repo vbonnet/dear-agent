@@ -15,6 +15,7 @@ import (
 // by the trigger registry and trigger subscriber.
 func TestWayfinderSessionTrackerEmissionMatchesTriggerRegistryLookup(t *testing.T) {
 	bus := eventbus.NewBus(nil)
+	defer bus.Close()
 
 	var mu sync.Mutex
 	var capturedEvents []*eventbus.Event
