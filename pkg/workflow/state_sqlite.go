@@ -376,6 +376,45 @@ func (s *SQLiteState) BeginRun(ctx context.Context, rec RunRecord) error {
 	return nil
 }
 
+// resumeRun atomically reopens an existing run and records the corresponding
+// audit transition. Keeping both writes in one transaction prevents a failed
+// audit insert from stranding a formerly terminal row as running. The method is
+// package-private because resumption is runner policy, not a new RunRecorder
+// capability.
+func (s *SQLiteState) resumeRun(ctx context.Context, runID string, event AuditEvent) (RunState, error) {
+	if runID == "" {
+		return "", fmt.Errorf("workflow: resumeRun: runID required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("workflow: resumeRun: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var previous RunState
+	if err := tx.QueryRowContext(ctx, `SELECT state FROM runs WHERE run_id = ?`, runID).Scan(&previous); err != nil {
+		return "", fmt.Errorf("workflow: resumeRun %s: read state: %w", runID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE runs SET state = 'running', finished_at = NULL, error = NULL
+		WHERE run_id = ?
+	`, runID); err != nil {
+		return "", fmt.Errorf("workflow: resumeRun %s: update state: %w", runID, err)
+	}
+	event.RunID = runID
+	event.FromState = string(previous)
+	event.ToState = string(RunStateRunning)
+	event.Reason = "run-resumed"
+	if err := s.emit(ctx, tx, event); err != nil {
+		return "", fmt.Errorf("workflow: resumeRun %s: audit transition: %w", runID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("workflow: resumeRun %s: commit: %w", runID, err)
+	}
+	s.runID = runID
+	return previous, nil
+}
+
 // UpsertNode writes (or updates) one row in the nodes table. Called on
 // every node-state transition so the per-run, per-node aggregate stays
 // fresh — readers (CLI, dashboards) join against this table.
@@ -458,6 +497,14 @@ func (s *SQLiteState) FinishRun(ctx context.Context, runID string, state RunStat
 // Emit writes one row to audit_events. The runner calls this on every
 // state transition; the row is the canonical "what happened" record.
 func (s *SQLiteState) Emit(ctx context.Context, ev AuditEvent) error {
+	return s.emit(ctx, s.db, ev)
+}
+
+type contextExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (s *SQLiteState) emit(ctx context.Context, execer contextExecer, ev AuditEvent) error {
 	if ev.RunID == "" {
 		return fmt.Errorf("workflow: Emit: RunID required")
 	}
@@ -474,7 +521,7 @@ func (s *SQLiteState) Emit(ctx context.Context, ev AuditEvent) error {
 	if len(ev.Payload) > 0 {
 		payloadJSON = mustMarshalJSON(ev.Payload)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := execer.ExecContext(ctx, `
 		INSERT INTO audit_events (
 		    event_id, run_id, node_id, attempt_no, from_state, to_state,
 		    reason, actor, occurred_at, payload_json
@@ -548,6 +595,7 @@ func (s *SQLiteState) Load(ctx context.Context) (*Snapshot, error) {
 
 	snap := &Snapshot{
 		Workflow:  wfName,
+		RunID:     s.runID,
 		Inputs:    map[string]string{},
 		Outputs:   map[string]string{},
 		Completed: map[string]bool{},

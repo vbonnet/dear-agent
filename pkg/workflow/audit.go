@@ -78,8 +78,11 @@ type AuditEvent struct {
 //   - StdoutAuditSink mirrors events to a writer (Phase 2 will add JSONL,
 //     Engram, OpenTelemetry).
 //
-// Sinks must NOT block the runner indefinitely — the runner cancels its
-// context on shutdown and sinks should respect that.
+// Sinks must NOT block the runner indefinitely and must respect context
+// deadlines. For required terminal evidence, Runner gives bounded cleanup
+// authority only to the current Recorder when that same value also implements
+// AuditSink and is present directly in Audit or its MultiAuditSink fan-out.
+// Other audit sinks remain observational and receive the execution context.
 type AuditSink interface {
 	Emit(ctx context.Context, event AuditEvent) error
 }
