@@ -67,7 +67,7 @@ require (
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.57.0
-	mvdan.cc/sh/v3 v3.13.1
+	mvdan.cc/sh/v3 v3.14.0
 	tailscale.com v1.102.3
 )
 
