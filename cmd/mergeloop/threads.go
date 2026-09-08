@@ -221,10 +221,36 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 			continue
 		}
 		sev := mergeloop.ThreadSeverityOf(t.bodies())
+		// A truncated thread cannot be classified honestly: a blocking marker
+		// may sit past the first page of comments. While the thread is still
+		// unresolved GitHub holds the merge, but once it is resolved this gate
+		// is the only reader left, so an unreadable resolved thread refuses.
+		if t.isResolved && t.truncated {
+			out = append(out, mergeloop.BlockingFinding{
+				ThreadID: t.id,
+				Author:   t.comments[0].author,
+				Severity: mergeloop.SeverityUnknown,
+				Excerpt:  "resolved thread has more comments than one page; severity cannot be established",
+			})
+			continue
+		}
 		if sev != mergeloop.SeverityBlocking {
-			// Unknown severity on an unresolved thread is already blocked by
-			// GitHub. Flagging it here too would deadlock every PR carrying
-			// ordinary bot prose.
+			// An UNRESOLVED thread of unknown severity is already held by
+			// GitHub's own conversation-resolution gate, so flagging it here
+			// too would deadlock every PR carrying ordinary bot prose.
+			//
+			// A RESOLVED one is the opposite case: GitHub has nothing left to
+			// hold, so this gate is the last reader. That is exactly the shape
+			// the old severity-blind resolver created, and a future badge
+			// format this parser has never seen lands here too. Refuse.
+			if t.isResolved && sev == mergeloop.SeverityUnknown {
+				out = append(out, mergeloop.BlockingFinding{
+					ThreadID: t.id,
+					Author:   t.comments[0].author,
+					Severity: sev,
+					Excerpt:  excerptFinding(t.comments),
+				})
+			}
 			continue
 		}
 		out = append(out, mergeloop.BlockingFinding{
