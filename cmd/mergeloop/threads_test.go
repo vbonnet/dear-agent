@@ -365,3 +365,47 @@ func TestBlockingFindingsInBotReplyDoesNotClearFinding(t *testing.T) {
 		t.Fatalf("blockingFindingsIn() = %d findings, want 1 (a bot reply must not clear a P1)", len(got))
 	}
 }
+
+// TestBlockingFindingsInResolvedThreadsFailClosed pins the second ce-lr7j
+// review round: once a thread is RESOLVED, GitHub's conversation-resolution
+// gate has nothing left to hold, so this gate is the last reader. An
+// unreadable or unrecognised resolved thread must refuse the merge.
+func TestBlockingFindingsInResolvedThreadsFailClosed(t *testing.T) {
+	t.Run("resolved unknown severity blocks", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r1", isResolved: true,
+			comments: []threadComment{botComment(tstUnparseable)},
+		}}
+		if got := blockingFindingsIn(threads); len(got) != 1 {
+			t.Fatalf("got %d findings, want 1 (resolved unknown must block)", len(got))
+		}
+	})
+	t.Run("unresolved unknown severity does not deadlock", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r2", isResolved: false,
+			comments: []threadComment{botComment(tstUnparseable)},
+		}}
+		if got := blockingFindingsIn(threads); len(got) != 0 {
+			t.Fatalf("got %d findings, want 0 (GitHub already holds unresolved threads)", len(got))
+		}
+	})
+	t.Run("resolved truncated thread blocks even if visible page is advisory", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r3", isResolved: true, truncated: true,
+			comments: []threadComment{botComment(tstCodexP2)},
+		}}
+		got := blockingFindingsIn(threads)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1 (truncated resolved thread must refuse)", len(got))
+		}
+	})
+	t.Run("resolved advisory thread still merges", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r4", isResolved: true,
+			comments: []threadComment{botComment(tstCodexP2)},
+		}}
+		if got := blockingFindingsIn(threads); len(got) != 0 {
+			t.Fatalf("got %d findings, want 0", len(got))
+		}
+	})
+}

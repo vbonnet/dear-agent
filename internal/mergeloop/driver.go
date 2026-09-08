@@ -387,24 +387,35 @@ func (d *Driver) resolveBotThreads(ctx context.Context, pr PR) {
 // that cannot be evaluated also means no merge. An unreachable gate must never
 // be read as "no findings" — that is the fail-open shape this whole bead exists
 // to remove.
-func (d *Driver) blockingFindingsGate(ctx context.Context, pr PR) bool {
+// gateRefusal explains why blockingFindingsGate refused, so the escalation
+// state and telemetry can tell review feedback apart from a provider outage.
+// Pointing an operator at "unaddressed bot findings" during a GraphQL failure
+// sends them looking for threads that do not exist.
+type gateRefusal struct {
+	reason string // durable escalation reason
+	kind   string // metric/telemetry discriminator
+}
+
+func (d *Driver) blockingFindingsGate(ctx context.Context, pr PR) (bool, gateRefusal) {
 	if d.Deps.Threads == nil {
 		// No resolver wired means nothing auto-resolved anything, so GitHub's
 		// own required_review_thread_resolution is still the live gate.
-		return true
+		return true, gateRefusal{}
 	}
 	findings, err := d.Deps.Threads.BlockingFindings(ctx, d.Repo, pr.Number)
 	if err != nil {
+		detail := "refusing merge: cannot evaluate review-thread gate: " + err.Error()
 		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "thread_gate_error",
-			Detail: "refusing merge: cannot evaluate review-thread gate: " + err.Error()})
-		return false
+			Detail: detail})
+		return false, gateRefusal{reason: detail, kind: "thread_gate_error"}
 	}
 	if len(findings) > 0 {
+		detail := describeFindings(findings)
 		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merge_blocked_findings",
-			Detail: describeFindings(findings)})
-		return false
+			Detail: detail})
+		return false, gateRefusal{reason: detail, kind: "merge_blocked_findings"}
 	}
-	return true
+	return true, gateRefusal{}
 }
 
 // describeFindings renders findings for the audit trail, most severe first.
@@ -422,15 +433,15 @@ func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickRes
 		return
 	}
 	// Independent of whatever resolveBotThreads decided a moment ago.
-	if !d.blockingFindingsGate(ctx, pr) {
+	if ok, refusal := d.blockingFindingsGate(ctx, pr); !ok {
 		// Deliberately NOT RecordAction. Recording an action here refreshes
 		// LastActionAt on every tick, which permanently suppresses the stall
 		// detector: the PR would sit green-but-unmergeable forever and the
 		// only trace would be a repeated audit line nobody reads. A blocked
 		// finding is a durable escalation, so it is recorded as one and the
 		// stall clock keeps running.
-		d.Tracker.RecordEscalation(pr.Number, "merge blocked by unaddressed bot finding(s)", now)
-		d.Deps.Metrics.recordEscalation(ctx, pr.Number, "merge_blocked_findings")
+		d.Tracker.RecordEscalation(pr.Number, refusal.reason, now)
+		d.Deps.Metrics.recordEscalation(ctx, pr.Number, refusal.kind)
 		res.Escalated++
 		return
 	}
