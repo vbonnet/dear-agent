@@ -15,12 +15,19 @@ const internalFoundationFeaturePath = "agm/test/bdd/features/internal_foundation
 type internalFoundationGuardrailStateKey struct{}
 type overrideParityStateKey struct{}
 type gitSandboxIsolationStateKey struct{}
+type buildAuthorityWaitOwnershipStateKey struct{}
 
 // gitSandboxIsolationState carries the output of the internal/gittest
 // regressions between the When and Then steps.
 type gitSandboxIsolationState struct {
 	output string
 	err    error
+}
+
+type buildAuthorityWaitOwnershipState struct {
+	repoRoot string
+	result   buildAuthorityWaitOwnershipScan
+	err      error
 }
 
 type overrideParityState struct {
@@ -54,7 +61,14 @@ func RegisterInternalFoundationGuardrailSteps(ctx *godog.ScenarioContext) {
 		return context.WithValue(ctx, gitSandboxIsolationStateKey{}, &gitSandboxIsolationState{}), nil
 	})
 
+	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		return context.WithValue(ctx, buildAuthorityWaitOwnershipStateKey{}, &buildAuthorityWaitOwnershipState{
+			repoRoot: packageSpecBDDRepoRoot(),
+		}), nil
+	})
+
 	registerGitSandboxIsolationSteps(ctx)
+	registerBuildAuthorityWaitOwnershipSteps(ctx)
 
 	ctx.Step(`^harness "([^"]*)" and model family "([^"]*)" use the shared override policy$`,
 		func(ctx context.Context, harness, family string) error {
@@ -204,6 +218,51 @@ func getGitSandboxIsolationState(ctx context.Context) (*gitSandboxIsolationState
 	state, ok := ctx.Value(gitSandboxIsolationStateKey{}).(*gitSandboxIsolationState)
 	if !ok || state == nil {
 		return nil, fmt.Errorf("git sandbox isolation state not initialized")
+	}
+	return state, nil
+}
+
+func registerBuildAuthorityWaitOwnershipSteps(ctx *godog.ScenarioContext) {
+	ctx.Step(`^the repository production source is available for build-authority wait ownership$`,
+		func(ctx context.Context) error {
+			_, err := getBuildAuthorityWaitOwnershipState(ctx)
+			return err
+		})
+
+	ctx.Step(`^AGM scans production source for build-authority wait ownership$`,
+		func(ctx context.Context) error {
+			state, err := getBuildAuthorityWaitOwnershipState(ctx)
+			if err != nil {
+				return err
+			}
+			state.result, state.err = scanBuildAuthorityWaitOwnership(
+				ctx, state.repoRoot, defaultBuildAuthorityWaitOwnershipLimits(),
+			)
+			return nil
+		})
+
+	ctx.Step(`^no production package outside the exact internal/buildauthority package should import C, mutate or subscribe to SIGCHLD, or broadly or foreign-reap children$`,
+		func(ctx context.Context) error {
+			state, err := getBuildAuthorityWaitOwnershipState(ctx)
+			if err != nil {
+				return err
+			}
+			if state.err != nil {
+				return fmt.Errorf("scan build-authority wait ownership: %w", state.err)
+			}
+			if len(state.result.violations) != 0 {
+				return fmt.Errorf("build-authority wait-ownership violations:\n%s",
+					strings.Join(state.result.violations, "\n"))
+			}
+			return nil
+		})
+
+}
+
+func getBuildAuthorityWaitOwnershipState(ctx context.Context) (*buildAuthorityWaitOwnershipState, error) {
+	state, ok := ctx.Value(buildAuthorityWaitOwnershipStateKey{}).(*buildAuthorityWaitOwnershipState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("build-authority wait-ownership state not initialized")
 	}
 	return state, nil
 }
