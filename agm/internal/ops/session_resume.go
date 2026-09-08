@@ -193,7 +193,7 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 		return result, ErrStorageError("session/resume.migrate-agy-model", err)
 	}
 
-	created, err := ensureResumeTmux(ctx, tmuxAdapter, &health, req)
+	created, err := ensureResumeTmux(ctx, tmuxAdapter, &health, m.SessionID, req)
 	result.Health = health
 	result.TmuxSessionName = health.TmuxSessionName
 	result.CreatedTmux = created.owned()
@@ -416,7 +416,13 @@ func classifyResumeHealth(ctx context.Context, tmuxAdapter session.TmuxInterface
 	return health
 }
 
-func ensureResumeTmux(ctx context.Context, tmuxAdapter session.TmuxInterface, health *ResumeSessionHealth, req *ResumeSessionRequest) (createdResumeTmux, error) {
+func ensureResumeTmux(
+	ctx context.Context,
+	tmuxAdapter session.TmuxInterface,
+	health *ResumeSessionHealth,
+	stableSessionID string,
+	req *ResumeSessionRequest,
+) (createdResumeTmux, error) {
 	if err := ctx.Err(); err != nil {
 		return createdResumeTmux{}, err
 	}
@@ -429,7 +435,7 @@ func ensureResumeTmux(ctx context.Context, tmuxAdapter session.TmuxInterface, he
 		return createdResumeTmux{}, fmt.Errorf("tmux adapter does not support exact resume identity")
 	}
 	name := tmux.SanitizeSessionName(health.TmuxSessionName)
-	identity, err := manager.CreateSessionWithIdentity(name, health.WorktreePath)
+	identity, err := manager.CreateSessionWithIdentity(name, health.WorktreePath, stableSessionID)
 	created := createdResumeTmux{Name: name, Identity: identity}
 	if err != nil {
 		return created, fmt.Errorf("create resume tmux session: %w", err)

@@ -223,6 +223,7 @@ type createSessionParams struct {
 
 type createSessionState struct {
 	createdTmux        bool
+	boundReusedTmux    bool
 	createdManifestDir bool
 	registered         bool
 	nameReserved       bool
@@ -236,6 +237,17 @@ func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequ
 			operationErr,
 			rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered),
 		)
+		if state.boundReusedTmux {
+			manager, ok := opCtx.Tmux.(session.StableSessionIdentityManager)
+			if !ok {
+				operationErr = errors.Join(operationErr, ErrStorageError(
+					"tmux.ClearSessionStableID",
+					fmt.Errorf("tmux backend lost stable-session identity capability during rollback"),
+				))
+			} else if err := manager.ClearSessionStableID(context.Background(), name, sessionID); err != nil {
+				operationErr = errors.Join(operationErr, ErrStorageError("tmux.ClearSessionStableID", err))
+			}
+		}
 	}
 	if state.nameReserved {
 		if err := releaseCreateSessionNameReservation(state.store, sessionID); err != nil {
@@ -455,7 +467,8 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
-	if err := createTmuxForSession(opCtx, req, params.name, exists); err != nil {
+	state.boundReusedTmux, err = createTmuxForSession(callCtx, opCtx, req, params.name, sessionID, exists)
+	if err != nil {
 		return nil, err
 	}
 	state.createdTmux = !exists
@@ -730,14 +743,31 @@ func createSessionID(requested string) string {
 	return uuid.New().String()
 }
 
-func createTmuxForSession(opCtx *OpContext, req *CreateSessionRequest, name string, exists bool) error {
+func createTmuxForSession(
+	ctx context.Context,
+	opCtx *OpContext,
+	req *CreateSessionRequest,
+	name, stableSessionID string,
+	exists bool,
+) (bool, error) {
+	manager, ok := opCtx.Tmux.(session.StableSessionIdentityManager)
+	if !ok {
+		return false, ErrStorageError(
+			"tmux.stable-session-identity",
+			fmt.Errorf("tmux backend does not support stable-session identity binding"),
+		)
+	}
 	if exists {
-		return nil
+		newlyBound, err := manager.BindSessionStableID(ctx, name, stableSessionID)
+		if err != nil {
+			return newlyBound, ErrStorageError("tmux.BindSessionStableID", err)
+		}
+		return newlyBound, nil
 	}
-	if err := opCtx.Tmux.CreateSession(name, req.Cwd); err != nil {
-		return ErrStorageError("tmux.CreateSession", err)
+	if err := manager.CreateSessionBound(name, req.Cwd, stableSessionID); err != nil {
+		return false, ErrStorageError("tmux.CreateSessionBound", err)
 	}
-	return nil
+	return false, nil
 }
 
 func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, params *createSessionParams) (*manifest.Codex, error) {

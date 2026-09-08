@@ -383,6 +383,7 @@ func TestRenameSessionIdentityRejectsIDReuseAfterServerRestart(t *testing.T) {
 func TestIsMissingSessionOutputRequiresExplicitMissingTarget(t *testing.T) {
 	for _, output := range []string{
 		"can't find session: missing",
+		"can't find pane: %17",
 		"no current target",
 	} {
 		if !isMissingSessionOutput([]byte(output)) {
@@ -428,6 +429,106 @@ func TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails(t *testing
 	}
 	if exists, hasErr := HasSession("partial-create"); hasErr != nil || !exists {
 		t.Fatalf("occupied final session = (exists=%v, err=%v), want preserved", exists, hasErr)
+	}
+}
+
+func TestNewSessionBoundStoresStableSessionID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	_, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	if err := NewSessionBound("stable-bound", t.TempDir(), "stable-session-id"); err != nil {
+		t.Fatalf("NewSessionBound() error = %v", err)
+	}
+	defer killSession("stable-bound")
+	binding, exists, err := inspectStableSessionIDContext(t.Context(), "stable-bound")
+	if err != nil || !exists || binding != "stable-session-id" {
+		t.Fatalf("stable binding = %q, exists=%v, err=%v", binding, exists, err)
+	}
+}
+
+func TestBindStableSessionIDRejectsOverwriteAndClearsExactValue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	_, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	if err := NewSession("stable-adopt", t.TempDir()); err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	defer killSession("stable-adopt")
+	newlyBound, err := BindStableSessionIDContext(t.Context(), "stable-adopt", "stable-session-id")
+	if err != nil || !newlyBound {
+		t.Fatalf("first bind = %v, %v; want newly bound", newlyBound, err)
+	}
+	newlyBound, err = BindStableSessionIDContext(t.Context(), "stable-adopt", "stable-session-id")
+	if err != nil || newlyBound {
+		t.Fatalf("idempotent bind = %v, %v; want unchanged", newlyBound, err)
+	}
+	if _, err := BindStableSessionIDContext(t.Context(), "stable-adopt", "replacement-session-id"); err == nil {
+		t.Fatal("BindStableSessionIDContext() overwrote an existing stable binding")
+	}
+	if err := ClearStableSessionIDContext(t.Context(), "stable-adopt", "replacement-session-id"); err == nil {
+		t.Fatal("ClearStableSessionIDContext() cleared a different stable binding")
+	}
+	if err := ClearStableSessionIDContext(t.Context(), "stable-adopt", "stable-session-id"); err != nil {
+		t.Fatalf("ClearStableSessionIDContext() error = %v", err)
+	}
+	binding, exists, err := inspectStableSessionIDContext(t.Context(), "stable-adopt")
+	if err != nil || !exists || binding != "" {
+		t.Fatalf("binding after clear = %q, exists=%v, err=%v", binding, exists, err)
+	}
+}
+
+func TestStableSessionAdoptionRefusesReusedTmuxIDsAfterServerRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	create := func() {
+		t.Helper()
+		if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "stable-race").CombinedOutput(); err != nil {
+			t.Fatalf("create isolated tmux session: %v: %s", err, output)
+		}
+	}
+	create()
+	oldTarget, exists, err := inspectStableSessionAdoptionTargetContext(t.Context(), "stable-race", "stable-race")
+	if err != nil || !exists {
+		t.Fatalf("inspect original adoption target = %#v, exists=%t, err=%v", oldTarget, exists, err)
+	}
+	if output, err := exec.Command("tmux", "-S", socketPath, "kill-server").CombinedOutput(); err != nil {
+		t.Fatalf("stop original isolated tmux server: %v: %s", err, output)
+	}
+	create()
+	replacement, exists, err := inspectStableSessionAdoptionTargetContext(t.Context(), "stable-race", "stable-race")
+	if err != nil || !exists {
+		t.Fatalf("inspect replacement adoption target = %#v, exists=%t, err=%v", replacement, exists, err)
+	}
+	if replacement.SessionID != oldTarget.SessionID || replacement.PaneID != oldTarget.PaneID {
+		t.Skipf("tmux did not reuse server-local IDs: old=%#v replacement=%#v", oldTarget, replacement)
+	}
+	if replacement.PanePID == oldTarget.PanePID {
+		t.Skipf("operating system unexpectedly reused pane PID %d", oldTarget.PanePID)
+	}
+
+	newlyBound, err := claimStableSessionAdoptionContext(t.Context(), oldTarget, "stable-session-id")
+	if err == nil || newlyBound {
+		t.Fatalf("stale-incarnation claim = newlyBound=%t, err=%v; want refusal", newlyBound, err)
+	}
+	after, exists, inspectErr := inspectStableSessionAdoptionTargetContext(t.Context(), "stable-race", "stable-race")
+	if inspectErr != nil || !exists {
+		t.Fatalf("inspect replacement after refusal = %#v, exists=%t, err=%v", after, exists, inspectErr)
+	}
+	if after.StableSessionID != "" || after.AdoptionIdentity != "" {
+		t.Fatalf("replacement was mutated by stale claim: %#v", after)
 	}
 }
 

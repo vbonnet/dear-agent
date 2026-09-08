@@ -26,6 +26,18 @@ func TestPasteBufferArgsPreserveAgyMultilineAsBracketedRaw(t *testing.T) {
 	}
 }
 
+func TestPasteBufferArgsForDeliveryUsesRawBracketedMultilineMode(t *testing.T) {
+	for _, harness := range []string{"codex-cli", "claude-code"} {
+		t.Run(harness, func(t *testing.T) {
+			got := pasteBufferArgsForDelivery("/tmp/agm.sock", "%7", harness, true)
+			want := []string{"-S", "/tmp/agm.sock", "paste-buffer", "-b", "agm-cmd", "-t", "%7", "-dpr"}
+			if !slices.Equal(got, want) {
+				t.Fatalf("pasteBufferArgsForDelivery() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 // TestSendPromptLiteral_ConditionalESC is a REGRESSION TEST for Bug 2:
 // ESC sent unconditionally, interrupting operations instead of queueing
 //
