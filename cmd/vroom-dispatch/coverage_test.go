@@ -9,10 +9,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/supervisorheartbeat"
+	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 	"golang.org/x/sys/unix"
 )
 
@@ -147,32 +150,144 @@ func TestShowStatusRendersFallback(t *testing.T) {
 // TestCoverageSupervisorClassification pins dead, stale, auth-failed, and alive health outcomes.
 func TestCoverageSupervisorClassification(t *testing.T) {
 	bin := t.TempDir()
-	writeFakeAGM(t, bin, `case "$2" in list) printf '%s\n' 'sup';; esac`)
+	writeFakeAGM(t, bin, `case "$2" in list) printf '%s\n' 'vroom-orchestrator';; esac`)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	orig := captureSupervisorPane
 	t.Cleanup(func() { captureSupervisorPane = orig })
-	sup := supervisor{Name: "sup", Harness: "codex-cli", TickInterval: time.Hour}
+	sup := supervisor{Name: "vroom-orchestrator", Harness: "codex-cli", TickInterval: time.Hour}
+	writeRecord := func(home, id string, beat time.Time) {
+		t.Helper()
+		store := supervisorheartbeat.New(filepath.Join(home, ".agm", "supervisors"))
+		if err := store.Write(supervisorheartbeat.Record{
+			ID:          id,
+			PrimaryFor:  "vroom-overseer",
+			TertiaryFor: "vroom-meta-orchestrator",
+			LastBeatUTC: beat,
+			PID:         os.Getpid(),
+			TmuxSession: id,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMirror := func(home string, beat time.Time) {
+		t.Helper()
+		dir := filepath.Join(home, ".agm", "vroom", "heartbeat")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(map[string]any{
+			"ts":   float64(beat.UnixMilli()) / 1e3,
+			"iso":  beat.UTC().Format(time.RFC3339),
+			"role": "orchestrator",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		member, ok := vroomsupervisor.Lookup(sup.Name)
+		if !ok {
+			t.Fatalf("legacy mirror fixture has no topology member for %q", sup.Name)
+		}
+		if err := os.WriteFile(filepath.Join(dir, member.Alias+".json"), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	freshHome := t.TempDir()
+	writeRecord(freshHome, sup.Name, time.Now().UTC())
 	captureSupervisorPane = func(string) (string, error) { return "codex login required", nil }
-	if got := classifySupervisor(t.TempDir(), sup); got != healthAuthFailed {
-		t.Errorf("auth classification = %v", got)
+	classify := func(home string, candidate supervisor) supervisorHealth {
+		t.Helper()
+		health, err := classifySupervisor(home, candidate)
+		if err != nil {
+			t.Fatalf("classifySupervisor(%q): %v", candidate.Name, err)
+		}
+		return health
+	}
+	if got := classify(freshHome, sup); got != healthAuthFailed {
+		t.Errorf("fresh heartbeat with auth failure classification = %v", got)
 	}
 	captureSupervisorPane = func(string) (string, error) { return "gpt-5 · /tmp\n›", nil }
-	if got := classifySupervisor(t.TempDir(), sup); got != healthStale {
-		t.Errorf("missing heartbeat classification = %v", got)
+
+	missingHome := t.TempDir()
+	writeMirror(missingHome, time.Now().UTC())
+	if got := classify(missingHome, sup); got != healthStale {
+		t.Errorf("fresh mirror with missing authoritative heartbeat classification = %v", got)
 	}
+	zeroHome := t.TempDir()
+	zeroStore := supervisorheartbeat.New(filepath.Join(zeroHome, ".agm", "supervisors"))
+	if err := zeroStore.Write(supervisorheartbeat.Record{ID: sup.Name}); err != nil {
+		t.Fatal(err)
+	}
+	writeMirror(zeroHome, time.Now().UTC())
+	if got := classify(zeroHome, sup); got != healthStale {
+		t.Errorf("fresh mirror with zero authoritative heartbeat classification = %v", got)
+	}
+	malformedHome := t.TempDir()
+	malformedDir := filepath.Join(malformedHome, ".agm", "supervisors", sup.Name)
+	if err := os.MkdirAll(malformedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(malformedDir, "heartbeat.json"), []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeMirror(malformedHome, time.Now().UTC())
+	malformedHealth, malformedErr := classifySupervisor(malformedHome, sup)
+	if malformedHealth != healthStale {
+		t.Errorf("fresh mirror with malformed authoritative heartbeat classification = %v", malformedHealth)
+	}
+	if malformedErr == nil ||
+		!strings.Contains(malformedErr.Error(), `read authoritative heartbeat "vroom-orchestrator"`) ||
+		!strings.Contains(malformedErr.Error(), "unmarshal") {
+		t.Errorf("malformed authoritative heartbeat diagnostic = %v", malformedErr)
+	}
+	agedHome := t.TempDir()
+	writeRecord(agedHome, sup.Name, time.Now().UTC().Add(-3*time.Hour))
+	writeMirror(agedHome, time.Now().UTC())
+	if got := classify(agedHome, sup); got != healthStale {
+		t.Errorf("fresh mirror with aged authoritative heartbeat classification = %v", got)
+	}
+
 	home := t.TempDir()
-	path := filepath.Join(home, ".agm", "vroom", "heartbeat")
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		t.Fatal(err)
+	writeRecord(home, sup.Name, time.Now().UTC())
+	writeMirror(home, time.Now().UTC().Add(-24*time.Hour))
+	if got := classify(home, sup); got != healthAlive {
+		t.Errorf("fresh authoritative heartbeat with stale mirror classification = %v", got)
 	}
-	if err := os.WriteFile(filepath.Join(path, "sup.json"), []byte(time.Now().UTC().Format(time.RFC3339)), 0o600); err != nil {
-		t.Fatal(err)
+	writeRecord(home, "missing", time.Now().UTC())
+	if got := classify(home, supervisor{Name: "missing", TickInterval: time.Hour}); got != healthDead {
+		t.Errorf("fresh heartbeat with absent session classification = %v", got)
 	}
-	if got := classifySupervisor(home, sup); got != healthAlive {
-		t.Errorf("alive classification = %v", got)
+}
+
+func TestSupervisorDiagnosticTrackerDebouncesUntilRecovery(t *testing.T) {
+	tracker := newSupervisorDiagnosticTracker()
+	readErr := errors.New("malformed heartbeat")
+	if !tracker.shouldReportHeartbeatReadError("orchestrator", readErr) {
+		t.Fatal("first heartbeat read error was suppressed")
 	}
-	if got := classifySupervisor(home, supervisor{Name: "missing", TickInterval: time.Hour}); got != healthDead {
-		t.Errorf("dead classification = %v", got)
+	if tracker.shouldReportHeartbeatReadError("orchestrator", readErr) {
+		t.Fatal("identical heartbeat read error was reported twice")
+	}
+	if !tracker.shouldReportHeartbeatReadError("orchestrator", errors.New("permission denied")) {
+		t.Fatal("changed heartbeat read error was suppressed")
+	}
+	if tracker.shouldReportHeartbeatReadError("orchestrator", nil) {
+		t.Fatal("recovery should clear state without reporting an error")
+	}
+	if !tracker.shouldReportHeartbeatReadError("orchestrator", readErr) {
+		t.Fatal("heartbeat read error after recovery was suppressed")
+	}
+}
+
+func TestStaleSupervisorTrailDetailsIdentifyAuthoritativeRecord(t *testing.T) {
+	details := staleSupervisorTrailDetails("vroom-orchestrator")
+	want := map[string]any{
+		"supervisor":       "vroom-orchestrator",
+		"heartbeat_id":     "vroom-orchestrator",
+		"heartbeat_source": "authoritative_agm_supervisor_record",
+	}
+	if !reflect.DeepEqual(details, want) {
+		t.Fatalf("staleSupervisorTrailDetails() = %#v, want %#v", details, want)
 	}
 }
 

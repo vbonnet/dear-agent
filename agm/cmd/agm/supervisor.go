@@ -15,58 +15,26 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/internal/supervisorheartbeat"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 	"github.com/vbonnet/dear-agent/pkg/override"
 	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
-// supervisorStateDir returns the per-supervisor state directory under
-// $HOME/.agm/supervisors/. Creates it if missing. Heartbeat files and
-// future mesh state live here.
-func supervisorStateDir(id string) (string, error) {
+// supervisorHeartbeatRoot resolves the authoritative supervisor-state root.
+// The persistence module owns the layout below this host-observed boundary.
+func supervisorHeartbeatRoot() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".agm", "supervisors", id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("mkdir %s: %w", dir, err)
-	}
-	return dir, nil
+	return filepath.Join(home, ".agm", "supervisors"), nil
 }
 
-// heartbeatPath returns the absolute path to the supervisor's heartbeat
-// file. The file exists iff a heartbeat has been written; its modtime is
-// the last beat and its JSON contents carry mesh role info.
-func heartbeatPath(id string) (string, error) {
-	dir, err := supervisorStateDir(id)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "heartbeat.json"), nil
-}
-
-// heartbeatRecord is the JSON shape written by `agm supervisor heartbeat`
-// and consumed by `agm supervisor status` and the sentinel loop_monitor.
-type heartbeatRecord struct {
-	ID          string    `json:"id"`
-	PrimaryFor  string    `json:"primary_for,omitempty"`
-	TertiaryFor string    `json:"tertiary_for,omitempty"`
-	LastBeatUTC time.Time `json:"last_beat_utc"`
-	PID         int       `json:"pid,omitempty"`
-	// TmuxSession is the tmux session the heartbeat was written from,
-	// self-reported best-effort at beat time. It lets `agm supervisor status`
-	// verify that a harness process is actually running where the heartbeat
-	// claims to come from — a fresh heartbeat alone is false-green when an
-	// orphaned writer keeps beating after the harness died (ce-axsr/ce-qkf7).
-	TmuxSession string `json:"tmux_session,omitempty"`
-}
-
-// vroomHeartbeatFile is the flat JSON shape read by the Overseer SKILL at
-// ~/.agm/vroom/heartbeat/<name>.json. The SKILL writes these itself during
-// ticks, but when the file goes stale (supervisor crashed, skill gap) the
-// authoritative AGM store still shows the supervisor alive — causing false
-// STALE alerts. SyncHeartbeatFiles bridges the two stores.
+// vroomHeartbeatFile is the legacy flat projection under
+// ~/.agm/vroom/heartbeat/<name>.json. It remains during the reader-first
+// rollout because older installed components may still inspect that path; new
+// health readers use the authoritative supervisor store instead.
 type vroomHeartbeatFile struct {
 	TS   float64 `json:"ts"`
 	ISO  string  `json:"iso"`
@@ -123,11 +91,11 @@ func syncVroomHeartbeatFile(dir, id string, ts time.Time) error {
 // returned as a single joined error so one bad supervisor doesn't block
 // the rest.
 func SyncHeartbeatFiles(dir string) error {
-	home, err := os.UserHomeDir()
+	base, err := supervisorHeartbeatRoot()
 	if err != nil {
-		return fmt.Errorf("home dir: %w", err)
+		return err
 	}
-	base := filepath.Join(home, ".agm", "supervisors")
+	store := supervisorheartbeat.New(base)
 	entries, err := os.ReadDir(base)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -141,7 +109,7 @@ func SyncHeartbeatFiles(dir string) error {
 			continue
 		}
 		id := e.Name()
-		rec, err := readHeartbeatRecord(id)
+		rec, err := store.Read(id)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("read %s: %w", id, err))
 			continue
@@ -419,6 +387,9 @@ func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath strin
 }
 
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
+	if err := supervisorheartbeat.ValidateID(supervisorID); err != nil {
+		return fmt.Errorf("supervisor run: %w", err)
+	}
 	var admission *circuitBreakerAdmission
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
@@ -589,7 +560,7 @@ func runSupervisorHeartbeat(cmd *cobra.Command, _ []string) error {
 	}
 
 	now := time.Now().UTC()
-	rec := heartbeatRecord{
+	rec := supervisorheartbeat.Record{
 		ID:          id,
 		PrimaryFor:  primary,
 		TertiaryFor: tertiary,
@@ -602,15 +573,14 @@ func runSupervisorHeartbeat(cmd *cobra.Command, _ []string) error {
 	if tmuxSession, tsErr := tmux.GetCurrentSessionName(); tsErr == nil {
 		rec.TmuxSession = tmuxSession
 	}
-	path, err := heartbeatPath(id)
+	root, err := supervisorHeartbeatRoot()
 	if err != nil {
 		return err
 	}
-	if err := writeHeartbeatRecord(path, rec); err != nil {
+	if err := supervisorheartbeat.New(root).Write(rec); err != nil {
 		return err
 	}
-	// Mirror to the flat VROOM heartbeat file so the Overseer SKILL's
-	// file-based staleness check sees fresh data immediately after each tick.
+	// Preserve the legacy flat projection during the reader-first rollout.
 	// Best-effort: a sync failure is printed but does not fail the beat.
 	if vroomDir, dirErr := defaultVroomHeartbeatDir(); dirErr == nil {
 		if syncErr := syncVroomHeartbeatFile(vroomDir, id, now); syncErr != nil {
@@ -655,45 +625,6 @@ func canonicalizeSupervisorHeartbeatMesh(id, primary, tertiary string) (string, 
 	return member.ID, primary, tertiary, nil
 }
 
-// writeHeartbeatRecord marshals rec and writes it atomically via a temp
-// file + rename so the sentinel never reads a half-written file.
-func writeHeartbeatRecord(path string, rec heartbeatRecord) error {
-	data, err := json.MarshalIndent(rec, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal heartbeat: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write tmp: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("rename: %w", err)
-	}
-	return nil
-}
-
-// readHeartbeatRecord loads a supervisor's latest heartbeat. Returns
-// (nil, nil) if the file doesn't exist — never-heartbeated is not an
-// error, it's just missing signal.
-func readHeartbeatRecord(id string) (*heartbeatRecord, error) {
-	path, err := heartbeatPath(id)
-	if err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var rec heartbeatRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		return nil, fmt.Errorf("unmarshal %s: %w", path, err)
-	}
-	return &rec, nil
-}
-
 // supervisorRow is the per-supervisor row produced by status reporting.
 //
 // Recoverable/QuorumLost/Recoverers capture mesh-recovery reachability, not
@@ -706,14 +637,14 @@ func readHeartbeatRecord(id string) (*heartbeatRecord, error) {
 // readable instead of leaving it to be inferred from a table of independent
 // staleness flags.
 type supervisorRow struct {
-	ID          string           `json:"id"`
-	AgeSecs     float64          `json:"age_secs"`
-	Stale       bool             `json:"stale"`
-	Missing     bool             `json:"missing"`
-	Recoverable bool             `json:"recoverable"`
-	QuorumLost  bool             `json:"quorum_lost"`
-	Recoverers  []string         `json:"recoverers,omitempty"`
-	Record      *heartbeatRecord `json:"record,omitempty"`
+	ID          string                      `json:"id"`
+	AgeSecs     float64                     `json:"age_secs"`
+	Stale       bool                        `json:"stale"`
+	Missing     bool                        `json:"missing"`
+	Recoverable bool                        `json:"recoverable"`
+	QuorumLost  bool                        `json:"quorum_lost"`
+	Recoverers  []string                    `json:"recoverers,omitempty"`
+	Record      *supervisorheartbeat.Record `json:"record,omitempty"`
 	// ProcessAlive reports that a harness process was verified running in
 	// the supervisor's tmux session pane tree. Heartbeat freshness alone is
 	// false-green (ce-axsr/ce-qkf7): an orphaned writer can keep the
@@ -915,10 +846,9 @@ func runSupervisorStatus(cmd *cobra.Command, args []string) error {
 	// than an ordinary stale row (bead ce-2qbx).
 	quorumLost := annotateMeshRecovery(rows)
 
-	// Mirror AGM records to the flat VROOM heartbeat files so the Overseer
-	// SKILL's file-based staleness check uses the same authoritative data.
+	// Preserve the legacy flat projection during the reader-first rollout.
 	// Best-effort: a sync failure is logged to stderr but does not fail the
-	// status command itself (the AGM read already succeeded).
+	// status command itself (the authoritative AGM read already succeeded).
 	if vroomDir, dirErr := defaultVroomHeartbeatDir(); dirErr == nil {
 		if syncErr := SyncHeartbeatFiles(vroomDir); syncErr != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: vroom heartbeat sync: %v\n", syncErr)
@@ -977,11 +907,16 @@ func resolveSupervisorIDs(cmd *cobra.Command, args []string) ([]string, error) {
 // buildSupervisorStatusRows reads each supervisor's heartbeat and returns
 // (rows, anyStale, err).
 func buildSupervisorStatusRows(ids []string) ([]supervisorRow, bool, error) {
+	root, err := supervisorHeartbeatRoot()
+	if err != nil {
+		return nil, false, err
+	}
+	store := supervisorheartbeat.New(root)
 	now := time.Now().UTC()
 	var rows []supervisorRow
 	anyStale := false
 	for _, id := range ids {
-		rec, err := readHeartbeatRecord(id)
+		rec, err := store.Read(id)
 		if err != nil {
 			return nil, false, fmt.Errorf("read %s: %w", id, err)
 		}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/internal/supervisorheartbeat"
 	"github.com/vbonnet/dear-agent/pkg/override"
 	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
@@ -256,57 +257,6 @@ func TestBuildSupervisorClaudeArgsCanOptIntoDevelopmentChannels(t *testing.T) {
 	}
 }
 
-func TestHeartbeatRoundTrip(t *testing.T) {
-	// Redirect HOME so supervisor state lands in a test-scoped dir.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	rec := heartbeatRecord{
-		ID:          "test-sup",
-		PrimaryFor:  "peer-a",
-		TertiaryFor: "peer-b",
-		LastBeatUTC: time.Now().UTC().Round(time.Millisecond),
-		PID:         12345,
-	}
-	path, err := heartbeatPath(rec.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := writeHeartbeatRecord(path, rec); err != nil {
-		t.Fatalf("writeHeartbeatRecord: %v", err)
-	}
-	// Directory structure.
-	wantDir := filepath.Join(home, ".agm", "supervisors", "test-sup")
-	if _, err := os.Stat(wantDir); err != nil {
-		t.Errorf("expected state dir %s to exist: %v", wantDir, err)
-	}
-
-	got, err := readHeartbeatRecord("test-sup")
-	if err != nil {
-		t.Fatalf("readHeartbeatRecord: %v", err)
-	}
-	if got == nil {
-		t.Fatal("readHeartbeatRecord returned nil for just-written record")
-		return
-	}
-	if got.ID != rec.ID || got.PrimaryFor != rec.PrimaryFor ||
-		got.TertiaryFor != rec.TertiaryFor || got.PID != rec.PID {
-		t.Errorf("roundtrip mismatch: got %+v want %+v", got, rec)
-	}
-}
-
-func TestReadHeartbeatMissing(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	got, err := readHeartbeatRecord("never-heartbeated")
-	if err != nil {
-		t.Errorf("readHeartbeatRecord(missing): %v", err)
-	}
-	if got != nil {
-		t.Errorf("readHeartbeatRecord(missing) = %+v, want nil", got)
-	}
-}
-
 func TestScrubAPIKey(t *testing.T) {
 	before := []string{
 		"PATH=/bin",
@@ -386,16 +336,17 @@ func TestSyncHeartbeatFiles(t *testing.T) {
 	// Write internal heartbeat records for two supervisors.
 	ts1 := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
 	ts2 := time.Date(2026, 6, 1, 11, 0, 0, 0, time.UTC)
+	root, err := supervisorHeartbeatRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := supervisorheartbeat.New(root)
 	for id, ts := range map[string]time.Time{"meta-o": ts1, "orch": ts2} {
-		path, err := heartbeatPath(id)
-		if err != nil {
-			t.Fatalf("heartbeatPath(%s): %v", id, err)
-		}
-		if err := writeHeartbeatRecord(path, heartbeatRecord{
+		if err := store.Write(supervisorheartbeat.Record{
 			ID:          id,
 			LastBeatUTC: ts,
 		}); err != nil {
-			t.Fatalf("writeHeartbeatRecord(%s): %v", id, err)
+			t.Fatalf("Store.Write(%s): %v", id, err)
 		}
 	}
 
@@ -523,7 +474,7 @@ func row(id string, stale bool, primaryFor, tertiaryFor string) supervisorRow {
 	return supervisorRow{
 		ID:    id,
 		Stale: stale,
-		Record: &heartbeatRecord{
+		Record: &supervisorheartbeat.Record{
 			ID:          id,
 			PrimaryFor:  primaryFor,
 			TertiaryFor: tertiaryFor,
@@ -570,7 +521,7 @@ func TestAnnotateMeshRecoveryPairStaleOverseerLive(t *testing.T) {
 	rows := []supervisorRow{
 		row("vroom-meta-orchestrator", true, "vroom-orchestrator", ""),
 		row("vroom-orchestrator", true, "vroom-meta-orchestrator", ""),
-		{ID: "vroom-overseer", Stale: false, Record: &heartbeatRecord{
+		{ID: "vroom-overseer", Stale: false, Record: &supervisorheartbeat.Record{
 			ID:          "vroom-overseer",
 			TertiaryFor: "vroom-meta-orchestrator",
 		}},
@@ -730,8 +681,8 @@ func TestAnnotateMeshRecoveryNilRecordPeerIsNoRecoverer(t *testing.T) {
 // --- not prove liveness; a zombie heartbeat writer must surface as DEAD) ---
 
 func TestApplyProcessLiveness(t *testing.T) {
-	freshRec := func(id, tmuxSession string) *heartbeatRecord {
-		return &heartbeatRecord{ID: id, LastBeatUTC: time.Now().UTC(), TmuxSession: tmuxSession}
+	freshRec := func(id, tmuxSession string) *supervisorheartbeat.Record {
+		return &supervisorheartbeat.Record{ID: id, LastBeatUTC: time.Now().UTC(), TmuxSession: tmuxSession}
 	}
 
 	tests := []struct {
@@ -789,7 +740,7 @@ func TestApplyProcessLiveness(t *testing.T) {
 		},
 		{
 			name: "inferred session missing is unverifiable, not dead",
-			row:  supervisorRow{ID: "overseer", Record: &heartbeatRecord{ID: "overseer", LastBeatUTC: time.Now().UTC()}},
+			row:  supervisorRow{ID: "overseer", Record: &supervisorheartbeat.Record{ID: "overseer", LastBeatUTC: time.Now().UTC()}},
 			probe: func(string) (paneProbe, error) {
 				return paneProbe{Exists: false}, nil
 			},
@@ -809,7 +760,7 @@ func TestApplyProcessLiveness(t *testing.T) {
 		},
 		{
 			name: "unknown supervisor with no recorded session is unverifiable",
-			row:  supervisorRow{ID: "s9", Record: &heartbeatRecord{ID: "s9", LastBeatUTC: time.Now().UTC()}},
+			row:  supervisorRow{ID: "s9", Record: &supervisorheartbeat.Record{ID: "s9", LastBeatUTC: time.Now().UTC()}},
 			probe: func(string) (paneProbe, error) {
 				t.Error("probe must not be called when there is no session to verify")
 				return paneProbe{}, nil
@@ -856,8 +807,8 @@ func TestApplyProcessLiveness(t *testing.T) {
 func TestApplyProcessLiveness_ZombieFeedsQuorum(t *testing.T) {
 	now := time.Now().UTC()
 	rows := []supervisorRow{
-		{ID: "meta-o", Record: &heartbeatRecord{ID: "meta-o", LastBeatUTC: now, TmuxSession: "vroom-meta-orchestrator", PrimaryFor: "orch"}},
-		{ID: "orch", Stale: true, Record: &heartbeatRecord{ID: "orch", LastBeatUTC: now.Add(-time.Hour), PrimaryFor: "meta-o"}},
+		{ID: "meta-o", Record: &supervisorheartbeat.Record{ID: "meta-o", LastBeatUTC: now, TmuxSession: "vroom-meta-orchestrator", PrimaryFor: "orch"}},
+		{ID: "orch", Stale: true, Record: &supervisorheartbeat.Record{ID: "orch", LastBeatUTC: now.Add(-time.Hour), PrimaryFor: "meta-o"}},
 	}
 	probe := func(string) (paneProbe, error) {
 		return paneProbe{Exists: true, HarnessAlive: false, ZombieWriter: true, Evidence: "zsh,agm"}, nil
@@ -886,28 +837,28 @@ func TestSupervisorTmuxSession(t *testing.T) {
 	}{
 		{
 			name:         "recorded session wins",
-			row:          supervisorRow{ID: "meta-o", Record: &heartbeatRecord{TmuxSession: "custom-session"}},
+			row:          supervisorRow{ID: "meta-o", Record: &supervisorheartbeat.Record{TmuxSession: "custom-session"}},
 			want:         "custom-session",
 			wantExplicit: true,
 		},
 		{
 			name: "known role falls back to vroom session name",
-			row:  supervisorRow{ID: "meta-o", Record: &heartbeatRecord{}},
+			row:  supervisorRow{ID: "meta-o", Record: &supervisorheartbeat.Record{}},
 			want: "vroom-meta-orchestrator",
 		},
 		{
 			name: "orch maps to vroom-orchestrator",
-			row:  supervisorRow{ID: "orch", Record: &heartbeatRecord{}},
+			row:  supervisorRow{ID: "orch", Record: &supervisorheartbeat.Record{}},
 			want: "vroom-orchestrator",
 		},
 		{
 			name: "id that is already a vroom session name is used directly",
-			row:  supervisorRow{ID: "vroom-meta-orchestrator", Record: &heartbeatRecord{}},
+			row:  supervisorRow{ID: "vroom-meta-orchestrator", Record: &supervisorheartbeat.Record{}},
 			want: "vroom-meta-orchestrator",
 		},
 		{
 			name: "unknown id has nothing to verify",
-			row:  supervisorRow{ID: "s7", Record: &heartbeatRecord{}},
+			row:  supervisorRow{ID: "s7", Record: &supervisorheartbeat.Record{}},
 			want: "",
 		},
 	}
