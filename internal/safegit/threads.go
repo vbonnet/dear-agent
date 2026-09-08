@@ -214,7 +214,7 @@ func threadRemediationGuidance(repo string, pr int) string {
 		"safe-merge: guidance: address each thread, then close it with its reason.\n"+
 			"Thread IDs are in brackets above, or list them again with:\n"+
 			"  resolve-review-threads list %s %s %d\n"+
-			"  resolve-review-threads reply-resolve <threadId> \"Fixed - <what changed>\"\n"+
+			"  resolve-review-threads reply-resolve <threadId> --body-file reply.md\n"+
 			"then sweep the answered ones and re-run safe-merge:\n"+
 			"  resolve-review-threads resolve-all %s %s %d\n"+
 			"(add a login argument after the PR number to sweep one author only)\n",

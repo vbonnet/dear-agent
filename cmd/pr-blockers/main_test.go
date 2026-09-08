@@ -70,3 +70,13 @@ func TestPrintHuman_BlockedListsFixesAndForbidsGuessing(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageUsesBodyFileForReviewReplies(t *testing.T) {
+	const want = "resolve-review-threads reply-resolve <threadId> --body-file reply.md"
+	if !strings.Contains(usage, want) {
+		t.Errorf("usage missing body-file-only review reply guidance %q:\n%s", want, usage)
+	}
+	if strings.Contains(usage, `reply-resolve <threadId> "`) {
+		t.Errorf("usage must not put a reply body in shell argv:\n%s", usage)
+	}
+}

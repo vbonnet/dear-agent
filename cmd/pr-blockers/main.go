@@ -172,7 +172,7 @@ Blockers detected, with their fixes:
   FAILING_REQUIRED_CHECK  fix the named check (gh pr checks <n>)
   PENDING_REQUIRED_CHECK  gh pr checks <n> --watch
   UNRESOLVED_THREADS      address in code, then per thread:
-                          resolve-review-threads reply-resolve <threadId> "Fixed - ..."
+                          resolve-review-threads reply-resolve <threadId> --body-file reply.md
                           (sweep answered ones with resolve-all; it refuses threads with
                            no reply. Outdated threads count, and outdated is not obsolete!)
   CHANGES_REQUESTED       address the review, push, re-request

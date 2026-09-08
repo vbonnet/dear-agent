@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -163,16 +162,15 @@ func listThreads(ctx context.Context, owner, repo string, pr int) ([]thread, err
 	var all []thread
 	cursor := ""
 	for {
-		args := []string{
-			"-f", "owner=" + owner,
-			"-f", "repo=" + repo,
-			"-F", "pr=" + strconv.Itoa(pr),
-			"-f", "query=" + listQuery,
+		variables := map[string]any{
+			"owner": owner,
+			"repo":  repo,
+			"pr":    pr,
 		}
 		if cursor != "" {
-			args = append(args, "-f", "after="+cursor)
+			variables["after"] = cursor
 		}
-		raw, err := ghGraphQL(ctx, args...)
+		raw, err := ghGraphQL(ctx, listQuery, variables)
 		if err != nil {
 			return nil, err
 		}
@@ -290,7 +288,7 @@ func toThread(n threadNode) thread {
 
 // fetchThread re-reads a single thread by node ID.
 func fetchThread(ctx context.Context, threadID string) (thread, error) {
-	raw, err := ghGraphQL(ctx, "-f", "id="+threadID, "-f", "query="+threadByIDQuery)
+	raw, err := ghGraphQL(ctx, threadByIDQuery, map[string]any{"id": threadID})
 	if err != nil {
 		return thread{}, err
 	}
@@ -342,7 +340,7 @@ func readMatchingTail(ctx context.Context, threadID, wantLastID string) (t threa
 		return cur, fail("someone commented on thread %s while its history was "+
 			"being read; nothing was posted.\n"+
 			"read the new comment(s) and answer those:\n"+
-			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
 	}
 	return cur, -1
 }
@@ -379,7 +377,7 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 	}
 	if !cur.Answered && !force {
 		return "", false, &unansweredError{msg: fmt.Sprintf("%s %s: unanswered (last word: @%s)%s\n"+
-			"reply with the reason instead: resolve-review-threads reply-resolve %s \"Fixed - <what changed>\"",
+			"reply with the reason instead: resolve-review-threads reply-resolve %s --body-file reply.md",
 			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)}
 	}
 	// effectiveWantID is what the post-mutation check below verifies against.
@@ -534,11 +532,11 @@ func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, erro
 	var all []tailComment
 	cursor := ""
 	for {
-		args := []string{"-f", "id=" + threadID, "-f", "query=" + threadCommentsQuery}
+		variables := map[string]any{"id": threadID}
 		if cursor != "" {
-			args = append(args, "-f", "after="+cursor)
+			variables["after"] = cursor
 		}
-		raw, err := ghGraphQL(ctx, args...)
+		raw, err := ghGraphQL(ctx, threadCommentsQuery, variables)
 		if err != nil {
 			return nil, err
 		}
@@ -613,7 +611,7 @@ func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommen
 	if action == "unresolve" {
 		query, field = unresolveMutation, "unresolveReviewThread"
 	}
-	raw, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "query="+query)
+	raw, err := ghGraphQL(ctx, query, map[string]any{"threadId": threadID})
 	if err != nil {
 		return "", "", false, err
 	}
@@ -640,17 +638,29 @@ func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommen
 	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, th.IsResolved), lastCommentID, th.IsResolved, nil
 }
 
-// ghGraphQL runs `gh api graphql <args...>` and returns stdout. Stderr is
-// folded into the error so gh's diagnostics survive.
-func ghGraphQL(ctx context.Context, args ...string) ([]byte, error) {
-	full := append([]string{"api", "graphql"}, args...)
-	// #nosec G702 G204 — fixed "gh" binary; args are passed as argv (no shell),
-	// so owner/repo/threadId values cannot inject commands.
-	cmd := exec.CommandContext(ctx, "gh", full...)
+// ghGraphQL sends one typed GraphQL envelope through standard input and
+// returns stdout. Query text and variable values never enter child argv.
+// Body-free failures preserve gh's stderr. Reply failures suppress it because
+// gh debug output can echo the request envelope, including the reply body.
+func ghGraphQL(ctx context.Context, query string, variables map[string]any) ([]byte, error) {
+	payload, err := json.Marshal(struct {
+		Query     string         `json:"query"`
+		Variables map[string]any `json:"variables"`
+	}{Query: query, Variables: variables})
+	if err != nil {
+		return nil, fmt.Errorf("encode gh api graphql request: %w", err)
+	}
+
+	// #nosec G702 -- fixed executable and fixed argv; request data is stdin.
+	cmd := exec.CommandContext(ctx, "gh", "api", "graphql", "--input", "-")
+	cmd.Stdin = bytes.NewReader(payload)
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
+		if _, carriesReplyBody := variables["body"]; carriesReplyBody {
+			return nil, fmt.Errorf("gh api graphql: %w (provider diagnostics suppressed because the request contains a reply body)", err)
+		}
 		if msg := bytes.TrimSpace(errBuf.Bytes()); len(msg) > 0 {
 			return nil, fmt.Errorf("gh api graphql: %w: %s", err, msg)
 		}

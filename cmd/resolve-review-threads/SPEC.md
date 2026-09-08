@@ -1,8 +1,8 @@
 # resolve-review-threads Command Specification
 
-<!-- Last audited at: 2026-08-20 -->
+<!-- Last audited at: 2026-09-08 -->
 
-**Version:** 2.6
+**Version:** 2.7
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -31,7 +31,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-08** When comment bodies are printed, the system shall collapse whitespace and truncate previews on rune boundaries.
 
-**RESOLVE-REVIEW-THREADS-09** When GitHub CLI reports a GraphQL error, the system shall include GitHub CLI diagnostics in the returned error.
+**RESOLVE-REVIEW-THREADS-09** When GitHub CLI reports a GraphQL error, the system shall include GitHub CLI diagnostics in the returned error unless the request variables include a reply body, in which case it shall suppress those diagnostics as required by RESOLVE-REVIEW-THREADS-53.
 
 **RESOLVE-REVIEW-THREADS-10** When flattening a review thread, the system shall mark it answered if and only if it holds more than one comment and its last comment author differs from its first comment author.
 
@@ -41,7 +41,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-13** When a thread is outdated, the system shall report that fact and shall not treat it as evidence the thread may be resolved.
 
-**RESOLVE-REVIEW-THREADS-14** When `reply-resolve` is requested, the system shall require a thread node ID and a non-empty body, post the reply, and resolve the thread only after the reply succeeds.
+**RESOLVE-REVIEW-THREADS-14** When `reply-resolve` is requested, the system shall require a thread node ID and an explicit body-file source, post the non-empty body from that source, and resolve the thread only after the reply succeeds.
 
 **RESOLVE-REVIEW-THREADS-15** When `resolve` is requested for a single unanswered thread and `--force` is absent, the system shall refuse to resolve it and exit non-zero.
 
@@ -57,7 +57,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-21** When `reply-resolve` finds its requested reply is already the thread's most recent comment, the system shall skip posting and proceed to resolution.
 
-**RESOLVE-REVIEW-THREADS-22** When `reply-resolve` posts a reply but a transient failure (the resolution itself, or the placement re-read that precedes it) prevents resolution, the system shall state that the reply is posted and direct the user to retry `reply-resolve`, which finds the posted reply by its text and resolves without reposting it.
+**RESOLVE-REVIEW-THREADS-22** When `reply-resolve` posts a reply but a transient failure (the resolution itself, or the placement re-read that precedes it) prevents resolution, the system shall state that the reply is posted and direct the user to retry `reply-resolve` with the unchanged body-file source, which finds the posted reply by its text and resolves without reposting it.
 
 **RESOLVE-REVIEW-THREADS-23** When comparing an existing comment against a requested reply, the system shall compare the bodies without whitespace collapsing or truncation, ignoring only surrounding whitespace.
 
@@ -91,9 +91,9 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-38** When the thread becomes resolved while its history is being paged, the system shall report it as skipped and post no reply.
 
-**RESOLVE-REVIEW-THREADS-39** When `reply-resolve`'s resolution is refused for access reasons, the system shall state that an immediate retry will be denied too and direct the user to fix credentials before finishing with `reply-resolve`, not an unguarded resolution-only command.
+**RESOLVE-REVIEW-THREADS-39** When `reply-resolve`'s resolution is refused for access reasons, the system shall state that an immediate retry will be denied too and direct the user to fix credentials before finishing with `reply-resolve` and the unchanged body-file source, not an unguarded resolution-only command.
 
-**RESOLVE-REVIEW-THREADS-40** When a reply mutation succeeds but its response omits the new comment's ID, the system shall leave the thread unresolved, state that the reply may already be live, and direct the user to re-run the same command rather than reword and repost.
+**RESOLVE-REVIEW-THREADS-40** When a reply mutation succeeds but its response omits the new comment's ID, the system shall leave the thread unresolved, state that the reply may already be live, and direct the user to re-run `reply-resolve` with the unchanged body-file source rather than reword and repost.
 
 **RESOLVE-REVIEW-THREADS-41** When resolving a thread without `--force`, the system shall verify the comment its evidence read was based on against the resolution mutation's own response — using the caller-named anchor when one was given, otherwise the last comment observed by the pre-mutation evidence check — and, on a mismatch, reopen the thread rather than leave it resolved on stale evidence.
 
@@ -101,7 +101,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-43** When a stale-evidence resolution is detected and the automatic reopen also fails, the system shall report the thread as still resolved and direct the user to run `unresolve` before any other action, distinctly from the advice given when the reviewer has simply commented again.
 
-**RESOLVE-REVIEW-THREADS-44** When advising a retry that depends on posting the identical reply body, the system shall include that exact body, POSIX-shell-quoted so a literal copy-paste reproduces it unchanged, rather than a generic placeholder or a representation (such as a Go string literal) that a shell would not round-trip.
+**RESOLVE-REVIEW-THREADS-44** When recovery depends on matching an identical reply body, the system shall direct the user to reuse the unchanged body-file source without rendering the reply body as command-line or shell-evaluable diagnostic text.
 
 **RESOLVE-REVIEW-THREADS-45** When a resolution mutation reports an error, the system shall re-read the thread before treating that as a clean no-op, since the client can fail after GitHub already applied the mutation server-side; if the re-read confirms it resolved, the system shall apply the same anchor verification and reopen-on-mismatch as a normally-reported success.
 
@@ -111,8 +111,19 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-48** When a resolution's named anchor is no longer the thread's last comment AND the thread is already resolved, the system shall reopen it before reporting the evidence refusal, so a later retry does not silently no-op against a resolved thread whose intervening comment was never read.
 
+**RESOLVE-REVIEW-THREADS-49** When a body-file source contains valid UTF-8 reply content, the system shall preserve its complete byte sequence as the provider-visible reply body without trimming or normalization.
+
+**RESOLVE-REVIEW-THREADS-50** When a body-file source is missing, duplicated, unreadable, invalid UTF-8, empty, or whitespace-only, the system shall fail before issuing any provider mutation.
+
+**RESOLVE-REVIEW-THREADS-51** When invoking an external process for a review-thread GraphQL operation, the system shall pass the query and variables as data input and shall not place any variable value in process arguments.
+
+**RESOLVE-REVIEW-THREADS-52** The system shall not evaluate reply-body content as shell syntax or permit embedded command substitutions to execute.
+
+**RESOLVE-REVIEW-THREADS-53** When the provider client fails an operation whose variables include a reply body, the system shall not copy the client's standard error into operator diagnostics because debug output can echo the request body.
+
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/review_thread_reply_safety.feature`
 - Feature: `agm/test/bdd/features/workflow_tooling_guardrails.feature`
 
 ## Test Traceability

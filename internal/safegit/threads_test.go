@@ -30,11 +30,14 @@ func TestThreadRemediationGuidance_IsRunnable(t *testing.T) {
 	got := threadRemediationGuidance("owner/repo", 42)
 	for _, want := range []string{
 		"resolve-review-threads list owner repo 42",
-		"reply-resolve",
+		"reply-resolve <threadId> --body-file reply.md",
 		"resolve-all owner repo 42",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("guidance missing %q, got:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, `reply-resolve <threadId> "`) {
+		t.Errorf("guidance must not put a reply body in shell argv, got:\n%s", got)
 	}
 }

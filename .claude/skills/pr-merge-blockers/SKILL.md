@@ -34,7 +34,7 @@ threads or an out-of-date branch. See the DEAR retro
    | `CONFLICTS` | `safe-rebase` onto base, resolve, `safe-push` |
    | `FAILING_REQUIRED_CHECK` | fix the named check; known flakes get one rerun |
    | `PENDING_REQUIRED_CHECK` | `gh pr checks <n> --watch` |
-   | `UNRESOLVED_THREADS` | address in code, then per thread: `resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
+   | `UNRESOLVED_THREADS` | write the reason to `reply.md`, then per thread: `resolve-review-threads reply-resolve <threadId> --body-file reply.md`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
    | `CHANGES_REQUESTED` | address the review, push, re-request |
    | `REVIEW_REQUIRED` | obtain an approving review |
    | `BEHIND` | `gh pr update-branch <n>` |
@@ -78,8 +78,8 @@ last word:
 # thread IDs: pr-blockers prints them in brackets, or list them directly
 resolve-review-threads list <owner> <repo> <n>
 
-# the normal path: state the reason and close the thread in one step
-resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"
+# the normal path: write the reason to reply.md, then close the thread in one step
+resolve-review-threads reply-resolve <threadId> --body-file reply.md
 
 # sweep: resolves ANSWERED threads, refuses the rest by name, exits non-zero
 # (add a login argument after <n> to sweep one author only)

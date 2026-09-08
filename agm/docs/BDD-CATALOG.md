@@ -933,6 +933,22 @@ rebase, and stale-lock cleanup instead of raw mutation commands, and the full
 publication gate must recognize the Go toolchain's documented install
 locations.
 
+### Review Thread Reply Safety
+
+**File:** [`review_thread_reply_safety.feature`](../test/bdd/features/review_thread_reply_safety.feature)
+
+**Drives:** body-file-only review reply input, byte-preserving GitHub delivery,
+and non-executable retry guidance for `resolve-review-threads`.
+
+**Key scenarios:**
+- Review reply bodies remain exact data outside process arguments and shell
+  evaluation, invalid sources fail before provider mutation, and failing
+  provider diagnostics cannot echo the reply body.
+
+**Why this matters:** Review text can contain shell syntax, newlines, and
+Unicode. Treating those bytes as command text can alter the recorded reply or
+execute unintended local actions.
+
 ### Workflow Tooling Guardrails
 
 **File:** [`workflow_tooling_guardrails.feature`](../test/bdd/features/workflow_tooling_guardrails.feature)

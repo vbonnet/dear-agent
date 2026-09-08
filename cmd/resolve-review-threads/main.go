@@ -21,7 +21,7 @@
 //	resolve-review-threads list          <owner> <repo> <pr>           # unresolved threads (JSON lines)
 //	resolve-review-threads list-all      <owner> <repo> <pr>           # every thread
 //	resolve-review-threads resolve       <threadId> [--force]           # one thread by ID
-//	resolve-review-threads reply-resolve <threadId> <body>             # reply, then resolve
+//	resolve-review-threads reply-resolve <threadId> --body-file <path|-> # reply, then resolve
 //	resolve-review-threads resolve-all   <owner> <repo> <pr> [author]  # answered threads only
 //	resolve-review-threads unresolve     <threadId>                    # re-open a thread
 //
@@ -61,13 +61,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // bodyPreviewLen caps the comment-body preview surfaced in list output.
 const bodyPreviewLen = 120
+
+const unchangedBodySourceAdvice = "re-run reply-resolve with the unchanged --body-file source; " +
+	"if the original source was standard input, replay retained bytes or save them to a named file"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -155,17 +160,55 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 	return 0
 }
 
+func parseReplyResolveArgs(args []string) (threadID, bodyFile string, err error) {
+	const usage = "usage: reply-resolve <threadId> --body-file <path|->"
+	if len(args) != 3 || args[1] != "--body-file" || strings.TrimSpace(args[0]) == "" || args[2] == "" {
+		return "", "", errors.New(usage)
+	}
+	return args[0], args[2], nil
+}
+
+// loadReplyBody reads the caller-selected data source once and returns its
+// bytes unchanged. UTF-8 is validated before conversion because encoding/json
+// replaces invalid string bytes with U+FFFD, which would silently violate the
+// exact-body contract.
+func loadReplyBody(path string, stdin io.Reader) (string, error) {
+	var (
+		body []byte
+		err  error
+	)
+	if path == "-" {
+		if stdin == nil {
+			return "", errors.New("read reply body from stdin: input is unavailable")
+		}
+		body, err = io.ReadAll(stdin)
+	} else {
+		body, err = os.ReadFile(path) //nolint:gosec // path is the operator-selected reply body source
+	}
+	if err != nil {
+		return "", fmt.Errorf("read reply body from %q: %w", path, err)
+	}
+	if !utf8.Valid(body) {
+		return "", fmt.Errorf("reply body from %q must be valid UTF-8", path)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "", errors.New("reply body must not be empty: resolution needs a stated reason")
+	}
+	return string(body), nil
+}
+
 // cmdReplyResolve posts a reply on one thread and then resolves it, so the
 // public justification and the resolution cannot drift apart. Resolving is
 // skipped when the reply fails, leaving the thread open rather than silently
 // closed with no explanation.
 func cmdReplyResolve(ctx context.Context, rest []string) int {
-	if len(rest) != 2 {
-		return fail("usage: reply-resolve <threadId> <body>")
+	threadID, bodyFile, err := parseReplyResolveArgs(rest)
+	if err != nil {
+		return fail("%v", err)
 	}
-	threadID, body := rest[0], rest[1]
-	if len(bytes.TrimSpace([]byte(body))) == 0 {
-		return fail("reply body must not be empty: resolution needs a stated reason")
+	body, err := loadReplyBody(bodyFile, os.Stdin)
+	if err != nil {
+		return fail("%v", err)
 	}
 	// Read first: to skip an already-resolved thread, and to notice a reply a
 	// previous run already posted so a retry does not duplicate it. Without
@@ -212,7 +255,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		return fail("your earlier reply is already on thread %s and the reviewer "+
 			"has commented since; nothing was posted.\n"+
 			"read the comment(s) after your reply and answer those:\n"+
-			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
 	case priorReplyIsLast:
 		// A previous run posted this and nothing has been said since, so the
 		// comment we matched (confirmed above to still be the true tail) is
@@ -228,7 +271,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		}
 		anchorID = id
 	}
-	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID, body); code != 0 {
+	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID); code != 0 {
 		return code
 	}
 	msg, _, rErr := resolveWithEvidence(ctx, threadID, false, anchorID)
@@ -263,25 +306,23 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			// Retrying immediately would just repeat the denied mutation; the
 			// credential problem has to be fixed first. Once it is, prefer
 			// reply-resolve over bare resolve for the same reason as the
-			// generic case below: it preserves the anchor check. The body is
-			// spelled out, not "...", because retry safety depends on
-			// text equality: a DIFFERENT body is a new reply that lands after
-			// whatever showed up while this was failing, not a safe retry.
+			// generic case below: it preserves the anchor check. The unchanged
+			// body-file source retains exact-text retry identity without rendering
+			// untrusted content into a shell command.
 			return fail("your reply is posted, but GitHub refused the resolution: %v\n"+
 				"this is an access problem, not a transient one: retrying immediately "+
 				"will be denied too.\n"+
 				"check `gh auth status` and that the token can resolve threads on this "+
-				"repo, then finish with the EXACT SAME body:\n"+
-				"  resolve-review-threads reply-resolve %s %s", rErr, threadID, shellQuote(body))
+				"repo, then %s; the source must yield exactly the same bytes", rErr,
+				unchangedBodySourceAdvice)
 		}
 		return fail("the reply is posted but the thread is NOT resolved (likely "+
 			"transient): %v\n"+
-			"this is safe to retry with the EXACT SAME body below (not a "+
+			"this is safe to %s (not a "+
 			"reworded one — retry safety depends on text equality): "+
 			"reply-resolve will see your reply is already last and resolve "+
 			"without reposting it. Bare resolve would work too, but it drops "+
-			"the anchor check this thread is relying on, so prefer:\n"+
-			"  resolve-review-threads reply-resolve %s %s", rErr, threadID, shellQuote(body))
+			"the anchor check this thread is relying on", rErr, unchangedBodySourceAdvice)
 	}
 	fmt.Println(msg)
 	return 0
@@ -291,8 +332,10 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 // the anchor for the whole safety argument: resolution is permitted only when
 // this exact comment is the thread's last one.
 func postReply(ctx context.Context, threadID, body string) (string, error) {
-	raw, err := ghGraphQL(ctx, "-f", "threadId="+threadID, "-f", "body="+body,
-		"-f", "query="+replyMutation)
+	raw, err := ghGraphQL(ctx, replyMutation, map[string]any{
+		"threadId": threadID,
+		"body":     body,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -313,9 +356,8 @@ func postReplyOrExit(ctx context.Context, threadID, body string) (id string, cod
 		return "", fail("your reply was posted, but GitHub's response did not "+
 			"confirm its ID, so it cannot be used as the resolution anchor: %v\n"+
 			"the thread was left UNRESOLVED on purpose. Do NOT reword and repost: "+
-			"re-run with the EXACT SAME body below and reply-resolve will find "+
-			"your reply by its text and resolve without duplicating it:\n"+
-			"  resolve-review-threads reply-resolve %s %s", err, threadID, shellQuote(body))
+			"%s. It will find your reply by its exact text and resolve without "+
+			"duplicating it", err, unchangedBodySourceAdvice)
 	}
 	// gh can fail client-side (network drop, timeout) after GitHub already
 	// applied the mutation server-side: this error alone does not prove the
@@ -397,17 +439,16 @@ func checkReplyPlacement(gotPrev, gotLast, wantPrev, wantLast string) replyPlace
 
 // verifyReplyPlacement re-reads the thread and applies checkReplyPlacement.
 // Returns 0 when the reply is exactly where we expect it.
-func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID, body string) int {
+func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID string) int {
 	after, err := fetchThread(ctx, threadID)
 	if err != nil {
 		return fail("your reply is posted but the thread state could not be "+
 			"re-read, so it was NOT resolved (likely transient): %v\n"+
-			"this is safe to retry with the EXACT SAME body below (not a "+
+			"this is safe to %s (not a "+
 			"reworded one — retry safety depends on text equality): "+
 			"reply-resolve will see your reply is already last and resolve "+
 			"without reposting it. Bare resolve would work too, but it drops "+
-			"the anchor check this thread is relying on, so prefer:\n"+
-			"  resolve-review-threads reply-resolve %s %s", err, threadID, shellQuote(body))
+			"the anchor check this thread is relying on", err, unchangedBodySourceAdvice)
 	}
 	switch checkReplyPlacement(after.PrevID, after.LastID, wantPrevID, wantLastID) {
 	case replyBuried:
@@ -415,14 +456,14 @@ func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID,
 			"thread %s: someone spoke after it, and your reply does not answer them.\n"+
 			"the thread was left UNRESOLVED on purpose. Read what came after "+
 			"your reply, then answer it with:\n"+
-			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
 	case replyJumped:
 		return fail("your reply is posted, but someone commented between the "+
 			"moment this command read thread %s and the moment it replied, so "+
 			"your reply sits on top of a comment it does not answer.\n"+
 			"the thread was left UNRESOLVED on purpose. Read the comment above "+
 			"your reply, then answer it with:\n"+
-			"  resolve-review-threads reply-resolve %s \"...\"", threadID, threadID)
+			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
 	case replyExact:
 		return 0
 	}
@@ -498,7 +539,7 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 thread asserts its point was handled; without a reply there is no record that
 it was even read. Address each one in code, then close it with its reason:
 
-  resolve-review-threads reply-resolve <threadId> "Fixed — <what changed>"
+  resolve-review-threads reply-resolve <threadId> --body-file reply.md
 
 --force overrides this and resolves unanswered threads. Reserve it for threads
 you are deliberately dismissing, and say so in a PR comment.
@@ -590,18 +631,6 @@ func sameReplyBody(lastBody, want string) bool {
 	return strings.TrimSpace(lastBody) == strings.TrimSpace(want)
 }
 
-// shellQuote wraps s in single quotes for a POSIX shell, escaping any
-// embedded single quote as '\”. Retry-guidance messages use this instead of
-// %q: %q produces Go string-literal escaping, so a multiline body's
-// newlines print as a literal backslash-n (which stays literal, not a
-// newline, inside bash double quotes) and embedded $ or backticks would be
-// expanded if pasted verbatim — either way the retried body would no longer
-// equal the original, defeating the exact-text-match retry safety this
-// guidance depends on. Single-quoted, only "'" itself needs escaping.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 func fail(format string, a ...any) int {
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)
 	return 1
@@ -616,8 +645,9 @@ usage:
   resolve-review-threads resolve       <threadId> [--force]          resolve one thread by ID
                                                                     (same evidence rule as resolve-all)
   resolve-review-threads unresolve     <threadId>                   re-open one thread by ID
-  resolve-review-threads reply-resolve <threadId> <body>            reply with the reason, then
-                                                                    resolve (the normal path)
+  resolve-review-threads reply-resolve <threadId> --body-file <path|->
+                                                                    reply with exact file/stdin data,
+                                                                    then resolve (the normal path)
   resolve-review-threads resolve-all   <owner> <repo> <pr> [author] [--force]
                                                                     resolve ANSWERED threads only;
                                                                     refuses unanswered ones by name
@@ -629,5 +659,7 @@ last word. Resolving asserts the point was handled, so it needs that evidence;
 reported but never sufficient: the hunk moving is not the point being fixed.
 
 Resolution is GraphQL-only; all calls go through an authenticated gh CLI.
+Use a named body file when durable retry may matter; standard input cannot be
+replayed unless the caller retains the same bytes.
 `)
 }
