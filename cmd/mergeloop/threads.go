@@ -85,7 +85,7 @@ const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:Str
         nodes{
           id
           isResolved
-          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } body } }
+          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login __typename } body } }
         }
       }
     }
@@ -100,6 +100,12 @@ const threadResolveMutation = `mutation($threadId:ID!){
 type threadComment struct {
 	author string
 	body   string
+	// typename is the GraphQL actor type of the comment author ("User",
+	// "Bot", "Organization", ...). It is verified positively: only a real
+	// User counts as a human reply. Inferring "human" from absence in a
+	// two-login bot allowlist let dependabot[bot], a GitHub Actions bot, or
+	// any newly introduced review bot silently clear a P1 finding.
+	typename string
 }
 
 // reviewThread is one PR review thread as fetched from GraphQL.
@@ -141,11 +147,27 @@ func (t reviewThread) bodies() []string {
 // engaged with the finding, so the merge gate treats it as addressed.
 func (t reviewThread) hasHumanComment() bool {
 	for _, c := range t.comments {
-		if !isKnownBotAuthor(c.author) {
+		if isHumanActor(c.typename, c.author) {
 			return true
 		}
 	}
 	return false
+}
+
+// isHumanActor reports whether a comment author is a real person.
+//
+// It fails closed twice over. The GraphQL actor type must be exactly "User",
+// so every Bot and Organization actor is excluded regardless of the login
+// allowlist. An empty typename (an older cached payload, or a field the API
+// declined to return) is NOT treated as human, because the whole point of the
+// merge gate is that an unverifiable answer must never clear a P1 finding.
+// The login allowlist is kept as a second, narrower check: a bot that somehow
+// reports itself as a User still cannot pass.
+func isHumanActor(typename, login string) bool {
+	if typename != "User" {
+		return false
+	}
+	return !isKnownBotAuthor(login)
 }
 
 // partitionResolvable splits fetched threads into the ones the loop may
@@ -327,7 +349,8 @@ func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, 
 									} `json:"pageInfo"`
 									Nodes []struct {
 										Author struct {
-											Login string `json:"login"`
+											Login    string `json:"login"`
+											Typename string `json:"__typename"`
 										} `json:"author"`
 										Body string `json:"body"`
 									} `json:"nodes"`
@@ -349,7 +372,7 @@ func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, 
 				truncated:  n.Comments.PageInfo.HasNextPage,
 			}
 			for _, c := range n.Comments.Nodes {
-				t.comments = append(t.comments, threadComment{author: c.Author.Login, body: c.Body})
+				t.comments = append(t.comments, threadComment{author: c.Author.Login, body: c.Body, typename: c.Author.Typename})
 			}
 			out = append(out, t)
 		}

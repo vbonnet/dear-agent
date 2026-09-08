@@ -357,6 +357,14 @@ func (d *Driver) resolveBotThreads(ctx context.Context, pr PR) {
 	}
 	out, err := d.Deps.Threads.ResolveBotThreads(ctx, d.Repo, pr.Number)
 	if err != nil {
+		// The resolver returns a populated ThreadResolution alongside the
+		// error, so withheld evidence exists even on this path. Dropping it
+		// here would delete the only record that a blocking finding was seen
+		// and left alone, which is exactly the silence ce-lr7j exists to end.
+		if out.Withheld > 0 {
+			d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "bot_threads_withheld",
+				Detail: fmt.Sprintf("left %d bot review thread(s) unresolved: blocking or unrecognised severity", out.Withheld)})
+		}
 		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "thread_resolve_error", Detail: err.Error()})
 		return
 	}
@@ -415,7 +423,14 @@ func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickRes
 	}
 	// Independent of whatever resolveBotThreads decided a moment ago.
 	if !d.blockingFindingsGate(ctx, pr) {
-		d.Tracker.RecordAction(pr.Number, StateGreen, now)
+		// Deliberately NOT RecordAction. Recording an action here refreshes
+		// LastActionAt on every tick, which permanently suppresses the stall
+		// detector: the PR would sit green-but-unmergeable forever and the
+		// only trace would be a repeated audit line nobody reads. A blocked
+		// finding is a durable escalation, so it is recorded as one and the
+		// stall clock keeps running.
+		d.Tracker.RecordEscalation(pr.Number, "merge blocked by unaddressed bot finding(s)", now)
+		d.Deps.Metrics.recordEscalation(ctx, pr.Number, "merge_blocked_findings")
 		res.Escalated++
 		return
 	}

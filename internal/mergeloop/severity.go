@@ -63,7 +63,12 @@ func (s ThreadSeverity) BlocksResolution() bool {
 // The shields.io host is required: an image alt of "P1 Badge" pointing anywhere
 // else is not a marker this code claims to understand, and falls through to
 // SeverityUnknown rather than being trusted.
-var codexBadgePattern = regexp.MustCompile(`!\[P(\d+) Badge\]\(https://img\.shields\.io/badge/P\d+-`)
+// Only the priorities Codex actually ships (P0-P3) are recognised. An
+// unsupported value such as P6 is deliberately NOT matched here: it falls
+// through to SeverityUnknown, which withholds. Matching `\d+` and then
+// treating everything except P0/P1 as advisory would let an unrecognised
+// priority auto-resolve and clear the independent gate at the same time.
+var codexBadgePattern = regexp.MustCompile(`!\[P([0-3]) Badge\]\(https://img\.shields\.io/badge/P[0-3]-`)
 
 // geminiBadgePattern matches the Gemini Code Assist severity badge. Real markup,
 // from PR #945:
