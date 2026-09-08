@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -24,6 +25,19 @@ type CleanupStats struct {
 	DirsCleanedUp   int
 	Errors          []error
 	TotalBytesFreed int64
+}
+
+func orphanCleanupPlatformError(goos string) error {
+	switch goos {
+	case "darwin", "linux":
+		return nil
+	default:
+		return WithContext(
+			NewError(ErrCodeUnsupportedPlatform,
+				fmt.Sprintf("sandbox orphan cleanup is unsupported on %s", goos)),
+			"goos", goos,
+		)
+	}
 }
 
 // DetectOrphanedMounts finds overlay mounts in /proc/mounts that might be orphaned.
@@ -114,8 +128,16 @@ func DetectOrphanedDirectories(sandboxBaseDir string, olderThan time.Duration) (
 
 // CleanupOrphanedMounts attempts to unmount orphaned overlay mounts.
 func CleanupOrphanedMounts(mounts []OrphanedResource) CleanupStats {
+	return cleanupOrphanedMounts(mounts, orphanCleanupPlatformError(runtime.GOOS))
+}
+
+func cleanupOrphanedMounts(mounts []OrphanedResource, platformErr error) CleanupStats {
 	stats := CleanupStats{
 		MountsDetected: len(mounts),
+	}
+	if platformErr != nil {
+		stats.Errors = append(stats.Errors, platformErr)
+		return stats
 	}
 
 	for _, mount := range mounts {
@@ -138,8 +160,16 @@ func CleanupOrphanedMounts(mounts []OrphanedResource) CleanupStats {
 
 // CleanupOrphanedDirectories attempts to remove orphaned directories.
 func CleanupOrphanedDirectories(dirs []OrphanedResource) CleanupStats {
+	return cleanupOrphanedDirectories(dirs, orphanCleanupPlatformError(runtime.GOOS))
+}
+
+func cleanupOrphanedDirectories(dirs []OrphanedResource, platformErr error) CleanupStats {
 	stats := CleanupStats{
 		DirsDetected: len(dirs),
+	}
+	if platformErr != nil {
+		stats.Errors = append(stats.Errors, platformErr)
+		return stats
 	}
 
 	for _, dir := range dirs {
@@ -164,7 +194,22 @@ func CleanupOrphanedDirectories(dirs []OrphanedResource) CleanupStats {
 // CleanupOrphaned performs full orphaned resource cleanup.
 // Returns statistics about what was cleaned up.
 func CleanupOrphaned(sandboxBaseDir string, olderThan time.Duration) (CleanupStats, error) {
+	return cleanupOrphaned(
+		sandboxBaseDir,
+		olderThan,
+		orphanCleanupPlatformError(runtime.GOOS),
+	)
+}
+
+func cleanupOrphaned(
+	sandboxBaseDir string,
+	olderThan time.Duration,
+	platformErr error,
+) (CleanupStats, error) {
 	var combined CleanupStats
+	if platformErr != nil {
+		return combined, platformErr
+	}
 
 	// Step 1: Detect and cleanup orphaned mounts
 	mounts, err := DetectOrphanedMounts(sandboxBaseDir)
@@ -172,7 +217,7 @@ func CleanupOrphaned(sandboxBaseDir string, olderThan time.Duration) (CleanupSta
 		return combined, fmt.Errorf("failed to detect orphaned mounts: %w", err)
 	}
 
-	mountStats := CleanupOrphanedMounts(mounts)
+	mountStats := cleanupOrphanedMounts(mounts, nil)
 	combined.MountsDetected = mountStats.MountsDetected
 	combined.MountsCleanedUp = mountStats.MountsCleanedUp
 	combined.Errors = append(combined.Errors, mountStats.Errors...)
@@ -183,7 +228,7 @@ func CleanupOrphaned(sandboxBaseDir string, olderThan time.Duration) (CleanupSta
 		return combined, fmt.Errorf("failed to detect orphaned directories: %w", err)
 	}
 
-	dirStats := CleanupOrphanedDirectories(dirs)
+	dirStats := cleanupOrphanedDirectories(dirs, nil)
 	combined.DirsDetected = dirStats.DirsDetected
 	combined.DirsCleanedUp = dirStats.DirsCleanedUp
 	combined.TotalBytesFreed = dirStats.TotalBytesFreed
