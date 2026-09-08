@@ -1,6 +1,7 @@
 package dolt
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -61,6 +62,9 @@ func TestMockAdapter_GetSession_NotFound(t *testing.T) {
 	_, err := adapter.GetSession("nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent session")
+	}
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("GetSession() error = %T %v, want typed ErrSessionNotFound", err, err)
 	}
 }
 

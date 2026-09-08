@@ -139,7 +139,7 @@ func (m *MockAdapter) GetSession(sessionID string) (*manifest.Manifest, error) {
 
 	session, exists := m.sessions[sessionID]
 	if !exists {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, sessionNotFoundError(sessionID)
 	}
 
 	// Return a deep copy to prevent external modifications

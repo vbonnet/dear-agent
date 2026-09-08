@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,158 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/testutil"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
+
+func TestDetectStateWithProbesPreservesObservationEvidence(t *testing.T) {
+	fixedNow := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	base := func() stateDetectionProbes {
+		return stateDetectionProbes{
+			hasSession:  func(string) (bool, error) { return true, nil },
+			capturePane: func(string, int) (string, error) { return "pane", nil },
+			detectTerminal: func(string, time.Time) state.DetectionResult {
+				return state.DetectionResult{State: state.StateReady, Confidence: "high", Evidence: "prompt"}
+			},
+			isInteractiveHarnessIdle: func(string) (bool, error) { return true, nil },
+			isHarnessAlive:           func(string) (bool, error) { return true, nil },
+			now:                      func() time.Time { return fixedNow },
+		}
+	}
+
+	tests := []struct {
+		name       string
+		configure  func(*stateDetectionProbes)
+		wantState  string
+		wantSource ObservationEvidence
+	}{
+		{
+			name: "absent session",
+			configure: func(probes *stateDetectionProbes) {
+				probes.hasSession = func(string) (bool, error) { return false, nil }
+			},
+			wantState:  manifest.StateOffline,
+			wantSource: EvidenceAbsent,
+		},
+		{
+			name: "unreadable pane",
+			configure: func(probes *stateDetectionProbes) {
+				probes.capturePane = func(string, int) (string, error) { return "", errors.New("capture failed") }
+			},
+			wantState:  manifest.StateDone,
+			wantSource: EvidenceUnreadable,
+		},
+		{
+			name: "recognized terminal prompt",
+			configure: func(probes *stateDetectionProbes) {
+				probes.isInteractiveHarnessIdle = func(string) (bool, error) { return false, nil }
+				probes.isHarnessAlive = func(string) (bool, error) { return false, nil }
+			},
+			wantState:  manifest.StateDone,
+			wantSource: EvidenceTerminal,
+		},
+		{
+			name:       "live ready harness",
+			configure:  func(*stateDetectionProbes) {},
+			wantState:  manifest.StateReady,
+			wantSource: EvidenceLive,
+		},
+		{
+			name: "ambiguous pane retains compatibility projection",
+			configure: func(probes *stateDetectionProbes) {
+				probes.detectTerminal = func(string, time.Time) state.DetectionResult {
+					return state.DetectionResult{State: state.StateUnknown, Confidence: "low", Evidence: "no marker"}
+				}
+			},
+			wantState:  manifest.StateReady,
+			wantSource: EvidenceUnknown,
+		},
+		{
+			name: "structured busy state is live",
+			configure: func(probes *stateDetectionProbes) {
+				probes.detectTerminal = func(string, time.Time) state.DetectionResult {
+					return state.DetectionResult{State: state.StateThinking, Confidence: "high", Evidence: "spinner"}
+				}
+				probes.isInteractiveHarnessIdle = func(string) (bool, error) {
+					t.Fatal("busy state must not use idle refinement")
+					return false, nil
+				}
+			},
+			wantState:  manifest.StateWorking,
+			wantSource: EvidenceLive,
+		},
+		{
+			name: "structured active state without liveness is unknown",
+			configure: func(probes *stateDetectionProbes) {
+				probes.detectTerminal = func(string, time.Time) state.DetectionResult {
+					return state.DetectionResult{State: state.StateThinking, Confidence: "high", Evidence: "spinner"}
+				}
+				probes.isHarnessAlive = func(string) (bool, error) { return false, nil }
+			},
+			wantState:  manifest.StateWorking,
+			wantSource: EvidenceUnknown,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			probes := base()
+			test.configure(&probes)
+			result, err := detectStateWithProbes("target", probes)
+			if err != nil {
+				t.Fatalf("detectStateWithProbes() error = %v", err)
+			}
+			if result.State != test.wantState || result.Evidence != test.wantSource {
+				t.Fatalf("detectStateWithProbes() = %#v, want state %q evidence %q", result, test.wantState, test.wantSource)
+			}
+		})
+	}
+}
+
+func TestProductionStateDetectorDoesNotMintGenericLiveEvidence(t *testing.T) {
+	probes := productionStateDetectionProbes()
+	if probes.isHarnessAlive != nil {
+		t.Fatal("generic state detector configured session-wide liveness as positive readiness evidence")
+	}
+}
+
+func TestDetectStateWithProbesPreservesLegacyFallbackOnRefinementError(t *testing.T) {
+	probes := stateDetectionProbes{
+		hasSession:  func(string) (bool, error) { return true, nil },
+		capturePane: func(string, int) (string, error) { return "pane", nil },
+		detectTerminal: func(string, time.Time) state.DetectionResult {
+			return state.DetectionResult{State: state.StateReady, Confidence: "high", Evidence: "prompt"}
+		},
+		isInteractiveHarnessIdle: func(string) (bool, error) { return false, errors.New("process probe failed") },
+		now:                      time.Now,
+	}
+
+	result, err := detectStateWithProbes("target", probes)
+	if err == nil {
+		t.Fatal("detectStateWithProbes() error = nil, want refinement error")
+	}
+	if result == nil || result.State != manifest.StateDone {
+		t.Fatalf("detectStateWithProbes() result = %#v, want legacy DONE fallback", result)
+	}
+}
+
+func TestDetectStateWithProbesSurfacesLivenessFailure(t *testing.T) {
+	probes := stateDetectionProbes{
+		hasSession:  func(string) (bool, error) { return true, nil },
+		capturePane: func(string, int) (string, error) { return "pane", nil },
+		detectTerminal: func(string, time.Time) state.DetectionResult {
+			return state.DetectionResult{State: state.StateThinking, Confidence: "high", Evidence: "spinner"}
+		},
+		isInteractiveHarnessIdle: func(string) (bool, error) { return false, nil },
+		isHarnessAlive:           func(string) (bool, error) { return false, errors.New("process table unavailable") },
+		now:                      time.Now,
+	}
+
+	result, err := detectStateWithProbes("target", probes)
+	if err == nil {
+		t.Fatal("detectStateWithProbes() error = nil, want liveness error")
+	}
+	if result == nil || result.Evidence != EvidenceUnknown {
+		t.Fatalf("detectStateWithProbes() result = %#v, want unknown evidence", result)
+	}
+}
 
 // TestDetectState_NonExistentSession verifies that a session not in tmux
 // returns OFFLINE.

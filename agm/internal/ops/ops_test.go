@@ -20,19 +20,20 @@ type sentKey struct {
 
 // mockTmux implements the tmux interfaces needed by ops.
 type mockTmux struct {
-	sessions        map[string]bool
-	sent            []sentKey
-	sendErr         error
-	killed          []string
-	killErr         error
-	hasErr          error
-	readiness       session.InputReadiness
-	readinessErr    error
-	readinessChecks []string
-	atomicChecks    []string
-	atomicOptions   []session.InputDeliveryOptions
-	inputCtx        context.Context
-	paneSendCtx     context.Context
+	sessions         map[string]bool
+	hasSessionChecks []string
+	sent             []sentKey
+	sendErr          error
+	killed           []string
+	killErr          error
+	hasErr           error
+	readiness        session.InputReadiness
+	readinessErr     error
+	readinessChecks  []string
+	atomicChecks     []string
+	atomicOptions    []session.InputDeliveryOptions
+	inputCtx         context.Context
+	paneSendCtx      context.Context
 }
 
 func newMockTmux(sessions ...string) *mockTmux {
@@ -47,6 +48,7 @@ func newMockTmux(sessions ...string) *mockTmux {
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
+	m.hasSessionChecks = append(m.hasSessionChecks, name)
 	if m.hasErr != nil {
 		return false, m.hasErr
 	}
@@ -151,6 +153,27 @@ func (m *mockTmuxWithLiveness) HarnessLiveness(name string) (session.LivenessInf
 type mockTmuxWithBatchLiveness struct {
 	*mockTmuxWithLiveness
 	batchCalls int
+}
+
+type exactGetFailureStorage struct {
+	dolt.Storage
+	err       error
+	listCalls int
+	uuidCalls int
+}
+
+func (s *exactGetFailureStorage) GetSession(string) (*manifest.Manifest, error) {
+	return nil, s.err
+}
+
+func (s *exactGetFailureStorage) ListSessions(filter *dolt.SessionFilter) ([]*manifest.Manifest, error) {
+	s.listCalls++
+	return s.Storage.ListSessions(filter)
+}
+
+func (s *exactGetFailureStorage) GetSessionByUUID(identifier string) (*manifest.Manifest, error) {
+	s.uuidCalls++
+	return s.Storage.GetSessionByUUID(identifier)
 }
 
 func (m *mockTmuxWithBatchLiveness) HarnessLivenessBatch(names []string) (map[string]session.LivenessInfo, error) {
@@ -399,6 +422,117 @@ func TestGetSession_ByName(t *testing.T) {
 	}
 	if result.Session.ID != "abc-123" {
 		t.Errorf("expected ID abc-123, got %s", result.Session.ID)
+	}
+}
+
+func TestGetSession_ActiveOnlyNamePrefersLiveReplacementOverArchivedIdentity(t *testing.T) {
+	retired := newManifest("abc-retired", "reused-name", "~/project")
+	retired.Lifecycle = manifest.LifecycleArchived
+	live := newManifest("abc-live", "reused-name", "~/project")
+	ctx := testCtx([]*manifest.Manifest{retired, live}, "reused-name")
+
+	result, err := GetSession(ctx, &GetSessionRequest{
+		Identifier: "reused-name",
+		ActiveOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Session.ID != live.SessionID {
+		t.Fatalf("resolved session ID = %q, want active replacement %q", result.Session.ID, live.SessionID)
+	}
+	if result.Session.Lifecycle == manifest.LifecycleArchived {
+		t.Fatal("active-only name lookup returned an archived identity")
+	}
+}
+
+func TestGetSession_ActiveOnlyNameExcludesReapingIdentity(t *testing.T) {
+	reaping := newManifest("abc-reaping", "reaping-name", "~/project")
+	reaping.Lifecycle = manifest.LifecycleReaping
+	ctx := testCtx([]*manifest.Manifest{reaping})
+
+	_, err := GetSession(ctx, &GetSessionRequest{
+		Identifier: reaping.Name,
+		ActiveOnly: true,
+	})
+	var problem *OpError
+	if !errors.As(err, &problem) || problem.Code != ErrCodeSessionNotFound {
+		t.Fatalf("active-only reaping name lookup error = %T %v, want %s", err, err, ErrCodeSessionNotFound)
+	}
+}
+
+func TestGetSession_ActiveOnlyExactArchivedIDStillResolves(t *testing.T) {
+	retired := newManifest("abc-retired", "retired-name", "~/project")
+	retired.Lifecycle = manifest.LifecycleArchived
+	ctx := testCtx([]*manifest.Manifest{retired})
+
+	result, err := GetSession(ctx, &GetSessionRequest{
+		Identifier: retired.SessionID,
+		ActiveOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Session.ID != retired.SessionID || result.Session.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("exact archived lookup = %#v, want retired identity preserved", result.Session)
+	}
+}
+
+func TestGetSession_ActiveOnlyExactReapingIdentityStillResolves(t *testing.T) {
+	reaping := newManifest("abc-reaping", "reaping-name", "~/project")
+	reaping.Lifecycle = manifest.LifecycleReaping
+	reaping.Claude.UUID = "claude-reaping-uuid"
+	ctx := testCtx([]*manifest.Manifest{reaping})
+
+	for _, identifier := range []string{reaping.SessionID, reaping.Claude.UUID} {
+		result, err := GetSession(ctx, &GetSessionRequest{
+			Identifier: identifier,
+			ActiveOnly: true,
+		})
+		if err != nil {
+			t.Fatalf("GetSession(%q) unexpected error: %v", identifier, err)
+		}
+		if result.Session.ID != reaping.SessionID || result.Session.Lifecycle != manifest.LifecycleReaping {
+			t.Fatalf("exact reaping lookup for %q = %#v, want reaping identity preserved", identifier, result.Session)
+		}
+		if result.Session.Status != manifest.LifecycleReaping {
+			t.Fatalf("exact reaping lookup status for %q = %q, want lifecycle without live observation", identifier, result.Session.Status)
+		}
+	}
+	if checks := ctx.Tmux.(*mockTmux).hasSessionChecks; len(checks) != 0 {
+		t.Fatalf("exact reaping ActiveOnly lookup probed tmux before lifecycle rejection: %v", checks)
+	}
+}
+
+func TestGetSession_ExactIDBackendFailureCannotRedirectToNameCollision(t *testing.T) {
+	const identifier = "requested-exact-id"
+	nameCollision := newManifest("different-stable-id", identifier, "~/project")
+	base := dolt.NewMockAdapter()
+	t.Cleanup(func() { _ = base.Close() })
+	if err := base.CreateSession(nameCollision); err != nil {
+		t.Fatalf("create same-name collision: %v", err)
+	}
+	wantErr := errors.New("exact ID backend unavailable")
+	storage := &exactGetFailureStorage{Storage: base, err: wantErr}
+	tmuxMock := newMockTmux(identifier)
+	ctx := &OpContext{Storage: storage, Tmux: tmuxMock}
+
+	result, err := GetSession(ctx, &GetSessionRequest{Identifier: identifier, ActiveOnly: true})
+	if result != nil {
+		t.Fatalf("GetSession() result = %#v, want nil on exact-ID backend failure", result)
+	}
+	var problem *OpError
+	if !errors.As(err, &problem) || problem.Code != ErrCodeStorageError || problem.Instance != "get_session" {
+		t.Fatalf("GetSession() error = %T %v, want typed %s get_session", err, err, ErrCodeStorageError)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("GetSession() error = %v, want backend cause %v", err, wantErr)
+	}
+	if storage.listCalls != 0 || storage.uuidCalls != 0 {
+		t.Fatalf("backend failure redirected to fallbacks: ListSessions=%d GetSessionByUUID=%d", storage.listCalls, storage.uuidCalls)
+	}
+	if len(tmuxMock.hasSessionChecks) != 0 {
+		t.Fatalf("backend failure reached tmux observation: %v", tmuxMock.hasSessionChecks)
 	}
 }
 
