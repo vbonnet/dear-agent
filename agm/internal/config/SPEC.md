@@ -35,7 +35,7 @@ decisions.
 
 **CONFIG-11** When no explicit configuration source is selected and the canonical source is ordinarily absent, the system shall retain defaults; when an explicit source is absent, any source path is dangling, or any other selected-source read fails, the system shall return no usable configuration before sandbox repository resolution.
 
-**CONFIG-12** When an existing selected configuration source is read, the system shall authenticate one regular-file snapshot of at most 1 MiB before decoding it.
+**CONFIG-12** When an existing selected configuration source is read, the system shall open it without waiting for a FIFO peer, authenticate the same opened descriptor as a regular file of at most 1 MiB, require a successful transition out of nonblocking state before wrapping or reading it, and reject any type, size, transition, or exact-size snapshot failure without returning usable configuration.
 
 **CONFIG-13** When sandbox configuration is present, the system shall require a canonical mapping, canonical true or false `enabled`, non-empty canonical string `provider`, and canonical sequences of non-empty strings for `repos` and `writable_dirs`, while preserving aliases, YAML merge precedence, registered provider extensibility, and explicit `repos: []` compatibility.
 
@@ -53,7 +53,7 @@ decisions.
 
 - Feature: `agm/test/bdd/features/config_directory_parity.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
-- Test consequence: CONFIG-10 through CONFIG-18 are verified by deterministic schema and unit tests rather than new scenarios — strict decode and source authentication in `config_strict_test.go`, runtime-authority capture, projection and isolated-HOME rebinding in `runtime_authority_test.go` and `runtime_authority_isolation_test.go`, centralized bootstrap and integrity in `storage_test.go`, and documented-snippet schema conformance in `documented_schema_test.go`. The two features above continue to own cross-package configuration-directory and harness parity.
+- Test consequence: CONFIG-10 through CONFIG-18 are verified by deterministic schema and unit tests rather than new scenarios — strict decode and source authentication in `config_strict_test.go`, including `TestOpenReadReadyConfigFileClearsNonblockOnSameDescriptor`, `TestReadConfigFilePropagatesBlockingTransitionFailure`, `TestOpenReadReadyConfigFileRejectsOversizeBeforeTransition`, and `TestOpenReadReadyConfigFileRejectsNonregularBeforeTransition`; runtime-authority capture, projection and isolated-HOME rebinding in `runtime_authority_test.go` and `runtime_authority_isolation_test.go`; centralized bootstrap and integrity in `storage_test.go`; and documented-snippet schema conformance in `documented_schema_test.go`. The two features above continue to own cross-package configuration-directory and harness parity.
 
 ## Package Test Traceability
 

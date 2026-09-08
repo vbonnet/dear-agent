@@ -444,6 +444,173 @@ func TestLoadRejectsUnboundedOrNonregularSource(t *testing.T) {
 	}
 }
 
+func TestOpenReadReadyConfigFileClearsNonblockOnSameDescriptor(t *testing.T) {
+	content := []byte("log_level: debug\n")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	transitionedFD := -1
+	source, err := openReadReadyConfigFile(path, func(fd int, nonblocking bool) error {
+		if nonblocking {
+			t.Fatal("blocking transition requested nonblocking state")
+		}
+		flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
+		if err != nil {
+			t.Fatalf("read flags before transition: %v", err)
+		}
+		if flags&unix.O_NONBLOCK == 0 {
+			t.Fatal("descriptor was not nonblocking at transition ingress")
+		}
+		transitionedFD = fd
+		return unix.SetNonblock(fd, nonblocking)
+	})
+	if err != nil {
+		t.Fatalf("openReadReadyConfigFile() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := source.file.Close(); err != nil {
+			t.Errorf("close read-ready config source: %v", err)
+		}
+	})
+
+	if got := int(source.file.Fd()); got != transitionedFD {
+		t.Fatalf("returned fd = %d, want authenticated and transitioned fd %d", got, transitionedFD)
+	}
+	flags, err := unix.FcntlInt(source.file.Fd(), unix.F_GETFL, 0)
+	if err != nil {
+		t.Fatalf("read returned flags: %v", err)
+	}
+	if flags&unix.O_NONBLOCK != 0 {
+		t.Fatalf("returned descriptor flags = %#x, want O_NONBLOCK clear", flags)
+	}
+	if source.declaredSize != int64(len(content)) {
+		t.Fatalf("declared size = %d, want %d", source.declaredSize, len(content))
+	}
+	got, err := io.ReadAll(source.file)
+	if err != nil {
+		t.Fatalf("read returned source: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Fatalf("read content = %q, want %q", got, content)
+	}
+}
+
+func TestReadConfigFilePropagatesBlockingTransitionFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("log_level: debug\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := errors.New("blocking transition failed")
+	capturedFD := -1
+
+	got, err := readConfigFileWithSetNonblock(path, func(fd int, nonblocking bool) error {
+		if nonblocking {
+			t.Fatal("blocking transition requested nonblocking state")
+		}
+		var stat unix.Stat_t
+		if err := unix.Fstat(fd, &stat); err != nil {
+			t.Fatalf("fstat transition input: %v", err)
+		}
+		if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+			t.Fatalf("transition input mode = %#o, want regular file", stat.Mode)
+		}
+		capturedFD = fd
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("readConfigFileWithSetNonblock() = %q, %v; want transition cause", got, err)
+	}
+	if got != nil {
+		t.Fatalf("transition failure returned bytes %q", got)
+	}
+	if capturedFD < 0 {
+		t.Fatal("transition was not called")
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(capturedFD, &stat); !errors.Is(err, unix.EBADF) {
+		t.Fatalf("Fstat(%d) after transition failure = %v, want EBADF", capturedFD, err)
+	}
+}
+
+func TestOpenReadReadyConfigFileRejectsOversizeBeforeTransition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxConfigBytes + 1); err != nil {
+		t.Fatal(errors.Join(err, file.Close()))
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	transitioned := false
+	source, err := openReadReadyConfigFile(path, func(int, bool) error {
+		transitioned = true
+		return nil
+	})
+	if source != nil {
+		if closeErr := source.file.Close(); closeErr != nil {
+			t.Errorf("close unexpected oversize source: %v", closeErr)
+		}
+		t.Fatal("oversize source became read-ready")
+	}
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("openReadReadyConfigFile() error = %v, want size rejection", err)
+	}
+	if transitioned {
+		t.Fatal("oversize source requested blocking transition before size rejection")
+	}
+}
+
+func TestOpenReadReadyConfigFileRejectsNonregularBeforeTransition(t *testing.T) {
+	root := t.TempDir()
+	fifo := filepath.Join(root, "config.fifo")
+	if err := unix.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("FIFO unavailable: %v", err)
+	}
+
+	for _, path := range []string{fifo, root} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			type result struct {
+				source       *readReadyConfigFile
+				err          error
+				transitioned bool
+			}
+			done := make(chan result, 1)
+			go func() {
+				transitioned := false
+				source, err := openReadReadyConfigFile(path, func(int, bool) error {
+					transitioned = true
+					return nil
+				})
+				done <- result{source: source, err: err, transitioned: transitioned}
+			}()
+
+			select {
+			case got := <-done:
+				if got.source != nil {
+					if closeErr := got.source.file.Close(); closeErr != nil {
+						t.Errorf("close unexpected nonregular source: %v", closeErr)
+					}
+					t.Fatalf("openReadReadyConfigFile(%q) returned a read-ready nonregular source", path)
+				}
+				if got.err == nil || !strings.Contains(got.err.Error(), "regular file") {
+					t.Fatalf("openReadReadyConfigFile(%q) error = %v, want regular-file rejection", path, got.err)
+				}
+				if got.transitioned {
+					t.Fatalf("openReadReadyConfigFile(%q) requested blocking transition before type rejection", path)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("openReadReadyConfigFile(%q) blocked on nonregular source", path)
+			}
+		})
+	}
+}
+
 func TestReadBoundedConfigPropagatesPartialReadError(t *testing.T) {
 	sentinel := errors.New("sentinel read failure")
 	reader := io.MultiReader(strings.NewReader("{}\n"), iotest.ErrReader(sentinel))
