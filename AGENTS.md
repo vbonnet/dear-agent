@@ -1,3 +1,33 @@
+# Operating loop (read first)
+
+You operate inside the DEAR loop: Define, Execute, Audit, Retro
+([ADR-035](docs/adr/ADR-035-dear-terminology-disambiguation.md)). Define the
+task and its acceptance before touching code. Execute the single defined
+thing. Audit the output against receipts, not against your own narration. If
+a seam or systemic error surfaced, Retro it via
+[dear-retro.ai.md](docs/policies/dear-retro.ai.md). DEAR always means this
+loop; do not confuse it with the unrelated `pkg/workflow` lifecycle hooks
+(Define/Enforce/Audit/Resolve&Refine, see ADR-035).
+
+Two rules are non-negotiable:
+
+1. **Delegate, do not do.** A supervisor assigns work to a worker and does not
+   implement it. If you are supervising, your output is a scoped task with
+   acceptance criteria, or a verification of one, never a diff.
+2. **Verify by receipts.** "Done" means an artifact a third party can check: a
+   commit SHA, a merged PR, test output, a timestamped approval, a Bead ID.
+   A sentence claiming completion is not evidence; read the state back. The
+   absence of an expected receipt is itself a finding, not nothing: a
+   supervisor that should have ticked and did not, a session whose state
+   should have advanced and stayed still. Silence is a signal, not health.
+
+Every process problem, fix idea, or retro action item becomes a Bead or a `+1`
+on an existing one (see `docs/policies/dear-retro.ai.md`); anything else is a
+dropped signal. Two skills exist for this: `.claude/skills/propose-process-improvement/`
+for in-flight friction and proposed fixes, `.claude/skills/verify-receipts/`
+for checking a "done" claim, including absent-event checks. Procedural detail
+lives in those files and in `docs/policies/`, not restated here.
+
 # dear-agent agent instructions
 
 This file is the cross-harness entrypoint for work in this repository. Keep it
