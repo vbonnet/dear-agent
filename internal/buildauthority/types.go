@@ -111,32 +111,40 @@ const (
 	CauseDeadline          CauseCode = "deadline"
 	CauseChildStart        CauseCode = "child-start"
 	CauseChildExit         CauseCode = "child-exit"
+	CauseChildTerminate    CauseCode = "child-terminate"
+	CauseChildWait         CauseCode = "child-wait"
 	CauseChildDrain        CauseCode = "child-drain"
 	CauseChildSurvivor     CauseCode = "child-survivor"
+	CauseChildProbe        CauseCode = "child-probe"
 	CauseIdentity          CauseCode = "identity"
 	CauseDescriptorClose   CauseCode = "descriptor-close"
 	CauseCleanup           CauseCode = "cleanup"
 	CauseInternalInvariant CauseCode = "internal-invariant"
 )
 
-var causeOrder = [...]CauseCode{
-	CauseInvalidRequest,
-	CauseNotFound,
-	CausePermission,
-	CauseMalformed,
-	CauseUnsupported,
-	CauseUnstable,
-	CauseLimit,
-	CauseCanceled,
-	CauseDeadline,
-	CauseChildStart,
-	CauseChildExit,
-	CauseChildDrain,
-	CauseChildSurvivor,
-	CauseIdentity,
-	CauseDescriptorClose,
-	CauseCleanup,
-	CauseInternalInvariant,
+func causeOrder() [20]CauseCode {
+	return [20]CauseCode{
+		CauseInvalidRequest,
+		CauseNotFound,
+		CausePermission,
+		CauseMalformed,
+		CauseUnsupported,
+		CauseUnstable,
+		CauseLimit,
+		CauseCanceled,
+		CauseDeadline,
+		CauseChildStart,
+		CauseChildExit,
+		CauseChildTerminate,
+		CauseChildWait,
+		CauseChildDrain,
+		CauseChildSurvivor,
+		CauseChildProbe,
+		CauseIdentity,
+		CauseDescriptorClose,
+		CauseCleanup,
+		CauseInternalInvariant,
+	}
 }
 
 // ChildDiagnostic contains only bounded metadata about child diagnostics. It
@@ -159,12 +167,14 @@ type FileIdentity struct {
 	Filesystem [2]int32
 }
 
-// RecoveryInfo is present only when an allocated task child remains. TaskPath
-// is an untrusted locator for later liveness handling, not deletion authority.
+// RecoveryInfo is present only when complete absence of an allocated task
+// child was not proved. TaskPath is an untrusted locator for later liveness
+// handling, not deletion authority. TaskRoot is nil only when the task mkdir
+// succeeded but no descriptor-bound task-root identity was ever verified.
 type RecoveryInfo struct {
 	TaskPath  string
 	StateRoot FileIdentity
-	TaskRoot  FileIdentity
+	TaskRoot  *FileIdentity
 }
 
 // FailureRecord is one sanitized failure category.
@@ -203,6 +213,7 @@ func (e *failureError) Report() FailureReport { return cloneFailureReport(e.repo
 
 func newRefusal(report FailureReport) *failureError {
 	normalized := cloneFailureReport(report)
+	normalizeChildOwnership(&normalized)
 	normalized.Primary = normalizeFailureRecord(normalized.Primary)
 	normalized.DescriptorClose = normalizeFailureRecord(normalized.DescriptorClose)
 	normalized.Cleanup = normalizeFailureRecord(normalized.Cleanup)
@@ -214,6 +225,24 @@ func newRefusal(report FailureReport) *failureError {
 		}
 	}
 	return &failureError{report: normalized, text: renderFailure(normalized)}
+}
+
+func normalizeChildOwnership(report *FailureReport) {
+	if report == nil {
+		return
+	}
+	var owner *FailureRecord
+	for _, record := range []*FailureRecord{report.Primary, report.DescriptorClose, report.Cleanup} {
+		if record == nil || record.Child == nil {
+			continue
+		}
+		if owner == nil {
+			owner = record
+			continue
+		}
+		record.Child = nil
+		owner.Causes = append(owner.Causes, CauseInternalInvariant)
+	}
 }
 
 func normalizeFailureRecord(record *FailureRecord) *FailureRecord {
@@ -228,8 +257,9 @@ func normalizeFailureRecord(record *FailureRecord) *FailureRecord {
 		record.Operation = OperationValidate
 		record.Causes = append(record.Causes, CauseInternalInvariant)
 	}
-	ranks := make(map[CauseCode]int, len(causeOrder))
-	for i, cause := range causeOrder {
+	order := causeOrder()
+	ranks := make(map[CauseCode]int, len(order))
+	for i, cause := range order {
 		ranks[cause] = i
 	}
 	seen := make(map[CauseCode]struct{}, len(record.Causes))
@@ -282,6 +312,10 @@ func cloneFailureReport(report FailureReport) FailureReport {
 	cloned.Cleanup = cloneFailureRecord(report.Cleanup)
 	if report.Recovery != nil {
 		recovery := *report.Recovery
+		if report.Recovery.TaskRoot != nil {
+			taskRoot := *report.Recovery.TaskRoot
+			recovery.TaskRoot = &taskRoot
+		}
 		cloned.Recovery = &recovery
 	}
 	return cloned

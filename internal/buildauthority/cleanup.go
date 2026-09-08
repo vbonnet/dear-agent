@@ -8,12 +8,20 @@ type quiescenceResult struct {
 	child  *ChildDiagnostic
 }
 
-// removalResult distinguishes a fully removed task child from every
-// preservation outcome. Causes are public-safe classifications, never raw
-// operating-system errors.
+type taskDisposition uint8
+
+const (
+	dispositionUnknown taskDisposition = iota
+	dispositionPresent
+	dispositionRemoved
+)
+
+// removalResult carries one of the three proof states produced by owned
+// removal or the final no-follow name/identity observation. Causes are
+// public-safe classifications, never raw operating-system errors.
 type removalResult struct {
-	removed bool
-	causes  []CauseCode
+	disposition taskDisposition
+	causes      []CauseCode
 }
 
 // cleanupTransaction owns the complete post-allocation teardown sequence.
@@ -24,6 +32,7 @@ type cleanupTransaction struct {
 	quiesce        func() quiescenceResult
 	nonRootClosers []func() error
 	remove         func() removalResult
+	observe        func() removalResult
 	closeTaskRoot  func() error
 	closeStateRoot func() error
 	recovery       RecoveryInfo
@@ -35,14 +44,25 @@ func runCleanup(transaction cleanupTransaction) error {
 	report := FailureReport{Primary: cloneFailureRecord(transaction.primary)}
 	quiescenceProven := attemptQuiescence(&report, transaction.quiesce)
 	nonRootCloseFailed := closeNonRoots(&report, transaction.nonRootClosers)
-	removed := false
+	var disposition taskDisposition
 	if quiescenceProven && !nonRootCloseFailed {
-		removed = attemptRemoval(&report, transaction.remove)
+		disposition = attemptRemoval(&report, transaction.remove)
+	} else {
+		disposition = observePreservedRoot(&report, transaction.observe)
 	}
-	closeRoot(&report, transaction.closeTaskRoot)
+	disposition = requireObservedIdentityForDisposition(
+		&report,
+		disposition,
+		transaction.recovery.TaskRoot != nil,
+	)
+	closeOptionalTaskRoot(
+		&report,
+		transaction.closeTaskRoot,
+		transaction.recovery.TaskRoot != nil,
+	)
 	closeRoot(&report, transaction.closeStateRoot)
 
-	if !removed {
+	if disposition != dispositionRemoved {
 		recovery := transaction.recovery
 		report.Recovery = &recovery
 	}
@@ -50,6 +70,40 @@ func runCleanup(transaction cleanupTransaction) error {
 		return nil
 	}
 	return newRefusal(report)
+}
+
+func requireObservedIdentityForDisposition(
+	report *FailureReport,
+	disposition taskDisposition,
+	taskRootObserved bool,
+) taskDisposition {
+	if taskRootObserved || disposition == dispositionUnknown {
+		return disposition
+	}
+	if report.Cleanup == nil {
+		report.Cleanup = &FailureRecord{
+			Phase:     PhaseClose,
+			Operation: OperationRemove,
+			Causes:    []CauseCode{CauseInternalInvariant},
+		}
+	} else {
+		report.Cleanup.Causes = append(report.Cleanup.Causes, CauseInternalInvariant)
+	}
+	return dispositionUnknown
+}
+
+func closeOptionalTaskRoot(
+	report *FailureReport,
+	closeDescriptor func() error,
+	taskRootObserved bool,
+) {
+	if closeDescriptor != nil {
+		closeRoot(report, closeDescriptor)
+		return
+	}
+	if taskRootObserved {
+		closeRoot(report, nil)
+	}
 }
 
 func attemptQuiescence(report *FailureReport, quiesce func() quiescenceResult) bool {
@@ -92,32 +146,64 @@ func closeNonRoots(report *FailureReport, closers []func() error) bool {
 	return nonRootCloseFailed
 }
 
-func attemptRemoval(report *FailureReport, remove func() removalResult) bool {
+func attemptRemoval(report *FailureReport, remove func() removalResult) taskDisposition {
 	if remove == nil {
 		report.Cleanup = &FailureRecord{
 			Phase:     PhaseClose,
 			Operation: OperationRemove,
 			Causes:    []CauseCode{CauseInternalInvariant},
 		}
-		return false
+		return dispositionUnknown
 	}
 	removal := remove()
-	if removal.removed && len(removal.causes) == 0 {
-		return true
+	if removal.disposition == dispositionRemoved && len(removal.causes) == 0 {
+		return dispositionRemoved
 	}
 	causes := append([]CauseCode(nil), removal.causes...)
 	if len(causes) == 0 {
 		causes = append(causes, CauseCleanup)
 	}
-	if removal.removed {
+	if removal.disposition != dispositionPresent && removal.disposition != dispositionUnknown {
 		causes = append(causes, CauseInternalInvariant)
+		removal.disposition = dispositionUnknown
 	}
 	report.Cleanup = &FailureRecord{
 		Phase:     PhaseClose,
 		Operation: OperationRemove,
 		Causes:    causes,
 	}
-	return removal.removed
+	return removal.disposition
+}
+
+func observePreservedRoot(report *FailureReport, observe func() removalResult) taskDisposition {
+	observation := removalResult{
+		disposition: dispositionUnknown,
+		causes:      []CauseCode{CauseInternalInvariant},
+	}
+	if observe != nil {
+		observation = observe()
+	}
+	if observation.disposition != dispositionPresent && observation.disposition != dispositionUnknown {
+		observation.disposition = dispositionUnknown
+		observation.causes = append(observation.causes, CauseInternalInvariant)
+	}
+	causes := append([]CauseCode(nil), observation.causes...)
+	switch {
+	case report.Cleanup == nil:
+		if len(causes) == 0 {
+			causes = append(causes, CauseCleanup)
+		}
+		report.Cleanup = &FailureRecord{
+			Phase:     PhaseClose,
+			Operation: OperationRemove,
+			Causes:    causes,
+		}
+	case len(causes) != 0:
+		report.Cleanup.Causes = append(report.Cleanup.Causes, causes...)
+	case observation.disposition == dispositionUnknown:
+		report.Cleanup.Causes = append(report.Cleanup.Causes, CauseCleanup)
+	}
+	return observation.disposition
 }
 
 func addDescriptorFailure(report *FailureReport, operation Operation, causes ...CauseCode) {
