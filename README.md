@@ -70,10 +70,12 @@ AGM/YouTube commands plus the Wayfinder and Research Pipeline skills, run:
 ```
 
 The script registers the `dear-agent` marketplace with the Claude CLI, then
-installs (or updates) every plugin declared in
+installs (or updates) the historical four-plugin set named in this section. It
+does not bulk install, update, or uninstall the Claude-only `spec-governance`
+source projection declared in
 [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). It is
-idempotent — re-running on an up-to-date repo just refreshes the marketplace.
-Restart Claude Code afterward to pick up the new commands.
+idempotent — re-running on an up-to-date repo just refreshes the marketplace and
+those four plugins. Restart Claude Code afterward to pick up the new commands.
 
 ## Loops — the primary UX
 

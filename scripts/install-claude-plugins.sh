@@ -2,21 +2,22 @@
 # Install dear-agent Claude Code plugins (agm, wayfinder, youtube, research-pipeline).
 #
 # This script registers the dear-agent marketplace (from a local repo checkout
-# or from GitHub) and installs every plugin it declares. It is idempotent:
-# running it twice on an up-to-date repo is a no-op.
+# or from GitHub) and bulk-manages its historical four-plugin install set.
+# Other catalog entries are intentionally outside this script's lifecycle.
+# Running it twice on an up-to-date repo is a no-op.
 #
 # Usage:
 #   scripts/install-claude-plugins.sh                # install from this repo (default)
 #   scripts/install-claude-plugins.sh --github       # install from github.com/vbonnet/dear-agent
 #   scripts/install-claude-plugins.sh --dry-run      # print actions without running them
-#   scripts/install-claude-plugins.sh --uninstall    # uninstall every dear-agent plugin
+#   scripts/install-claude-plugins.sh --uninstall    # uninstall the four bulk-managed plugins
 #   scripts/install-claude-plugins.sh --scope user   # pass --scope to `claude plugin install`
 #
 # Environment overrides (mainly for tests):
 #   CLAUDE_BIN           path to the claude CLI (default: claude)
 #   DEAR_AGENT_REPO      repo root to use (default: directory containing this script's ../)
 #   DEAR_AGENT_GH_REPO   GitHub repo coordinate for --github (default: vbonnet/dear-agent)
-#   MARKETPLACE_NAME     marketplace name (default: parsed from marketplace.json)
+#   MARKETPLACE_NAME     marketplace name (default: dear-agent)
 
 set -euo pipefail
 
@@ -27,6 +28,11 @@ REPO_ROOT_DEFAULT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="${DEAR_AGENT_REPO:-$REPO_ROOT_DEFAULT}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 GH_REPO="${DEAR_AGENT_GH_REPO:-vbonnet/dear-agent}"
+
+# Deliberately closed: source-only catalog entries such as spec-governance must
+# not silently join bulk install, update, or uninstall behavior.
+BULK_PLUGINS=(agm wayfinder youtube research-pipeline)
+readonly BULK_PLUGINS
 
 SOURCE_MODE="local"
 DRY_RUN=0
@@ -42,7 +48,7 @@ while [[ $# -gt 0 ]]; do
     --scope)     SCOPE="$2";           shift 2 ;;
     --scope=*)   SCOPE="${1#*=}";      shift ;;
     -h|--help)
-      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *)
       echo "ERROR: unknown argument: $1" >&2
@@ -75,45 +81,6 @@ require_marketplace_manifest() {
   [[ -f "$manifest" ]] || die "marketplace manifest not found at: $manifest"
 }
 
-# Parse plugin names from .claude-plugin/marketplace.json without jq.
-# Looks for `"name": "<name>"` lines inside the plugins[] block.
-list_plugin_names() {
-  local manifest="$REPO_ROOT/.claude-plugin/marketplace.json"
-  awk '
-    /"plugins"[[:space:]]*:[[:space:]]*\[/ { in_plugins=1; next }
-    in_plugins && /\]/                     { in_plugins=0 }
-    in_plugins && /"name"[[:space:]]*:/ {
-      match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
-      if (RSTART) {
-        s = substr($0, RSTART, RLENGTH)
-        sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-        sub(/".*/, "", s)
-        print s
-      }
-    }
-  ' "$manifest"
-}
-
-marketplace_name() {
-  if [[ -n "${MARKETPLACE_NAME:-}" ]]; then
-    printf '%s\n' "$MARKETPLACE_NAME"
-    return
-  fi
-  local manifest="$REPO_ROOT/.claude-plugin/marketplace.json"
-  awk '
-    /^[[:space:]]*"name"[[:space:]]*:/ && !seen {
-      match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
-      if (RSTART) {
-        s = substr($0, RSTART, RLENGTH)
-        sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-        sub(/".*/, "", s)
-        print s
-        seen = 1
-      }
-    }
-  ' "$manifest"
-}
-
 marketplace_is_known() {
   local name="$1"
   local out
@@ -133,15 +100,8 @@ plugin_is_installed() {
 require_claude
 require_marketplace_manifest
 
-MARKET="$(marketplace_name)"
-[[ -n "$MARKET" ]] || die "could not parse marketplace name from .claude-plugin/marketplace.json"
-
-# Bash 3.2-compatible array population (no mapfile).
-PLUGINS=()
-while IFS= read -r _name; do
-  [[ -n "$_name" ]] && PLUGINS+=("$_name")
-done < <(list_plugin_names)
-[[ ${#PLUGINS[@]} -gt 0 ]] || die "no plugins found in marketplace manifest"
+MARKET="${MARKETPLACE_NAME:-dear-agent}"
+PLUGINS=("${BULK_PLUGINS[@]}")
 
 case "$SOURCE_MODE" in
   local)  SOURCE_ARG="$REPO_ROOT" ;;

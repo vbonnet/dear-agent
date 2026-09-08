@@ -1,0 +1,15 @@
+{
+  "name": "spec-governance",
+  "version": "0.1.0",
+  "description": "Canonical SPEC.md authoring and read-only consolidation-audit skills",
+  "author": {
+    "name": "dear-agent",
+    "url": "https://github.com/vbonnet/dear-agent"
+  },
+  "repository": "https://github.com/vbonnet/dear-agent",
+  "license": "Apache-2.0",
+  "skills": [
+    "./skills/audit-specs",
+    "./skills/write-spec"
+  ]
+}

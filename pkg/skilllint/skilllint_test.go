@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -59,6 +60,59 @@ allowed-tools: Bash(example *)
 
 # Run command
 `
+
+func TestCheckContentMatchesCheckFile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		path    string
+		content string
+	}{
+		{
+			name:    "skill",
+			path:    "skills/example/SKILL.md",
+			content: strings.Replace(validSkill("example-skill"), "## Verify", "## Notes", 1),
+		},
+		{
+			name:    "command",
+			path:    "commands/example.md",
+			content: "---\ndescription: incomplete\n---\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeFile(t, t.TempDir(), tt.path, tt.content)
+			fromFile, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			fromContent := CheckContent(path, []byte(tt.content))
+			if !reflect.DeepEqual(fromContent, fromFile) {
+				t.Fatalf("CheckContent = %v, CheckFile = %v", fromContent, fromFile)
+			}
+		})
+	}
+}
+
+func TestCheckContentRejectsUnknownSurfaceWithoutReadingFile(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "notes", "example.md")
+	fromContent := CheckContent(path, []byte(validSkill("example-skill")))
+	assertReasons(t, fromContent, []string{"not a recognized SKILL.md or commands/*.md surface"})
+
+	fromFile, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile tried to read an unknown surface: %v", err)
+	}
+	if !reflect.DeepEqual(fromContent, fromFile) {
+		t.Fatalf("CheckContent = %v, CheckFile = %v", fromContent, fromFile)
+	}
+}
 
 func TestCheckFileCommandSchema(t *testing.T) {
 	t.Parallel()
