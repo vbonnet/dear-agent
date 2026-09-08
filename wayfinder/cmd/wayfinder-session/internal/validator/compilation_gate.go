@@ -1,14 +1,14 @@
 package validator
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/boundedexec"
 )
 
 // CompilationResult holds the result of a compilation attempt
@@ -155,124 +155,142 @@ func detectProjectLanguage(projectDir string) (string, error) {
 	return detectedLang, nil
 }
 
+// compilationBuildTimeout and compilationTestTimeout bound the BUILD gate's
+// shell-outs. The build previously had no bound at all.
+const (
+	compilationBuildTimeout = 5 * time.Minute
+	compilationTestTimeout  = 5 * time.Minute
+)
+
 // runBuild executes the build command for the detected language
 func runBuild(projectDir, lang string) *CompilationResult {
-	var cmd *exec.Cmd
+	cmd := boundedexec.Command{
+		Dir:     projectDir,
+		Label:   "BUILD compilation",
+		Timeout: compilationBuildTimeout,
+	}
 
 	switch lang {
 	case "go":
-		cmd = exec.Command("go", "build", "./...")
+		cmd.Name, cmd.Args = "go", []string{"build", "./..."}
 	case "python":
-		// Python syntax check
-		cmd = exec.Command("python", "-m", "py_compile")
-		// Add all .py files as arguments
-		pyFiles, _ := filepath.Glob(filepath.Join(projectDir, "*.py"))
-		if len(pyFiles) > 0 {
-			cmd.Args = append(cmd.Args, pyFiles...)
+		// Python syntax check over the project's top-level modules.
+		// A project directory containing an unclosed bracket makes the joined
+		// pattern malformed, so this error is reachable and not decoration.
+		pyFiles, err := filepath.Glob(filepath.Join(projectDir, "*.py"))
+		if err != nil {
+			// The message goes in Output as well: that is the field the
+			// caller renders, so a diagnostic that lives only in ErrorMessage
+			// reaches the operator as "0 compilation errors" and no remedy.
+			diagnostic := fmt.Sprintf("cannot enumerate Python sources in %s: %v", projectDir, err)
+			return &CompilationResult{
+				Success:      false,
+				Output:       diagnostic,
+				ErrorMessage: diagnostic,
+			}
 		}
+		if len(pyFiles) == 0 {
+			return &CompilationResult{Success: true}
+		}
+		cmd.Name, cmd.Args = "python", append([]string{"-m", "py_compile"}, pyFiles...)
 	case "javascript", "typescript":
 		// Check if package.json has build script
-		pkgPath := filepath.Join(projectDir, "package.json")
-		if _, err := os.Stat(pkgPath); err == nil {
-			cmd = exec.Command("npm", "run", "build")
-		} else {
+		if _, err := os.Stat(filepath.Join(projectDir, "package.json")); err != nil {
 			// No build script, skip build validation
 			return &CompilationResult{Success: true}
 		}
+		cmd.Name, cmd.Args = "npm", []string{"run", "build"}
 	case "rust":
-		cmd = exec.Command("cargo", "build")
+		cmd.Name, cmd.Args = "cargo", []string{"build"}
 	case "java":
 		// Try Maven first, then Gradle
-		if _, err := os.Stat(filepath.Join(projectDir, "pom.xml")); err == nil {
-			cmd = exec.Command("mvn", "compile")
-		} else if _, err := os.Stat(filepath.Join(projectDir, "build.gradle")); err == nil {
-			cmd = exec.Command("gradle", "build")
+		switch {
+		case fileExists(filepath.Join(projectDir, "pom.xml")):
+			cmd.Name, cmd.Args = "mvn", []string{"compile"}
+		case fileExists(filepath.Join(projectDir, "build.gradle")):
+			cmd.Name, cmd.Args = "gradle", []string{"build"}
+		default:
+			return &CompilationResult{Success: true}
 		}
 	default:
 		// Unknown language, skip build validation
 		return &CompilationResult{Success: true}
 	}
 
-	if cmd == nil {
-		return &CompilationResult{Success: true}
-	}
-
-	cmd.Dir = projectDir
-	output, err := cmd.CombinedOutput()
-	exitCode := 0
-	exitErr := &exec.ExitError{}
-	if errors.As(err, &exitErr) {
-		exitCode = exitErr.ExitCode()
-	}
-
+	res := cmd.Run()
 	return &CompilationResult{
-		Success:      err == nil,
-		Output:       string(output),
-		ExitCode:     exitCode,
+		Success:      res.Err == nil,
+		Output:       compilationOutput(res),
+		ExitCode:     res.ExitCode(),
 		ErrorMessage: "",
 	}
 }
 
 // runTests executes the test command for the detected language
 func runTests(projectDir, lang string) (*CompilationResult, error) {
-	var cmd *exec.Cmd
+	cmd := boundedexec.Command{
+		Dir:     projectDir,
+		Label:   "BUILD tests",
+		Timeout: compilationTestTimeout,
+	}
 
 	switch lang {
 	case "go":
-		cmd = exec.Command("go", "test", "./...", "-v")
+		cmd.Name, cmd.Args = "go", []string{"test", "./...", "-v"}
 	case "python":
 		// Try pytest first, fall back to unittest
 		if _, err := exec.LookPath("pytest"); err == nil {
-			cmd = exec.Command("pytest", "-v")
+			cmd.Name, cmd.Args = "pytest", []string{"-v"}
 		} else {
-			cmd = exec.Command("python", "-m", "unittest", "discover", "-v")
+			cmd.Name, cmd.Args = "python", []string{"-m", "unittest", "discover", "-v"}
 		}
 	case "javascript", "typescript":
-		cmd = exec.Command("npm", "test")
+		cmd.Name, cmd.Args = "npm", []string{"test"}
 	case "rust":
-		cmd = exec.Command("cargo", "test")
+		cmd.Name, cmd.Args = "cargo", []string{"test"}
 	case "java":
 		// Try Maven first, then Gradle
-		if _, err := os.Stat(filepath.Join(projectDir, "pom.xml")); err == nil {
-			cmd = exec.Command("mvn", "test")
-		} else if _, err := os.Stat(filepath.Join(projectDir, "build.gradle")); err == nil {
-			cmd = exec.Command("gradle", "test")
+		switch {
+		case fileExists(filepath.Join(projectDir, "pom.xml")):
+			cmd.Name, cmd.Args = "mvn", []string{"test"}
+		case fileExists(filepath.Join(projectDir, "build.gradle")):
+			cmd.Name, cmd.Args = "gradle", []string{"test"}
+		default:
+			return &CompilationResult{Success: true, TestCount: 1}, nil
 		}
 	default:
 		// Unknown language, skip test validation
 		return &CompilationResult{Success: true, TestCount: 1}, nil
 	}
 
-	if cmd == nil {
-		return &CompilationResult{Success: true, TestCount: 1}, nil
-	}
-
-	cmd.Dir = projectDir
-
-	// Set timeout to 5 minutes
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
-	cmd.Dir = projectDir
-
-	output, err := cmd.CombinedOutput()
-	exitCode := 0
-	exitErr := &exec.ExitError{}
-	if errors.As(err, &exitErr) {
-		exitCode = exitErr.ExitCode()
-	}
+	res := cmd.Run()
+	output := compilationOutput(res)
 
 	// Parse test results
-	testCount, failureCount := parseTestOutput(string(output), lang)
+	testCount, failureCount := parseTestOutput(output, lang)
 
 	return &CompilationResult{
-		Success:      err == nil && failureCount == 0,
-		Output:       string(output),
-		ExitCode:     exitCode,
-		ErrorMessage: "",
+		Success:      res.Err == nil && failureCount == 0,
+		Output:       output,
+		ExitCode:     res.ExitCode(),
 		TestCount:    testCount,
 		FailureCount: failureCount,
 	}, nil
+}
+
+// fileExists reports whether path is present, without distinguishing why not.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// compilationOutput annotates a timed-out run so the operator sees the bound
+// rather than a silently truncated log.
+func compilationOutput(res boundedexec.Result) string {
+	if res.TimedOut {
+		return res.Output + fmt.Sprintf("\n[timed out after %s]\n", res.Elapsed.Round(time.Second))
+	}
+	return res.Output
 }
 
 // parseTestOutput parses test output to extract test count and failure count
