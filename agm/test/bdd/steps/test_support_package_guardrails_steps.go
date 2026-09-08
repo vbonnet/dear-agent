@@ -53,6 +53,8 @@ type testSupportRouteState struct {
 	trustIsolationErr    error
 	testEnvOutput        string
 	testEnvErr           error
+	authProjectionOutput string
+	authProjectionErr    error
 }
 
 // RegisterTestSupportPackageGuardrailSteps registers residual package coverage steps.
@@ -102,6 +104,7 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^retired named environment paths should be discovered and removed exactly$`, retiredNamedTestEnvironmentPathsAreRemoved)
 	ctx.Step(`^overlong names should be rejected only for new environments$`, overlongNamesAreRejectedOnlyForNewEnvironments)
 	ctx.Step(`^unsafe named test environment paths should be rejected before mutation$`, unsafeNamedTestEnvironmentPathsAreRejected)
+	registerAuthProjectionGuardrailSteps(ctx)
 }
 
 func trustProtocolSetupShouldBeScoped(ctx context.Context) error {
