@@ -30,6 +30,8 @@ but the policy API and audit vocabulary remain provider and harness neutral.
 
 **OVERRIDE-08** When a required judge cannot render any verdict, the system shall fail closed and audit the judge error.
 
+**OVERRIDE-09** When a safety-critical caller requires a durable override audit, the system shall not authorize the bypass unless the complete verdict record and owner-only audit metadata have been synced to durable storage; an audit create, append, permission, sync, close, or path-identity failure shall deny the bypass.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/internal_foundation_guardrails.feature`
