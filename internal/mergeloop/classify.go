@@ -331,12 +331,14 @@ func isPermanentProjectionError(errStr string) bool {
 // DefaultCap is the backpressure ceiling: a tick that sees more open PRs than
 // this does nothing at all.
 //
-// The old value was 50, chosen when the repo carried ~12 open PRs. It sat two
-// PRs above the live count of 48 on 2026-09-01, which meant the loop was two
-// merges away from backpressuring itself into a permanent, silent no-op. That
-// is the same class of invisible stop as the 41-day outage this cap was never
-// meant to cause, so it now carries real headroom.
+// This constant only NAMES the threshold that was already hardcoded at two
+// call sites; it deliberately does not change its value. Raising the ceiling
+// is an operational change with its own blast radius (it multiplies the work
+// each tick accepts), so it belongs in its own reviewed change rather than
+// riding along with a severity fix. Operators who need headroom today can
+// pass --cap without waiting for that.
 //
 // Backpressure exists to stop the loop thrashing a queue it cannot drain, not
-// to switch it off. Raise this rather than let it bind.
-const DefaultCap = 250
+// to switch it off. When the open-PR count approaches this number, raise the
+// ceiling rather than let it silently bind into a no-op tick.
+const DefaultCap = 50

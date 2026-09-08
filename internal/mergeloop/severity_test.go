@@ -101,3 +101,26 @@ func TestThreadSeverity_HighestWins(t *testing.T) {
 		})
 	}
 }
+
+// TestClassifyCommentSeverityUnsupportedPriorityIsUnknown pins the ce-lr7j
+// review finding that an unrestricted `P(\d+)` match let an unsupported
+// priority such as P6 classify as advisory, which auto-resolved the thread AND
+// cleared the independent merge gate with the same wrong verdict.
+func TestClassifyCommentSeverityUnsupportedPriorityIsUnknown(t *testing.T) {
+	for _, p := range []string{"P4", "P5", "P6", "P9", "P10"} {
+		body := "**<sub><sub>![" + p + " Badge](https://img.shields.io/badge/" + p + "-orange?style=flat)</sub></sub>  Title**"
+		if got := ClassifyCommentSeverity(body); got != SeverityUnknown {
+			t.Errorf("ClassifyCommentSeverity(%s) = %v, want %v (unsupported priority must fail closed)", p, got, SeverityUnknown)
+		}
+		if !ClassifyCommentSeverity(body).BlocksResolution() {
+			t.Errorf("%s must block resolution", p)
+		}
+	}
+	// The supported range still classifies as before.
+	for p, want := range map[string]ThreadSeverity{"P0": SeverityBlocking, "P1": SeverityBlocking, "P2": SeverityAdvisory, "P3": SeverityAdvisory} {
+		body := "**<sub><sub>![" + p + " Badge](https://img.shields.io/badge/" + p + "-orange?style=flat)</sub></sub>  Title**"
+		if got := ClassifyCommentSeverity(body); got != want {
+			t.Errorf("ClassifyCommentSeverity(%s) = %v, want %v", p, got, want)
+		}
+	}
+}

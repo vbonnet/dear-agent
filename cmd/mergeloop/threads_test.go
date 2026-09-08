@@ -99,7 +99,7 @@ const (
 )
 
 func botComment(body string) threadComment {
-	return threadComment{author: "chatgpt-codex-connector", body: body}
+	return threadComment{author: "chatgpt-codex-connector", body: body, typename: "Bot"}
 }
 
 func TestPartitionResolvable(t *testing.T) {
@@ -122,12 +122,12 @@ func TestPartitionResolvable(t *testing.T) {
 		},
 		{
 			name:         "gemini high is withheld",
-			thread:       reviewThread{id: "t3", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiHigh}}},
+			thread:       reviewThread{id: "t3", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiHigh, typename: "Bot"}}},
 			wantResolved: 0, wantWithheld: 1,
 		},
 		{
 			name:         "gemini medium resolves",
-			thread:       reviewThread{id: "t4", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiMedium}}},
+			thread:       reviewThread{id: "t4", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiMedium, typename: "Bot"}}},
 			wantResolved: 1, wantWithheld: 0,
 		},
 		{
@@ -140,7 +140,7 @@ func TestPartitionResolvable(t *testing.T) {
 			// MLC-05 preserved: human threads are neither resolved nor counted.
 			name: "human-authored thread is never resolved",
 			thread: reviewThread{id: "t6", comments: []threadComment{
-				{author: "vbonnet", body: tstCodexP2},
+				{author: "vbonnet", body: tstCodexP2, typename: "User"},
 			}},
 			wantResolved: 0, wantWithheld: 0,
 		},
@@ -148,7 +148,7 @@ func TestPartitionResolvable(t *testing.T) {
 			// MLC-05 preserved: a human reply anywhere protects the thread.
 			name: "bot thread with a human reply is never resolved",
 			thread: reviewThread{id: "t7", comments: []threadComment{
-				botComment(tstCodexP2), {author: "vbonnet", body: "disagree, keep it"},
+				botComment(tstCodexP2), {author: "vbonnet", body: "disagree, keep it", typename: "User"},
 			}},
 			wantResolved: 0, wantWithheld: 0,
 		},
@@ -208,7 +208,7 @@ func TestBlockingFindingsIn(t *testing.T) {
 		},
 		{
 			name:   "gemini high blocks",
-			thread: reviewThread{id: "b3", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiHigh}}},
+			thread: reviewThread{id: "b3", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiHigh, typename: "Bot"}}},
 			want:   1,
 		},
 		{
@@ -228,13 +228,13 @@ func TestBlockingFindingsIn(t *testing.T) {
 			// override them.
 			name: "P1 with a human reply is treated as addressed",
 			thread: reviewThread{id: "b6", comments: []threadComment{
-				botComment(tstCodexP1), {author: "vbonnet", body: "fixed in a follow-up"},
+				botComment(tstCodexP1), {author: "vbonnet", body: "fixed in a follow-up", typename: "User"},
 			}},
 			want: 0,
 		},
 		{
 			name:   "human-only thread does not block",
-			thread: reviewThread{id: "b7", comments: []threadComment{{author: "vbonnet", body: tstCodexP1}}},
+			thread: reviewThread{id: "b7", comments: []threadComment{{author: "vbonnet", body: tstCodexP1, typename: "User"}}},
 			want:   0,
 		},
 	}
@@ -319,5 +319,49 @@ func TestExcerptFindingKeepsShortNonASCIITitle(t *testing.T) {
 
 	if got := excerptFinding([]threadComment{{body: body}}); got != title {
 		t.Errorf("excerptFinding = %q, want %q", got, title)
+	}
+}
+
+// TestIsHumanActor pins the ce-lr7j review finding that "human" was inferred
+// from absence in a two-login bot allowlist, so any non-allowlisted automation
+// account (dependabot[bot], a GitHub Actions bot, a newly introduced review
+// bot) silently cleared a P1 finding from the merge gate.
+func TestIsHumanActor(t *testing.T) {
+	tests := []struct {
+		name     string
+		typename string
+		login    string
+		want     bool
+	}{
+		{"real person", "User", "vbonnet", true},
+		{"allowlisted bot", "Bot", "chatgpt-codex-connector", false},
+		{"non-allowlisted bot is not human", "Bot", "dependabot[bot]", false},
+		{"github actions bot is not human", "Bot", "github-actions[bot]", false},
+		{"unknown future review bot is not human", "Bot", "some-new-review-bot", false},
+		{"organization actor is not human", "Organization", "vbonnet-org", false},
+		{"missing actor type fails closed", "", "vbonnet", false},
+		{"bot login claiming User still fails", "User", "chatgpt-codex-connector", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isHumanActor(tt.typename, tt.login); got != tt.want {
+				t.Errorf("isHumanActor(%q, %q) = %v, want %v", tt.typename, tt.login, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBlockingFindingsInBotReplyDoesNotClearFinding is the end-to-end shape of
+// the same defect: a bot reply on a P1 thread must not make it look addressed.
+func TestBlockingFindingsInBotReplyDoesNotClearFinding(t *testing.T) {
+	threads := []reviewThread{{
+		id: "x1",
+		comments: []threadComment{
+			botComment(tstCodexP1),
+			{author: "dependabot[bot]", body: "Bumped the dep.", typename: "Bot"},
+		},
+	}}
+	if got := blockingFindingsIn(threads); len(got) != 1 {
+		t.Fatalf("blockingFindingsIn() = %d findings, want 1 (a bot reply must not clear a P1)", len(got))
 	}
 }
