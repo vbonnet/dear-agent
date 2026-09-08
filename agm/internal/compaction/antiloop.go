@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/fileutil"
 )
 
 const (
@@ -20,17 +23,34 @@ const (
 
 // CompactionState tracks compaction history for a session.
 type CompactionState struct {
+	SessionID       string             `json:"session_id,omitempty"`
 	SessionName     string             `json:"session_name"`
 	LastCompaction  time.Time          `json:"last_compaction"`
 	CompactionCount int                `json:"compaction_count"`
 	History         []CompactionRecord `json:"history"`
 }
 
+// AttemptOutcome is the persisted delivery-accounting result for a compaction
+// attempt. Empty outcomes are legacy confirmed records.
+type AttemptOutcome string
+
+// Persisted attempt outcomes distinguish confirmed delivery from ambiguity and
+// positive proof that no command was sent.
+const (
+	AttemptOutcomePending         AttemptOutcome = "pending"
+	AttemptOutcomeConfirmed       AttemptOutcome = "confirmed"
+	AttemptOutcomeUncertain       AttemptOutcome = "uncertain"
+	AttemptOutcomeDefiniteNotSent AttemptOutcome = "definite_not_sent"
+)
+
 // CompactionRecord is a single compaction event.
 type CompactionRecord struct {
-	Timestamp  time.Time `json:"timestamp"`
-	PromptFile string    `json:"prompt_file"`
-	Forced     bool      `json:"forced"`
+	AttemptID        string         `json:"attempt_id,omitempty"`
+	Timestamp        time.Time      `json:"timestamp"`
+	OutcomeUpdatedAt time.Time      `json:"outcome_updated_at,omitzero"`
+	Outcome          AttemptOutcome `json:"outcome,omitempty"`
+	PromptFile       string         `json:"prompt_file"`
+	Forced           bool           `json:"forced"`
 }
 
 // stateDir returns the compaction-state directory under baseDir.
@@ -43,8 +63,13 @@ func stateFile(baseDir, sessionName string) string {
 	return filepath.Join(stateDir(baseDir), sessionName+".json")
 }
 
-// LoadState reads compaction state for a session. Returns zero-value state if file does not exist.
+// LoadState reads legacy display-name-keyed compaction state. It remains for
+// compatibility; delivery callers use BeginAttempt so accounting is keyed by
+// stable session ID. It returns zero-value state if the file does not exist.
 func LoadState(baseDir, sessionName string) (*CompactionState, error) {
+	if err := validateStorageKey("session name", sessionName); err != nil {
+		return nil, err
+	}
 	path := stateFile(baseDir, sessionName)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -60,17 +85,27 @@ func LoadState(baseDir, sessionName string) (*CompactionState, error) {
 	return &s, nil
 }
 
-// SaveState writes compaction state to disk.
+// SaveState atomically writes legacy display-name-keyed compaction state. It
+// remains for compatibility; delivery callers use Attempt.Mark.
 func SaveState(baseDir string, state *CompactionState) error {
-	dir := stateDir(baseDir)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create compaction-state dir: %w", err)
+	if state == nil {
+		return fmt.Errorf("compaction state is nil")
+	}
+	if err := validateStorageKey("session name", state.SessionName); err != nil {
+		return err
+	}
+	if err := validateAttemptRecords(state.History); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal compaction state: %w", err)
 	}
-	return os.WriteFile(stateFile(baseDir, state.SessionName), data, 0o600)
+	data = append(data, '\n')
+	if err := fileutil.AtomicWrite(stateFile(baseDir, state.SessionName), data, 0o600); err != nil {
+		return fmt.Errorf("write compaction state: %w", err)
+	}
+	return nil
 }
 
 // recentCompactions counts compactions within the rolling window.
@@ -78,11 +113,27 @@ func recentCompactions(history []CompactionRecord, now time.Time) int {
 	cutoff := now.Add(-CompactionWindow)
 	count := 0
 	for _, r := range history {
-		if r.Timestamp.After(cutoff) {
+		if attemptCountsForAntiLoop(r.Outcome) && r.Timestamp.After(cutoff) {
 			count++
 		}
 	}
 	return count
+}
+
+func attemptCountsForAntiLoop(outcome AttemptOutcome) bool {
+	// Unknown values count conservatively. Only a persisted, explicit proof that
+	// delivery did not occur releases the attempt from the anti-loop budget.
+	return outcome != AttemptOutcomeDefiniteNotSent
+}
+
+func latestCountedAttempt(history []CompactionRecord) time.Time {
+	var latest time.Time
+	for _, record := range history {
+		if attemptCountsForAntiLoop(record.Outcome) && record.Timestamp.After(latest) {
+			latest = record.Timestamp
+		}
+	}
+	return latest
 }
 
 // CheckAntiLoop returns an error if compaction should be blocked, unless force is true.
@@ -96,8 +147,12 @@ func CheckAntiLoop(state *CompactionState, force bool) error {
 		return fmt.Errorf("session '%s' has reached maximum compactions in the last %s (%d/%d). Use --force to override",
 			state.SessionName, CompactionWindow, recent, MaxCompactionsPerWindow)
 	}
-	if !state.LastCompaction.IsZero() {
-		elapsed := now.Sub(state.LastCompaction)
+	lastCompaction := state.LastCompaction
+	if latest := latestCountedAttempt(state.History); latest.After(lastCompaction) {
+		lastCompaction = latest
+	}
+	if !lastCompaction.IsZero() {
+		elapsed := now.Sub(lastCompaction)
 		if elapsed < CooldownDuration {
 			remaining := CooldownDuration - elapsed
 			return fmt.Errorf("session '%s' was compacted %s ago (cooldown: %s, remaining: %s). Use --force to override",
@@ -113,9 +168,12 @@ func RecordCompaction(state *CompactionState, promptFile string, forced bool) *C
 	state.LastCompaction = now
 	state.CompactionCount++
 	state.History = append(state.History, CompactionRecord{
-		Timestamp:  now,
-		PromptFile: promptFile,
-		Forced:     forced,
+		AttemptID:        uuid.NewString(),
+		Timestamp:        now,
+		OutcomeUpdatedAt: now,
+		Outcome:          AttemptOutcomeConfirmed,
+		PromptFile:       promptFile,
+		Forced:           forced,
 	})
 	return state
 }
