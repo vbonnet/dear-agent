@@ -1013,6 +1013,20 @@ logging, trace evidence, Git/worktree safety, quality baselines, and verificatio
 
 ---
 
+### Disk Ledger Guardrails
+
+**File:** [`disk_ledger_guardrails.feature`](../test/bdd/features/disk_ledger_guardrails.feature)
+
+**Drives:** co-located SPEC coverage for the per-run disk allocation/release
+ledger, its block-aware measurement, and the reclaim-health verdict that
+distinguishes a collector reclaiming nothing from an idle healthy host.
+
+**Key scenarios:**
+- Every listed disk ledger package has a co-located `SPEC.md`.
+- Every package SPEC points back to the executable guardrail feature.
+
+---
+
 ### API And Gateway Package Guardrails
 
 **File:** [`api_gateway_package_guardrails.feature`](../test/bdd/features/api_gateway_package_guardrails.feature)
