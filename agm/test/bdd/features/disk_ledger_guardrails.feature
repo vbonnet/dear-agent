@@ -1,4 +1,5 @@
 # SPEC: pkg/diskledger/SPEC.md
+# RELATED-SPEC: cmd/disk-ledger/SPEC.md
 Feature: Disk ledger package guardrails
   The disk ledger attributes disk growth to the run that caused it and decides
   whether the reclaim path is reclaiming anything. It must keep executable SPEC
@@ -12,4 +13,5 @@ Feature: Disk ledger package guardrails
 
     Examples:
       | package         |
+      | cmd/disk-ledger |
       | pkg/diskledger  |
