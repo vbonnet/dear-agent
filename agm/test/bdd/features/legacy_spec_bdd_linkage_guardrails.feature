@@ -21,6 +21,7 @@
 # RELATED-SPEC: agm/cmd/agm/parity/SPEC.md
 # RELATED-SPEC: agm/internal/reaper/SPEC.md
 # RELATED-SPEC: agm/internal/modelrouter/SPEC.md
+# RELATED-SPEC: cmd/pretool-supervisor-guard/SPEC.md
 Feature: Legacy specification BDD linkage guardrails
   Strict existing requirements must link to an executable BDD surface so
   package behavior cannot drift as unreferenced documentation.
@@ -55,6 +56,7 @@ Feature: Legacy specification BDD linkage guardrails
       | agm/cmd/agm/parity/SPEC.md              |
       | agm/internal/reaper/SPEC.md             |
       | agm/internal/modelrouter/SPEC.md         |
+      | cmd/pretool-supervisor-guard/SPEC.md     |
 
   Scenario Outline: Legacy BDD linkage is provider-neutral
     Given strict legacy linkage runs through "<harness>" with "<family>"

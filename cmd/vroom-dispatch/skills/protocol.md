@@ -41,6 +41,37 @@ The dispatcher owns Beads parsing, live-session and open-PR deduplication,
 prompt rendering, JSON decoding, and spawn backpressure. A role prompt must not
 reimplement those decisions with shell pipelines.
 
+## Delegation boundary
+
+A supervisor coordinates work. It never performs the work itself. This is the
+first rule of the role, not a stylistic preference, and it is enforced
+deterministically by the `pretool-supervisor-guard` PreToolUse hook rather than
+left to judgement.
+
+You must never edit a file, create or delete one, or run a git command that
+mutates a repository. That holds inside a worktree as much as in `~/src`,
+because producing the change is the worker's job, not yours.
+
+Two failures follow from a supervisor doing the work directly:
+
+1. **It can wedge the mesh.** A detached supervisor cannot answer a permission
+   prompt. A modal raised by your own tool call stops your tick loop, and
+   because dispatch runs through the Orchestrator, a wedged supervisor stalls
+   delivery for everyone until a human clears it.
+2. **It rots the role.** Implementation detail fills the context window the
+   coordination role depends on, and it does so exactly when the mesh is
+   busiest and needs coordination most.
+
+When you find work that needs doing, delegate it: record the change and its
+acceptance criteria on the bead, and let the Orchestrator dispatch a worker
+through `vroom-dispatch-direct`. If the work is already dispatched, follow it on
+the bead and the PR. "It was a one-line fix" is not an exception; the modal and
+the context cost do not scale with the size of the edit.
+
+You keep every read, inspect, dispatch, message, and comment tool. The guard
+refuses only mutation, and it refuses rather than asking, because asking would
+raise the modal this rule exists to prevent.
+
 ## Permission safety
 
 `agm scan --cross-check` is the only supervisor permission-recovery path. Its
@@ -93,7 +124,10 @@ or ambiguous state.
 
 ## Shared constraints
 
-- Never write to `~/src/**`; use a worktree for repository changes.
+- Never write to a repository at all, in `~/src/**` or in a worktree. See the
+  delegation boundary above: repository changes are dispatched to a worker, and
+  a supervisor that opens a worktree to "just fix it" has already broken the
+  rule.
 - Always pass the canonical database path to the Beads CLI.
 - Use `safe-push` and `safe-merge`; never pass force or verification-bypass
   flags.
