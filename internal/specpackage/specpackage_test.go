@@ -21,6 +21,8 @@ import (
 
 const testManifestDigestDomain = "dear-agent/spec-governance-package-manifest/v1\x00"
 
+var canonicalTestSourceFiles = mustReadCanonicalTestSourceFiles()
+
 type testFixture struct {
 	base          string
 	sourceRoot    string
@@ -109,7 +111,7 @@ func TestValidateRejectsTreeContentModeAndManifestTampering(t *testing.T) {
 				content := mustReadFile(t, path)
 				replaceReadOnlyFile(t, path, append(content, []byte("\nchanged\n")...), 0o444)
 			},
-			wantError: "exact canonical package manifest",
+			wantError: "approved content digest",
 		},
 		{
 			name: "payload mode changed",
@@ -249,22 +251,186 @@ func TestStageRejectsExtraCanonicalSourceTreeEntry(t *testing.T) {
 	assertDirectoryEmpty(t, fixture.stagingParent)
 }
 
-func TestStageRejectsForbiddenCheckoutCommandsAndRetainsPrivateRoot(t *testing.T) {
-	for _, forbidden := range []string{
+func TestStageRejectsUnapprovedPortableShellCommandsAndRetainsPrivateRoot(t *testing.T) {
+	for _, command := range []string{
 		"go run ./tools/specaudit",
+		"go   run ../tools/specaudit",
 		"make lint-specs",
 		"cmd/ears-lint",
 		"internal/speccoverage",
+		`"<distribution-root>/bin/specaudit" inventory -repo . -repository owner/name -revision deadbeef; go run ../tools/specaudit`,
 	} {
-		t.Run(forbidden, func(t *testing.T) {
+		t.Run(command, func(t *testing.T) {
 			fixture := newFixtureInputs(t)
 			path := filepath.Join(fixture.sourceRoot, "spec-governance", "skills", "audit-specs", "references", "audit-verdicts.md")
-			content := append(mustReadFile(t, path), []byte("\n`"+forbidden+"`\n")...)
+			content := append(mustReadFile(t, path), []byte("\n```sh\n"+command+"\n```\n")...)
 			mustWriteFile(t, path, content, 0o600)
 
 			staged, err := Stage(context.Background(), fixture.sourceRoot, fixture.artifactPath, fixture.stagingParent)
-			if err == nil || !strings.Contains(err.Error(), `retains checkout-only reference "`+forbidden+`"`) {
-				t.Fatalf("Stage = %#v, error = %v; want forbidden-reference rejection", staged, err)
+			if err == nil || !strings.Contains(err.Error(), "not an approved packaged command template") {
+				t.Fatalf("Stage = %#v, error = %v; want positive shell-template rejection", staged, err)
+			}
+			assertRetainedFailedRoot(t, fixture.stagingParent, err)
+		})
+	}
+}
+
+func TestStageRejectsNonportableSpecauditReferences(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		addition  string
+		wantError string
+	}{
+		{name: "inline checkout command", addition: "`go run ../tools/specaudit`\n", wantError: "nonportable inline specaudit reference"},
+		{name: "inline absolute checkout path", addition: "`/tmp/dear-agent/tools/specaudit`\n", wantError: "nonportable inline specaudit reference"},
+		{name: "inline whitespace variant", addition: "`go   run specaudit`\n", wantError: "nonportable inline specaudit reference"},
+		{name: "prose checkout path", addition: "Use /tmp/dear-agent/tools/specaudit.\n", wantError: "outside a declared non-executable context"},
+		{name: "prose PATH and CWD command", addition: "> Run specaudit inventory -repo .\n", wantError: "outside a declared non-executable context"},
+		{name: "prose make command", addition: "Run make lint-specs.\n", wantError: "approved content digest"},
+		{name: "prose unrelated checkout command", addition: "Please run go run ../tools/other-audit.\n", wantError: "approved content digest"},
+		{name: "prose alternate command verb", addition: "Execute make lint-specs.\n", wantError: "approved content digest"},
+		{name: "prose entity evasion", addition: "Run spec&#97;udit inventory -repo .\n", wantError: "outside a declared non-executable context"},
+		{name: "prose emphasis evasion", addition: "Run spec**audit** inventory -repo .\n", wantError: "outside a declared non-executable context"},
+		{name: "prefixed installed child", addition: "`/tmp/<distribution-root>/bin/specaudit`\n", wantError: "nonportable inline specaudit reference"},
+		{name: "wrapper alias", addition: "`<distribution-root>/bin/specaudit-wrapper`\n", wantError: "nonportable inline specaudit reference"},
+		{name: "case alias", addition: "`/tmp/dear-agent/tools/SpecAudit`\n", wantError: "nonportable inline specaudit reference"},
+		{name: "Unicode-adjacent alias", addition: "Use Ⱥspecaudit.\n", wantError: "outside a declared non-executable context"},
+		{name: "indented command", addition: "    go run ../tools/specaudit\n", wantError: "ambiguous indented code block"},
+		{name: "untyped fence", addition: "```\ngo run ../tools/specaudit\n```\n", wantError: "ambiguous untyped code block"},
+		{name: "YAML command", addition: "```yaml\ncommand: go run ../tools/specaudit\n```\n", wantError: "unsupported code block language"},
+		{name: "JSON command", addition: "```json\n{\"collector\":\"go run specaudit\"}\n```\n", wantError: "unapproved specaudit reference"},
+		{name: "JSON escaped command", addition: "```json\n{\"command\":\"go run ./tools/spec\\u0061udit\"}\n```\n", wantError: "unapproved specaudit reference"},
+		{name: "text command", addition: "```text\nspecaudit inventory\n```\n", wantError: "not an approved packaged data template"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newFixtureInputs(t)
+			path := filepath.Join(fixture.sourceRoot, "spec-governance", "skills", "audit-specs", "references", "audit-verdicts.md")
+			content := append(mustReadFile(t, path), []byte("\n"+test.addition)...)
+			mustWriteFile(t, path, content, 0o600)
+
+			staged, err := Stage(context.Background(), fixture.sourceRoot, fixture.artifactPath, fixture.stagingParent)
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Stage = %#v, error = %v; want error containing %q", staged, err, test.wantError)
+			}
+			assertRetainedFailedRoot(t, fixture.stagingParent, err)
+		})
+	}
+}
+
+func TestStageRejectsExecutableInlineAndBlockquotedCommands(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		addition  string
+		wantError string
+	}{
+		{name: "inline make command", addition: "`make lint-specs`\n", wantError: "approved content digest"},
+		{name: "split inline make command", addition: "Run `make` `lint-specs`.\n", wantError: "approved content digest"},
+		{name: "split inline specaudit command", addition: "Run `specaudit` `inventory` `-repo` `.`.\n", wantError: "approved content digest"},
+		{name: "HTTP inline shell separator", addition: "Run `https://example.test/specaudit;make`.\n", wantError: "nonportable inline specaudit reference"},
+		{name: "inline shell separator", addition: "`make;lint-specs`\n", wantError: "approved content digest"},
+		{name: "inline command path", addition: "`cmd/ears-lint`\n", wantError: "approved content digest"},
+		{name: "inline internal path", addition: "`internal/speccoverage`\n", wantError: "approved content digest"},
+		{name: "typed text command", addition: "```text\nmake lint-specs\n```\n", wantError: "approved content digest"},
+		{name: "mislabelled language command", addition: "```gherkin\nmake lint-specs\n```\n", wantError: "unsupported code block language"},
+		{name: "blockquoted shell fence", addition: "> ```sh\n> make lint-specs\n> ```\n", wantError: "ambiguous blockquoted code block"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newFixtureInputs(t)
+			path := filepath.Join(fixture.sourceRoot, "spec-governance", "skills", "audit-specs", "references", "audit-verdicts.md")
+			content := append(mustReadFile(t, path), []byte("\n"+test.addition)...)
+			mustWriteFile(t, path, content, 0o600)
+
+			staged, err := Stage(context.Background(), fixture.sourceRoot, fixture.artifactPath, fixture.stagingParent)
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Stage = %#v, error = %v; want error containing %q", staged, err, test.wantError)
+			}
+			assertRetainedFailedRoot(t, fixture.stagingParent, err)
+		})
+	}
+}
+
+func TestStageBoundsSpecauditReferences(t *testing.T) {
+	fixture := newFixtureInputs(t)
+	path := filepath.Join(fixture.sourceRoot, "spec-governance", "skills", "audit-specs", "references", "audit-verdicts.md")
+	content := append(mustReadFile(t, path), []byte("\n"+strings.Repeat("`specaudit` ", maxMarkdownSpecauditReferences+1)+"\n")...)
+	mustWriteFile(t, path, content, 0o600)
+
+	staged, err := Stage(context.Background(), fixture.sourceRoot, fixture.artifactPath, fixture.stagingParent)
+	wantError := fmt.Sprintf("exceeds the %d-specaudit-reference bound", maxMarkdownSpecauditReferences)
+	if err == nil || !strings.Contains(err.Error(), wantError) {
+		t.Fatalf("Stage = %#v, error = %v; want bounded-reference rejection %q", staged, err, wantError)
+	}
+	assertRetainedFailedRoot(t, fixture.stagingParent, err)
+}
+
+func TestStageRejectsMutatedPortableCommandTemplates(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		old  string
+		new  string
+		want string
+	}{
+		{name: "double backslash then injected command", old: "     -repo \"<repository-path>\" \\\n", new: "     -repo \"<repository-path>\" \\\\\n   go run ../tools/specaudit\n", want: "not an approved packaged command template"},
+		{name: "missing flag", old: "     -repository \"<owner/name>\" \\\n", new: "", want: "not an approved packaged command template"},
+		{name: "unknown flag", old: "     -repo \"<repository-path>\" \\\n", new: "     -unknown \"<repository-path>\" \\\n", want: "not an approved packaged command template"},
+		{name: "reordered flags", old: "     -repo \"<repository-path>\" \\\n     -repository \"<owner/name>\" \\\n", new: "     -repository \"<owner/name>\" \\\n     -repo \"<repository-path>\" \\\n", want: "not an approved packaged command template"},
+		{name: "parameter expansion", old: "\"<distribution-root>/bin/specaudit\" inventory \\\n", new: "\"${UNSET}<distribution-root>/bin/specaudit\" inventory \\\n", want: "dynamic word"},
+		{name: "command substitution", old: "\"<distribution-root>/bin/specaudit\" inventory \\\n", new: "\"$(printf specaudit)\" inventory \\\n", want: "dynamic word"},
+		{name: "append redirection", old: "> inventory.json\n", new: ">> inventory.json\n", want: "unapproved redirection"},
+		{name: "shell info metadata", old: "```sh\n", new: "```sh copy\n", want: "noncanonical code block info"},
+		{name: "shell info case alias", old: "```sh\n", new: "```SH\n", want: "noncanonical code block info"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newFixtureInputs(t)
+			path := filepath.Join(fixture.sourceRoot, "spec-governance", "skills", "audit-specs", "SKILL.md")
+			content := string(mustReadFile(t, path))
+			mutated := strings.Replace(content, test.old, test.new, 1)
+			if mutated == content {
+				t.Fatalf("fixture did not contain mutation target %q", test.old)
+			}
+			mustWriteFile(t, path, []byte(mutated), 0o600)
+
+			staged, err := Stage(context.Background(), fixture.sourceRoot, fixture.artifactPath, fixture.stagingParent)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Stage = %#v, error = %v; want exact command-template rejection containing %q", staged, err, test.want)
+			}
+			assertRetainedFailedRoot(t, fixture.stagingParent, err)
+		})
+	}
+}
+
+func TestStageAllowsDeclaredNonExecutableSpecauditData(t *testing.T) {
+	fixture := newFixtureInputs(t)
+	path := filepath.Join(fixture.sourceRoot, "spec-governance", "skills", "audit-specs", "references", "audit-verdicts.md")
+	addition := "\nThe logical command is `specaudit`. See https://example.test/tools/specaudit, [specaudit](https://example.test/tools/specaudit), and <https://example.test/tools/specaudit>.\n\n" +
+		"The installed child is `<distribution-root>/bin/specaudit`.\n\n" +
+		"Canonical traceability labels include `BDD Tests`, `BDD Traceability`, `BDD feature`, `Command BDD`, `Cross-surface BDD`, `Cross-surface contracts`, `Package Test Traceability`, `Related feature`, `Status BDD`, `Strict-spec linkage`, `Strictness BDD`, and `Test Traceability`.\n\n" +
+		"A full-line claim is `` - `path.feature` ``, and data outcomes include `needs product decision`, `no normative behavior changed`, `runtime_status: UNVERIFIED`, and `spec updated`.\n\n" +
+		"```json\n{\"collector\": \"specaudit inventory\"}\n```\n"
+	content := append(mustReadFile(t, path), []byte(addition)...)
+	mustWriteFile(t, path, content, 0o600)
+
+	if err := validatePortableMarkdownCommands("skills/audit-specs/references/audit-verdicts.md", content); err != nil {
+		t.Fatalf("validatePortableMarkdownCommands() = %v; want declared non-executable data accepted", err)
+	}
+}
+
+func TestStageRejectsEveryUnapprovedProseMutation(t *testing.T) {
+	for _, prose := range []string{
+		"Run make lint-specs.",
+		"Use make lint-specs.",
+		"Call make lint-specs.",
+		"This is a benign but unapproved sentence.",
+	} {
+		t.Run(prose, func(t *testing.T) {
+			fixture := newFixtureInputs(t)
+			path := filepath.Join(fixture.sourceRoot, "spec-governance", "skills", "audit-specs", "references", "audit-verdicts.md")
+			content := append(mustReadFile(t, path), []byte("\n"+prose+"\n")...)
+			mustWriteFile(t, path, content, 0o600)
+
+			staged, err := Stage(context.Background(), fixture.sourceRoot, fixture.artifactPath, fixture.stagingParent)
+			if err == nil || !strings.Contains(err.Error(), "approved content digest") {
+				t.Fatalf("Stage = %#v, error = %v; want closed approved-content rejection", staged, err)
 			}
 			assertRetainedFailedRoot(t, fixture.stagingParent, err)
 		})
@@ -440,25 +606,44 @@ func newFixtureInputs(t *testing.T) *testFixture {
 }
 
 func testSourceFiles() map[string][]byte {
-	return map[string][]byte{
-		"spec-governance/skills/audit-specs/SKILL.md": []byte("---\n" +
-			"name: audit-specs\n" +
-			"description: Audit a governed SPEC distribution.\n" +
-			"---\n" +
-			"# Audit specs\n\n" +
-			"Run `\"<distribution-root>/bin/specaudit\"`.\n\n" +
-			"Read [audit verdicts](references/audit-verdicts.md) and the [report schema](references/report-schema.md).\n"),
-		"spec-governance/skills/audit-specs/references/audit-verdicts.md": []byte("# Audit verdicts\n\nA verdict is pass or fail.\n"),
-		"spec-governance/skills/audit-specs/references/report-schema.md": []byte("# Report schema\n\n" +
-			"The executable identity is `\"<distribution-root>/bin/specaudit\"`.\n"),
-		"spec-governance/skills/write-spec/SKILL.md": []byte("---\n" +
-			"name: write-spec\n" +
-			"description: Write a governed SPEC.\n" +
-			"---\n" +
-			"# Write specs\n\n" +
-			"Read the [contract model](references/contract-model.md) and [EARS and BDD](references/ears-and-bdd.md).\n"),
-		"spec-governance/skills/write-spec/references/contract-model.md": []byte("# Contract model\n\nDefine one observable contract.\n"),
-		"spec-governance/skills/write-spec/references/ears-and-bdd.md":   []byte("# EARS and BDD\n\nUse executable scenarios.\n"),
+	files := make(map[string][]byte, len(canonicalTestSourceFiles))
+	for sourcePath, content := range canonicalTestSourceFiles {
+		files[sourcePath] = bytes.Clone(content)
+	}
+	return files
+}
+
+func mustReadCanonicalTestSourceFiles() map[string][]byte {
+	repositoryRoot := mustFindTestRepositoryRoot()
+	files := make(map[string][]byte, len(payloadLayout)-1)
+	for _, entry := range payloadLayout {
+		if entry.sourcePath == "" {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(entry.sourcePath)))
+		if err != nil {
+			panic(fmt.Sprintf("read canonical test source %q: %v", entry.sourcePath, err))
+		}
+		files[entry.sourcePath] = content
+	}
+	return files
+}
+
+func mustFindTestRepositoryRoot() string {
+	directory, err := os.Getwd()
+	if err != nil {
+		panic(fmt.Sprintf("resolve specpackage test working directory: %v", err))
+	}
+	for {
+		module, readErr := os.ReadFile(filepath.Join(directory, "go.mod"))
+		if readErr == nil && bytes.Contains(module, []byte("module github.com/vbonnet/dear-agent\n")) {
+			return directory
+		}
+		parent := filepath.Dir(directory)
+		if parent == directory {
+			panic("find dear-agent repository root from specpackage test working directory")
+		}
+		directory = parent
 	}
 }
 

@@ -23,34 +23,37 @@ claim; a runtime conclusion requires separate current evidence.
 ## Commands
 
 Resolve the authenticated distribution root for the installed package that
-supplied the skill. Invoke the bundled executable by absolute path; do not use
-the current working directory, a source checkout, or `PATH` to locate it:
+supplied the skill. The bundled executable must be invoked through the
+absolute-path template below; do not use the current working directory, a
+source checkout, or `PATH` to locate it:
 
 ```sh
 "<distribution-root>/bin/specaudit" inventory \
-  -repo <repository-path> \
-  -repository <owner/name> \
-  -revision <40-hex-sha> > inventory.json
+  -repo "<repository-path>" \
+  -repository "<owner/name>" \
+  -revision "<40-hex-sha>" > inventory.json
 
 "<distribution-root>/bin/specaudit" validate \
   -input findings.json \
   -inventory inventory.json \
-  -repo <repository-path>
+  -repo "<repository-path>"
 
 "<distribution-root>/bin/specaudit" render \
   -input findings.json \
   -inventory inventory.json \
-  -repo <repository-path> > report.html
+  -repo "<repository-path>" > report.html
 ```
 
 `-repository` is the stable repository label; it prevents clone and worktree
 directory names from changing deterministic output. Commands emit inventory or
 HTML bytes to standard output. The caller's authorized redirection selects the
-destination. Reports use `specaudit` as the stable logical command identity;
-within an installed workflow, bind that identity to the same authenticated
-`<distribution-root>/bin/specaudit` executable. Never resolve it through
-`PATH`, and do not record a host-specific distribution root in deterministic
-report content.
+destination. Generated reproduction commands POSIX-quote the repository label
+as one argument and reject an empty label, surrounding whitespace, invalid
+UTF-8, or any non-printable rune. Reports use `specaudit` as the stable logical
+command identity; within an installed workflow, bind that identity to the same
+authenticated `<distribution-root>/bin/specaudit` executable. Never resolve it
+through `PATH`, and do not record a host-specific distribution root in
+deterministic report content.
 
 ## Top-level object
 
@@ -103,7 +106,7 @@ report content.
       "object_dir": "path-sha256:canonical-object-directory-identity",
       "alternate_object_dirs": ["path-sha256:canonical-alternate-directory-identity"]
     },
-    "reproduce": ["exact read-only commands"]
+    "reproduce": ["exact read-only command templates"]
   },
   "inventory": [],
   "features": [],
