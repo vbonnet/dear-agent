@@ -53,14 +53,14 @@ func TestNeedsRetrigger(t *testing.T) {
 			name:     "empty required, zero runs falls back to stuck",
 			pr:       PR{Number: 5},
 			runs:     nil,
-			required: nil,
+			required: map[string]bool{},
 			want:     true,
 		},
 		{
 			name:     "empty required, any run is not stuck",
 			pr:       PR{Number: 6},
 			runs:     []CheckRun{{Name: "anything"}},
-			required: nil,
+			required: map[string]bool{},
 			want:     false,
 		},
 		{

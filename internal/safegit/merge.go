@@ -691,7 +691,7 @@ func discoverRequiredChecksContext(ctx context.Context, repo, branch string) (re
 
 	// --paginate --slurp makes omission impossible when more than one API page
 	// of rules applies. The parser expects one nested array per returned page.
-	rulesOut, rulesErr := runCommand(exec.CommandContext(ctx, "gh", "api", "--paginate", "--slurp",
+	rulesOut, rulesErr := runCommand(promptDisabledGHCommandContext(ctx, "api", "--paginate", "--slurp",
 		rulesBranchEndpoint(repo, branch),
 	))
 	var rulesPolicy requiredCheckPolicy
@@ -703,7 +703,7 @@ func discoverRequiredChecksContext(ctx context.Context, repo, branch string) (re
 		}
 	}
 
-	classicOut, classicErr := runCommand(exec.CommandContext(ctx, "gh", "api",
+	classicOut, classicErr := runCommand(promptDisabledGHCommandContext(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/branches/%s/protection/required_status_checks", parts[0], parts[1], url.PathEscape(branch)),
 	))
 	var classicPolicy requiredCheckPolicy

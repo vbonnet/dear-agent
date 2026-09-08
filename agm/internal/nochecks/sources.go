@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/safegit"
 )
 
 // All gh calls are hard-bounded and prompt-disabled so the scan is safe to run
@@ -56,36 +58,29 @@ func ListOpenPRs(repo string, limit int) ([]PR, error) {
 	return prs, nil
 }
 
-// FetchRequiredChecks returns the branch-protection required check names for the
-// repo's default branch (main). On any error it returns nil, which
-// NeedsRetrigger treats as "fall back to any-check-run" — conservative, never
-// over-flagging. branch is the protected branch to read (typically "main").
-func FetchRequiredChecks(repo, branch string) map[string]bool {
-	out, err := ghJSON(ghAPITimeout, []string{
-		"api", fmt.Sprintf("repos/%s/branches/%s/protection/required_status_checks", repo, branch),
-		"--jq", ".contexts[]",
-	})
+// FetchRequiredChecks returns the complete effective required-check context set
+// for branch through SafeGit's shared layered-policy owner. A non-nil empty set
+// means the policy is authoritatively empty; every incomplete or unsupported
+// policy returns an error and no partial set. The whole two-source read shares
+// one supervisor-owned deadline.
+func FetchRequiredChecks(ctx context.Context, repo, branch string) (map[string]bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, ghAPITimeout)
+	defer cancel()
+
+	required, err := safegit.RequiredCheckNamesForBranch(ctx, repo, branch)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("reading effective required checks for %s branch %s: %w", repo, branch, err)
 	}
-	set := map[string]bool{}
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if name := strings.TrimSpace(line); name != "" {
-			set[name] = true
-		}
-	}
-	if len(set) == 0 {
-		return nil
-	}
-	return set
+	return required, nil
 }
 
-// CheckRunNamesForRef returns the check-runs reported against sha in repo. An
-// empty slice (the stuck case) is a valid, non-error result; a non-nil error
-// means the read itself failed. It satisfies CheckRunsFunc once bound to a repo.
+// CheckRunNamesForRef returns every page of check-runs reported against sha in
+// repo. An empty slice (the stuck case) is a valid, non-error result; a non-nil
+// error means the complete read failed. It satisfies CheckRunsFunc once bound
+// to a repo.
 func CheckRunNamesForRef(repo, sha string) ([]CheckRun, error) {
 	out, err := ghJSON(ghAPITimeout, []string{
-		"api", fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, sha),
+		"api", fmt.Sprintf("repos/%s/commits/%s/check-runs?per_page=100", repo, sha), "--paginate",
 		"--jq", ".check_runs[].name",
 	})
 	if err != nil {

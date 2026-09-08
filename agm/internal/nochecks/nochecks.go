@@ -54,10 +54,11 @@ type StuckPR struct {
 // non-empty, a PR is stuck only when NONE of the required checks has a run on
 // the head SHA: a partial set (some required runs present, others not yet) means
 // CI did fire and is merely still in progress, so the PR is left alone. When
-// required is empty — the protection API was unreadable, or the branch is
-// unprotected — the predicate falls back to "any check-run at all": zero runs
-// means stuck. This fallback is conservative in the safe direction; it can only
-// ever flag a PR that genuinely has no checks.
+// required is empty because the complete effective policy is authoritatively
+// known to require no checks, the predicate falls back to "any check-run at
+// all": zero runs means stuck. Incomplete policy never reaches this predicate.
+// This fallback is conservative in the safe direction; it can only ever flag a
+// PR that genuinely has no checks.
 //
 // Draft PRs are never flagged: CI legitimately may not run on a draft, so a
 // re-trigger would be noise.
