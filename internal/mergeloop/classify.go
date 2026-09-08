@@ -327,3 +327,18 @@ func isPermanentProjectionError(errStr string) bool {
 		strings.Contains(lower, "reconciling") ||
 		strings.Contains(lower, "normalizing")
 }
+
+// DefaultCap is the backpressure ceiling: a tick that sees more open PRs than
+// this does nothing at all.
+//
+// This constant only NAMES the threshold that was already hardcoded at two
+// call sites; it deliberately does not change its value. Raising the ceiling
+// is an operational change with its own blast radius (it multiplies the work
+// each tick accepts), so it belongs in its own reviewed change rather than
+// riding along with a severity fix. Operators who need headroom today can
+// pass --cap without waiting for that.
+//
+// Backpressure exists to stop the loop thrashing a queue it cannot drain, not
+// to switch it off. When the open-PR count approaches this number, raise the
+// ceiling rather than let it silently bind into a no-op tick.
+const DefaultCap = 50

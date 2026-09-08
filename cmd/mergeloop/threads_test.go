@@ -1,7 +1,9 @@
 package main
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestIsKnownBotAuthor(t *testing.T) {
@@ -80,127 +82,330 @@ func TestSplitOwnerRepo(t *testing.T) {
 	}
 }
 
-func TestClassifyCommentSeverity(t *testing.T) {
-	cases := []struct {
-		name     string
-		body     string
-		want     threadSeverity
-		blocking bool
+// ---- ce-lr7j regression tests ----
+//
+// Bodies are real markup copied from the PRs in the incident: #989 (Codex, four
+// P1s auto-resolved into main) and #945 (Gemini).
+
+const (
+	tstCodexP1 = "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  " +
+		"Require delivery evidence before closing merged work**\n\nWhen a matching PR has merged but " +
+		"deployment verification is still pending, this branch closes the bead using only the merge timestamp."
+	tstCodexP2 = "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  " +
+		"Fail closed when reconciliation is unavailable**\n\nIf this call transiently fails, the code skips it."
+	tstGeminiHigh   = "![high](https://www.gstatic.com/codereviewagent/high-priority.svg)\n\nThis will not build on Windows."
+	tstGeminiMedium = "![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg)\n\nAdd a precondition here."
+	tstUnparseable  = "I think this could be structured a little differently, but up to you."
+)
+
+func botComment(body string) threadComment {
+	return threadComment{author: "chatgpt-codex-connector", body: body, typename: "Bot"}
+}
+
+func TestPartitionResolvable(t *testing.T) {
+	tests := []struct {
+		name         string
+		thread       reviewThread
+		wantResolved int
+		wantWithheld int
 	}{
-		// No badge → advisory by default; existing auto-resolve behaviour preserved.
-		{"empty body", "", severityNone, false},
-		{"plain suggestion no badge", "Consider extracting this into a helper.", severityNone, false},
-
-		// Explicit advisory markers.
-		{"nit marker", "**nit:** missing newline at end of file", severityAdvisory, false},
-		{"P3 badge", "[P3] this could be cleaner", severityAdvisory, false},
-		{"P4 badge", "[P4] minor style issue", severityAdvisory, false},
-		{"P5 badge", "[P5] cosmetic", severityAdvisory, false},
-		{"advisory word", "advisory: prefer sync.Once here", severityAdvisory, false},
-		{"info word", "info: this pattern is deprecated", severityAdvisory, false},
-		{"note word", "note: this changes external API", severityAdvisory, false},
-		{"low word", "severity: low \u2014 consider renaming", severityAdvisory, false},
-		{"suggestion word", "suggestion: extract constant", severityAdvisory, false},
-		{"style word", "style: inconsistent casing", severityAdvisory, false},
-		{"cosmetic word", "cosmetic change only", severityAdvisory, false},
-
-		// Blocking markers.
-		{"P0 badge uppercase", "[P0] data loss on shutdown", severityP0, true},
-		{"P0 inline", "This is a P0 regression.", severityP0, true},
-		{"P1 badge", "**[P1]** nil pointer dereference on empty slice", severityP1, true},
-		{"P1 inline", "P1: this breaks the auth flow", severityP1, true},
-		{"P2 badge", "[P2] race condition under load", severityP2, true},
-		{"P2 Codex style", "**Severity: P2** \u2014 mutex not held across goroutine", severityP2, true},
-		{"critical word", "critical: SQL injection via unescaped input", severityP2, true},
-		{"blocker word", "blocker: this must be fixed before merge", severityP2, true},
-		{"security word", "security: token exposed in logs", severityP2, true},
-		{"vuln word", "vuln: use of deprecated crypto primitive", severityP2, true},
-
-		// Both P1 and advisory in body: P1 wins (max severity).
-		{"p1 overrides nit", "nit: also fix style. P1: but this is a real bug.", severityP1, true},
-
-		// Advisory badge overrides incidental blocking keyword in the same body.
-		// "[P3] security option" must not fire as P2 just because "security" is
-		// a blocking keyword: the explicit badge is authoritative (ce-lr7j Codex P1).
-		{"advisory badge beats security keyword", "[P3] Rename the security option", severityAdvisory, false},
-		{"advisory badge beats critical keyword", "[P4] critical path refactor (style)", severityAdvisory, false},
-		// Blocking badge wins over advisory badge when both are present.
-		{"p1 badge beats advisory badge", "P1: real bug. Also [P3] nit.", severityP1, true},
-		// Word-boundary prevents false positives: "HEAP0" must not trigger P0
-		// even when a blocking keyword also appears (Gemini high finding).
-		{"HEAP0 substring not P0", "HEAP0 critical regression", severityP2, true},
-		// temp0 does not contain P0; critical keyword dominates (Gemini suggestion).
-		{"temp0 no P0 false positive", "critical: check temp0", severityP2, true},
-		// P10 must not be confused with P1 (no word boundary after the 1 in "P10").
-		// reSeverityMarker uses \bP[0-9]\b, so "P10" is not detected as a badge at all.
-		{"P10 not P1", "P10: some badge", severityNone, false},
-
-		// Fail-closed: severity-like pattern present but not in vocabulary.
-		// P6/P7/P8/P9 are in the severity-marker regex but not in blocking or safe lists.
-		{"unknown P6", "P6: unrecognised badge", severityUnknown, true},
-		{"unknown P9", "[P9] some future severity", severityUnknown, true},
-		// Unknown badge (P6) must not be overridden by a safe keyword in the body
-		// (Codex P2: check unknown badge before safe-keyword fallback).
-		{"unknown P6 with suggestion not advisory", "P6 suggestion: revise this", severityUnknown, true},
-
-		// Advisory badge must be a structured label, not a bare prose mention.
-		// "only P3 if" in a blocking comment must not downgrade severity
-		// (Codex P1: anchor advisory badges to bracket/image form).
-		{"P3 in prose does not downgrade blocking", "Critical: this corrupts data; it would only be P3 if validation had run", severityP2, true},
-
-		// Textual high-severity labels from bots that don't use Px badges.
-		// Gemini image format: ![high](.../gstatic.com/...).
-		{"Gemini high image badge", "![high](https://www.gstatic.com/codereviewagent/high-priority.svg) SQL injection", severityP2, true},
-		// Generic text label format.
-		{"text Severity: high label", "Severity: high \u2014 potential data loss", severityP2, true},
-		{"text Priority: high label", "Priority: high fix needed", severityP2, true},
+		{
+			// The exact #989 case. This must never resolve again.
+			name:         "P1 bot thread is withheld",
+			thread:       reviewThread{id: "t1", comments: []threadComment{botComment(tstCodexP1)}},
+			wantResolved: 0, wantWithheld: 1,
+		},
+		{
+			name:         "P2 bot thread resolves",
+			thread:       reviewThread{id: "t2", comments: []threadComment{botComment(tstCodexP2)}},
+			wantResolved: 1, wantWithheld: 0,
+		},
+		{
+			name:         "gemini high is withheld",
+			thread:       reviewThread{id: "t3", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiHigh, typename: "Bot"}}},
+			wantResolved: 0, wantWithheld: 1,
+		},
+		{
+			name:         "gemini medium resolves",
+			thread:       reviewThread{id: "t4", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiMedium, typename: "Bot"}}},
+			wantResolved: 1, wantWithheld: 0,
+		},
+		{
+			// Fail closed: an unrecognised marker must not be resolved.
+			name:         "unparseable severity is withheld",
+			thread:       reviewThread{id: "t5", comments: []threadComment{botComment(tstUnparseable)}},
+			wantResolved: 0, wantWithheld: 1,
+		},
+		{
+			// MLC-05 preserved: human threads are neither resolved nor counted.
+			name: "human-authored thread is never resolved",
+			thread: reviewThread{id: "t6", comments: []threadComment{
+				{author: "vbonnet", body: tstCodexP2, typename: "User"},
+			}},
+			wantResolved: 0, wantWithheld: 0,
+		},
+		{
+			// MLC-05 preserved: a human reply anywhere protects the thread.
+			name: "bot thread with a human reply is never resolved",
+			thread: reviewThread{id: "t7", comments: []threadComment{
+				botComment(tstCodexP2), {author: "vbonnet", body: "disagree, keep it", typename: "User"},
+			}},
+			wantResolved: 0, wantWithheld: 0,
+		},
+		{
+			name: "already-resolved thread is skipped",
+			thread: reviewThread{id: "t8", isResolved: true,
+				comments: []threadComment{botComment(tstCodexP2)}},
+			wantResolved: 0, wantWithheld: 0,
+		},
+		{
+			name: "truncated thread is never resolved",
+			thread: reviewThread{id: "t9", truncated: true,
+				comments: []threadComment{botComment(tstCodexP2)}},
+			wantResolved: 0, wantWithheld: 0,
+		},
+		{
+			// A P2 follow-up must not downgrade a P1 opener.
+			name: "mixed P1 and P2 in one thread is withheld",
+			thread: reviewThread{id: "t10", comments: []threadComment{
+				botComment(tstCodexP1), botComment(tstCodexP2),
+			}},
+			wantResolved: 0, wantWithheld: 1,
+		},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := classifyCommentSeverity(c.body)
-			if got != c.want {
-				t.Errorf("classifyCommentSeverity(%q) = %v, want %v", c.body, got, c.want)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resolvable, withheld := partitionResolvable([]reviewThread{tc.thread})
+			if len(resolvable) != tc.wantResolved {
+				t.Errorf("resolvable = %d, want %d", len(resolvable), tc.wantResolved)
 			}
-			if got.blocking() != c.blocking {
-				t.Errorf("classifyCommentSeverity(%q).blocking() = %v, want %v", c.body, got.blocking(), c.blocking)
+			if withheld != tc.wantWithheld {
+				t.Errorf("withheld = %d, want %d", withheld, tc.wantWithheld)
 			}
 		})
 	}
 }
 
-func TestMaxSeverity(t *testing.T) {
-	cases := []struct {
+func TestBlockingFindingsIn(t *testing.T) {
+	tests := []struct {
 		name   string
-		bodies []string
-		want   threadSeverity
+		thread reviewThread
+		want   int
 	}{
-		{"empty", nil, severityNone},
-		{"all advisory", []string{"nit: style", "suggestion: rename"}, severityAdvisory},
-		{"mixed P1 and nit", []string{"nit: formatting", "P1: data loss"}, severityP1},
-		{"P2 only", []string{"[P2] race condition"}, severityP2},
-		{"P0 wins over P1", []string{"P1: real bug", "P0: data corruption"}, severityP0},
+		{
+			// The core of the independent gate: a P1 that something already
+			// resolved is still reported, because GitHub's own gate is now
+			// blind to it. This is what catches a resolver bug.
+			name: "resolved P1 still blocks the merge",
+			thread: reviewThread{id: "b1", isResolved: true,
+				comments: []threadComment{botComment(tstCodexP1)}},
+			want: 1,
+		},
+		{
+			name:   "unresolved P1 blocks",
+			thread: reviewThread{id: "b2", comments: []threadComment{botComment(tstCodexP1)}},
+			want:   1,
+		},
+		{
+			name:   "gemini high blocks",
+			thread: reviewThread{id: "b3", comments: []threadComment{{author: "gemini-code-assist", body: tstGeminiHigh, typename: "Bot"}}},
+			want:   1,
+		},
+		{
+			name:   "P2 does not block",
+			thread: reviewThread{id: "b4", comments: []threadComment{botComment(tstCodexP2)}},
+			want:   0,
+		},
+		{
+			// Unknown severity is handled by GitHub's gate while the thread is
+			// open. Blocking here too would deadlock on ordinary bot prose.
+			name:   "unparseable bot prose does not block",
+			thread: reviewThread{id: "b5", comments: []threadComment{botComment(tstUnparseable)}},
+			want:   0,
+		},
+		{
+			// A person engaged with the finding. Not this gate's call to
+			// override them.
+			name: "P1 with a human reply is treated as addressed",
+			thread: reviewThread{id: "b6", comments: []threadComment{
+				botComment(tstCodexP1), {author: "vbonnet", body: "fixed in a follow-up", typename: "User"},
+			}},
+			want: 0,
+		},
+		{
+			name:   "human-only thread does not block",
+			thread: reviewThread{id: "b7", comments: []threadComment{{author: "vbonnet", body: tstCodexP1, typename: "User"}}},
+			want:   0,
+		},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := maxSeverity(c.bodies); got != c.want {
-				t.Errorf("maxSeverity(%v) = %v, want %v", c.bodies, got, c.want)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := blockingFindingsIn([]reviewThread{tc.thread})
+			if len(got) != tc.want {
+				t.Fatalf("blockingFindingsIn() = %d findings, want %d (%+v)", len(got), tc.want, got)
 			}
 		})
 	}
 }
 
-func TestThreadSeverityString(t *testing.T) {
-	cases := map[threadSeverity]string{
-		severityNone:     "none",
-		severityAdvisory: "advisory",
-		severityP2:       "P2",
-		severityP1:       "P1",
-		severityP0:       "P0",
-		severityUnknown:  "unknown",
+// TestBlockingFindingCarriesExcerpt pins that the audit record says WHAT is
+// blocking. "1 finding blocks this merge" with no detail is the kind of opaque
+// record that made the original incident hard to see.
+func TestBlockingFindingCarriesExcerpt(t *testing.T) {
+	got := blockingFindingsIn([]reviewThread{
+		{id: "b8", comments: []threadComment{botComment(tstCodexP1)}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("want 1 finding, got %d", len(got))
 	}
-	for s, want := range cases {
-		if got := s.String(); got != want {
-			t.Errorf("threadSeverity(%d).String() = %q, want %q", int(s), got, want)
+	if got[0].Excerpt == "" || got[0].Excerpt == "(no excerpt)" {
+		t.Errorf("Excerpt = %q, want the finding title", got[0].Excerpt)
+	}
+	if !strings.Contains(got[0].Excerpt, "Require delivery evidence") {
+		t.Errorf("Excerpt = %q, want it to carry the finding title", got[0].Excerpt)
+	}
+	if got[0].Author != "chatgpt-codex-connector" {
+		t.Errorf("Author = %q", got[0].Author)
+	}
+}
+
+// TestFullIncidentScenario replays PR #989's real thread mix end to end.
+func TestFullIncidentScenario(t *testing.T) {
+	threads := []reviewThread{
+		{id: "p1a", comments: []threadComment{botComment(tstCodexP1)}},
+		{id: "p1b", comments: []threadComment{botComment(tstCodexP1)}},
+		{id: "p1c", comments: []threadComment{botComment(tstCodexP1)}},
+		{id: "p1d", comments: []threadComment{botComment(tstCodexP1)}},
+		{id: "p2a", comments: []threadComment{botComment(tstCodexP2)}},
+	}
+	resolvable, withheld := partitionResolvable(threads)
+	if len(resolvable) != 1 || resolvable[0].id != "p2a" {
+		t.Errorf("resolvable = %+v, want only the P2 thread", resolvable)
+	}
+	if withheld != 4 {
+		t.Errorf("withheld = %d, want 4 (the P1s)", withheld)
+	}
+	if n := len(blockingFindingsIn(threads)); n != 4 {
+		t.Errorf("blocking findings = %d, want 4: the merge must be refused", n)
+	}
+}
+
+// Bot findings routinely contain non-ASCII prose. Truncating the excerpt on a
+// byte index can split a multi-byte rune, so the audit record would carry
+// invalid UTF-8 and render as a replacement character.
+func TestExcerptFindingTruncatesOnRuneBoundaries(t *testing.T) {
+	// One ASCII byte before 3-byte runes puts byte offset 120 inside a rune,
+	// so a byte slice there produces invalid UTF-8.
+	title := "x" + strings.Repeat("→", 200)
+	body := "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)\n\n**" + title + "**\n"
+
+	got := excerptFinding([]threadComment{{body: body}})
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("excerptFinding returned invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("excerptFinding did not truncate a 200-rune title: %q", got)
+	}
+	if n := utf8.RuneCountInString(strings.TrimSuffix(got, "...")); n != 120 {
+		t.Errorf("excerptFinding truncated to %d runes, want 120", n)
+	}
+}
+
+// A short non-ASCII finding is returned whole.
+func TestExcerptFindingKeepsShortNonASCIITitle(t *testing.T) {
+	title := "Réfuser les chemins non canoniques"
+	body := "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)\n\n**" + title + "**\n"
+
+	if got := excerptFinding([]threadComment{{body: body}}); got != title {
+		t.Errorf("excerptFinding = %q, want %q", got, title)
+	}
+}
+
+// TestIsHumanActor pins the ce-lr7j review finding that "human" was inferred
+// from absence in a two-login bot allowlist, so any non-allowlisted automation
+// account (dependabot[bot], a GitHub Actions bot, a newly introduced review
+// bot) silently cleared a P1 finding from the merge gate.
+func TestIsHumanActor(t *testing.T) {
+	tests := []struct {
+		name     string
+		typename string
+		login    string
+		want     bool
+	}{
+		{"real person", "User", "vbonnet", true},
+		{"allowlisted bot", "Bot", "chatgpt-codex-connector", false},
+		{"non-allowlisted bot is not human", "Bot", "dependabot[bot]", false},
+		{"github actions bot is not human", "Bot", "github-actions[bot]", false},
+		{"unknown future review bot is not human", "Bot", "some-new-review-bot", false},
+		{"organization actor is not human", "Organization", "vbonnet-org", false},
+		{"missing actor type fails closed", "", "vbonnet", false},
+		{"bot login claiming User still fails", "User", "chatgpt-codex-connector", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isHumanActor(tt.typename, tt.login); got != tt.want {
+				t.Errorf("isHumanActor(%q, %q) = %v, want %v", tt.typename, tt.login, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBlockingFindingsInBotReplyDoesNotClearFinding is the end-to-end shape of
+// the same defect: a bot reply on a P1 thread must not make it look addressed.
+func TestBlockingFindingsInBotReplyDoesNotClearFinding(t *testing.T) {
+	threads := []reviewThread{{
+		id: "x1",
+		comments: []threadComment{
+			botComment(tstCodexP1),
+			{author: "dependabot[bot]", body: "Bumped the dep.", typename: "Bot"},
+		},
+	}}
+	if got := blockingFindingsIn(threads); len(got) != 1 {
+		t.Fatalf("blockingFindingsIn() = %d findings, want 1 (a bot reply must not clear a P1)", len(got))
+	}
+}
+
+// TestBlockingFindingsInResolvedThreadsFailClosed pins the second ce-lr7j
+// review round: once a thread is RESOLVED, GitHub's conversation-resolution
+// gate has nothing left to hold, so this gate is the last reader. An
+// unreadable or unrecognised resolved thread must refuse the merge.
+func TestBlockingFindingsInResolvedThreadsFailClosed(t *testing.T) {
+	t.Run("resolved unknown severity blocks", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r1", isResolved: true,
+			comments: []threadComment{botComment(tstUnparseable)},
+		}}
+		if got := blockingFindingsIn(threads); len(got) != 1 {
+			t.Fatalf("got %d findings, want 1 (resolved unknown must block)", len(got))
 		}
-	}
+	})
+	t.Run("unresolved unknown severity does not deadlock", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r2", isResolved: false,
+			comments: []threadComment{botComment(tstUnparseable)},
+		}}
+		if got := blockingFindingsIn(threads); len(got) != 0 {
+			t.Fatalf("got %d findings, want 0 (GitHub already holds unresolved threads)", len(got))
+		}
+	})
+	t.Run("resolved truncated thread blocks even if visible page is advisory", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r3", isResolved: true, truncated: true,
+			comments: []threadComment{botComment(tstCodexP2)},
+		}}
+		got := blockingFindingsIn(threads)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1 (truncated resolved thread must refuse)", len(got))
+		}
+	})
+	t.Run("resolved advisory thread still merges", func(t *testing.T) {
+		threads := []reviewThread{{
+			id: "r4", isResolved: true,
+			comments: []threadComment{botComment(tstCodexP2)},
+		}}
+		if got := blockingFindingsIn(threads); len(got) != 0 {
+			t.Fatalf("got %d findings, want 0", len(got))
+		}
+	})
 }
