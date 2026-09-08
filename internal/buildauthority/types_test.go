@@ -2,11 +2,47 @@ package buildauthority
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
+
+func TestCauseOrderMatchesNormativeContract(t *testing.T) {
+	t.Parallel()
+
+	want := [...]CauseCode{
+		CauseInvalidRequest,
+		CauseNotFound,
+		CausePermission,
+		CauseMalformed,
+		CauseUnsupported,
+		CauseUnstable,
+		CauseLimit,
+		CauseCanceled,
+		CauseDeadline,
+		CauseChildStart,
+		CauseChildExit,
+		CauseChildTerminate,
+		CauseChildWait,
+		CauseChildDrain,
+		CauseChildSurvivor,
+		CauseChildProbe,
+		CauseIdentity,
+		CauseDescriptorClose,
+		CauseCleanup,
+		CauseInternalInvariant,
+	}
+	if got := causeOrder(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("causeOrder = %#v, want %#v", got, want)
+	}
+	first := causeOrder()
+	first[0] = CauseInternalInvariant
+	if got := causeOrder(); got[0] != CauseInvalidRequest {
+		t.Fatalf("causeOrder shares mutable package state: %#v", got)
+	}
+}
 
 func TestRefusalReportIsDeepCopiedAndRecoveryIsNotRendered(t *testing.T) {
 	t.Parallel()
@@ -43,7 +79,7 @@ func TestRefusalReportIsDeepCopiedAndRecoveryIsNotRendered(t *testing.T) {
 				Mode:       0o40700,
 				Filesystem: [2]int32{3, 4},
 			},
-			TaskRoot: FileIdentity{
+			TaskRoot: &FileIdentity{
 				Device:     1,
 				Inode:      5,
 				UID:        501,
@@ -73,6 +109,7 @@ func TestRefusalReportIsDeepCopiedAndRecoveryIsNotRendered(t *testing.T) {
 	}
 	first.Primary.Causes[0] = CauseInternalInvariant
 	first.Recovery.TaskPath = "mutated"
+	first.Recovery.TaskRoot.Inode = 99
 	second := refusal.Report()
 	if got := second.Primary.Causes; len(got) != 2 || got[0] != CauseCanceled || got[1] != CauseChildExit {
 		t.Fatalf("Report causes were aliased or noncanonical: %#v", got)
@@ -80,24 +117,86 @@ func TestRefusalReportIsDeepCopiedAndRecoveryIsNotRendered(t *testing.T) {
 	if got := second.Recovery.TaskPath; got != "/private/state/.sandbox-gc-build-secret" {
 		t.Fatalf("Report recovery was aliased: %q", got)
 	}
+	if got := second.Recovery.TaskRoot.Inode; got != 5 {
+		t.Fatalf("Report task-root identity was aliased: %d", got)
+	}
+}
+
+func TestRefusalPreservesUnobservedTaskRootRecovery(t *testing.T) {
+	t.Parallel()
+
+	err := newRefusal(FailureReport{
+		Cleanup: &FailureRecord{
+			Phase:     PhaseClose,
+			Operation: OperationRemove,
+			Causes:    []CauseCode{CauseIdentity},
+		},
+		Recovery: &RecoveryInfo{
+			TaskPath:  "/private/state/.sandbox-gc-build-unobserved",
+			StateRoot: FileIdentity{Device: 1, Inode: 2},
+		},
+	})
+
+	first := err.Report()
+	if first.Recovery == nil || first.Recovery.TaskRoot != nil {
+		t.Fatalf("Recovery = %#v, want unobserved task-root identity", first.Recovery)
+	}
+	first.Recovery.TaskPath = "mutated"
+	second := err.Report()
+	if second.Recovery == nil || second.Recovery.TaskRoot != nil ||
+		second.Recovery.TaskPath != "/private/state/.sandbox-gc-build-unobserved" {
+		t.Fatalf("second Recovery = %#v", second.Recovery)
+	}
+	if strings.Contains(err.Error(), "unobserved") {
+		t.Fatalf("Error exposed Recovery: %q", err)
+	}
 }
 
 func TestRefusalRendersMissingExitStatusAsNone(t *testing.T) {
 	t.Parallel()
 
 	err := newRefusal(FailureReport{
-		Primary: &FailureRecord{
-			Phase:     PhaseAuthority,
-			Operation: OperationProbe,
-			Causes:    []CauseCode{CauseChildStart},
+		Cleanup: &FailureRecord{
+			Phase:     PhaseClose,
+			Operation: OperationQuiesce,
+			Causes:    []CauseCode{CauseChildWait},
 			Child: &ChildDiagnostic{
 				DiagnosticSHA256: Digest{},
 			},
 		},
 	})
-	const want = "buildauthority: primary=authority/probe/child-start child(exit=none,bytes=0,truncated=false,sha256=0000000000000000000000000000000000000000000000000000000000000000)"
+	const want = "buildauthority: cleanup=close/quiesce/child-wait child(exit=none,bytes=0,truncated=false,sha256=0000000000000000000000000000000000000000000000000000000000000000)"
 	if got := err.Error(); got != want {
 		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestRefusalKeepsOnlyEarliestChildDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	err := newRefusal(FailureReport{
+		Primary: &FailureRecord{
+			Phase:     PhaseBuildAGM,
+			Operation: OperationExecute,
+			Causes:    []CauseCode{CauseChildExit},
+			Child:     &ChildDiagnostic{ExitStatusObserved: true, ExitStatus: 2},
+		},
+		Cleanup: &FailureRecord{
+			Phase:     PhaseClose,
+			Operation: OperationQuiesce,
+			Causes:    []CauseCode{CauseChildProbe},
+			Child:     &ChildDiagnostic{DiagnosticBytes: 99},
+		},
+	})
+	report := err.Report()
+	if report.Primary == nil || report.Primary.Child == nil || report.Primary.Child.ExitStatus != 2 {
+		t.Fatalf("Primary Child = %#v, want earliest diagnostic", report.Primary)
+	}
+	if report.Cleanup == nil || report.Cleanup.Child != nil {
+		t.Fatalf("Cleanup Child = %#v, want nil", report.Cleanup)
+	}
+	if got := report.Primary.Causes; len(got) != 2 || got[0] != CauseChildExit || got[1] != CauseInternalInvariant {
+		t.Fatalf("Primary causes = %#v, want child-exit plus invariant", got)
 	}
 }
 
