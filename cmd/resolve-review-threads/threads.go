@@ -649,7 +649,7 @@ func reopenOrFail(
 	if uErr == nil {
 		return nil
 	}
-	if _, unverified := errors.AsType[*unverifiedProviderStateError](uErr); unverified {
+	if matchesErrorType[*unverifiedProviderStateError](uErr) {
 		return &unverifiedProviderStateError{msg: fmt.Sprintf(
 			"%s, and the automatic reopen outcome could not be verified: %v",
 			reason,
@@ -739,7 +739,15 @@ func isAccessDenied(err error) bool {
 	if err == nil {
 		return false
 	}
-	_, ok := errors.AsType[*providerAccessDeniedError](err)
+	return matchesErrorType[*providerAccessDeniedError](err)
+}
+
+// matchesErrorType consumes the typed match even when callers only need the
+// boolean. The repository's pinned errcheck version treats a blank first
+// errors.AsType result as an unchecked error.
+func matchesErrorType[T error](err error) bool {
+	matched, ok := errors.AsType[T](err)
+	_ = matched
 	return ok
 }
 

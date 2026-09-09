@@ -390,7 +390,7 @@ func replyResolutionEvidenceFailure(
 			prefix, err, threadID, guidance.answerKind, guidance.answer), true
 	}
 
-	if _, ok := errors.AsType[*supersededEvidenceError](err); ok {
+	if matchesErrorType[*supersededEvidenceError](err) {
 		prefix := "the evidence changed and the thread now requires a new answer"
 		if guidance.replyWasPosted {
 			prefix = "your reply is posted, but a newer comment is confirmed and it does not answer that comment"
@@ -399,23 +399,23 @@ func replyResolutionEvidenceFailure(
 			prefix, err, guidance.answerKind, guidance.answer), true
 	}
 
-	if _, ok := errors.AsType[*unverifiableResolutionError](err); ok {
+	if matchesErrorType[*unverifiableResolutionError](err) {
 		return fmt.Sprintf("the resolution response did not confirm its evidence anchor, so the automatic reopen restored a safe retry state:\n%v\n"+
 			"no newer comment was confirmed; do not revise the reply source. Use this unchanged-operation lifecycle:\n%s",
 			err, guidance.unchanged), true
 	}
 
-	if _, ok := errors.AsType[*unavailableAnswerEvidenceError](err); ok {
+	if matchesErrorType[*unavailableAnswerEvidenceError](err) {
 		return fmt.Sprintf("the thread's author evidence is insufficient to prove an independent answer; another reply would not repair that evidence:\n%v\n%s",
 			err, guidance.inspect), true
 	}
 
-	if _, ok := errors.AsType[*unverifiedProviderStateError](err); ok {
+	if matchesErrorType[*unverifiedProviderStateError](err) {
 		return fmt.Sprintf("provider state could not be verified, so no retry or cleanup is yet safe:\n%v\n%s",
 			err, guidance.inspect), true
 	}
 
-	if _, ok := errors.AsType[*unansweredError](err); ok {
+	if matchesErrorType[*unansweredError](err) {
 		if guidance.replyWasPosted {
 			return fmt.Sprintf("the posted reply is still last, but the thread is not provably answered:\n%v\n%s",
 				err, guidance.inspect), true
