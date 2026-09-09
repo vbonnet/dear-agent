@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -70,10 +71,16 @@ func TestEnsurePrivateContinuationDirectoryRetriesEveryParentSync(t *testing.T) 
 	}
 }
 
-func TestExplicitXDGDirectoryPlanRetriesCreatedAncestorSync(t *testing.T) {
+func TestExplicitXDGDirectoryPlanSyncsOnlyManagedDescendants(t *testing.T) {
 	base := t.TempDir()
-	createdAncestor := filepath.Join(base, "created-ancestor")
-	stateRoot := filepath.Join(createdAncestor, "state")
+	externalAncestor := filepath.Join(base, "external-ancestor")
+	if err := os.Mkdir(externalAncestor, 0o700); err != nil {
+		t.Fatalf("create external ancestor: %v", err)
+	}
+	stateRoot := filepath.Join(externalAncestor, "state")
+	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+		t.Fatalf("create explicit XDG state root: %v", err)
+	}
 	t.Setenv("XDG_STATE_HOME", stateRoot)
 	target := filepath.Join(stateRoot, "dear-agent", "resolve-review-threads")
 
@@ -81,48 +88,48 @@ func TestExplicitXDGDirectoryPlanRetriesCreatedAncestorSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build explicit XDG directory plan: %v", err)
 	}
-	volume := filepath.VolumeName(target)
-	wantAnchor := volume + string(filepath.Separator)
-	if volume == "" {
-		wantAnchor = string(filepath.Separator)
-	}
-	if plan.anchor != wantAnchor {
-		t.Fatalf("explicit XDG durability anchor = %q, want %q", plan.anchor, wantAnchor)
+	if plan.anchor != stateRoot {
+		t.Fatalf("explicit XDG durability anchor = %q, want %q", plan.anchor, stateRoot)
 	}
 
-	failedSync := errors.New("injected XDG ancestor sync failure")
-	failParent := filepath.Dir(createdAncestor)
-	failed := false
+	expectedParents := []string{stateRoot, filepath.Join(stateRoot, "dear-agent")}
+	var syncCalls []string
 	err = ensurePrivateContinuationDirectoryWithSync(plan.anchor, plan.target, func(path string) error {
-		if path == failParent && !failed {
-			failed = true
-			return failedSync
+		if path == externalAncestor || path == base || path == filepath.Dir(base) {
+			return fmt.Errorf("synchronized above explicit XDG root: %s", path)
 		}
-		return nil
-	})
-	if !errors.Is(err, failedSync) {
-		t.Fatalf("first explicit XDG preflight error = %v, want injected sync failure", err)
-	}
-	if _, statErr := os.Lstat(createdAncestor); statErr != nil {
-		t.Fatalf("created XDG ancestor was not left for retry: %v", statErr)
-	}
-
-	plan, err = buildContinuationReceiptDirectoryPlan(target)
-	if err != nil {
-		t.Fatalf("rebuild explicit XDG directory plan: %v", err)
-	}
-	retriedFailedParent := false
-	err = ensurePrivateContinuationDirectoryWithSync(plan.anchor, plan.target, func(path string) error {
-		if path == failParent {
-			retriedFailedParent = true
-		}
+		syncCalls = append(syncCalls, path)
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("retry explicit XDG preflight: %v", err)
+		t.Fatalf("prepare explicit XDG state: %v", err)
 	}
-	if !retriedFailedParent {
-		t.Fatalf("retry did not re-sync parent %s for the already-created XDG ancestor", failParent)
+	if !reflect.DeepEqual(syncCalls, expectedParents) {
+		t.Fatalf("explicit XDG parent syncs = %q, want %q", syncCalls, expectedParents)
+	}
+}
+
+func TestExplicitXDGDirectoryPlanRequiresExistingBoundary(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "missing-state-root")
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	target := filepath.Join(stateRoot, "dear-agent", "resolve-review-threads")
+
+	plan, err := buildContinuationReceiptDirectoryPlan(target)
+	if err != nil {
+		t.Fatalf("build explicit XDG directory plan: %v", err)
+	}
+	err = ensurePrivateContinuationDirectoryWithSync(plan.anchor, plan.target, func(string) error {
+		t.Fatal("missing explicit XDG boundary attempted a directory sync")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("missing explicit XDG state root was created by the command")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing explicit XDG state root error = %v, want os.ErrNotExist", err)
+	}
+	if _, statErr := os.Lstat(stateRoot); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("missing explicit XDG state root was mutated: %v", statErr)
 	}
 }
 

@@ -78,6 +78,10 @@ Continuation receipts are authenticated by a long-lived local key under the
 selected XDG state home and are bound to the effective GH_HOST. Preserve the
 exact receipt, body source, host, state home, and key until the thread reaches a
 confirmed terminal state; regenerating the key invalidates outstanding receipts.
+An explicitly selected XDG_STATE_HOME must already exist. The command
+synchronizes only command-managed descendant entries with their parents; it
+never synchronizes the selected state root's own entry or walks another
+caller-owned ancestor.
 Continuation issuance and replay currently require Unix. Non-Unix platforms fail
 before reply mutation. For continue-resolve, failure precedes both
 body-source and provider access because private durable key state is not yet proven
@@ -90,4 +94,6 @@ printed, the reply remains unresolved and is not rebound automatically. Inspect
 the exact live thread and use the bare resolve operation only if that current
 answer is accepted.
 `)
+	fmt.Fprintln(os.Stderr, "\nCanonical first-answer lifecycle:")
+	fmt.Fprintln(os.Stderr, newReplyBodyGuidance("<threadId>"))
 }

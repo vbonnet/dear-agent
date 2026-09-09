@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// newReplyBodyGuidanceTemplate owns the repository's initial reply-file
+// lifecycle. Other command and skill surfaces route operators through
+// resolve-review-threads --help rather than copying it.
 const newReplyBodyGuidanceTemplate = `For this thread, create a task-owned reply file in the system temporary directory outside the repository or merge worktree:
   reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"
 Write a thread-specific reason to "$reply_file", then run:

@@ -78,7 +78,7 @@ func TestClassifyBlockers_OutdatedUnresolvedThreadBlocks(t *testing.T) {
 	if !strings.Contains(bs[0].Detail, "outdated") {
 		t.Errorf("outdated threads must be called out, got: %s", bs[0].Detail)
 	}
-	assertExternalTemporaryReplyFileLifecycle(t, bs[0].Fix)
+	assertRoutesReviewThreadLifecycleToOwner(t, bs[0].Fix)
 	if !strings.Contains(bs[0].Fix, "resolve-review-threads resolve-all owner repo 42") {
 		t.Errorf("thread fix must name resolve-review-threads, got: %s", bs[0].Fix)
 	}
@@ -92,55 +92,19 @@ func TestClassifyBlockers_OutdatedUnresolvedThreadBlocks(t *testing.T) {
 	}
 }
 
-func assertExternalTemporaryReplyFileLifecycle(t *testing.T, got string) {
+func assertRoutesReviewThreadLifecycleToOwner(t *testing.T, got string) {
 	t.Helper()
-	normalized := strings.ToLower(got)
-	for _, want := range []string{
-		`reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"`,
-		`--body-file "$reply_file"`,
-		`rm -f -- "$reply_file"`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("reply-file guidance missing %q:\n%s", want, got)
-		}
-	}
-	for _, want := range []string{
-		"for each thread",
-		"exact-body retry remains valid",
-		"file unchanged",
-		"terminal resolution is confirmed",
-		"only then",
-		"safe-merge",
-	} {
-		if !strings.Contains(normalized, want) {
-			t.Errorf("reply-file guidance missing %q:\n%s", want, got)
-		}
+	if !strings.Contains(got, "resolve-review-threads --help") {
+		t.Errorf("review-thread guidance does not route to its owning command:\n%s", got)
 	}
 	for _, forbidden := range []string{
-		"reply.md",
-		`reply-resolve <threadId> "`,
-		`--body-file $reply_file`,
-		"mktemp -t",
-		"mktemp -u",
-		"trap ",
+		"resolve-review-thread.XXXXXX",
+		"--body-file",
+		"rm -f --",
 	} {
 		if strings.Contains(got, forbidden) {
-			t.Errorf("reply-file guidance contains unsafe form %q:\n%s", forbidden, got)
+			t.Errorf("review-thread guidance duplicates owner token %q:\n%s", forbidden, got)
 		}
-	}
-	create := strings.Index(got, `reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"`)
-	bodyFile := strings.Index(got, `--body-file "$reply_file"`)
-	retention := strings.Index(normalized, "file unchanged")
-	confirmation := strings.Index(normalized, "terminal resolution is confirmed")
-	cleanup := strings.Index(got, `rm -f -- "$reply_file"`)
-	nextThread := strings.Index(normalized, "next thread")
-	merge := strings.LastIndex(normalized, "safe-merge")
-	if create >= bodyFile || bodyFile >= retention || retention >= confirmation || confirmation >= cleanup || cleanup >= nextThread || cleanup >= merge {
-		t.Errorf("reply-file guidance lifecycle is out of order (create=%d body=%d retain=%d confirm=%d cleanup=%d next=%d merge=%d):\n%s",
-			create, bodyFile, retention, confirmation, cleanup, nextThread, merge, got)
-	}
-	if sweep := strings.Index(got, "resolve-review-threads resolve-all"); sweep >= 0 && cleanup >= sweep {
-		t.Errorf("reply-file cleanup must precede resolve-all (cleanup=%d sweep=%d):\n%s", cleanup, sweep, got)
 	}
 }
 

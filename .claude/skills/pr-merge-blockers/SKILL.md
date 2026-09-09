@@ -34,7 +34,7 @@ threads or an out-of-date branch. See the DEAR retro
    | `CONFLICTS` | `safe-rebase` onto base, resolve, `safe-push` |
    | `FAILING_REQUIRED_CHECK` | fix the named check; known flakes get one rerun |
    | `PENDING_REQUIRED_CHECK` | `gh pr checks <n> --watch` |
-   | `UNRESOLVED_THREADS` | for each thread, create a fresh `reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"` in the system temporary directory, write its thread-specific reason to `"$reply_file"`, then run `resolve-review-threads reply-resolve <threadId> --body-file "$reply_file"`; whenever exact-body retry remains valid, retain that file unchanged through the retry; after that thread's terminal resolution is confirmed, remove it with `rm -f -- "$reply_file"`, and only then continue to the next thread or `safe-merge`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
+   | `UNRESOLVED_THREADS` | address each thread, then apply the canonical per-thread reply and recovery lifecycle from `resolve-review-threads --help`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
    | `CHANGES_REQUESTED` | address the review, push, re-request |
    | `REVIEW_REQUIRED` | obtain an approving review |
    | `BEHIND` | `gh pr update-branch <n>` |
@@ -78,25 +78,18 @@ last word:
 # thread IDs: pr-blockers prints them in brackets, or list them directly
 resolve-review-threads list <owner> <repo> <n>
 
-# for each thread, create a fresh reply source outside the repository or merge worktree
-reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"
-# write that thread's reason to "$reply_file", then close it in one step
-resolve-review-threads reply-resolve <threadId> --body-file "$reply_file"
-# whenever exact-body retry remains valid, retain this same file unchanged
-# through the retry
-
-# only after terminal resolution is confirmed
-rm -f -- "$reply_file"
-# only then continue to the next thread or safe-merge
+# print the command-owned reply-source, retry, and cleanup lifecycle
+resolve-review-threads --help
+# apply that lifecycle to each thread in turn
 
 # final sweep: resolves ANSWERED threads, refuses the rest by name, exits non-zero
 # (add a login argument after <n> to sweep one author only)
 resolve-review-threads resolve-all <owner> <repo> <n>
 ```
 
-If a reviewer follow-up conclusively supersedes that body, revise the same
-source in place instead of assigning a new temporary path. Unchanged retention
-applies only while exact-body retry remains valid.
+The command help and any command-emitted recovery diagnostic are the canonical
+owners for reply-source creation, retention, retry, and cleanup. Follow them
+directly rather than reconstructing their lifecycle from this skill.
 
 Every `resolve-review-threads` path enforces this, including single-thread
 `resolve <threadId>`, and each one re-reads the thread immediately before

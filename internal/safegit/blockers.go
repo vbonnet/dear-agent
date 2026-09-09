@@ -242,13 +242,8 @@ func threadBlocker(st PRState, repo string, threads []ReviewThread) *Blocker {
 	return &Blocker{
 		Code:   BlockThreads,
 		Detail: detail,
-		Fix: fmt.Sprintf("address each thread in code; for each thread, create a fresh task-owned reply file in the "+
-			"system temporary directory outside the repository with: reply_file=\"$(mktemp /tmp/resolve-review-thread.XXXXXX)\"; write its "+
-			"thread-specific reason to \"$reply_file\" and close the thread using its ID in brackets above: "+
-			"resolve-review-threads reply-resolve <threadId> --body-file \"$reply_file\"; whenever exact-body "+
-			"retry remains valid, retain the same file unchanged through the retry; "+
-			"only after that thread's terminal resolution is confirmed, "+
-			"remove it with: rm -f -- \"$reply_file\"; only then continue to the next thread or safe-merge "+
+		Fix: fmt.Sprintf("address each thread in code; apply the canonical per-thread reply and recovery lifecycle from: "+
+			"resolve-review-threads --help, using the thread IDs in brackets above "+
 			"(list thread IDs again any time with: "+
 			"resolve-review-threads list %s %s %d; sweep the answered ones with: "+
 			"resolve-review-threads resolve-all %s %s %d, which refuses threads nobody "+

@@ -171,16 +171,9 @@ Blockers detected, with their fixes:
   CONFLICTS               safe-rebase onto base, resolve, safe-push
   FAILING_REQUIRED_CHECK  fix the named check (gh pr checks <n>)
   PENDING_REQUIRED_CHECK  gh pr checks <n> --watch
-  UNRESOLVED_THREADS      address in code; for each thread, create a fresh
-                          task-owned file outside the repository:
-                          reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"
-                          write the reason to "$reply_file", then run:
-                          resolve-review-threads reply-resolve <threadId> --body-file "$reply_file"
-                          whenever exact-body retry remains valid, retain the
-                          same file unchanged through the retry;
-                          only after that thread's terminal resolution is confirmed:
-                          rm -f -- "$reply_file"
-                          only then continue to the next thread or safe-merge
+  UNRESOLVED_THREADS      address each thread; apply the canonical per-thread
+                          reply and recovery lifecycle from:
+                          resolve-review-threads --help
                           (sweep answered ones with resolve-all; it refuses threads with
                            no reply. Outdated threads count, and outdated is not obsolete!)
   CHANGES_REQUESTED       address the review, push, re-request

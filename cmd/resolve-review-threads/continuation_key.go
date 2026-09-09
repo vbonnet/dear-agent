@@ -272,12 +272,11 @@ func buildContinuationReceiptDirectoryPlan(path string) (continuationReceiptDire
 		)
 	}
 	if explicitXDG {
-		volume := filepath.VolumeName(target)
-		anchor := volume + string(filepath.Separator)
-		if volume == "" {
-			anchor = string(filepath.Separator)
-		}
-		return continuationReceiptDirectoryPlan{anchor: anchor, target: target}, nil
+		// XDG_STATE_HOME is a user-selected, pre-existing durability boundary.
+		// The command owns and synchronizes only its descendants; traversing or
+		// fsyncing arbitrary ancestors above that boundary can fail even when the
+		// configured state root itself is legitimately accessible.
+		return continuationReceiptDirectoryPlan{anchor: stateRoot, target: target}, nil
 	}
 	// The user's home is the documented pre-existing boundary for the fallback
 	// ~/.local/state location. Everything below it may have been created by a

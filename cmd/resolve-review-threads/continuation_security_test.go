@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,7 +13,11 @@ import (
 )
 
 func TestContinuationReceiptHMACRoundTripAndTamperRejection(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+		t.Fatalf("create explicit XDG state root: %v", err)
+	}
+	t.Setenv("XDG_STATE_HOME", stateRoot)
 	key, err := loadOrCreateContinuationReceiptKey()
 	if err != nil {
 		t.Fatalf("create signing key: %v", err)
@@ -80,6 +85,9 @@ func TestContinueResolveEnvironmentFailuresRetainReceiptBeforeBodyOrProvider(t *
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			stateRoot := filepath.Join(t.TempDir(), "state")
+			if err := os.Mkdir(stateRoot, 0o700); err != nil {
+				t.Fatalf("create explicit XDG state root: %v", err)
+			}
 			t.Setenv("XDG_STATE_HOME", stateRoot)
 			t.Setenv("GH_HOST", test.ambientHost)
 			issuerKey := bytes.Repeat([]byte{0x42}, continuationReceiptKeyBytes)
@@ -187,6 +195,44 @@ func TestReplyResolvePreflightsSigningKeyBeforeReplyMutation(t *testing.T) {
 	assertContainsNone(t, diagnostics, body)
 }
 
+func TestReplyResolveRequiresExistingExplicitXDGStateRootBeforeMutation(t *testing.T) {
+	const (
+		threadID = "PRRT_missing_xdg_boundary"
+		body     = "Do not post without the configured durability boundary."
+	)
+	stateRoot := filepath.Join(t.TempDir(), "missing-state-root")
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	bodyFile := writeContinuationBody(t, body)
+	opening := providerComment{
+		id:    "PRRC_missing_xdg_opening",
+		login: "reviewer",
+		body:  "P1: require an existing explicit state boundary.",
+	}
+	provider := installSequencedProvider(t,
+		providerStep{stdout: threadResponse(threadID, false, opening)},
+		providerStep{stdout: historyResponse(threadID, opening)},
+		providerStep{stdout: threadResponse(threadID, false, opening)},
+	)
+
+	code, stdout, diagnostics := provider.capture(func() int {
+		return run([]string{"reply-resolve", threadID, "--body-file", bodyFile})
+	})
+	if code == 0 {
+		t.Fatal("reply-resolve posted without an existing explicit XDG state root")
+	}
+	provider.assertExhausted()
+	assertQueryKinds(t, provider, "thread", "history", "thread")
+	assertNoProviderMutation(t, provider)
+	if stdout != "" {
+		t.Fatalf("missing XDG boundary printed success: %q", stdout)
+	}
+	assertContainsAll(t, diagnostics, "signing state could not be established", "nothing was posted")
+	assertContainsNone(t, diagnostics, body)
+	if _, err := os.Lstat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing explicit XDG state root was mutated: %v", err)
+	}
+}
+
 func TestContinuationPlatformBoundaryRejectsNonUnix(t *testing.T) {
 	if err := validateContinuationReceiptPlatform("windows", false); err == nil {
 		t.Fatal("unsupported Windows continuation state was accepted")
@@ -233,6 +279,9 @@ func TestReplyResolveRejectsUnsupportedContinuationPlatformBeforeMutation(t *tes
 func TestContinueResolveRejectsUnsupportedPlatformBeforeBodyOrProvider(t *testing.T) {
 	const body = "Retain this source without reading it on an unsupported platform."
 	stateRoot := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+		t.Fatalf("create explicit XDG state root: %v", err)
+	}
 	t.Setenv("XDG_STATE_HOME", stateRoot)
 	key, err := loadOrCreateContinuationReceiptKey()
 	if err != nil {

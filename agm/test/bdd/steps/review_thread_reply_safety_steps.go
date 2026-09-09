@@ -59,8 +59,8 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		postedReplyContinuationReceiptsShouldBindEvidenceWithoutReposting,
 	)
 	ctx.Step(
-		`^continuation key state should be private, durable, stable, and established before posting$`,
-		continuationKeyStateShouldBePrivateDurableAndPreflighted,
+		`^continuation issuance should require private, durable, stable local issuer state before posting$`,
+		continuationIssuerStateShouldBePrivateDurableAndPreflighted,
 	)
 	ctx.Step(
 		`^unsupported continuation platforms should fail before reply mutation and before continuation body-source or provider access$`,
@@ -193,12 +193,17 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestReadContinuationReceiptKeyRejectsFIFOWithoutBlocking",
 		"TestEnsurePrivateContinuationDirectoryRejectsManagedSymlink",
 		"TestEnsurePrivateContinuationDirectoryRetriesEveryParentSync",
-		"TestExplicitXDGDirectoryPlanRetriesCreatedAncestorSync",
+		"TestExplicitXDGDirectoryPlanSyncsOnlyManagedDescendants",
+		"TestExplicitXDGDirectoryPlanRequiresExistingBoundary",
+		"TestExplicitXDGStateRootBelowExecuteOnlyAncestor",
 		"TestEnsurePrivateContinuationDirectoryRejectsPublicFinalDirectory",
+		"TestReplyResolveRequiresExistingExplicitXDGStateRootBeforeMutation",
 		"TestContinuationPlatformBoundaryRejectsNonUnix",
 		"TestReplyResolveRejectsUnsupportedContinuationPlatformBeforeMutation",
 		"TestContinueResolveRejectsUnsupportedPlatformBeforeBodyOrProvider",
 		"TestHelpDocumentsUnixOnlyContinuationBoundary",
+		"TestHelpDocumentsStateRootOwnership",
+		"TestHelpUsesCanonicalFirstAnswerGuidance",
 		"TestObservedEditRevisionRequiresCountAndLastNode",
 		"TestProviderQueriesRequestLastEditNodeID",
 		"TestProviderReadsCarryLastEditNodeIDs",
@@ -281,8 +286,9 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 	}
 	output, err := runLocalGuardrailNamedGoTests(ctx,
 		"./cmd/pr-blockers",
-		"TestUsageUsesExternalTemporaryBodyFileLifecycle",
-		"TestSkillUsesExternalTemporaryBodyFileLifecycle",
+		"TestUsageRoutesReviewThreadLifecycleToOwner",
+		"TestSkillRoutesReviewThreadLifecycleToOwner",
+		"TestReplyFileLifecycleHasOneProductionOwner",
 	)
 	state.output += "\n" + output
 	state.err = err
@@ -339,7 +345,7 @@ func postedReplyContinuationReceiptsShouldBindEvidenceWithoutReposting(ctx conte
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 
-func continuationKeyStateShouldBePrivateDurableAndPreflighted(ctx context.Context) error {
+func continuationIssuerStateShouldBePrivateDurableAndPreflighted(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 

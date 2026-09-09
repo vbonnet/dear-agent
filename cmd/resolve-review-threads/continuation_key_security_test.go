@@ -11,6 +11,9 @@ import (
 
 func TestContinuationReceiptKeyIsPrivateStableAndReused(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+		t.Fatalf("create explicit XDG state root: %v", err)
+	}
 	t.Setenv("XDG_STATE_HOME", stateRoot)
 
 	first, err := loadOrCreateContinuationReceiptKey()
@@ -46,6 +49,9 @@ func TestContinuationReceiptKeyIsPrivateStableAndReused(t *testing.T) {
 
 func TestConcurrentContinuationReceiptKeyCreationConverges(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+		t.Fatalf("create explicit XDG state root: %v", err)
+	}
 	t.Setenv("XDG_STATE_HOME", stateRoot)
 
 	const workers = 12
@@ -69,6 +75,30 @@ func TestConcurrentContinuationReceiptKeyCreationConverges(t *testing.T) {
 		if !bytes.Equal(keys[0], keys[index]) {
 			t.Fatalf("worker %d observed a different continuation key", index)
 		}
+	}
+}
+
+func TestExplicitXDGStateRootBelowExecuteOnlyAncestor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX execute-only ancestor semantics are required")
+	}
+	base := t.TempDir()
+	externalAncestor := filepath.Join(base, "execute-only")
+	if err := os.Mkdir(externalAncestor, 0o700); err != nil {
+		t.Fatalf("create external ancestor: %v", err)
+	}
+	stateRoot := filepath.Join(externalAncestor, "state")
+	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+		t.Fatalf("create explicit XDG state root: %v", err)
+	}
+	if err := os.Chmod(externalAncestor, 0o100); err != nil {
+		t.Fatalf("make external ancestor execute-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(externalAncestor, 0o700) })
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	if _, err := loadOrCreateContinuationReceiptKey(); err != nil {
+		t.Fatalf("create continuation key below execute-only external ancestor: %v", err)
 	}
 }
 

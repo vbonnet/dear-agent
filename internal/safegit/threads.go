@@ -212,16 +212,11 @@ func threadRemediationGuidance(repo string, pr int) string {
 	}
 	return fmt.Sprintf(
 		"safe-merge: guidance: address each thread, then close it with its reason.\n"+
+			"Apply the canonical per-thread reply and recovery lifecycle from:\n"+
+			"  resolve-review-threads --help\n"+
 			"Thread IDs are in brackets above, or list them again with:\n"+
 			"  resolve-review-threads list %s %s %d\n"+
-			"For each thread, create a fresh task-owned reply file in the system temporary directory outside the repository or merge worktree:\n"+
-			"  reply_file=\"$(mktemp /tmp/resolve-review-thread.XXXXXX)\"\n"+
-			"Write that thread's reason to \"$reply_file\", then close it with:\n"+
-			"  resolve-review-threads reply-resolve <threadId> --body-file \"$reply_file\"\n"+
-			"Whenever exact-body retry remains valid, retain the same file unchanged through the retry.\n"+
-			"Only after that thread's terminal resolution is confirmed, remove the reply file:\n"+
-			"  rm -f -- \"$reply_file\"\n"+
-			"Only then continue to the next thread. After all threads, sweep the answered ones:\n"+
+			"After all threads are handled, sweep the answered ones:\n"+
 			"  resolve-review-threads resolve-all %s %s %d\n"+
 			"Then re-run safe-merge.\n"+
 			"(add a login argument after the PR number to sweep one author only)\n",

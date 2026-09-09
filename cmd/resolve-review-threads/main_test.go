@@ -718,6 +718,37 @@ func TestHelpDocumentsUnixOnlyContinuationBoundary(t *testing.T) {
 	}
 }
 
+func TestHelpDocumentsStateRootOwnership(t *testing.T) {
+	diagnostics := captureStderr(t, func() {
+		if code := run([]string{"--help"}); code != 0 {
+			t.Fatalf("run(--help) = %d, want 0", code)
+		}
+	})
+	for _, want := range []string{
+		"An explicitly selected XDG_STATE_HOME must already exist",
+		"synchronizes only command-managed descendant entries with their parents",
+		"never synchronizes the selected state root's own entry",
+		"or walks another",
+		"caller-owned ancestor",
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Fatalf("help omitted %q:\n%s", want, diagnostics)
+		}
+	}
+}
+
+func TestHelpUsesCanonicalFirstAnswerGuidance(t *testing.T) {
+	diagnostics := captureStderr(t, func() {
+		if code := run([]string{"--help"}); code != 0 {
+			t.Fatalf("run(--help) = %d, want 0", code)
+		}
+	})
+	want := newReplyBodyGuidance("<threadId>")
+	if count := strings.Count(diagnostics, want); count != 1 {
+		t.Fatalf("help contains %d canonical first-answer lifecycles, want 1:\n%s", count, diagnostics)
+	}
+}
+
 // TestClassifyPriorReplyBeyondTail is the regression for the bounded-window
 // fail-open. A reply buried under later discussion must still be found, or it
 // gets reposted and anchored to the newest follow-up, which passes the

@@ -36,5 +36,5 @@ func TestThreadRemediationGuidance_IsRunnable(t *testing.T) {
 			t.Errorf("guidance missing %q, got:\n%s", want, got)
 		}
 	}
-	assertExternalTemporaryReplyFileLifecycle(t, got)
+	assertRoutesReviewThreadLifecycleToOwner(t, got)
 }
