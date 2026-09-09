@@ -1,6 +1,6 @@
 # Authenticated Build Authority Specification
 
-<!-- Last audited at: 2026-09-08 -->
+<!-- Last audited at: 2026-09-09 -->
 
 **Version:** 1.0
 **Status:** Draft
@@ -75,7 +75,7 @@ additional product requirements.
 **BUILD-AUTH-049** When GOMODCACHE is admitted, the build authority shall authenticate its bounded complete metadata tree.
 **BUILD-AUTH-050** When GOMODCACHE is admitted, the build authority shall accept only protected directories and regular files.
 **BUILD-AUTH-051** When Repository is admitted, the build authority shall require root-or-effective-user ancestry and an effective-user-owned standalone-worktree root and captured descendants.
-**BUILD-AUTH-052** When Repository is admitted, the build authority shall require its Git, common, object, and active-configuration paths to match the retained in-tree admission envelope and shall freeze the complete selective administrative row set under the normative three-class policy.
+**BUILD-AUTH-052** When Repository is admitted, the build authority shall require its real `.git`, config, optional packed-refs, and object-root bindings to match the retained standalone in-tree admission envelope and shall freeze the complete selective administrative row set under the normative three-class policy.
 **BUILD-AUTH-053** When source local configuration is admitted, the build authority shall require every normalized key and value to match the normative closed source-config table.
 **BUILD-AUTH-054** If Repository contains a forbidden routing, replacement, shallow, promisor, include, lock, or execution-affecting state, then the build authority shall refuse admission.
 **BUILD-AUTH-055** When the source object store is inventoried, the build authority shall admit only canonical loose objects and complete matching version-2 pack/index pairs as copied content.
@@ -91,13 +91,13 @@ additional product requirements.
 **BUILD-AUTH-062** When git-path/git is created, the build authority shall make it the sole policy symlink and bind it to the retained Git identity.
 **BUILD-AUTH-063** When private Git policy files are created, the build authority shall create exactly the three empty 0600 regular files declared in the workspace policy.
 **BUILD-AUTH-064** When a module-owned direct child environment is constructed, the build authority shall construct one of exactly two sealed 39-row profile types from an empty set and byte-sort its unique complete assignments.
-**BUILD-AUTH-065** When task allocation has not started, the build authority shall use the exact task-path-free preallocation direct profile only for the five normative non-source plans from retained physical `/` and the later four source plans from retained Repository, with the root sentinels absent and no task child.
+**BUILD-AUTH-065** The build authority shall use the exact task-path-free preallocation direct profile only for the five normative non-source plans from retained physical `/`, shall require the root sentinels absent before task allocation, and shall never invoke a module-owned child from or against Repository.
 **BUILD-AUTH-066** When task allocation succeeds, the build authority shall use the exact task-private profile for every later module-owned direct child, derive every pinned-Go-owned descendant only through the normative 50-, 51-, or 52-row projection, and omit every unlisted key.
 **BUILD-AUTH-067** When a fixed command plan invokes Go, Git, or the compiler probe directly, the build authority shall execute only the applicable nominal retained absolute executable authority.
 **BUILD-AUTH-068** When a command phase runs, the build authority shall enforce its exact direct-or-derived argv, cwd, environment, stdin, phase, output, diagnostic, and resource contract and shall not publish a successful result until child quiescence, empty stderr, and closure without DescriptorClose of every supervisor-owned transient child-I/O endpoint due at that boundary are proved.
 **BUILD-AUTH-069** When a command phase runs, the build authority shall honor context cancellation and the whole-transaction deadline.
 **BUILD-AUTH-070** When a command is about to invoke its named process owner or that invocation returns, the build authority shall run every applicable retained-authority revalidation in the fixed normative order, including the physical-root and retained-null checks around every dependent command, and shall run the complete command-end bracket even when request validation, setup, Start, execution, output validation, descriptor closure, or quiescence failed.
-**BUILD-AUTH-071** When a pair is about to be returned, the build authority shall revalidate every retained authority, including physical root, null device, nominal executables, selective source rows, and sealed manifest claims.
+**BUILD-AUTH-071** When a pair is about to be returned, the build authority shall revalidate every still-operative retained authority and sealed claim, including physical root, null device, nominal executables, GOROOT, GOMODCACHE, StateRoot, private workspace and output identities, and private-store, dependency, graph, and manifest claims, and shall not reopen or consume caller Repository after descriptor-bound copy and private-store preflight make the private store the sole final source authority.
 **BUILD-AUTH-072** When the first module-owned direct operational Go child is about to start, the build authority shall require the task-private keyed projection, empty private GOTMPDIR and GOCACHE trees, and the normative physical-root/null bracket for pinned-Go-owned nil-stdin descendants.
 **BUILD-AUTH-073** When a module-owned direct Git or Go child completes or the next module-owned child, final return, or cleanup is about to begin, the build authority shall enforce the applicable private-derived-tree limits and unchanged-workspace invariants.
 **BUILD-AUTH-074** When the requested revision is parsed, the build authority shall require one lowercase full object ID whose width matches the admitted SHA-1 or SHA-256 repository format.
@@ -325,10 +325,10 @@ non-process no-scratch boundary uses this closed table:
 | Open or retain Repository, `.git`, config, admin, packed-ref, or object-store state | `source/open` |
 | Query descriptor identity, ancestry, ACL, or mount facts for source state | `source/probe` |
 | Enumerate the selective `.git` envelope or frame repository/source-object manifests | `source/walk` |
-| Parse the revision against admitted object format, config, packed refs, object names, pack/index name-pair framing, descriptor ACL bytes, or a source-row wire image | `source/parse` |
+| Parse the revision against admitted object format, config, packed refs, object names, pack/index name-pair framing, or descriptor ACL bytes | `source/parse` |
 | Hash source config, object content, auxiliary content, or a source manifest | `source/hash` |
 | Validate an already parsed source policy predicate | `source/validate` |
-| Compare source-row output, physical paths, formats, origins, independent claims, or a repeated source snapshot | `source/compare` |
+| Compare retained source paths, admitted format/config/manifest claims, independent claims, or a repeated source snapshot | `source/compare` |
 | Context cancellation or expiry between primitives | The phase and operation assigned to the next primitive, with `canceled` or `deadline` |
 | Impossible sealed-plan, dependency, or adapter state | The current phase with `validate/internal-invariant` |
 
@@ -545,25 +545,126 @@ result.
 
 ### Exact no-scratch capture and probes
 
-No-scratch capture follows this exact eight-step, two-block order:
+No-scratch capture follows this exact eight-step, one-block order:
 
 | Step | Exact boundary |
 | ---: | --- |
-| 1 | Validate the request and entry context; admit Darwin/arm64 and the initial `SIGCHLD` state |
+| 1 | Sample and retain the opaque one-hour transaction window; validate the request and entry context; admit Darwin/arm64 and the initial `SIGCHLD` state |
 | 2 | Retain StateRoot, physical `/`, `/dev/null`, Go, GOROOT, GOMODCACHE, Git, Repository, real `.git`, config, and initial object root; parse config for the provisional object format and prove every required disjointness relation |
 | 3 | Complete bounded GOROOT and GOMODCACHE captures, nominal Go/compiler/Git admission, literal `GOROOT/go.env` parsing, and their manifests; seal the preallocation environment and five non-source plans |
 | 4 | Validate physical `/`, `/dev/null`, and absence of `/go.mod`, `/go.work`, and `/.git`; run the five non-source probes below from `/` in order |
 | 5 | Revalidate physical root, null device, sentinels, and the three nominal executable roles after the non-source block |
-| 6 | Finish the selective `.git` classification, packed-ref parse, closed object inventory, and exact `goroot/v1`, `gomodcache/v1`, `repository/v1`, and `source-object-content/v1` manifests; seal the four source plans |
-| 7 | Run source paths, source formats, source local config, and source active config from the retained physical Repository, in that order |
-| 8 | Revalidate and compare every retained authority, sentinel, selective row set, config, inventory, transcript, and manifest; only complete success constructs the single-use `capturedNoScratchInputs` aggregate |
+| 6 | Finish the selective `.git` classification, packed-ref parse, closed object inventory, and exact `goroot/v1`, `gomodcache/v1`, `repository/v1`, and `source-object-content/v1` manifests; seal the C1 source envelope without invoking a child |
+| 7 | Parse and bind requested Revision directly to the custom-admitted object format without invoking a child |
+| 8 | Revalidate and compare every retained authority, sentinel, selective row set, config, inventory, non-source transcript, revision, and manifest in the exact final schedule below; only complete success constructs the single-use `capturedNoScratchInputs` aggregate |
+
+Step 8 uses this exact left-to-right final-revalidation order. The StateRoot
+check is deliberately last so the allocator capability is refreshed immediately
+before the move cell is sealed. It is fail-closed and fail-fast: a row begins
+only after every preceding row returned complete proof with no non-close or
+descriptor-close failure. The first failing row withholds the aggregate and
+starts the exact close transaction, so no later final row is attempted and no
+final-row failure enters the command-end/block-end private-later slot. A
+non-close failure remains write-once Primary; a transient close failure
+aggregates independently in DescriptorClose.
+
+| Order | Exact final-revalidation row |
+| ---: | --- |
+| 1 | Caller context and the shared transaction window |
+| 2 | Physical root |
+| 3 | Retained null device |
+| 4 | Physical-root sentinels `/go.mod`, `/go.work`, and `/.git` |
+| 5 | Retained GOROOT tree and physical pathname binding |
+| 6 | Fresh live `GOROOT/go.env` transaction |
+| 7 | Go executable role |
+| 8 | Compiler executable role |
+| 9 | Retained GOMODCACHE tree and physical pathname binding |
+| 10 | Git executable role |
+| 11 | As its first primitive, atomically take the pending C1 source owner; on success, run the complete descriptor-bound C1 source-envelope revalidation below |
+| 12 | `goroot/v1`, `gomodcache/v1`, `repository/v1`, then `source-object-content/v1` manifest claims |
+| 13 | Sealed non-source block proof, then its five output claims in command order |
+| 14 | Reparse requested Revision and compare its grammar and width binding to the admitted repository object format |
+| 15 | Revalidate retained StateRoot and its physical pathname binding; complete success then infallibly moves the already-owned thirteen-slot transaction into the sealed aggregate |
+
+Before allocation, the no-scratch owner closes every successfully retained
+long-lived capability exactly once in this order on refusal or on an unmoved
+aggregate close. A moved aggregate transfers this same ordered owner; neither
+the losing alias nor the source owner closes a transferred handle. A nominal
+role owns its executable descriptor, a tree owns its retained root bundle, and
+a retained source leaf owns its one descriptor. Inside the physical-root bundle
+the separately opened descriptor closes before `os.Root`; inside StateRoot,
+GOROOT, GOMODCACHE, Repository, real `.git`, and object-root bundles, `os.Root`
+closes before the separately retained descriptor. Both inner closes are
+attempted even when the first fails. Null, config, packed refs, and each nominal
+executable role own only their one leaf descriptor.
+
+| Close order | Long-lived capability |
+| ---: | --- |
+| 1 | Optional retained `.git/packed-refs` leaf |
+| 2 | Retained `.git/objects` root bundle |
+| 3 | Retained `.git/config` leaf |
+| 4 | Retained real `.git` root bundle |
+| 5 | Retained Repository root bundle |
+| 6 | Git executable role |
+| 7 | Compiler executable role |
+| 8 | Go executable role |
+| 9 | Retained GOMODCACHE tree |
+| 10 | Retained GOROOT tree |
+| 11 | Retained null device |
+| 12 | Retained physical root |
+| 13 | Retained StateRoot |
+
+Every descriptor acquired only while opening, walking, hashing, parsing, or
+revalidating one source-envelope primitive receives an exact-once owner immediately after the
+open and closes before that primitive returns, innermost before outermost. It
+never enters the long-lived table. Initial `SIGCHLD` admission and the shared
+clock/window are value claims and own no closeable handle. Closure continues
+through all long-lived rows after an earlier close failure; the earliest close
+failure alone supplies the DescriptorClose category.
+
+From the first source-slot acquisition in step 2 through the end of step 6, one
+private unsealable C1 construction owner takes each successfully retained
+source handle immediately. No raw source handle exists outside that owner. A
+failure during steps 2 through 6 closes every acquired source slot in the
+source prefix of the close table, then closes every successfully acquired outer
+slot from slot 6 onward. Complete step-6 proof infallibly transfers that same
+five-slot owner into the pending C1 cell as the sole act that seals the source
+envelope; the construction owner then becomes inert. No fallible primitive
+intervenes between complete proof and that transfer.
+
+The sealed C1 source envelope is itself one shared pointer-alias
+`pending`/`moved`/`closed` cell. It permits only two atomic operations. Pending
+Close changes `pending` to `closed` and attempts source-owner slots 1 through 5
+in close-table order. Pending take changes `pending` to `moved` and returns one
+opaque owner for those five still-open slots without exposing a raw handle.
+Every losing, concurrent, copied, repeated, moved, or closed alias operation
+refuses with `validate/internal-invariant` in the current phase, with no state
+change and before handle access.
+
+Take is the complete first primitive of final row 11. Refusal is
+`final/validate/internal-invariant`, does not attempt source revalidation, and
+withholds the aggregate. On such a refusal, the no-scratch transaction closes
+only its successfully acquired outer slots from slot 6 onward: the earlier
+winning C1 operation either already owns source slots 1 through 5 after a move
+or already closed them, and the losing alias never touches them. Production
+exposes no competing C1 alias, so this path is invariant evidence. Success
+transfers slots 1 through 5 directly into the no-scratch transaction before it
+revalidates them. Row 11 is synchronous and returns only after every transient
+tail and close has completed. A failure after a successful take in rows 11
+through 15 closes the now-complete thirteen-slot owner exactly in the table
+order. A failure before row 11 uses pending C1 Close for slots 1 through 5,
+then closes the outer owner from slot 6 onward. Row 15's StateRoot check is the
+final fallible primitive; success infallibly moves the complete owner and
+validated value claims into the aggregate's own shared
+`pending`/`moved`/`closed` cell. No borrow, release, adoption, post-StateRoot
+join, or source-command ownership state exists.
 
 That aggregate contains the retained StateRoot, physical-root, null-device,
 nominal Go/compiler/Git, GOROOT, GOMODCACHE, Repository administration, config,
 packed-ref, object-inventory, and revision capabilities; the exact
 `goroot/v1`, `gomodcache/v1`, `repository/v1`, and
 `source-object-content/v1` manifests; and the sealed direct environments and
-the opaque whole-transaction window plus nine fixed plans. It is one shared
+the opaque whole-transaction window plus five fixed plans. It is one shared
 pending/moved/closed move cell: no
 constituent, copy, raw path, manifest digest, or generic process plan authorizes
 workspace allocation.
@@ -622,17 +723,62 @@ inventory. Each accepts only its nominal plan and a module-minted command-
 window token, copies the token's exact context and deadlines into one fully
 keyed private `processRequest`, and invokes the preallocation supervisor. A
 production-source guard admits exactly those five request literals with their
-exact direct fields and forbids a generic producer for this block. Later source
-and task-private commands require separate named materializers and closed
-guards; the generic supervisor carrier or an environment value alone confers no
-command authority.
+exact direct fields and forbids a generic producer for this block. Every later
+task-private command requires its own named materializer and closed guard; the
+generic supervisor carrier or an environment value alone confers no command
+authority. The same production guard refuses every preallocation process
+request whose cwd, argv, environment, or stdin carries Repository, `.git`,
+source-config, or source-object path authority.
 
-Each of the four source plans uses the same direct profile, retained null stdin,
-deadline, and successful empty-stderr gate, but runs only from the retained
-physical Repository. Physical root and `/dev/null` remain retained for the
-whole transaction and are revalidated before and after every command that
-depends on them, including later `core.hooksPath=/dev/null` bindings. No task
-child exists before step 8 completes.
+No module-owned child ever runs from or against Repository. In
+particular, pre/post pathname sampling cannot authorize a pathname-based
+`Cmd.Dir`, `-C`, `--git-dir`, configuration, or object lookup: a same-UID
+rename/replace/restore sequence could otherwise substitute the child input
+between observations. Source paths and formats are instead derived from
+retained descriptor topology plus the closed custom config, packed-ref, and
+object-name grammars. The custom parser is the sole source-config admission
+authority; source config is never copied or consumed by a child. Later private
+Git commands independently corroborate only the copied object format, selected
+revision, object graph, canonical private config, materialized tree, and final
+private state after descriptor-bound copy and custom private-store preflight.
+
+The deep private C1 source-envelope operation expands into one fixed primitive
+transaction: observe and compare the retained
+Repository descriptor; rebind its physical pathname; observe and compare
+retained `.git`; reopen `.git` no-follow from Repository and compare it;
+observe, bounded-read, hash, parse, policy-validate, and compare config, then
+reopen it no-follow and repeat those claims; prove packed-refs absence or repeat
+the corresponding retained bounded-read, hash, parse, validate, and compare
+transaction; observe and compare the retained object root; recursively
+enumerate only the retained `.git` root no-follow; classify every row while
+reading no inert content; on initial admission, policy-validate the classified
+rows; on revalidation, first compare every name, presence, kind, class,
+identity, and security claim with the sealed row set, then policy-validate only
+equal retained rows; read and hash authority/content rows;
+finish and validate the closed object-inventory relationships; compare the
+sorted authority and inert row sets; recompute both source manifests; then
+repeat the Repository, `.git`, and object-root pathname bindings. Each open is
+owned before its first probe, and the failing primitive supplies
+`source/open`, `probe`, `walk`, `parse`, `validate`, `hash`, or `compare`; a
+wrapper never relabels a composite error.
+
+That opaque transaction runs during initial step 6 and final row 11 only. It
+stops before the next independent primitive after its
+first non-close or descriptor-close failure. An entered leaf/content
+primitive nevertheless completes this exact applicable tail: use the already
+open leaf for its post-content descriptor observation and security comparison;
+close that leaf; then, when the parent and comparison prerequisites were
+captured before the failure, run the mandatory no-follow trailing pathname
+rebind and close its comparison leaf. The trailing rebind is the only new open
+allowed after the initiating failure; no unrelated source-envelope primitive
+begins. If Primary is empty on entry, the first Primary-eligible failure claims
+Primary; otherwise that non-close failure is discarded. Later non-close tail
+failures are also discarded because neither invocation is a
+command-end or block-end bracket, but every such failure still withholds proof.
+The earliest close failure alone populates DescriptorClose, including closure
+of a trailing comparison leaf. After this tail, the primitive returns and no
+next independent primitive runs. Thus source admission cannot consume or
+populate the command/block private-later slot required by BUILD-AUTH-170.
 
 ## Normative filesystem and parser policy
 
@@ -841,9 +987,9 @@ section/subsection/variable triples. Every unlisted key refuses.
 | `core.bare` | Required once; canonical `false` |
 | `core.filemode`, `core.logallrefupdates`, `core.ignorecase`, `core.precomposeunicode` | Optional once each; canonical `true` or `false`; never copied |
 | `extensions.objectformat` | Absent for SHA-1; exactly `sha256` for SHA-256 |
-| `extensions.refstorage` | Optional only for format 1; exactly `files`; reported ref format remains `files` |
-| `extensions.worktreeconfig` | Optional canonical Boolean; whenever present, active `.git/config.worktree` is absent and sterile origin/scope output contains no worktree-scope row |
-| `core.hookspath` | Optional bounded opaque value; never resolved, copied, logged, or used; every source command shadows it with `-c core.hooksPath=/dev/null` |
+| `extensions.refstorage` | Optional only for format 1; exactly `files`; absence retains the admitted standalone files format |
+| `extensions.worktreeconfig` | Optional canonical Boolean; `.git/config.worktree` remains forbidden and absent, and no worktree-scoped config is consumed |
+| `core.hookspath` | Optional bounded opaque value; never resolved, copied, logged, or used and omitted from private configuration |
 | `user.name`, `user.email`, `beads.role` | Optional once each; bounded printable opaque metadata; never copied or used |
 | `remote.<name>.url` | Required once per declared remote; nonempty and control-free; command-style `<transport>::` URLs refuse |
 | `remote.<name>.fetch` | Required once per declared remote; exactly `+refs/heads/*:refs/remotes/<same-name>/*` |
@@ -860,21 +1006,10 @@ routing key, executable proxy/SSH/fsmonitor key, or
 refuses even when its value is empty or false. Stored `core.hookspath` is the
 only hook-related exception.
 
-Every source-repository Git child uses `--no-pager` and these exact
-command-scoped overrides in addition to the preallocation environment:
-
-| Key | Exact value |
-| --- | --- |
-| `core.hooksPath` | `/dev/null` |
-| `protocol.allow` | `never` |
-| `core.useReplaceRefs` | `false` |
-| `core.commitGraph`, `core.multiPackIndex`, `core.fsmonitor` | `false`, `false`, `false` |
-| `pack.readReverseIndex`, `pack.useBitmaps` | `false`, `false` |
-| `maintenance.auto`, `fetch.writeCommitGraph` | `false`, `false` |
-| `gc.auto` | `0` |
-
-Active-origin output contains only admitted local rows and these exact
-module-authored command rows. System, global, and XDG sources remain sterile.
+No child consumes source config or constructs an active source-configuration
+view. System, global, XDG, command, and worktree configuration are therefore
+outside source admission rather than runtime inputs. The later private
+repository has its own exact generated config and command overrides.
 
 ### Selective retained `.git` envelope
 
@@ -886,15 +1021,22 @@ identity policy and enters exactly one class:
 | Class | Exact closure |
 | --- | --- |
 | Authority and manifest | `.git`, required `.git/config`, optional `.git/packed-refs`, and the complete closed `.git/objects` subtree enter `repository/v1`; canonical loose objects and complete pack/index content pairs also enter `source-object-content/v1`; admitted object auxiliaries remain repository-only |
-| Forbidden | `.git/config.worktree`, `.git/commondir`, `.git/gitdir`, `.git/shallow`, `.git/info/grafts`, either object alternate file, loose `.git/refs/replace` descendants, object promisor/temporary/unknown rows, any symlink or special entry, and any basename equal to `.lock` or ending in `.lock`; packed refs supply the corresponding replacement-ref check |
+| Forbidden | `.git/config.worktree`, `.git/commondir`, `.git/gitdir`, `.git/shallow`, `.git/info/grafts`, either object alternate file, the loose `.git/refs/replace` root and every descendant, object promisor/temporary/unknown rows, any symlink or special entry, and any basename equal to `.lock` or ending in `.lock`; packed refs supply the corresponding replacement-ref check |
 | Inert administration | Every remaining directory or regular file outside `.git/objects`; retain its raw name, kind, descriptor identity, presence, bounds, and security facts, but read and hash none of its content bytes and include it in neither manifest |
 
-Revalidation repeats the complete classification and refusal scan. Every
-authority row and both manifests remain unchanged, and the complete inert row
-set retains identical name, kind, descriptor identity, presence, and security
-claims. Addition, removal, replacement, or reclassification refuses;
-same-inode inert byte changes are allowed because those bytes are never read or
-consulted. No path outside Repository's single `.git` child is enumerated.
+Initial admission classifies the complete row set before policy validation; a
+present forbidden row or disallowed parsed predicate is
+`source/validate/unsupported`. Revalidation instead compares observed topology
+with the sealed set before applying policy: appearance, disappearance, kind or
+class change, and security drift are `source/compare/unstable`, while an
+expected-present row bound to a different object is
+`source/compare/identity`. Only rows equal on those claims proceed to their
+applicable content read, hash, parse, policy validation, and manifest
+comparison. Every authority row and both manifests remain unchanged, and the
+complete inert row set retains identical name, kind, descriptor identity,
+presence, and security claims. Same-inode inert byte changes remain allowed
+because those bytes are never read or consulted. No path outside Repository's
+single `.git` child is enumerated.
 
 ### Closed object-store auxiliary grammar
 
@@ -923,16 +1065,22 @@ administrative state has this closed handling:
 | Class | Exact handling |
 | --- | --- |
 | Captured authority | Retain the Repository root bundle, real in-tree `.git` directory, directly parsed `.git/config`, exact physical Git/common/object paths, admitted format claims, and the closed object-content and auxiliary inventories |
-| Source Git allowance | Run only the source-path, source-format, source-local-config, and source-active-config transcript rows below; these commands are metadata-only and receive the fixed source overrides |
-| Presence-refused state | Gitfile or linked worktree, external common/object path, `config.worktree`, include, alternate, HTTP alternate, graft, shallow marker, loose or packed `refs/replace` name, promisor/partial-clone state, a basename matching the exact `.lock` predicate anywhere in captured `.git`, and every unrecognized object-store name including temporary forms |
-| Inert administrative state | `HEAD`, ordinary loose refs, packed-ref object IDs after the bounded name scan below, reflogs, index, hooks, non-lock operation-state files, and filter-repo records are not resolved, copied, or used by an admitted source command to select or dereference content |
+| Source Git prohibition | No module-owned child runs from or against Repository, and no process request receives a Repository, `.git`, source-config, or source-object path through cwd, argv, environment, or stdin |
+| Presence-refused state | Gitfile or linked worktree, external common/object path, `config.worktree`, include, alternate, HTTP alternate, graft, shallow marker, the loose `refs/replace` root or any descendant, a packed `refs/replace` name, promisor/partial-clone state, a basename matching the exact `.lock` predicate anywhere in captured `.git`, and every unrecognized object-store name including temporary forms |
+| Inert administrative state | `HEAD`, ordinary loose refs, packed-ref object IDs after the bounded name scan below, reflogs, index, hooks, non-lock operation-state files, and filter-repo records are not resolved, copied, or consumed during source admission |
 | Caller worktree | Tracked, modified, and untracked pathname state outside the captured administrative envelope is neither inspected nor consumed; only the exact committed object graph enters the private checkout |
 | Object consumers | Revision resolution, timestamp corroboration, fsck, object presence, tree, attributes, raw blobs, projections, checkout, HEAD, status, and ref inventory run only in the private repository after its semantic preflight |
 
 Ordinary ref storage may therefore be inert while replacement names remain a
-presence refusal. The custom administrative inventory detects a loose
-`refs/replace` path and structurally scans packed-ref names without resolving
+presence refusal. The custom administrative inventory refuses the loose
+`refs/replace` root and every descendant and structurally scans packed-ref names without resolving
 their object IDs.
+
+After descriptor-bound copy, source/private content-manifest equality, and
+private-store semantic preflight succeed, caller Repository is no longer an
+operative source authority. Its retained handles are closure-only; every later
+object, tree, build, and final-return claim is authorized and revalidated
+against the private store instead.
 
 Within the captured `.git` administrative envelope, any file or directory
 basename equal to `.lock` or ending in `.lock` is lock state and refuses. The
@@ -1169,8 +1317,8 @@ GO_EXTLINK_ENABLED HOME LANG LC_ALL PATH TEMP TMP TMPDIR TZ XDG_CONFIG_HOME
 
 The preallocation direct profile contains no task path and is used only for
 `go version`, the keyed `go env` projection, the direct retained compiler
-`-V=full` probe, Git version/build-options, Git builtin inventory, and the four
-source-metadata rows. Every later module-owned direct child uses the
+`-V=full` probe, Git version/build-options, and Git builtin inventory. Every
+later module-owned direct child uses the
 task-private direct profile. Go, Git, and the compiler probe are invoked only
 through their applicable nominal retained absolute authority.
 
@@ -1398,7 +1546,7 @@ No other section, key, duplicate, comment, blank line, or trailing byte remains.
 
 | Phase | Exact behavior |
 | --- | --- |
-| No-scratch admission | Execute only the exact eight-step capture transaction: retain nominal/root/null/tree/source capabilities; run five non-source plans from physical `/`; finish selective source classification and all four named manifests; run four source plans from Repository; revalidate; then seal the move-once aggregate. No task child exists and write-denied evidence admits only device writes to `/dev/null` |
+| No-scratch admission | Execute only the exact eight-step, one-block capture transaction: retain nominal/root/null/tree/source capabilities; run five non-source plans from physical `/`; finish selective source classification and all four named manifests; custom-parse Revision; revalidate; then seal the move-once aggregate. No child runs against Repository, no task child exists, and write-denied evidence admits only device writes to `/dev/null` |
 | Workspace allocation | Consume only the pending complete no-scratch aggregate and use the exact 100-attempt exclusive allocator; successful task `mkdirat` is allocation and every later refusal uses the shared cleanup transaction even when task-root identity was not observed |
 | Source semantic preflight | Without invoking Git, inflate and resolve every source physical representation through the spool, prove same-ID equivalence, decode the exact selected commit/tree/path grammar, derive the custom timestamp claim, and empty the spool |
 | Init | Invoke private `init --quiet` with explicit empty template, admitted object format, files ref format, fixed branch, and checkout path; query the four private-init filesystem Booleans before replacing config |
@@ -1413,8 +1561,9 @@ No other section, key, duplicate, comment, blank line, or trailing byte remains.
 | Checkout | Check out the detached exact commit with command-scoped `/dev/null` hooks layered over the private config's empty hook directory, no filter driver, and one worker; post-walk every tracked entry no-follow and require raw Git object hash and exact mode equality |
 | Final Git state | Require exact detached HEAD, empty exact porcelain status, and empty exact ref inventory after checkout and after each role build |
 
-Every module-invoked Git command uses the retained absolute executable and
-task-private environment. Its global prefix is exactly `--no-pager`,
+Every module-invoked Git command runs only after allocation, uses the retained
+absolute executable and task-private environment, and never names the caller
+Repository. Its global prefix is exactly `--no-pager`,
 `-C <physical-work-dir>`,
 then these `-c` assignments in order:
 
@@ -1432,16 +1581,11 @@ fetch.writeCommitGraph=false
 gc.auto=0
 ```
 
-The physical work directory is Repository for the four source rows, task root
-for init, and checkout for every other private row. Within that envelope, the
-exact transcript forms are:
+The physical work directory is task root for init and checkout for every other
+private row. Within that envelope, the exact transcript forms are:
 
 | Purpose | Exact subcommand and output contract |
 | --- | --- |
-| Source paths | `rev-parse --path-format=absolute --show-toplevel --absolute-git-dir --git-common-dir --git-path objects`; four exact LF-terminated physical paths matching Repository, `.git`, `.git`, and `.git/objects` |
-| Source formats | `rev-parse --show-object-format=storage --show-ref-format`; exactly `sha1` or `sha256`, LF, then `files`, LF |
-| Source local config | `config --null --show-origin --show-scope --local --list`; one `local NUL file:.git/config NUL key LF value NUL` record per directly parsed row, in source order |
-| Source active config | `config --null --show-origin --show-scope --list`; the same local records followed by one `command NUL command line: NUL key LF value NUL` record per fixed `-c` assignment in prefix order, with no system, global, XDG, worktree, or other origin |
 | Init | `init --quiet --template=<private-empty-git-template> --object-format=<sha1-or-sha256> --ref-format=files --initial-branch=authority-staging <checkout>`; empty stdout |
 | Init Boolean | `config --type=bool --default=<default> --get <key>` separately with `core.filemode=true`, `core.symlinks=true`, `core.ignorecase=false`, and `core.precomposeunicode=false` as key/default pairs; exactly `true` or `false` plus LF |
 | Revision | `rev-parse --verify --end-of-options <revision>^{commit}`; exactly the lowercase revision plus LF |
@@ -1460,16 +1604,11 @@ exact transcript forms are:
 All unspecified stdout is empty. Every successful fixed command has empty
 stderr, and its result is unavailable until child quiescence and closure without
 DescriptorClose of every supervisor-owned transient child-I/O endpoint due at
-that boundary are also proved; every diagnostic is privately bounded. The
-source path, format, local-config, and active-config rows are the only commands
-that run against Repository; none can dereference an object. Init and its four
-Boolean probes are the only private commands before private-store semantic
+that boundary are also proved; every diagnostic is privately bounded. No Git
+command runs against Repository. Init and its four Boolean probes are the only
+private commands before private-store semantic
 preflight and never read an object. Every other private row begins only after
 that preflight and an empty-spool proof.
-
-Config transcript keys use Git's ASCII-lowercased section and variable names
-while retaining subsection bytes; the directly parsed semantic rows and fixed
-command rows compare in that normalized form.
 
 Every module-owned form and this complete Go 1.27.1 VCS-stamping sequence for
 each role-package query and role build is mechanically proved builtin-only and
@@ -1703,7 +1842,7 @@ merge, installation, or activation.
 | --- | --- |
 | 001-019 | Compile-time interface checks plus public lifecycle and receipt tests; every eight-step no-scratch failure closes the already-retained capability prefix, returns no allocation or Recovery, and survives `-race`; successful-`mkdirat` partial-allocation, descriptor, and concurrent Close cases |
 | 020-058 | Public filesystem fixtures plus distinct nominal Go/compiler/Git and retained physical-root/null capability checks; exact `0755` physical-root success, one-off root-mode failures, and wrong null kind, owner, complete `020666` mode, link count, raw major, or raw minor; physical-root-anchored fresh-leaf initial and repeated `GOROOT/go.env` transactions with operation-attributed open/probe/ACL-parse/exact-read/grammar/hash/post-observation/compare, retained-row and digest binding, every primitive failure, and exact-once close including Primary plus DescriptorClose; exact Go/compiler/Git wire lengths and digests, root-sentinel outcomes, and per-use identity/security drift; golden SHA-256 vectors for all six manifest domains, fixed root framing, raw-byte ordering, root-count exclusion, control/newline names, and symlink target-record binding; selective `.git` authority/forbidden/inert classification, inert add/remove/replace/reclassify and identity/security drift, and allowed same-inode unread inert-byte change; absent/no-ACL/empty-ACL, bad-filesec-magic, endian, bounds, unknown-bit, permit/deny, and 128/129-entry ACL cases; injected exact/one-over accounting for GOROOT 65,536 descendants, 2 GiB aggregate, and 128 MiB/file, GOMODCACHE 500,000 descendants, 16 GiB aggregate, and 512 MiB/file, and Repository 1,000,000 descendants, 64 GiB aggregate, and 8 GiB/pack; dual-open root identity mismatch and pathname replacement; local/ignore-ownership, visible-flag masking, and descendant FSID/device transition; GOROOT 4-KiB and 40-link exact/one-over, absolute, dangling, directory-target, cycle, escape, and target drift; thin/fat 0/1/32/33 rows, duplicate row, table/slice overlap, alignment, outer/inner mismatch, swapped/FAT64/ARM64e, exact header flags, every allowed command family exact/one-off size, multiplicity, extent, padding, path-prefix lookalike, and panic containment; all five linkedit-data commands with zero-size interior, exact-end, and one-over cursors, a synthetic pinned-Git-shaped empty `LC_DATA_IN_CODE`, and zero-count/nonzero-offset refusal for every other extent family |
-| 059-111 | Public synthetic standalone repositories; exact eight-step/two-block command order and four-manifest move-once aggregate before allocation; the deep five-command interface, exact pre/post matrix, mandatory entered-bracket completion, separately armed block-end bracket on every later exit, five named request materializers with no raw caller command or timing authority, same-clock opaque command windows, earliest caller/transaction/phase deadline, and zero allocation; first pending pointer-alias transfer success, losing/repeated/concurrent alias refusal before handle access, and exactly-once transfer or close; exact 12-byte lowercase name framing, entropy error/short read, context stop, collision without allocation, 100-candidate exhaustion, every closed noncollision `mkdirat` cause, and immediate post-success unobserved claim; exact no-home initial workspace, sole symlink, and unchanged-policy boundary; retained read/write spool-to-`ReaderAt`, same-inode one-to-zero unlink proof, rename/swap refusal, 4,096/4,097 files, 2-GiB exact/one-over, generations, empty-before-Git, and cleanup; distinct exact 39-row byte-sorted preallocation/task-private direct environments and fresh clones; hostile ambient home/telemetry/sidecar/cache/temp/proxy/loader variables absent; pinned empty-home telemetry-off/no-artifact probe and writable-home negative; every preallocation command and four source rows before allocator count changes, retained-null stdin, root/null brackets, filesystem-write-denied evidence allowing only `/dev/null`, exact 39-to-50 mutation, 51-row Git, 50-row tool-ID, 52-row compile/assembler, and 51-row link projections; object/zlib/pack/delta accounting, same-ID canonical equivalence, commit grammar, raw-tree `40000` to transcript `040000`, tree-DAG/path collision; byte-exact SHA-1/SHA-256 config; raw batch/tree/attribute framing including inert `diff=set`; copy completeness, raw projection equality, checkout, and exact Git state |
+| 059-111 | Public synthetic standalone repositories; exact eight-step/one-block order and four-manifest move-once aggregate before allocation; the deep five-command non-source interface, exact non-source rows, mandatory entered-command brackets, separately armed non-source block-end bracket on every later exit, five named request materializers with no raw caller command or timing authority, same-clock opaque command windows, earliest caller/transaction/phase deadline, and zero allocation; a production guard and full trace proving exactly five preallocation children and no process request or child cwd, argv, environment, or stdin carries Repository, `.git`, source-config, or source-object path authority; C1 initial-policy versus revalidation-drift attribution and fixed post-content-observe, close, and trailing-rebind failure composition; the fifteen-row fail-fast final schedule with StateRoot last and infallible sealing; C1 atomic pending/moved/closed first-winner take plus losing/repeated/concurrent alias refusal before handle access; exactly-once transfer or close in the thirteen-owner order, physical-root descriptor-before-`os.Root` order, every other root-bundle `os.Root`-before-descriptor order, and injected dual-inner-close failures; exact 12-byte lowercase name framing, entropy error/short read, context stop, collision without allocation, 100-candidate exhaustion, every closed noncollision `mkdirat` cause, and immediate post-success unobserved claim; exact no-home initial workspace, sole symlink, and unchanged-policy boundary; retained read/write spool-to-`ReaderAt`, same-inode one-to-zero unlink proof, rename/swap refusal, 4,096/4,097 files, 2-GiB exact/one-over, generations, empty-before-Git, and cleanup; distinct exact 39-row byte-sorted preallocation/task-private direct environments and fresh clones; hostile ambient home/telemetry/sidecar/cache/temp/proxy/loader variables absent; pinned empty-home telemetry-off/no-artifact probe and writable-home negative; all five preallocation commands before allocator count changes, retained-null stdin, root/null brackets, filesystem-write-denied evidence allowing only `/dev/null`, exact 39-to-50 mutation, 51-row Git, 50-row tool-ID, 52-row compile/assembler, and 51-row link projections; exhaustive source-config/topology/format/routing corpora and source-state noninterference; object/zlib/pack/delta accounting, same-ID canonical equivalence, commit grammar, raw-tree `40000` to transcript `040000`, tree-DAG/path collision; byte-exact SHA-1/SHA-256 private config; raw batch/tree/attribute framing including inert `diff=set`; copy completeness, source/private manifest equality, repeated private custom preflight, private Git corroboration, checkout, and exact Git state |
 | 112-138 | Synthetic module-cache, `go.sum`, ZIP/ZIP64, cancellation, no-follow source/symlink, graph recheck, assembly, `go_asm.h`, and exact derived-tree threshold cases; all twelve role-list seven-plus-three bundles, no operational role-list child, six module-list/two-mod-verify negative traces, and exact 42 tool-ID total |
 | 139-154 | Deterministic build-info; exact seven-row Go-owned Git argv/output/exit/order traces for all twelve role-package queries and both role builds; exact 98 Git and 42 tool-ID totals; no fifth pinned-Go child constructor; each role's exact operational child multiset and causal partial order with every argv/cwd/environment, allowed ready-action interleavings, and host-derived `GOMAXPROCS`/compiler `-c`; thin-Mach-O, retained-output-identity, role-order, graph comparison, and partial-pair cases plus one opt-in exact real pair build |
 | 155-170 | Public real-process and instance-local supervisor cases plus tagged retained-null and bounded-input-pipe plans, nil/untyped-input refusal, pinned-Go nil-stdin/root-null exception, exit-zero/nonempty-stderr refusal and successful-result withholding until quiescence/closure/empty stderr; production-source guard for the exact 16-byte sigaction ABI, admitted/ignored/changed/query-error `SIGCHLD`, forbidden broad reapers, and allowed exact-PID waits; exact descriptor-read/EOF attribution, required/optional/forbidden observations, sentinel and allocator mappings, preallocation root/non-root close ordering, setup failure before and after task allocation, including successful `mkdirat` with failed retained open and optional recovery identity; exact write-once Primary mappings, first-postcheck-as-Primary, child-Primary plus one bounded private non-close postcheck record, proof withholding, no later record, no public secondary slot, independent DescriptorClose and Cleanup, and rendered slot order; exact-once pipe close/join, captured `Setpgid=true`/`Pgid=0`, Start/process-group-establishment failure, immediate and deliberately delayed observation of a fast exit without post-Start `getpgid`, Darwin/arm64 siginfo size/alignment/field offsets and every exact terminal code/status boundary, nonblocking waitid terminal/anomalous/stopped states, preterminal `ECHILD`/lost-identity no-signal handoff with permanently absent public status despite early or late private Wait return, post-terminal sigaction drift with no signal/probe plus synchronous status-preserving reap, single and persistent EINTR/deadline resampling with the exact positive channel-free five-millisecond retry and second-EINTR handoff, waitid-versus-ProcessState mismatch, natural/nonzero/signaled exit, cancel/deadline/limit/parse/input/read races and fixed precedence including one-read limit-before-parse publication, five-millisecond maximum programmed wait, exact handoff-plus-one-second pipe finalization before every background return, structured-versus-streamed mode validation, a greater-than-256-MiB valid streamed fixture without whole-output retention, concrete-tagged-plan and no-function/writer/open-interface source guards, incomplete-stream-worker no-result and task-preservation proof, terminal-latch versus late-I/O-fault cases, cloned-input concurrent-mutation coverage, a deterministic completion-channel scheduler, five-second post-attempt observation and `child-wait` handoff, leader pinning, required zombie leader, empty/missing/live/wrong-state snapshots, raw sysctl overflow, terminate/wait/probe/drain/survivor faults, provisional `ESRCH`/`EPERM`, 4,096/4,097 members, 1,000-snapshot follow-up, held stdout and stderr, common one-second EOF bound, signed/absent status, exact stderr prefix/count/digest/truncation, earliest-child/single-Child reporting, all disposition/Recovery rows, whole-ledger preflight before any delete, removal plus root-close failure, replacement root, nested mount, descriptor failure, and concurrent Close |
