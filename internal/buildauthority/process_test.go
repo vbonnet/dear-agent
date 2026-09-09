@@ -36,6 +36,7 @@ func TestValidateProcessRequestRequiresClosedInputs(t *testing.T) {
 		phase:         PhaseSource,
 		executable:    "/usr/bin/git",
 		directory:     "/private/tmp/task",
+		input:         newBoundedProcessInput(nil),
 		stdoutLimit:   processMaxStructuredOutputBytes,
 		phaseDeadline: deadline,
 	}
@@ -48,6 +49,27 @@ func TestValidateProcessRequestRequiresClosedInputs(t *testing.T) {
 		mutate func(*processRequest)
 	}{
 		{name: "nil context", mutate: func(request *processRequest) { request.ctx = nil }},
+		{name: "nil input", mutate: func(request *processRequest) { request.input = nil }},
+		{name: "zero input tag", mutate: func(request *processRequest) { request.input = &processInput{} }},
+		{name: "unknown input tag", mutate: func(request *processRequest) {
+			request.input = &processInput{kind: processInputKind(255)}
+		}},
+		{name: "missing retained null", mutate: func(request *processRequest) {
+			request.input = newRetainedNullProcessInput(nil)
+		}},
+		{name: "retained null with bounded payload", mutate: func(request *processRequest) {
+			request.input = &processInput{
+				kind:         processInputRetainedNull,
+				retainedNull: &retainedNullDevice{},
+				bounded:      []byte{},
+			}
+		}},
+		{name: "bounded input with retained null", mutate: func(request *processRequest) {
+			request.input = &processInput{
+				kind:         processInputBounded,
+				retainedNull: &retainedNullDevice{},
+			}
+		}},
 		{name: "invalid phase", mutate: func(request *processRequest) { request.phase = Phase("other") }},
 		{name: "relative executable", mutate: func(request *processRequest) { request.executable = "git" }},
 		{name: "unclean executable", mutate: func(request *processRequest) { request.executable = "/usr/bin/../bin/git" }},
@@ -205,6 +227,20 @@ func TestProcessInputWriterClonesBeforeAsyncUse(t *testing.T) {
 	}
 }
 
+func TestBoundedProcessInputClonesAtConstructionAndResolution(t *testing.T) {
+	original := []byte("constructor-clone")
+	input := newBoundedProcessInput(original)
+	copy(original, []byte("caller-mutates!!"))
+	resolved, err := resolveProcessInput(context.Background(), input)
+	if err != nil {
+		t.Fatal("bounded input did not resolve")
+	}
+	copy(input.bounded, []byte("plan-mutated!!!!"))
+	if string(resolved.bounded) != "constructor-clone" {
+		t.Fatalf("resolved bytes = %q", resolved.bounded)
+	}
+}
+
 func TestProcessProductionSourceHasNoExecutableOutputSeam(t *testing.T) {
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -234,10 +270,32 @@ func TestProcessProductionSourceHasNoExecutableOutputSeam(t *testing.T) {
 		{name: "executable", typeOf: reflect.TypeFor[string]()},
 		{name: "arguments", typeOf: reflect.TypeFor[[]string]()},
 		{name: "directory", typeOf: reflect.TypeFor[string]()},
-		{name: "input", typeOf: reflect.TypeFor[[]byte]()},
+		{name: "input", typeOf: reflect.TypeFor[*processInput]()},
 		{name: "stdoutLimit", typeOf: reflect.TypeFor[uint64]()},
 		{name: "phaseDeadline", typeOf: reflect.TypeFor[time.Time]()},
 		{name: "transactionDeadline", typeOf: reflect.TypeFor[time.Time]()},
+	}
+	inputType := reflect.TypeFor[processInput]()
+	if inputType.Kind() != reflect.Struct || inputType.NumField() != 3 {
+		t.Fatalf("compiled processInput shape = %s with %d fields", inputType, inputType.NumField())
+	}
+	for _, name := range []string{"kind", "retainedNull", "bounded"} {
+		field, ok := inputType.FieldByName(name)
+		if !ok || field.PkgPath == "" || field.Anonymous || field.Type.Kind() == reflect.Func ||
+			field.Type.Kind() == reflect.Interface {
+			t.Fatalf("compiled processInput field %q is missing or unsealed", name)
+		}
+	}
+	for _, sealedType := range []reflect.Type{
+		reflect.TypeFor[resolvedProcessInput](),
+		reflect.TypeFor[retainedNullProcessBorrow](),
+	} {
+		for field := range sealedType.Fields() {
+			if field.Anonymous || field.PkgPath == "" || field.Type.Kind() == reflect.Func ||
+				field.Type.Kind() == reflect.Interface {
+				t.Fatalf("sealed process-input type %s field %s exposes an open seam", sealedType, field.Name)
+			}
+		}
 	}
 	if requestType.Kind() != reflect.Struct || requestType.NumField() != len(wantFields) {
 		t.Fatalf("compiled processRequest shape = %s with %d fields, want closed %d-field struct",

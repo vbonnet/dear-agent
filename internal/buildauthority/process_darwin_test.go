@@ -10,6 +10,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -102,7 +103,7 @@ func TestDarwinSupervisorPipeSetupAndStartFailureCloseExactlyOnce(t *testing.T) 
 			harness := newDarwinHarness(darwinOldSigaction{})
 			harness.pipeFailureAt = failureAt
 			request := harness.request()
-			request.input = []byte("input")
+			request.input = newBoundedProcessInput([]byte("input"))
 			supervisor, initial := newDarwinProcessSupervisor(harness.dependencies())
 			if initial != nil {
 				t.Fatalf("initial failure = %+v", initial)
@@ -261,6 +262,210 @@ func TestDarwinSupervisorRejectsZeroEnvironmentProfilesBeforeAllocation(t *testi
 					harness.pipeCalls, len(harness.commandSpecs), harness.command.startCount)
 			}
 		})
+	}
+}
+
+func TestDarwinSupervisorRejectsInvalidInputBeforeAllocation(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input *processInput
+	}{
+		{name: "nil"},
+		{name: "zero tag", input: &processInput{}},
+		{name: "unknown tag", input: &processInput{kind: processInputKind(255)}},
+		{name: "missing retained null", input: newRetainedNullProcessInput(nil)},
+		{
+			name: "retained null with bounded payload",
+			input: &processInput{
+				kind:         processInputRetainedNull,
+				retainedNull: &retainedNullDevice{},
+				bounded:      []byte{},
+			},
+		},
+		{
+			name: "bounded with retained null",
+			input: &processInput{
+				kind:         processInputBounded,
+				retainedNull: &retainedNullDevice{},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newDarwinHarness(darwinOldSigaction{})
+			request := harness.request()
+			request.input = test.input
+			supervisor, initial := newDarwinProcessSupervisor(harness.dependencies())
+			if initial != nil {
+				t.Fatalf("initial failure = %+v", initial)
+			}
+			result := harness.run(supervisor, request)
+			requireProcessRecord(t, result.primary, PhaseSource, OperationValidate, CauseInternalInvariant)
+			if result.structuredOutput != nil || harness.pipeCalls != 0 ||
+				len(harness.commandSpecs) != 0 || harness.command.startCount != 0 {
+				t.Fatalf("invalid input crossed allocation seam: output=%v pipes=%d specs=%d starts=%d",
+					result.structuredOutput != nil, harness.pipeCalls, len(harness.commandSpecs), harness.command.startCount)
+			}
+		})
+	}
+}
+
+func TestDarwinSupervisorInputVariantsHaveDisjointOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		input     func(*testing.T) (*processInput, *retainedNullDevice)
+		wantPipes int
+	}{
+		{
+			name: "bounded empty",
+			input: func(*testing.T) (*processInput, *retainedNullDevice) {
+				return newBoundedProcessInput(nil), nil
+			},
+			wantPipes: 3,
+		},
+		{
+			name: "retained null",
+			input: func(t *testing.T) (*processInput, *retainedNullDevice) {
+				device, err := retainNullDevice(context.Background())
+				if err != nil {
+					t.Fatalf("retain null device: %v", err)
+				}
+				return newRetainedNullProcessInput(device), device
+			},
+			wantPipes: 2,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newDarwinHarness(darwinOldSigaction{})
+			harness.waitSteps = []darwinWaitStep{{info: validDarwinInfo(101, darwinChildExited, 0)}}
+			harness.snapshots = [][]darwinTestMember{{{pid: 101, pgid: 101, state: darwinProcessZombie}}}
+			input, retained := test.input(t)
+			if retained != nil {
+				defer func() {
+					if err := retained.close(); err != nil {
+						t.Errorf("close retained null device: %v", err)
+					}
+				}()
+			}
+			request := harness.request()
+			request.input = input
+			supervisor, initial := newDarwinProcessSupervisor(harness.dependencies())
+			if initial != nil {
+				t.Fatalf("initial failure = %+v", initial)
+			}
+			result := harness.run(supervisor, request)
+			if result.primary != nil || result.descriptorClose != nil || !result.quiescence.proven ||
+				result.structuredOutput == nil || harness.pipeCalls != test.wantPipes {
+				t.Fatalf("primary=%+v close=%+v quiescence=%+v output-nil=%v pipe calls=%d",
+					result.primary, result.descriptorClose, result.quiescence,
+					result.structuredOutput == nil, harness.pipeCalls)
+			}
+			if retained == nil {
+				if harness.command.stdin != harness.ends[4] {
+					t.Fatal("bounded input did not configure the child side of its private pipe")
+				}
+			} else {
+				if harness.command.stdin != retained.leaf.descriptor {
+					t.Fatal("retained null input did not borrow the retained descriptor directly")
+				}
+				if _, err := retained.leaf.descriptor.Stat(); err != nil {
+					t.Fatalf("supervisor closed retained null descriptor: %v", err)
+				}
+			}
+			harness.requireEveryCreatedEndClosedOnce(t)
+		})
+	}
+}
+
+func TestDarwinSupervisorRejectsUnusableRetainedNullBeforeAllocation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*testing.T, *retainedNullDevice) func()
+	}{
+		{
+			name: "closed descriptor",
+			mutate: func(t *testing.T, device *retainedNullDevice) func() {
+				t.Helper()
+				if err := device.close(); err != nil {
+					t.Fatalf("close retained null device: %v", err)
+				}
+				return func() {}
+			},
+		},
+		{
+			name: "descriptor drift",
+			mutate: func(t *testing.T, device *retainedNullDevice) func() {
+				t.Helper()
+				original := device.leaf.descriptor
+				wrong, err := os.Open(physicalRootPath)
+				if err != nil {
+					t.Fatalf("open wrong descriptor: %v", err)
+				}
+				device.leaf.descriptor = wrong
+				return func() {
+					_ = wrong.Close()
+					device.leaf.descriptor = original
+					_ = device.close()
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			device, err := retainNullDevice(context.Background())
+			if err != nil {
+				t.Fatalf("retain null device: %v", err)
+			}
+			cleanup := test.mutate(t, device)
+			defer cleanup()
+			harness := newDarwinHarness(darwinOldSigaction{})
+			request := harness.request()
+			request.input = newRetainedNullProcessInput(device)
+			supervisor, initial := newDarwinProcessSupervisor(harness.dependencies())
+			if initial != nil {
+				t.Fatalf("initial failure = %+v", initial)
+			}
+			result := harness.run(supervisor, request)
+			if result.primary == nil || result.primary.Phase != PhaseAuthority ||
+				result.primary.Operation != OperationProbe || result.structuredOutput != nil ||
+				harness.pipeCalls != 0 || len(harness.commandSpecs) != 0 || harness.command.startCount != 0 {
+				t.Fatalf("unusable retained null crossed start boundary: result=%+v pipes=%d specs=%d starts=%d",
+					result, harness.pipeCalls, len(harness.commandSpecs), harness.command.startCount)
+			}
+		})
+	}
+}
+
+func TestDarwinSupervisorPostCommandRetainedNullRevalidationGatesOutput(t *testing.T) {
+	device, err := retainNullDevice(context.Background())
+	if err != nil {
+		t.Fatalf("retain null device: %v", err)
+	}
+	harness := newDarwinHarness(darwinOldSigaction{})
+	harness.stdoutData = []byte("withheld")
+	harness.waitSteps = []darwinWaitStep{{info: validDarwinInfo(101, darwinChildExited, 0)}}
+	harness.snapshots = [][]darwinTestMember{{{pid: 101, pgid: 101, state: darwinProcessZombie}}}
+	dependencies := harness.dependencies()
+	originalWaitID := dependencies.waitID
+	closed := false
+	dependencies.waitID = func(pid int) (darwinSiginfo, error) {
+		if !closed {
+			closed = true
+			if err := device.close(); err != nil {
+				t.Fatalf("close retained null device after Start: %v", err)
+			}
+		}
+		return originalWaitID(pid)
+	}
+	request := harness.request()
+	request.input = newRetainedNullProcessInput(device)
+	supervisor, initial := newDarwinProcessSupervisor(dependencies)
+	if initial != nil {
+		t.Fatalf("initial failure = %+v", initial)
+	}
+	result := harness.run(supervisor, request)
+	if !closed || result.primary == nil || result.primary.Phase != PhaseAuthority ||
+		result.primary.Operation != OperationProbe || result.structuredOutput != nil ||
+		!result.quiescence.proven || result.descriptorClose != nil || harness.pipeCalls != 2 {
+		t.Fatalf("post-command retained-null gate = %+v closed=%v pipes=%d", result, closed, harness.pipeCalls)
 	}
 }
 
@@ -890,6 +1095,73 @@ func TestDarwinSetPrimaryDoesNotTreatDumpedSIGKILLAsIntentional(t *testing.T) {
 	requireProcessRecord(t, run.result.primary, PhaseSource, OperationExecute, CauseChildExit)
 }
 
+func TestDarwinStructuredOutputPublishesOnlyAfterEverySuccessGate(t *testing.T) {
+	ready := func() darwinProcessRun {
+		return darwinProcessRun{
+			request:         processRequest{phase: PhaseSource},
+			result:          processResult{quiescence: quiescenceResult{proven: true}},
+			publicTerminal:  &processTerminal{class: processTerminalExited, status: 0},
+			candidateOutput: []byte("structured"),
+			ioComplete:      true,
+			stderr:          processStderrResult{eof: true},
+		}
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*darwinProcessRun)
+	}{
+		{name: "primary", mutate: func(run *darwinProcessRun) {
+			run.result.primary = &FailureRecord{Phase: PhaseSource, Operation: OperationExecute}
+		}},
+		{name: "descriptor close", mutate: func(run *darwinProcessRun) {
+			run.result.descriptorClose = &FailureRecord{Phase: PhaseClose, Operation: OperationCloseNonRoot}
+		}},
+		{name: "quiescence gap", mutate: func(run *darwinProcessRun) { run.result.quiescence.proven = false }},
+		{name: "background handoff", mutate: func(run *darwinProcessRun) {
+			run.result.background = &processBackgroundReap{done: make(chan processReapResult)}
+		}},
+		{name: "io gap", mutate: func(run *darwinProcessRun) { run.ioComplete = false }},
+		{name: "missing terminal", mutate: func(run *darwinProcessRun) { run.publicTerminal = nil }},
+		{name: "nonzero terminal", mutate: func(run *darwinProcessRun) { run.publicTerminal.status = 1 }},
+		{name: "successful stderr", mutate: func(run *darwinProcessRun) { run.stderr.total = 1 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run := ready()
+			test.mutate(&run)
+			run.publishStructuredOutput()
+			if run.result.structuredOutput != nil {
+				t.Fatalf("gate published %q", run.result.structuredOutput)
+			}
+		})
+	}
+	run := ready()
+	run.publishStructuredOutput()
+	if string(run.result.structuredOutput) != "structured" {
+		t.Fatalf("proved result = %q", run.result.structuredOutput)
+	}
+}
+
+func TestDarwinSuccessfulStderrGateIsParseMalformedWithStatusZeroChild(t *testing.T) {
+	harness := newDarwinHarness(darwinOldSigaction{})
+	harness.stdoutData = []byte("withheld")
+	harness.stderrData = []byte("diagnostic")
+	harness.waitSteps = []darwinWaitStep{{info: validDarwinInfo(101, darwinChildExited, 0)}}
+	harness.snapshots = [][]darwinTestMember{{{pid: 101, pgid: 101, state: darwinProcessZombie}}}
+	harness.command.reap = processReapResult{reliable: true, pid: 101, exited: true, exitStatus: 0}
+	supervisor, initial := newDarwinProcessSupervisor(harness.dependencies())
+	if initial != nil {
+		t.Fatalf("initial failure = %+v", initial)
+	}
+	result := harness.run(supervisor, harness.request())
+	requireProcessRecord(t, result.primary, PhaseSource, OperationParse, CauseMalformed)
+	if result.structuredOutput != nil || result.primary.Child == nil ||
+		!result.primary.Child.ExitStatusObserved || result.primary.Child.ExitStatus != 0 ||
+		result.primary.Child.DiagnosticBytes != uint64(len(harness.stderrData)) ||
+		!result.quiescence.proven || result.descriptorClose != nil {
+		t.Fatalf("stderr-gated result = %+v", result)
+	}
+}
+
 func TestDarwinSupervisorCompletionDrivenSchedulingStress(t *testing.T) {
 	for iteration := range 250 {
 		harness := newDarwinHarness(darwinOldSigaction{})
@@ -1050,7 +1322,7 @@ func TestDarwinSupervisorMapsWorkerFailuresByFixedPriority(t *testing.T) {
 			harness.snapshots = [][]darwinTestMember{{{pid: 101, pgid: 101, state: darwinProcessZombie}}}
 			harness.command.reap = processReapResult{reliable: true, pid: 101, exited: true, exitStatus: 0}
 			request := harness.request()
-			request.input = test.input
+			request.input = newBoundedProcessInput(test.input)
 			if test.stdoutLimit != 0 {
 				request.stdoutLimit = test.stdoutLimit
 			}
@@ -1112,7 +1384,7 @@ func TestDarwinSupervisorTerminalLatchSurvivesLateInputFailure(t *testing.T) {
 	harness.snapshots = [][]darwinTestMember{{{pid: 101, pgid: 101, state: darwinProcessZombie}}}
 	harness.command.reap = processReapResult{reliable: true, pid: 101, exited: true, exitStatus: 7}
 	request := harness.request()
-	request.input = []byte("input")
+	request.input = newBoundedProcessInput([]byte("input"))
 	dependencies := harness.dependencies()
 	originalWaitID := dependencies.waitID
 	dependencies.waitID = func(pid int) (darwinSiginfo, error) {
@@ -1143,21 +1415,27 @@ func TestDarwinSupervisorTerminalLatchSurvivesLateInputFailure(t *testing.T) {
 }
 
 func TestDarwinSupervisorDescriptorFailureOwnsOnlyChildDiagnostic(t *testing.T) {
-	harness := newDarwinHarness(darwinOldSigaction{})
-	harness.endCloseFailureAt = 2 // Parent copy of the child stdout writer.
-	harness.waitSteps = []darwinWaitStep{{info: validDarwinInfo(101, darwinChildExited, 0)}}
-	harness.snapshots = [][]darwinTestMember{{{pid: 101, pgid: 101, state: darwinProcessZombie}}}
-	harness.command.reap = processReapResult{reliable: true, pid: 101, exited: true, exitStatus: 0}
-	supervisor, initial := newDarwinProcessSupervisor(harness.dependencies())
-	if initial != nil {
-		t.Fatalf("initial failure = %+v", initial)
+	for failureAt := 1; failureAt <= 6; failureAt++ {
+		t.Run(string(rune('0'+failureAt)), func(t *testing.T) {
+			harness := newDarwinHarness(darwinOldSigaction{})
+			harness.stdoutData = []byte("withheld")
+			harness.endCloseFailureAt = failureAt
+			harness.waitSteps = []darwinWaitStep{{info: validDarwinInfo(101, darwinChildExited, 0)}}
+			harness.snapshots = [][]darwinTestMember{{{pid: 101, pgid: 101, state: darwinProcessZombie}}}
+			harness.command.reap = processReapResult{reliable: true, pid: 101, exited: true, exitStatus: 0}
+			supervisor, initial := newDarwinProcessSupervisor(harness.dependencies())
+			if initial != nil {
+				t.Fatalf("initial failure = %+v", initial)
+			}
+			result := harness.run(supervisor, harness.request())
+			if result.primary != nil || result.descriptorClose == nil || result.descriptorClose.Child == nil ||
+				result.quiescence.child != nil || !result.quiescence.proven || result.structuredOutput != nil {
+				t.Fatalf("result = primary %+v descriptor %+v quiescence %+v output=%q",
+					result.primary, result.descriptorClose, result.quiescence, result.structuredOutput)
+			}
+			harness.requireEveryCreatedEndClosedOnce(t)
+		})
 	}
-	result := harness.run(supervisor, harness.request())
-	if result.primary != nil || result.descriptorClose == nil || result.descriptorClose.Child == nil ||
-		result.quiescence.child != nil || !result.quiescence.proven {
-		t.Fatalf("result = primary %+v descriptor %+v quiescence %+v", result.primary, result.descriptorClose, result.quiescence)
-	}
-	harness.requireEveryCreatedEndClosedOnce(t)
 }
 
 func TestDarwinSupervisorLateBackgroundWaitCannotMutateSealedResult(t *testing.T) {
@@ -1427,12 +1705,14 @@ func TestRealDarwinSupervisorSuccessAndFailure(t *testing.T) {
 		name       string
 		script     string
 		wantOutput string
+		wantOp     Operation
 		wantCause  CauseCode
 		wantStatus int
 	}{
-		{name: "success", script: "printf stdout; printf diagnostic >&2", wantOutput: "stdout"},
-		{name: "nonzero", script: "printf failure >&2; exit 7", wantCause: CauseChildExit, wantStatus: 7},
-		{name: "unrequested signal", script: "kill -TERM $$", wantCause: CauseChildExit, wantStatus: -int(syscall.SIGTERM)},
+		{name: "success", script: "printf stdout", wantOutput: "stdout"},
+		{name: "status zero stderr", script: "printf stdout; printf diagnostic >&2", wantOp: OperationParse, wantCause: CauseMalformed},
+		{name: "nonzero", script: "printf failure >&2; exit 7", wantOp: OperationExecute, wantCause: CauseChildExit, wantStatus: 7},
+		{name: "unrequested signal", script: "kill -TERM $$", wantOp: OperationExecute, wantCause: CauseChildExit, wantStatus: -int(syscall.SIGTERM)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := supervisor.runTaskPrivate(processRequest{
@@ -1441,10 +1721,12 @@ func TestRealDarwinSupervisorSuccessAndFailure(t *testing.T) {
 				executable:    "/bin/sh",
 				arguments:     []string{"-c", test.script},
 				directory:     workspace.taskRoot,
+				input:         newBoundedProcessInput(nil),
 				stdoutLimit:   1 << 20,
 				phaseDeadline: time.Now().Add(5 * time.Second),
 			}, environment)
-			if string(result.structuredOutput) != test.wantOutput {
+			if string(result.structuredOutput) != test.wantOutput ||
+				(test.wantCause != "" && result.structuredOutput != nil) {
 				t.Fatalf("stdout = %q; primary=%+v cleanup=%+v close=%+v", result.structuredOutput, result.primary, result.quiescence, result.descriptorClose)
 			}
 			if !result.quiescence.proven || result.background != nil || result.descriptorClose != nil {
@@ -1456,7 +1738,7 @@ func TestRealDarwinSupervisorSuccessAndFailure(t *testing.T) {
 				}
 				return
 			}
-			requireProcessRecord(t, result.primary, PhaseSource, OperationExecute, test.wantCause)
+			requireProcessRecord(t, result.primary, PhaseSource, test.wantOp, test.wantCause)
 			if result.primary.Child == nil || !result.primary.Child.ExitStatusObserved || result.primary.Child.ExitStatus != test.wantStatus {
 				t.Fatalf("child = %+v", result.primary.Child)
 			}
@@ -1486,6 +1768,7 @@ func TestRealDarwinSupervisorCancellationKillsOnlyOwnedGroup(t *testing.T) {
 		executable:    "/bin/sh",
 		arguments:     []string{"-c", "exec /bin/sleep 30"},
 		directory:     workspace.taskRoot,
+		input:         newBoundedProcessInput(nil),
 		stdoutLimit:   1 << 20,
 		phaseDeadline: time.Now().Add(5 * time.Second),
 	}, environment)
@@ -1493,7 +1776,7 @@ func TestRealDarwinSupervisorCancellationKillsOnlyOwnedGroup(t *testing.T) {
 		t.Fatal("canceled child cleanup exceeded focused test bound")
 	}
 	requireProcessRecord(t, result.primary, PhaseSource, OperationExecute, CauseCanceled)
-	if !result.quiescence.proven || result.background != nil || result.primary.Child == nil ||
+	if result.structuredOutput != nil || !result.quiescence.proven || result.background != nil || result.primary.Child == nil ||
 		!result.primary.Child.ExitStatusObserved || result.primary.Child.ExitStatus != -int(syscall.SIGKILL) {
 		t.Fatalf("canceled result = %+v", result)
 	}
@@ -1526,6 +1809,7 @@ type darwinHarness struct {
 	pipeCalls         int
 	heldReaders       bool
 	stdoutData        []byte
+	stderrData        []byte
 	commandSpecs      []processCommandSpec
 	commandProfiles   []string
 	commandEnvs       [][]string
@@ -1633,6 +1917,7 @@ func (harness *darwinHarness) request() processRequest {
 		phase:         PhaseSource,
 		executable:    "/bin/echo",
 		directory:     "/private/tmp",
+		input:         newBoundedProcessInput(nil),
 		stdoutLimit:   1 << 20,
 		phaseDeadline: harness.base.Add(time.Hour),
 	}
@@ -1661,9 +1946,12 @@ func (harness *darwinHarness) newPipe() (processPipe, error) {
 	} else {
 		data := []byte(nil)
 		readErr := error(nil)
-		if harness.pipeCalls == 1 {
+		switch harness.pipeCalls {
+		case 1:
 			data = harness.stdoutData
 			readErr = harness.stdoutReadErr
+		case 2:
+			data = harness.stderrData
 		}
 		read = &memoryProcessEnd{reader: bytes.NewReader(data), readErr: readErr}
 		if harness.pipeCalls == 1 {

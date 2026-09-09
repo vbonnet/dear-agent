@@ -3,6 +3,7 @@
 package buildauthority
 
 import (
+	"context"
 	"errors"
 	"io"
 	"math"
@@ -95,21 +96,12 @@ func (supervisor *darwinProcessSupervisor) runClosed(
 	validEnvironment bool,
 	newCommand processCommandFactory,
 ) processResult {
-	result := processResult{quiescence: quiescenceResult{proven: true}}
-	if failure := validateProcessRequest(request); failure != nil {
-		result.primary = failure
-		return result
-	}
-	if supervisor == nil || !validEnvironment {
-		result.primary = &FailureRecord{
-			Phase:     request.phase,
-			Operation: OperationValidate,
-			Causes:    []CauseCode{CauseInternalInvariant},
-		}
+	input, result, valid := supervisor.validateClosedRun(request, validEnvironment)
+	if !valid {
 		return result
 	}
 
-	pipes, setupErr := setupProcessPipes(supervisor.deps.newPipe, len(request.input) != 0)
+	pipes, setupErr := setupProcessPipes(supervisor.deps.newPipe, input.kind == processInputBounded)
 	if setupErr != nil {
 		result.primary = &FailureRecord{
 			Phase:     request.phase,
@@ -150,7 +142,11 @@ func (supervisor *darwinProcessSupervisor) runClosed(
 		return result
 	}
 
-	command.configure(pipes.stdinChildReader(), pipes.stdoutChildWriter(), pipes.stderrChildWriter())
+	stdin := input.retainedNull.processReader()
+	if input.kind == processInputBounded {
+		stdin = pipes.stdinChildReader()
+	}
+	command.configure(stdin, pipes.stdoutChildWriter(), pipes.stderrChildWriter())
 	notifications := newProcessNotifications()
 	workerStop := make(chan struct{})
 	stdoutDone := startProcessStdoutReader(
@@ -190,7 +186,7 @@ func (supervisor *darwinProcessSupervisor) runClosed(
 	}
 	_ = pipes.closeChildEnds()
 	if pipes.stdinWrite != nil {
-		run.writerDone = startProcessInputWriter(pipes.stdinWrite, request.input, workerStop, notifications)
+		run.writerDone = startProcessInputWriter(pipes.stdinWrite, input.bounded, workerStop, notifications)
 	}
 	if pid <= 0 || pid > math.MaxInt32 {
 		addProcessCleanupCause(&run.result, CauseChildWait)
@@ -199,8 +195,40 @@ func (supervisor *darwinProcessSupervisor) runClosed(
 		run.execute()
 	}
 	run.result.descriptorClose = processDescriptorFailure(pipes.allEnds()...)
+	run.applyRetainedNullGate(request.ctx, input)
+	run.applySuccessfulStderrGate()
 	attachProcessChild(&run.result, childDiagnosticFromProcess(run.stderr, run.publicTerminal))
+	run.publishStructuredOutput()
 	return run.result
+}
+
+func (supervisor *darwinProcessSupervisor) validateClosedRun(
+	request processRequest,
+	validEnvironment bool,
+) (resolvedProcessInput, processResult, bool) {
+	result := processResult{quiescence: quiescenceResult{proven: true}}
+	if failure := validateProcessRequest(request); failure != nil {
+		result.primary = failure
+		return resolvedProcessInput{}, result, false
+	}
+	if supervisor == nil || !validEnvironment {
+		result.primary = &FailureRecord{
+			Phase:     request.phase,
+			Operation: OperationValidate,
+			Causes:    []CauseCode{CauseInternalInvariant},
+		}
+		return resolvedProcessInput{}, result, false
+	}
+	input, inputErr := resolveProcessInput(request.ctx, request.input)
+	if inputErr != nil {
+		result.primary = &FailureRecord{
+			Phase:     PhaseAuthority,
+			Operation: OperationProbe,
+			Causes:    privateCauses(inputErr, CauseInternalInvariant),
+		}
+		return resolvedProcessInput{}, result, false
+	}
+	return input, result, true
 }
 
 type darwinProcessRun struct {
@@ -218,9 +246,11 @@ type darwinProcessRun struct {
 	groupBuffer   darwinGroupBuffer
 	groupSeen     [processGroupMemberLimit * 2]int32
 
-	result         processResult
-	stderr         processStderrResult
-	publicTerminal *processTerminal
+	result          processResult
+	stderr          processStderrResult
+	publicTerminal  *processTerminal
+	candidateOutput []byte
+	ioComplete      bool
 }
 
 func (run *darwinProcessRun) stopWorkers() {
@@ -724,16 +754,64 @@ func pollProcessIO(
 }
 
 func (run *darwinProcessRun) applyIOCompletion(completion processIOCompletion, latched processStop) {
-	run.result.structuredOutput = completion.stdout.bytes
+	run.candidateOutput = completion.stdout.bytes
 	run.stderr = completion.stderr
+	if processIOHasCleanupGap(completion, latched) {
+		addProcessCleanupCause(&run.result, CauseChildDrain)
+	}
+	run.ioComplete = processIOComplete(completion)
+}
+
+func processIOHasCleanupGap(completion processIOCompletion, latched processStop) bool {
 	lateOutputLimit := (completion.stdout.limitExceeded || completion.stderr.overflow) &&
 		latched.kind != processStopOutputLimit
 	lateInputFailure := completion.writer.writeFailed && latched.kind != processStopInput
-	if completion.missed || !completion.stdout.eof || completion.stdout.readFailed ||
+	return completion.missed || !completion.stdout.eof || completion.stdout.readFailed ||
 		!completion.stderr.eof || completion.stderr.readFailed || !completion.writerJoined ||
-		lateOutputLimit || lateInputFailure {
-		addProcessCleanupCause(&run.result, CauseChildDrain)
+		lateOutputLimit || lateInputFailure
+}
+
+func processIOComplete(completion processIOCompletion) bool {
+	return !completion.missed && completion.stdoutJoined && completion.stdout.eof &&
+		!completion.stdout.readFailed && !completion.stdout.limitExceeded &&
+		completion.stderrJoined && completion.stderr.eof && !completion.stderr.readFailed &&
+		!completion.stderr.overflow && completion.writerJoined && !completion.writer.writeFailed
+}
+
+func (run *darwinProcessRun) applyRetainedNullGate(ctx context.Context, input resolvedProcessInput) {
+	if input.kind != processInputRetainedNull || run.result.primary != nil {
+		return
 	}
+	if err := input.retainedNull.revalidate(ctx); err != nil {
+		run.result.primary = &FailureRecord{
+			Phase:     PhaseAuthority,
+			Operation: OperationProbe,
+			Causes:    privateCauses(err, CauseInternalInvariant),
+		}
+	}
+}
+
+func (run *darwinProcessRun) applySuccessfulStderrGate() {
+	if run.result.primary != nil || run.publicTerminal == nil ||
+		run.publicTerminal.class != processTerminalExited || run.publicTerminal.status != 0 ||
+		run.stderr.total == 0 {
+		return
+	}
+	run.result.primary = &FailureRecord{
+		Phase:     run.request.phase,
+		Operation: OperationParse,
+		Causes:    []CauseCode{CauseMalformed},
+	}
+}
+
+func (run *darwinProcessRun) publishStructuredOutput() {
+	if run.result.primary != nil || run.result.descriptorClose != nil ||
+		!run.result.quiescence.proven || run.result.background != nil || !run.ioComplete ||
+		run.publicTerminal == nil || run.publicTerminal.class != processTerminalExited ||
+		run.publicTerminal.status != 0 || run.stderr.total != 0 {
+		return
+	}
+	run.result.structuredOutput = run.candidateOutput
 }
 
 type processRunPipes struct {
