@@ -32,6 +32,7 @@ type authorityBracketFixture struct {
 	directoryEntries  map[string][]string
 	hashes            map[string]Digest
 	links             map[string]string
+	presentSentinels  map[string]bool
 	closed            map[*os.File]int
 	transient         []*os.File
 	calls             map[string]int
@@ -308,7 +309,8 @@ func newAuthorityBracketFixture(t *testing.T) *authorityBracketFixture {
 			"retained-git":      gitDigest,
 			"fresh-git":         gitDigest,
 		},
-		links: make(map[string]string),
+		links:            make(map[string]string),
+		presentSentinels: make(map[string]bool),
 	}
 	fixture.resetTrace()
 	return fixture
@@ -524,6 +526,34 @@ func (fixture *authorityBracketFixture) primitives() preflightAuthorityPrimitive
 
 func (fixture *authorityBracketFixture) bracketPrimitives() preflightAuthorityBracketPrimitives {
 	return preflightAuthorityBracketPrimitives{
+		probeSentinelAbsence: func(
+			_ context.Context,
+			parent *os.File,
+			name string,
+			mode authoritySentinelAbsenceMode,
+		) *authorityPrimitiveFailure {
+			modeName := "invalid"
+			switch mode {
+			case authorityInitialSentinelAbsence:
+				modeName = "initial"
+			case authorityExpectedSentinelAbsence:
+				modeName = "expected"
+			}
+			key := fixture.step(fmt.Sprintf("sentinel:%s:%s", modeName, name))
+			if fixture.labels[parent] != "root" || !mode.valid() {
+				return newAuthorityPrimitiveFailure(OperationValidate, CauseInternalInvariant)
+			}
+			if failure := fixture.failures[key]; failure != nil {
+				return failure
+			}
+			if !fixture.presentSentinels[name] {
+				return nil
+			}
+			if mode == authorityInitialSentinelAbsence {
+				return newAuthorityPrimitiveFailure(OperationValidate, CauseUnsupported)
+			}
+			return newAuthorityPrimitiveFailure(OperationCompare, CauseUnstable)
+		},
 		openAbsoluteRoot: func(
 			context.Context,
 		) (*authorityDescriptorAcquisition, *authorityPrimitiveFailure) {

@@ -3,6 +3,10 @@
 package buildauthority
 
 func newProcessSupervisor() (processSupervisor, *FailureRecord) {
+	return newProcessSupervisorWithScheduler(&realProcessScheduler{})
+}
+
+func newProcessSupervisorWithScheduler(processScheduler) (processSupervisor, *FailureRecord) {
 	return nil, &FailureRecord{
 		Phase:     PhaseAuthority,
 		Operation: OperationValidate,

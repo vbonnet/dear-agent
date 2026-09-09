@@ -29,8 +29,8 @@ const (
 // nominal entry points make preallocation and task-private environments
 // non-interchangeable at the command seam.
 type processSupervisor interface {
-	runPreallocation(processRequest, preallocationEnvironment) processResult
-	runTaskPrivate(processRequest, taskPrivateEnvironment) processResult
+	runPreallocation(*processRequest, preallocationEnvironment) processResult
+	runTaskPrivate(*processRequest, taskPrivateEnvironment) processResult
 	privateProcessSupervisor()
 }
 
@@ -46,6 +46,7 @@ type processRequest struct {
 	input               *processInput
 	stdoutLimit         uint64
 	phaseDeadline       time.Time
+	callerDeadline      time.Time
 	transactionDeadline time.Time
 }
 
@@ -53,6 +54,7 @@ type processInputKind uint8
 
 const (
 	processInputRetainedNull processInputKind = iota + 1
+	processInputBracketedRetainedNull
 	processInputBounded
 )
 
@@ -60,13 +62,23 @@ const (
 // transaction-owned descriptor; a bounded input owns a clone and requires one
 // supervisor-owned pipe.
 type processInput struct {
-	kind         processInputKind
-	retainedNull *retainedNullDevice
-	bounded      []byte
+	kind          processInputKind
+	retainedNull  *retainedNullDevice
+	bracketedNull *retainedNullCommandWitness
+	bounded       []byte
 }
 
 func newRetainedNullProcessInput(device *retainedNullDevice) *processInput {
 	return &processInput{kind: processInputRetainedNull, retainedNull: device}
+}
+
+func newBracketedRetainedNullProcessInput(
+	witness *retainedNullCommandWitness,
+) *processInput {
+	return &processInput{
+		kind:          processInputBracketedRetainedNull,
+		bracketedNull: witness,
+	}
 }
 
 func newBoundedProcessInput(input []byte) *processInput {
@@ -85,13 +97,16 @@ func validProcessInput(input *processInput) bool {
 	}
 	switch input.kind {
 	case processInputRetainedNull:
-		if input.bounded != nil {
+		if input.bracketedNull != nil || input.bounded != nil {
 			return false
 		}
 		_, ok := input.retainedNull.borrowProcessInput()
 		return ok
+	case processInputBracketedRetainedNull:
+		return input.retainedNull == nil && input.bounded == nil &&
+			input.bracketedNull.validForProcessInput()
 	case processInputBounded:
-		return input.retainedNull == nil
+		return input.retainedNull == nil && input.bracketedNull == nil
 	default:
 		return false
 	}
@@ -111,20 +126,231 @@ func resolveProcessInput(ctx context.Context, input *processInput) (resolvedProc
 		}
 		return resolvedProcessInput{kind: input.kind, retainedNull: borrow}, nil
 	}
+	if input.kind == processInputBracketedRetainedNull {
+		borrow, ok := input.bracketedNull.borrowProcessInput()
+		if !ok {
+			return resolvedProcessInput{}, fail(
+				CauseInternalInvariant,
+				"invalid bracketed retained null-device input",
+			)
+		}
+		return resolvedProcessInput{kind: input.kind, retainedNull: borrow}, nil
+	}
 	return resolvedProcessInput{
 		kind:    input.kind,
 		bounded: append([]byte(nil), input.bounded...),
 	}, nil
 }
 
+// nonSourceProcessOwner is the only command authority exposed to the
+// no-scratch non-source block. Its five nominal methods prevent a caller from
+// supplying executable, argv, environment, stdin, output, context, or time
+// authority through a generic command seam.
+type nonSourceProcessOwner interface {
+	runGoVersion(goVersionPlan, *nonSourceCommandWindow) processResult
+	runGoEnvironment(goEnvironmentPlan, *nonSourceCommandWindow) processResult
+	runCompilerVersion(compilerVersionPlan, *nonSourceCommandWindow) processResult
+	runGitVersion(gitVersionPlan, *nonSourceCommandWindow) processResult
+	runGitBuiltinInventory(gitBuiltinInventoryPlan, *nonSourceCommandWindow) processResult
+	privateNonSourceProcessOwner()
+}
+
+type preallocationNonSourceProcessOwner struct {
+	supervisor processSupervisor
+	issuer     *nonSourceWindowIssuer
+}
+
+func (*preallocationNonSourceProcessOwner) privateNonSourceProcessOwner() {}
+
+//nolint:unused // B seals this adapter behind the runner; C makes the runner reachable.
+func newNonSourceProcessOwner(
+	issuer *nonSourceWindowIssuer,
+) (nonSourceProcessOwner, *FailureRecord) {
+	if issuer == nil || !issuer.valid() {
+		return nil, authorityFailure(OperationValidate, CauseInternalInvariant)
+	}
+	supervisor, failure := newProcessSupervisorWithScheduler(issuer.scheduler)
+	if failure != nil {
+		return nil, failure
+	}
+	return &preallocationNonSourceProcessOwner{
+		supervisor: supervisor,
+		issuer:     issuer,
+	}, nil
+}
+
+func invalidNonSourceProcessResult(failure *FailureRecord) processResult {
+	if failure == nil {
+		failure = authorityFailure(OperationValidate, CauseInternalInvariant)
+	}
+	return processResult{
+		primary:    cloneFailureRecord(failure),
+		quiescence: quiescenceResult{proven: true},
+	}
+}
+
+func (owner *preallocationNonSourceProcessOwner) runGoVersion(
+	plan goVersionPlan,
+	window *nonSourceCommandWindow,
+) processResult {
+	if owner == nil || owner.supervisor == nil || !owner.issuer.valid() || !plan.valid() {
+		return invalidNonSourceProcessResult(nil)
+	}
+	authority, failure := window.consume(nonSourceCommandGoVersion, plan.environment, owner.issuer)
+	if failure != nil {
+		return invalidNonSourceProcessResult(failure)
+	}
+	request := &processRequest{
+		ctx:                 authority.ctx,
+		phase:               PhaseAuthority,
+		executable:          plan.executable.retained.leaf.path,
+		arguments:           []string{"version"},
+		directory:           physicalRootPath,
+		input:               newBracketedRetainedNullProcessInput(authority.nullWitness),
+		stdoutLimit:         processMaxStructuredOutputBytes,
+		phaseDeadline:       authority.phaseDeadline,
+		callerDeadline:      authority.callerDeadline,
+		transactionDeadline: authority.transactionDeadline,
+	}
+	result := owner.supervisor.runPreallocation(request, plan.environment)
+	return reconcileNonSourceProcessDeadline(window, request, result)
+}
+
+func (owner *preallocationNonSourceProcessOwner) runGoEnvironment(
+	plan goEnvironmentPlan,
+	window *nonSourceCommandWindow,
+) processResult {
+	if owner == nil || owner.supervisor == nil || !owner.issuer.valid() || !plan.valid() {
+		return invalidNonSourceProcessResult(nil)
+	}
+	authority, failure := window.consume(nonSourceCommandGoEnvironment, plan.environment, owner.issuer)
+	if failure != nil {
+		return invalidNonSourceProcessResult(failure)
+	}
+	request := &processRequest{
+		ctx:                 authority.ctx,
+		phase:               PhaseAuthority,
+		executable:          plan.executable.retained.leaf.path,
+		arguments:           goEnvironmentArguments(),
+		directory:           physicalRootPath,
+		input:               newBracketedRetainedNullProcessInput(authority.nullWitness),
+		stdoutLimit:         processMaxStructuredOutputBytes,
+		phaseDeadline:       authority.phaseDeadline,
+		callerDeadline:      authority.callerDeadline,
+		transactionDeadline: authority.transactionDeadline,
+	}
+	result := owner.supervisor.runPreallocation(request, plan.environment)
+	return reconcileNonSourceProcessDeadline(window, request, result)
+}
+
+func (owner *preallocationNonSourceProcessOwner) runCompilerVersion(
+	plan compilerVersionPlan,
+	window *nonSourceCommandWindow,
+) processResult {
+	if owner == nil || owner.supervisor == nil || !owner.issuer.valid() || !plan.valid() {
+		return invalidNonSourceProcessResult(nil)
+	}
+	authority, failure := window.consume(nonSourceCommandCompilerVersion, plan.environment, owner.issuer)
+	if failure != nil {
+		return invalidNonSourceProcessResult(failure)
+	}
+	request := &processRequest{
+		ctx:                 authority.ctx,
+		phase:               PhaseAuthority,
+		executable:          plan.executable.retained.leaf.path,
+		arguments:           []string{"-V=full"},
+		directory:           physicalRootPath,
+		input:               newBracketedRetainedNullProcessInput(authority.nullWitness),
+		stdoutLimit:         processMaxStructuredOutputBytes,
+		phaseDeadline:       authority.phaseDeadline,
+		callerDeadline:      authority.callerDeadline,
+		transactionDeadline: authority.transactionDeadline,
+	}
+	result := owner.supervisor.runPreallocation(request, plan.environment)
+	return reconcileNonSourceProcessDeadline(window, request, result)
+}
+
+func (owner *preallocationNonSourceProcessOwner) runGitVersion(
+	plan gitVersionPlan,
+	window *nonSourceCommandWindow,
+) processResult {
+	if owner == nil || owner.supervisor == nil || !owner.issuer.valid() || !plan.valid() {
+		return invalidNonSourceProcessResult(nil)
+	}
+	authority, failure := window.consume(nonSourceCommandGitVersion, plan.environment, owner.issuer)
+	if failure != nil {
+		return invalidNonSourceProcessResult(failure)
+	}
+	request := &processRequest{
+		ctx:                 authority.ctx,
+		phase:               PhaseAuthority,
+		executable:          plan.executable.retained.leaf.path,
+		arguments:           []string{"version", "--build-options"},
+		directory:           physicalRootPath,
+		input:               newBracketedRetainedNullProcessInput(authority.nullWitness),
+		stdoutLimit:         processMaxStructuredOutputBytes,
+		phaseDeadline:       authority.phaseDeadline,
+		callerDeadline:      authority.callerDeadline,
+		transactionDeadline: authority.transactionDeadline,
+	}
+	result := owner.supervisor.runPreallocation(request, plan.environment)
+	return reconcileNonSourceProcessDeadline(window, request, result)
+}
+
+func (owner *preallocationNonSourceProcessOwner) runGitBuiltinInventory(
+	plan gitBuiltinInventoryPlan,
+	window *nonSourceCommandWindow,
+) processResult {
+	if owner == nil || owner.supervisor == nil || !owner.issuer.valid() || !plan.valid() {
+		return invalidNonSourceProcessResult(nil)
+	}
+	authority, failure := window.consume(nonSourceCommandGitBuiltinInventory, plan.environment, owner.issuer)
+	if failure != nil {
+		return invalidNonSourceProcessResult(failure)
+	}
+	request := &processRequest{
+		ctx:        authority.ctx,
+		phase:      PhaseAuthority,
+		executable: plan.executable.retained.leaf.path,
+		arguments: []string{
+			"--git-dir=/dev/null",
+			"--list-cmds=builtins",
+		},
+		directory:           physicalRootPath,
+		input:               newBracketedRetainedNullProcessInput(authority.nullWitness),
+		stdoutLimit:         processMaxStructuredOutputBytes,
+		phaseDeadline:       authority.phaseDeadline,
+		callerDeadline:      authority.callerDeadline,
+		transactionDeadline: authority.transactionDeadline,
+	}
+	result := owner.supervisor.runPreallocation(request, plan.environment)
+	return reconcileNonSourceProcessDeadline(window, request, result)
+}
+
+func reconcileNonSourceProcessDeadline(
+	window *nonSourceCommandWindow,
+	request *processRequest,
+	result processResult,
+) processResult {
+	if request == nil {
+		return invalidNonSourceProcessResult(nil)
+	}
+	if failure := window.retainProcessCallerDeadline(request.callerDeadline); failure != nil {
+		return invalidNonSourceProcessResult(failure)
+	}
+	return result
+}
+
 // processResult is deliberately package-private. structuredOutput is the only
-// raw child data retained by this seam; stderr is reduced to ChildDiagnostic.
+// raw child data retained by this seam; structuredOutputChild keeps the exact
+// successful-child diagnostic private unless validation of those bytes fails.
 type processResult struct {
-	structuredOutput []byte
-	primary          *FailureRecord
-	descriptorClose  *FailureRecord
-	quiescence       quiescenceResult
-	background       *processBackgroundReap
+	structuredOutput      []byte
+	structuredOutputChild *ChildDiagnostic
+	primary               *FailureRecord
+	descriptorClose       *FailureRecord
+	quiescence            quiescenceResult
+	background            *processBackgroundReap
 }
 
 // processBackgroundReap exposes only sanitized liveness state and is never
@@ -223,7 +449,8 @@ func validateProcessRequest(request processRequest) *FailureRecord {
 		request.stdoutLimit == 0 || request.stdoutLimit > processMaxStructuredOutputBytes ||
 		!cleanAbsoluteProcessPath(request.executable) ||
 		!cleanAbsoluteProcessPath(request.directory)
-	if !invalid && request.phaseDeadline.IsZero() && request.transactionDeadline.IsZero() {
+	if !invalid && request.phaseDeadline.IsZero() && request.callerDeadline.IsZero() &&
+		request.transactionDeadline.IsZero() {
 		_, hasContextDeadline := request.ctx.Deadline()
 		invalid = !hasContextDeadline
 	}
@@ -247,6 +474,7 @@ const (
 	processStopNone processStopKind = iota
 	processStopDeadline
 	processStopCanceled
+	processStopInvalidContext
 	processStopOutputLimit
 	processStopInput
 	processStopRead
@@ -264,6 +492,8 @@ func (stop processStop) primary(phase Phase) *FailureRecord {
 		operation, cause = OperationExecute, CauseDeadline
 	case processStopCanceled:
 		operation, cause = OperationExecute, CauseCanceled
+	case processStopInvalidContext:
+		operation, cause = OperationValidate, CauseInternalInvariant
 	case processStopOutputLimit:
 		operation, cause = OperationExecute, CauseLimit
 	case processStopInput:
@@ -303,7 +533,7 @@ func (notifications *processNotifications) workerCompleted() {
 func (notifications *processNotifications) publish(kind processStopKind) {
 	notifications.mu.Lock()
 	switch kind {
-	case processStopNone, processStopDeadline, processStopCanceled:
+	case processStopNone, processStopDeadline, processStopCanceled, processStopInvalidContext:
 		// Only worker-originated facts are publishable through this channel.
 	case processStopOutputLimit:
 		notifications.outputLimit = true
@@ -319,15 +549,9 @@ func (notifications *processNotifications) publish(kind processStopKind) {
 	}
 }
 
-func (notifications *processNotifications) sample(request processRequest, now time.Time) processStop {
-	// Deadline is deliberately sampled before cancellation, including a context
-	// whose own timer has already reported DeadlineExceeded.
-	contextError := request.ctx.Err()
-	if processDeadlineReached(request, now) || errors.Is(contextError, context.DeadlineExceeded) {
-		return processStop{kind: processStopDeadline}
-	}
-	if contextError != nil {
-		return processStop{kind: processStopCanceled}
+func (notifications *processNotifications) sample(request *processRequest, now time.Time) processStop {
+	if stop := processRequestStop(request, now); stop.kind != processStopNone {
+		return stop
 	}
 	notifications.mu.Lock()
 	defer notifications.mu.Unlock()
@@ -338,6 +562,40 @@ func (notifications *processNotifications) sample(request processRequest, now ti
 		return processStop{kind: processStopInput}
 	case notifications.read:
 		return processStop{kind: processStopRead}
+	default:
+		return processStop{}
+	}
+}
+
+func processRequestBoundaryFailure(
+	request *processRequest,
+	now time.Time,
+) *FailureRecord {
+	phase := PhaseAuthority
+	if request != nil && validPhase(request.phase) {
+		phase = request.phase
+	}
+	return processRequestStop(request, now).primary(phase)
+}
+
+func processRequestStop(request *processRequest, now time.Time) processStop {
+	if request == nil || request.ctx == nil || now.IsZero() {
+		return processStop{kind: processStopInvalidContext}
+	}
+	// Deadline is deliberately sampled before cancellation, including a context
+	// whose own timer has already reported DeadlineExceeded. Any other non-nil
+	// context error is not cancellation evidence and fails closed as an invariant.
+	contextError := request.ctx.Err()
+	contextDeadline, hasContextDeadline := request.ctx.Deadline()
+	retainProcessCallerDeadlineAt(request, contextDeadline, hasContextDeadline, now)
+	switch {
+	case processDeadlineReachedAt(request, now),
+		errors.Is(contextError, context.DeadlineExceeded):
+		return processStop{kind: processStopDeadline}
+	case errors.Is(contextError, context.Canceled):
+		return processStop{kind: processStopCanceled}
+	case contextError != nil:
+		return processStop{kind: processStopInvalidContext}
 	default:
 		return processStop{}
 	}
@@ -358,8 +616,18 @@ func (notifications *processNotifications) sampleWorkers() processStop {
 	}
 }
 
-func processDeadlineReached(request processRequest, now time.Time) bool {
-	for _, deadline := range processDeadlines(request) {
+func processDeadlineReachedAt(
+	request *processRequest,
+	now time.Time,
+) bool {
+	if request == nil {
+		return false
+	}
+	for _, deadline := range []time.Time{
+		request.phaseDeadline,
+		request.callerDeadline,
+		request.transactionDeadline,
+	} {
 		if !deadline.IsZero() && !now.Before(deadline) {
 			return true
 		}
@@ -367,7 +635,12 @@ func processDeadlineReached(request processRequest, now time.Time) bool {
 	return false
 }
 
-func nextProcessDeadline(request processRequest) time.Time {
+func nextProcessDeadline(request *processRequest, now time.Time) time.Time {
+	if request == nil || request.ctx == nil || now.IsZero() {
+		return time.Time{}
+	}
+	contextDeadline, hasContextDeadline := request.ctx.Deadline()
+	retainProcessCallerDeadlineAt(request, contextDeadline, hasContextDeadline, now)
 	var next time.Time
 	for _, deadline := range processDeadlines(request) {
 		if deadline.IsZero() || (!next.IsZero() && !deadline.Before(next)) {
@@ -378,12 +651,32 @@ func nextProcessDeadline(request processRequest) time.Time {
 	return next
 }
 
-func processDeadlines(request processRequest) [3]time.Time {
-	deadlines := [3]time.Time{request.phaseDeadline, request.transactionDeadline}
-	if deadline, ok := request.ctx.Deadline(); ok {
-		deadlines[2] = deadline
+func retainProcessCallerDeadlineAt(
+	request *processRequest,
+	deadline time.Time,
+	hasDeadline bool,
+	now time.Time,
+) {
+	if request == nil || !hasDeadline {
+		return
 	}
-	return deadlines
+	if deadline.IsZero() {
+		deadline = now
+	}
+	if request.callerDeadline.IsZero() || deadline.Before(request.callerDeadline) {
+		request.callerDeadline = deadline
+	}
+}
+
+func processDeadlines(request *processRequest) [3]time.Time {
+	if request == nil {
+		return [3]time.Time{}
+	}
+	return [3]time.Time{
+		request.phaseDeadline,
+		request.callerDeadline,
+		request.transactionDeadline,
+	}
 }
 
 func processPollDelay(now time.Time, deadlines ...time.Time) time.Duration {
@@ -669,6 +962,16 @@ func childDiagnosticFromProcess(stderr processStderrResult, terminal *processTer
 		}
 	}
 	return diagnostic
+}
+
+func validStructuredOutputChild(child *ChildDiagnostic) bool {
+	return child != nil && child.ExitStatusObserved && child.ExitStatus == 0 &&
+		validEmptyProcessDiagnostic(child)
+}
+
+func validEmptyProcessDiagnostic(child *ChildDiagnostic) bool {
+	return child != nil && child.DiagnosticBytes == 0 && !child.Truncated &&
+		child.DiagnosticSHA256 == Digest(sha256.Sum256(nil))
 }
 
 func attachProcessChild(result *processResult, child *ChildDiagnostic) {

@@ -31,6 +31,7 @@ func platformPreflightAuthorityPrimitives() (
 		readExactForParse:    readExactAuthorityForParse,
 		hashBytes:            hashAuthorityBytes,
 		brackets: preflightAuthorityBracketPrimitives{
+			probeSentinelAbsence:         probePreflightAuthoritySentinelAbsence,
 			openAbsoluteRoot:             openPreflightAuthorityAbsoluteRoot,
 			openRootHandle:               openPreflightAuthorityRootHandle,
 			openNullRelativeNoFollow:     openPreflightAuthorityNullRelativeNoFollow,
@@ -46,6 +47,56 @@ func platformPreflightAuthorityPrimitives() (
 			parseRawNullACLForComparison: parsePreflightAuthorityRawNullACLForComparison,
 		},
 	}, nil
+}
+
+func probePreflightAuthoritySentinelAbsence(
+	ctx context.Context,
+	parent *os.File,
+	name string,
+	mode authoritySentinelAbsenceMode,
+) *authorityPrimitiveFailure {
+	if parent == nil || name == "" || name == "." || name == ".." ||
+		strings.Contains(name, string(filepath.Separator)) || !mode.valid() {
+		return newAuthorityPrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	for {
+		if failure := authorityContextPrimitiveFailure(ctx, OperationProbe); failure != nil {
+			return failure
+		}
+		var stat unix.Stat_t
+		err := unix.Fstatat(int(parent.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		runtime.KeepAlive(parent)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return classifyPreflightAuthoritySentinelAbsence(ctx, mode, err)
+	}
+}
+
+func classifyPreflightAuthoritySentinelAbsence(
+	ctx context.Context,
+	mode authoritySentinelAbsenceMode,
+	err error,
+) *authorityPrimitiveFailure {
+	if failure := authorityContextPrimitiveFailure(ctx, OperationProbe); failure != nil {
+		return failure
+	}
+	if !mode.valid() {
+		return newAuthorityPrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if err == nil {
+		if mode == authorityInitialSentinelAbsence {
+			return newAuthorityPrimitiveFailure(OperationValidate, CauseUnsupported)
+		}
+		return newAuthorityPrimitiveFailure(OperationCompare, CauseUnstable)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return newAuthorityPrimitiveFailure(OperationProbe, CausePermission)
+	}
+	return newAuthorityPrimitiveFailure(OperationProbe, CauseUnstable)
 }
 
 func openPreflightAuthorityAbsoluteRoot(

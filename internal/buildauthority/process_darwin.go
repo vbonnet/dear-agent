@@ -33,6 +33,19 @@ type darwinProcessSupervisor struct {
 func (*darwinProcessSupervisor) privateProcessSupervisor() {}
 
 func newProcessSupervisor() (processSupervisor, *FailureRecord) {
+	return newProcessSupervisorWithScheduler(&realProcessScheduler{})
+}
+
+func newProcessSupervisorWithScheduler(
+	scheduler processScheduler,
+) (processSupervisor, *FailureRecord) {
+	if scheduler == nil {
+		return nil, &FailureRecord{
+			Phase:     PhaseAuthority,
+			Operation: OperationValidate,
+			Causes:    []CauseCode{CauseInternalInvariant},
+		}
+	}
 	return newDarwinProcessSupervisor(darwinProcessDependencies{
 		queryAction:             realDarwinSigaction,
 		waitID:                  realDarwinWaitID,
@@ -41,7 +54,7 @@ func newProcessSupervisor() (processSupervisor, *FailureRecord) {
 		newPreallocationCommand: newRealPreallocationProcessCommand,
 		newTaskPrivateCommand:   newRealTaskPrivateProcessCommand,
 		newPipe:                 newRealProcessPipe,
-		scheduler:               realProcessScheduler{},
+		scheduler:               scheduler,
 	})
 }
 
@@ -74,7 +87,7 @@ func newDarwinProcessSupervisor(deps darwinProcessDependencies) (processSupervis
 }
 
 func (supervisor *darwinProcessSupervisor) runPreallocation(
-	request processRequest,
+	request *processRequest,
 	environment preallocationEnvironment,
 ) processResult {
 	return supervisor.runClosed(request, environment.valid(), func(spec processCommandSpec) processCommand {
@@ -83,7 +96,7 @@ func (supervisor *darwinProcessSupervisor) runPreallocation(
 }
 
 func (supervisor *darwinProcessSupervisor) runTaskPrivate(
-	request processRequest,
+	request *processRequest,
 	environment taskPrivateEnvironment,
 ) processResult {
 	return supervisor.runClosed(request, environment.valid(), func(spec processCommandSpec) processCommand {
@@ -91,14 +104,21 @@ func (supervisor *darwinProcessSupervisor) runTaskPrivate(
 	})
 }
 
+//nolint:gocyclo // The fixed setup/start/ownership order is the audited process state machine.
 func (supervisor *darwinProcessSupervisor) runClosed(
-	request processRequest,
+	request *processRequest,
 	validEnvironment bool,
 	newCommand processCommandFactory,
 ) processResult {
 	input, result, valid := supervisor.validateClosedRun(request, validEnvironment)
 	if !valid {
 		return result
+	}
+	if input.kind == processInputBracketedRetainedNull {
+		if failure := processRequestBoundaryFailure(request, supervisor.deps.scheduler.now()); failure != nil {
+			result.primary = failure
+			return result
+		}
 	}
 
 	pipes, setupErr := setupProcessPipes(supervisor.deps.newPipe, input.kind == processInputBounded)
@@ -125,6 +145,13 @@ func (supervisor *darwinProcessSupervisor) runClosed(
 		}
 		result.descriptorClose = processDescriptorFailure(pipes.allEnds()...)
 		return result
+	}
+	if input.kind == processInputBracketedRetainedNull {
+		if failure := processRequestBoundaryFailure(request, supervisor.deps.scheduler.now()); failure != nil {
+			result.primary = failure
+			result.descriptorClose = processDescriptorFailure(pipes.allEnds()...)
+			return result
+		}
 	}
 
 	command := newCommand(processCommandSpec{
@@ -155,6 +182,16 @@ func (supervisor *darwinProcessSupervisor) runClosed(
 		notifications,
 	)
 	stderrDone := startProcessStderrReader(pipes.stderrRead, notifications)
+	if input.kind == processInputBracketedRetainedNull {
+		if failure := processRequestBoundaryFailure(request, supervisor.deps.scheduler.now()); failure != nil {
+			_ = pipes.closeAll()
+			<-stdoutDone
+			<-stderrDone
+			result.primary = failure
+			result.descriptorClose = processDescriptorFailure(pipes.allEnds()...)
+			return result
+		}
+	}
 
 	pid, startErr := command.start()
 	if startErr != nil {
@@ -203,11 +240,19 @@ func (supervisor *darwinProcessSupervisor) runClosed(
 }
 
 func (supervisor *darwinProcessSupervisor) validateClosedRun(
-	request processRequest,
+	request *processRequest,
 	validEnvironment bool,
 ) (resolvedProcessInput, processResult, bool) {
 	result := processResult{quiescence: quiescenceResult{proven: true}}
-	if failure := validateProcessRequest(request); failure != nil {
+	if request == nil {
+		result.primary = &FailureRecord{
+			Phase:     PhaseAuthority,
+			Operation: OperationValidate,
+			Causes:    []CauseCode{CauseInternalInvariant},
+		}
+		return resolvedProcessInput{}, result, false
+	}
+	if failure := validateProcessRequest(*request); failure != nil {
 		result.primary = failure
 		return resolvedProcessInput{}, result, false
 	}
@@ -233,7 +278,7 @@ func (supervisor *darwinProcessSupervisor) validateClosedRun(
 
 type darwinProcessRun struct {
 	supervisor    *darwinProcessSupervisor
-	request       processRequest
+	request       *processRequest
 	command       processCommand
 	pid           int
 	pipes         processRunPipes
@@ -336,9 +381,10 @@ func (run *darwinProcessRun) sampleObservationStop(observation *darwinProcessObs
 
 func (run *darwinProcessRun) handleInterruptedWait(observation *darwinProcessObservation) bool {
 	if observation.stop.kind == processStopNone {
+		now := run.supervisor.deps.scheduler.now()
 		delay := processPollDelay(
-			run.supervisor.deps.scheduler.now(),
-			nextProcessDeadline(run.request),
+			now,
+			nextProcessDeadline(run.request, now),
 			observation.exitDeadline,
 		)
 		run.supervisor.deps.scheduler.wait(
@@ -384,9 +430,10 @@ func (run *darwinProcessRun) attemptInitialSignal(observation *darwinProcessObse
 }
 
 func (run *darwinProcessRun) waitForNextObservation(observation *darwinProcessObservation) {
+	now := run.supervisor.deps.scheduler.now()
 	delay := processPollDelay(
-		run.supervisor.deps.scheduler.now(),
-		nextProcessDeadline(run.request),
+		now,
+		nextProcessDeadline(run.request, now),
 		observation.exitDeadline,
 	)
 	wake := run.notifications.wake
@@ -805,13 +852,20 @@ func (run *darwinProcessRun) applySuccessfulStderrGate() {
 }
 
 func (run *darwinProcessRun) publishStructuredOutput() {
+	run.result.structuredOutput = nil
+	run.result.structuredOutputChild = nil
 	if run.result.primary != nil || run.result.descriptorClose != nil ||
 		!run.result.quiescence.proven || run.result.background != nil || !run.ioComplete ||
 		run.publicTerminal == nil || run.publicTerminal.class != processTerminalExited ||
 		run.publicTerminal.status != 0 || run.stderr.total != 0 {
 		return
 	}
+	child := childDiagnosticFromProcess(run.stderr, run.publicTerminal)
+	if !validStructuredOutputChild(child) {
+		return
+	}
 	run.result.structuredOutput = run.candidateOutput
+	run.result.structuredOutputChild = child
 }
 
 type processRunPipes struct {

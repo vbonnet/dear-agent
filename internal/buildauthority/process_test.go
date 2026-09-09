@@ -101,18 +101,18 @@ func TestProcessStopSamplingUsesFixedPrecedence(t *testing.T) {
 	notifications.publish(processStopRead)
 	notifications.publish(processStopInput)
 	notifications.publish(processStopOutputLimit)
-	if got := notifications.sample(request, base).kind; got != processStopOutputLimit {
+	if got := notifications.sample(&request, base).kind; got != processStopOutputLimit {
 		t.Fatalf("worker precedence = %d, want output limit", got)
 	}
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	request.ctx = canceled
-	if got := notifications.sample(request, base).kind; got != processStopCanceled {
+	if got := notifications.sample(&request, base).kind; got != processStopCanceled {
 		t.Fatalf("cancel precedence = %d, want canceled", got)
 	}
 	request.phaseDeadline = base
-	if got := notifications.sample(request, base).kind; got != processStopDeadline {
+	if got := notifications.sample(&request, base).kind; got != processStopDeadline {
 		t.Fatalf("deadline precedence = %d, want deadline", got)
 	}
 
@@ -138,7 +138,7 @@ func TestProcessStopSamplingUsesFixedPrecedence(t *testing.T) {
 func TestProcessStopSamplesContextErrorExactlyOnce(t *testing.T) {
 	ctx := &changingErrorContext{errors: []error{context.DeadlineExceeded, context.Canceled}}
 	request := processRequest{ctx: ctx, phaseDeadline: time.Now().Add(time.Hour)}
-	if got := newProcessNotifications().sample(request, time.Now()).kind; got != processStopDeadline {
+	if got := newProcessNotifications().sample(&request, time.Now()).kind; got != processStopDeadline {
 		t.Fatalf("stop = %d, want deadline", got)
 	}
 	if ctx.calls != 1 {
@@ -273,13 +273,14 @@ func TestProcessProductionSourceHasNoExecutableOutputSeam(t *testing.T) {
 		{name: "input", typeOf: reflect.TypeFor[*processInput]()},
 		{name: "stdoutLimit", typeOf: reflect.TypeFor[uint64]()},
 		{name: "phaseDeadline", typeOf: reflect.TypeFor[time.Time]()},
+		{name: "callerDeadline", typeOf: reflect.TypeFor[time.Time]()},
 		{name: "transactionDeadline", typeOf: reflect.TypeFor[time.Time]()},
 	}
 	inputType := reflect.TypeFor[processInput]()
-	if inputType.Kind() != reflect.Struct || inputType.NumField() != 3 {
+	if inputType.Kind() != reflect.Struct || inputType.NumField() != 4 {
 		t.Fatalf("compiled processInput shape = %s with %d fields", inputType, inputType.NumField())
 	}
-	for _, name := range []string{"kind", "retainedNull", "bounded"} {
+	for _, name := range []string{"kind", "retainedNull", "bracketedNull", "bounded"} {
 		field, ok := inputType.FieldByName(name)
 		if !ok || field.PkgPath == "" || field.Anonymous || field.Type.Kind() == reflect.Func ||
 			field.Type.Kind() == reflect.Interface {
@@ -327,7 +328,7 @@ func TestProcessProductionSourceHasNoExecutableOutputSeam(t *testing.T) {
 		if !ok {
 			t.Fatalf("process supervisor is missing typed entry %s", entry.name)
 		}
-		if method.Type.NumIn() != 2 || method.Type.In(0) != requestType ||
+		if method.Type.NumIn() != 2 || method.Type.In(0) != reflect.PointerTo(requestType) ||
 			method.Type.In(1) != entry.environment || method.Type.NumOut() != 1 ||
 			method.Type.Out(0) != reflect.TypeFor[processResult]() {
 			t.Fatalf("process supervisor entry %s has type %s", entry.name, method.Type)

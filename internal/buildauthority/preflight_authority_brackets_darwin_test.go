@@ -319,6 +319,90 @@ func TestDarwinPreflightAuthorityA2PrimitiveClassifiersAreClosed(t *testing.T) {
 			cause:     CauseUnsupported,
 		},
 		{
+			name: "initial sentinel present",
+			invoke: func() *authorityPrimitiveFailure {
+				return classifyPreflightAuthoritySentinelAbsence(
+					context.Background(),
+					authorityInitialSentinelAbsence,
+					nil,
+				)
+			},
+			operation: OperationValidate,
+			cause:     CauseUnsupported,
+		},
+		{
+			name: "expected sentinel present",
+			invoke: func() *authorityPrimitiveFailure {
+				return classifyPreflightAuthoritySentinelAbsence(
+					context.Background(),
+					authorityExpectedSentinelAbsence,
+					nil,
+				)
+			},
+			operation: OperationCompare,
+			cause:     CauseUnstable,
+		},
+		{
+			name: "sentinel permission",
+			invoke: func() *authorityPrimitiveFailure {
+				return classifyPreflightAuthoritySentinelAbsence(
+					context.Background(),
+					authorityExpectedSentinelAbsence,
+					unix.EACCES,
+				)
+			},
+			operation: OperationProbe,
+			cause:     CausePermission,
+		},
+		{
+			name: "sentinel unexpected lookup error",
+			invoke: func() *authorityPrimitiveFailure {
+				return classifyPreflightAuthoritySentinelAbsence(
+					context.Background(),
+					authorityExpectedSentinelAbsence,
+					unix.EIO,
+				)
+			},
+			operation: OperationProbe,
+			cause:     CauseUnstable,
+		},
+		{
+			name: "invalid sentinel mode",
+			invoke: func() *authorityPrimitiveFailure {
+				return classifyPreflightAuthoritySentinelAbsence(
+					context.Background(),
+					authoritySentinelAbsenceMode(0),
+					unix.ENOENT,
+				)
+			},
+			operation: OperationValidate,
+			cause:     CauseInternalInvariant,
+		},
+		{
+			name: "nil sentinel context",
+			invoke: func() *authorityPrimitiveFailure {
+				return classifyPreflightAuthoritySentinelAbsence(
+					nil, //nolint:staticcheck // Deliberately exercise the private seam invariant.
+					authorityExpectedSentinelAbsence,
+					unix.ENOENT,
+				)
+			},
+			operation: OperationValidate,
+			cause:     CauseInternalInvariant,
+		},
+		{
+			name: "canceled sentinel probe",
+			invoke: func() *authorityPrimitiveFailure {
+				return classifyPreflightAuthoritySentinelAbsence(
+					canceledPreflightPrimitiveContext(),
+					authorityExpectedSentinelAbsence,
+					unix.EIO,
+				)
+			},
+			operation: OperationProbe,
+			cause:     CauseCanceled,
+		},
+		{
 			name: "canceled acquisition",
 			invoke: func() *authorityPrimitiveFailure {
 				return classifyPreflightAuthorityAcquisitionFailure(
@@ -334,6 +418,18 @@ func TestDarwinPreflightAuthorityA2PrimitiveClassifiersAreClosed(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			assertPreflightPrimitiveFailure(t, test.invoke(), test.operation, test.cause)
 		})
+	}
+	for _, mode := range []authoritySentinelAbsenceMode{
+		authorityInitialSentinelAbsence,
+		authorityExpectedSentinelAbsence,
+	} {
+		if failure := classifyPreflightAuthoritySentinelAbsence(
+			context.Background(),
+			mode,
+			unix.ENOENT,
+		); failure != nil {
+			t.Fatalf("absent sentinel mode %d = %+v", mode, failure)
+		}
 	}
 }
 

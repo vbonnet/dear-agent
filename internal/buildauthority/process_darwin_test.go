@@ -189,14 +189,14 @@ func TestDarwinSupervisorTypedEntriesForwardOnlyTheirClosedProfiles(t *testing.T
 			name: "preallocation",
 			want: preallocation.clone(),
 			run: func(supervisor processSupervisor, request processRequest) processResult {
-				return supervisor.runPreallocation(request, preallocation)
+				return supervisor.runPreallocation(&request, preallocation)
 			},
 		},
 		{
 			name: "task private",
 			want: taskPrivate.clone(),
 			run: func(supervisor processSupervisor, request processRequest) processResult {
-				return supervisor.runTaskPrivate(request, taskPrivate)
+				return supervisor.runTaskPrivate(&request, taskPrivate)
 			},
 		},
 	} {
@@ -229,13 +229,13 @@ func TestDarwinSupervisorRejectsZeroEnvironmentProfilesBeforeAllocation(t *testi
 		{
 			name: "preallocation",
 			run: func(supervisor processSupervisor, request processRequest) processResult {
-				return supervisor.runPreallocation(request, preallocationEnvironment{})
+				return supervisor.runPreallocation(&request, preallocationEnvironment{})
 			},
 		},
 		{
 			name: "task private",
 			run: func(supervisor processSupervisor, request processRequest) processResult {
-				return supervisor.runTaskPrivate(request, taskPrivateEnvironment{})
+				return supervisor.runTaskPrivate(&request, taskPrivateEnvironment{})
 			},
 		},
 	} {
@@ -252,6 +252,215 @@ func TestDarwinSupervisorRejectsZeroEnvironmentProfilesBeforeAllocation(t *testi
 					harness.pipeCalls, len(harness.commandSpecs), harness.command.startCount)
 			}
 		})
+	}
+}
+
+func TestDarwinBracketedDeadlineStopsAtEveryPreStartBoundary(t *testing.T) {
+	plans, nullDevice := materializerTestPlans(t)
+	for _, test := range []struct {
+		name        string
+		stage       string
+		wantPipes   int
+		wantActions int
+		wantSpecs   int
+		configured  bool
+	}{
+		{name: "before allocation", stage: "before", wantActions: 1},
+		{name: "after allocation", stage: "action", wantPipes: 2, wantActions: 2},
+		{
+			name:        "after command configuration",
+			stage:       "command",
+			wantPipes:   2,
+			wantActions: 2,
+			wantSpecs:   1,
+			configured:  true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newDarwinHarness(darwinOldSigaction{})
+			issuer := newNonSourceWindowIssuer(harness.scheduler)
+			transaction, failure := issuer.beginTransaction(context.Background())
+			if failure != nil {
+				t.Fatalf("begin transaction: %+v", failure)
+			}
+			window := authorizedMaterializerWindow(
+				t,
+				issuer,
+				transaction,
+				nonSourceCommandGoVersion,
+				plans.goVersion.environment,
+				nullDevice,
+			)
+			authority, failure := window.consume(
+				nonSourceCommandGoVersion,
+				plans.goVersion.environment,
+				issuer,
+			)
+			if failure != nil {
+				t.Fatalf("consume command window: %+v", failure)
+			}
+			request := &processRequest{
+				ctx:                 authority.ctx,
+				phase:               PhaseAuthority,
+				executable:          plans.goVersion.executable.retained.leaf.path,
+				arguments:           []string{"version"},
+				directory:           physicalRootPath,
+				input:               newBracketedRetainedNullProcessInput(authority.nullWitness),
+				stdoutLimit:         processMaxStructuredOutputBytes,
+				phaseDeadline:       authority.phaseDeadline,
+				callerDeadline:      authority.callerDeadline,
+				transactionDeadline: authority.transactionDeadline,
+			}
+			setDeadline := func() {
+				harness.scheduler.mu.Lock()
+				harness.scheduler.current = authority.phaseDeadline
+				harness.scheduler.mu.Unlock()
+			}
+			dependencies := harness.dependencies()
+			switch test.stage {
+			case "before":
+			case "action":
+				queryAction := dependencies.queryAction
+				dependencies.queryAction = func() (darwinOldSigaction, error) {
+					action, err := queryAction()
+					if harness.actionCalls == 2 {
+						setDeadline()
+					}
+					return action, err
+				}
+			case "command":
+				newCommand := dependencies.newPreallocationCommand
+				dependencies.newPreallocationCommand = func(
+					spec processCommandSpec,
+					environment preallocationEnvironment,
+				) processCommand {
+					command := newCommand(spec, environment)
+					setDeadline()
+					return command
+				}
+			default:
+				t.Fatalf("unknown deadline stage %q", test.stage)
+			}
+			supervisor, initial := newDarwinProcessSupervisor(dependencies)
+			if initial != nil {
+				t.Fatalf("initial failure = %+v", initial)
+			}
+			if test.stage == "before" {
+				setDeadline()
+			}
+			result := supervisor.runPreallocation(request, plans.goVersion.environment)
+			requireProcessRecord(
+				t,
+				result.primary,
+				PhaseAuthority,
+				OperationExecute,
+				CauseDeadline,
+			)
+			if harness.pipeCalls != test.wantPipes ||
+				harness.actionCalls != test.wantActions ||
+				len(harness.commandSpecs) != test.wantSpecs ||
+				harness.command.startCount != 0 || harness.waitCalls() != 0 ||
+				harness.waitIDCalls != 0 || harness.signalCalls != 0 ||
+				harness.snapshotCalls != 0 {
+				t.Fatalf(
+					"calls pipes=%d actions=%d specs=%d start=%d Wait=%d waitid=%d signal=%d snapshot=%d",
+					harness.pipeCalls,
+					harness.actionCalls,
+					len(harness.commandSpecs),
+					harness.command.startCount,
+					harness.waitCalls(),
+					harness.waitIDCalls,
+					harness.signalCalls,
+					harness.snapshotCalls,
+				)
+			}
+			if configured := harness.command.stdin != nil && harness.command.stdout != nil &&
+				harness.command.stderr != nil; configured != test.configured {
+				t.Fatalf("command configured = %t, want %t", configured, test.configured)
+			}
+			if !result.quiescence.proven || result.structuredOutput != nil ||
+				result.structuredOutputChild != nil || result.background != nil ||
+				result.descriptorClose != nil {
+				t.Fatalf("deadline result = %+v", result)
+			}
+			harness.requireEveryCreatedEndClosedOnce(t)
+		})
+	}
+}
+
+func TestDarwinNonSourceMaterializerRetainsObservedCallerDeadline(t *testing.T) {
+	plans, nullDevice := materializerTestPlans(t)
+	harness := newDarwinHarness(darwinOldSigaction{})
+	harness.waitSteps = []darwinWaitStep{
+		{info: darwinSiginfo{}},
+		{info: validDarwinInfo(101, darwinChildExited, 0)},
+	}
+	harness.snapshots = [][]darwinTestMember{{{
+		pid:   101,
+		pgid:  101,
+		state: darwinProcessZombie,
+	}}}
+	caller := &runnerTestMutableDeadlineContext{
+		Context:     context.Background(),
+		deadline:    harness.base.Add(2 * time.Hour),
+		hasDeadline: true,
+	}
+	shortened := harness.base.Add(30 * time.Minute)
+	issuer := newNonSourceWindowIssuer(harness.scheduler)
+	transaction, failure := issuer.beginTransaction(caller)
+	if failure != nil {
+		t.Fatalf("begin transaction: %+v", failure)
+	}
+	window := authorizedMaterializerWindow(
+		t,
+		issuer,
+		transaction,
+		nonSourceCommandGoVersion,
+		plans.goVersion.environment,
+		nullDevice,
+	)
+	dependencies := harness.dependencies()
+	waitID := dependencies.waitID
+	dependencies.waitID = func(pid int) (darwinSiginfo, error) {
+		info, err := waitID(pid)
+		switch harness.waitIDCalls {
+		case 1:
+			caller.deadline = shortened
+		case 2:
+			caller.deadline = time.Time{}
+			caller.hasDeadline = false
+		}
+		return info, err
+	}
+	supervisor, initial := newDarwinProcessSupervisor(dependencies)
+	if initial != nil {
+		t.Fatalf("initial failure = %+v", initial)
+	}
+	owner := &preallocationNonSourceProcessOwner{
+		supervisor: supervisor,
+		issuer:     issuer,
+	}
+	result := owner.runGoVersion(plans.goVersion, window)
+	requireSuccessfulMaterializerResult(t, result)
+	if harness.waitIDCalls != 2 || harness.command.startCount != 1 {
+		t.Fatalf("waitid=%d start=%d, want 2/1", harness.waitIDCalls, harness.command.startCount)
+	}
+	if deadline, ok := transaction.state.callerDeadlineFloor.snapshot(); !ok || deadline != shortened {
+		t.Fatalf("transaction deadline floor = %s / %t, want %s", deadline, ok, shortened)
+	}
+	if deadline, ok := transaction.state.authorityContext.Deadline(); !ok || deadline != shortened {
+		t.Fatalf("post-process authority deadline = %s / %t, want %s", deadline, ok, shortened)
+	}
+	next, failure := issuer.mintCommand(
+		transaction,
+		nonSourceCommandGoEnvironment,
+		plans.goEnvironment.environment,
+	)
+	if failure != nil {
+		t.Fatalf("mint next command: %+v", failure)
+	}
+	if next.callerDeadline != shortened {
+		t.Fatalf("next command caller deadline = %s, want %s", next.callerDeadline, shortened)
 	}
 }
 
@@ -1076,7 +1285,7 @@ func TestDarwinSupervisorReadStopSuppressesOnlyAcceptedExactSIGKILL(t *testing.T
 }
 
 func TestDarwinSetPrimaryDoesNotTreatDumpedSIGKILLAsIntentional(t *testing.T) {
-	run := darwinProcessRun{request: processRequest{phase: PhaseSource}}
+	run := darwinProcessRun{request: &processRequest{phase: PhaseSource}}
 	run.setPrimary(
 		processStop{kind: processStopRead},
 		&processTerminal{class: processTerminalDumped, status: int(syscall.SIGKILL)},
@@ -1088,7 +1297,7 @@ func TestDarwinSetPrimaryDoesNotTreatDumpedSIGKILLAsIntentional(t *testing.T) {
 func TestDarwinStructuredOutputPublishesOnlyAfterEverySuccessGate(t *testing.T) {
 	ready := func() darwinProcessRun {
 		return darwinProcessRun{
-			request:         processRequest{phase: PhaseSource},
+			request:         &processRequest{phase: PhaseSource},
 			result:          processResult{quiescence: quiescenceResult{proven: true}},
 			publicTerminal:  &processTerminal{class: processTerminalExited, status: 0},
 			candidateOutput: []byte("structured"),
@@ -1119,15 +1328,24 @@ func TestDarwinStructuredOutputPublishesOnlyAfterEverySuccessGate(t *testing.T) 
 			run := ready()
 			test.mutate(&run)
 			run.publishStructuredOutput()
-			if run.result.structuredOutput != nil {
-				t.Fatalf("gate published %q", run.result.structuredOutput)
+			if run.result.structuredOutput != nil || run.result.structuredOutputChild != nil {
+				t.Fatalf(
+					"gate published output=%q child=%+v",
+					run.result.structuredOutput,
+					run.result.structuredOutputChild,
+				)
 			}
 		})
 	}
 	run := ready()
 	run.publishStructuredOutput()
-	if string(run.result.structuredOutput) != "structured" {
-		t.Fatalf("proved result = %q", run.result.structuredOutput)
+	if string(run.result.structuredOutput) != "structured" ||
+		!validStructuredOutputChild(run.result.structuredOutputChild) {
+		t.Fatalf(
+			"proved result = %q child=%+v",
+			run.result.structuredOutput,
+			run.result.structuredOutputChild,
+		)
 	}
 }
 
@@ -1711,7 +1929,7 @@ func TestRealDarwinSupervisorSuccessAndFailure(t *testing.T) {
 		{name: "unrequested signal", script: "kill -TERM $$", wantOp: OperationExecute, wantCause: CauseChildExit, wantStatus: -int(syscall.SIGTERM)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			result := supervisor.runTaskPrivate(processRequest{
+			result := supervisor.runTaskPrivate(&processRequest{
 				ctx:           context.Background(),
 				phase:         PhaseSource,
 				executable:    "/bin/sh",
@@ -1764,7 +1982,7 @@ func TestRealDarwinSupervisorCancellationKillsOnlyOwnedGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	started := time.Now()
-	result := supervisor.runTaskPrivate(processRequest{
+	result := supervisor.runTaskPrivate(&processRequest{
 		ctx:           ctx,
 		phase:         PhaseSource,
 		executable:    "/bin/sh",
@@ -1934,7 +2152,7 @@ func (harness *darwinHarness) run(supervisor processSupervisor, request processR
 	if err != nil {
 		panic(err)
 	}
-	return supervisor.runTaskPrivate(request, environment)
+	return supervisor.runTaskPrivate(&request, environment)
 }
 
 func (harness *darwinHarness) newPipe() (processPipe, error) {
