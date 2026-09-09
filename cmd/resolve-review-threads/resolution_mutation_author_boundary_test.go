@@ -83,8 +83,7 @@ func TestBareNonForceResolveReopensChangedAuthorBoundary(t *testing.T) {
 			if mutated || msg != "" {
 				t.Fatalf("changed author boundary returned (msg=%q, mutated=%t), want no success attribution", msg, mutated)
 			}
-			var unavailable *unavailableAnswerEvidenceError
-			if !errors.As(err, &unavailable) {
+			if _, ok := errors.AsType[*unavailableAnswerEvidenceError](err); !ok {
 				t.Fatalf("changed author boundary error = %T %v, want unavailableAnswerEvidenceError", err, err)
 			}
 			provider.assertExhausted()
@@ -132,8 +131,7 @@ func TestExactNonForceResolveReopensChangedOpeningAuthor(t *testing.T) {
 			if mutated || msg != "" {
 				t.Fatalf("changed opening author returned (msg=%q, mutated=%t), want no success attribution", msg, mutated)
 			}
-			var unavailable *unavailableAnswerEvidenceError
-			if !errors.As(err, &unavailable) {
+			if _, ok := errors.AsType[*unavailableAnswerEvidenceError](err); !ok {
 				t.Fatalf("changed opening author error = %T %v, want unavailableAnswerEvidenceError", err, err)
 			}
 			provider.assertExhausted()

@@ -46,8 +46,7 @@ func TestResolveErrorRecoveryReopensChangedAuthorEvidence(t *testing.T) {
 			if msg != "" {
 				t.Errorf("author contradiction returned success message: %q", msg)
 			}
-			var unavailable *unavailableAnswerEvidenceError
-			if !errors.As(err, &unavailable) {
+			if _, ok := errors.AsType[*unavailableAnswerEvidenceError](err); !ok {
 				t.Fatalf("author contradiction error = %T %v, want unavailableAnswerEvidenceError", err, err)
 			}
 			provider.assertExhausted()
@@ -87,12 +86,10 @@ func TestResolveErrorRecoveryPrioritizesChangedAnchorOverAuthorEvidence(t *testi
 	if mutated || msg != "" {
 		t.Fatalf("changed anchor returned (msg=%q, mutated=%t), want no success attribution", msg, mutated)
 	}
-	var superseded *supersededEvidenceError
-	if !errors.As(err, &superseded) {
+	if _, ok := errors.AsType[*supersededEvidenceError](err); !ok {
 		t.Fatalf("changed anchor error = %T %v, want supersededEvidenceError", err, err)
 	}
-	var unavailable *unavailableAnswerEvidenceError
-	if errors.As(err, &unavailable) {
+	if _, ok := errors.AsType[*unavailableAnswerEvidenceError](err); ok {
 		t.Fatalf("changed anchor was masked as unavailable author evidence: %v", err)
 	}
 	provider.assertExhausted()

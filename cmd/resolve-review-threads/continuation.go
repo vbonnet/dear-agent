@@ -545,10 +545,9 @@ func cmdContinueResolve(ctx context.Context, rest []string) int {
 	}
 	receipt, err := decodeContinuationReceipt(receiptToken)
 	if err != nil {
-		var issuerStateErr *continuationIssuerStateError
-		if errors.As(err, &issuerStateErr) {
+		if issuerStateErr, ok := errors.AsType[*continuationIssuerStateError](err); ok {
 			return fail("continuation receipt authentication state could not be restored: %v; no body source was read and no provider request was made\n%s",
-				err, continuationIssuerStateRecoveryGuidance(receiptToken, bodyFile))
+				issuerStateErr, continuationIssuerStateRecoveryGuidance(receiptToken, bodyFile))
 		}
 		return fail("invalid continuation receipt: %v; no provider request was made\n%s",
 			err, invalidContinuationReceiptGuidance(bodyFile))
