@@ -36,6 +36,14 @@ const (
 	StatusSnoozed   RecoveryStatus = "snoozed"
 	StatusRecovered RecoveryStatus = "recovered"
 	StatusFailed    RecoveryStatus = "failed"
+	// StatusUnhealthy is a job that needs remediation. It is what planning
+	// returns; planning must never return StatusRecovered, because an
+	// intention to act is not an observed outcome (RL-25).
+	StatusUnhealthy RecoveryStatus = "unhealthy"
+	// StatusPending is a job whose remediation ran and whose structural
+	// checks now pass, but whose pulse has not yet returned. It is neither a
+	// success nor yet a failure (RL-26).
+	StatusPending RecoveryStatus = "pending-verification"
 )
 
 // Job defines one critical job to monitor and self-heal.
@@ -260,6 +268,12 @@ func DefaultHostOps() HostOps {
 }
 
 // LoadAbsenceAlarms reads the absence-alarm journal and returns pulses that are alarming.
+//
+// Deprecated: use LoadPulseTruth. The escalation journal is append-only and
+// records absences only, so a pulse that recovers leaves no record and this
+// map is monotonic: once a pulse appears it can never clear. Driving
+// remediation from it restarts jobs that came back long ago. It is retained
+// only as a fallback for hosts with no absence-alarm heartbeat yet.
 func LoadAbsenceAlarms(journalPath string) (map[string]bool, error) {
 	alarming := make(map[string]bool)
 	f, err := os.Open(journalPath)
@@ -281,7 +295,12 @@ func LoadAbsenceAlarms(journalPath string) (map[string]bool, error) {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			continue
 		}
-		if rec.Kind == "absence.alarm" || rec.Status == absencealarm.StatusAbsent || rec.Status == absencealarm.StatusUndetermined {
+		// Only genuine pulse alarms count. Records this loop writes back to
+		// the journal for escalation must not be re-read as fresh alarms.
+		if rec.Kind != "absence.alarm" {
+			continue
+		}
+		if rec.Status == absencealarm.StatusAbsent || rec.Status == absencealarm.StatusUndetermined {
 			alarming[rec.Pulse] = true
 		}
 	}
@@ -305,10 +324,13 @@ func IsJobSnoozed(job Job, snoozes map[string]absencealarm.Snooze, now time.Time
 }
 
 // PlanJob determines the required recovery action for a job without executing it.
+//
+// It returns StatusUnhealthy, never StatusRecovered: whether a job recovered is
+// decided by VerifyRecovery after the action ran, not by the decision to act.
 func PlanJob(
 	job Job,
 	snoozes map[string]absencealarm.Snooze,
-	alarmingPulses map[string]bool,
+	truth PulseTruth,
 	launchdJobs map[string]LaunchdJobInfo,
 	host HostOps,
 	now time.Time,
@@ -320,7 +342,7 @@ func PlanJob(
 	// RL-01: missing binary check
 	if job.BinaryPath != "" && !host.FileExists(job.BinaryPath) {
 		if len(job.InstallCmd) > 0 {
-			return ActionReinstall, StatusRecovered, fmt.Sprintf("binary %s does not exist on disk", job.BinaryPath)
+			return ActionReinstall, StatusUnhealthy, fmt.Sprintf("binary %s does not exist on disk", job.BinaryPath)
 		}
 	}
 
@@ -329,15 +351,33 @@ func PlanJob(
 		info, loaded := launchdJobs[job.LaunchdLabel]
 		// RL-02, RL-06: unloaded launchd job
 		if !loaded {
-			return ActionBootstrap, StatusRecovered, fmt.Sprintf("launchd job %s is not loaded", job.LaunchdLabel)
+			return ActionBootstrap, StatusUnhealthy, fmt.Sprintf("launchd job %s is not loaded", job.LaunchdLabel)
 		}
 		// RL-03: exit code 78 (EX_CONFIG) or -9 (SIGKILL / code signing mismatch)
 		if info.Status == 78 || info.Status == -9 {
-			return ActionBootstrap, StatusRecovered, fmt.Sprintf("launchd job %s exited with status %d (LWCR/codesigning issue)", job.LaunchdLabel, info.Status)
+			return ActionBootstrap, StatusUnhealthy, fmt.Sprintf("launchd job %s exited with status %d (LWCR/codesigning issue)", job.LaunchdLabel, info.Status)
 		}
-		// RL-04: pulse absent/undetermined or non-zero exit when not running
-		if (job.Pulse != "" && alarmingPulses[job.Pulse]) || (info.PID == 0 && info.Status != 0) {
-			return ActionKickstart, StatusRecovered, fmt.Sprintf("launchd job %s is loaded but pulse %q is alarming (last exit status %d)", job.LaunchdLabel, job.Pulse, info.Status)
+		// RL-04: pulse absent or undetermined.
+		if job.Pulse != "" && truth.Alarming(job.Pulse) {
+			reason := fmt.Sprintf("launchd job %s is loaded but pulse %q is alarming", job.LaunchdLabel, job.Pulse)
+			if d := truth.AbsentFor(job.Pulse, now); d > 0 {
+				reason += fmt.Sprintf(" (absent for %s)", d.Round(time.Minute))
+			}
+			return ActionKickstart, StatusUnhealthy, reason
+		}
+		// RL-24: a present pulse is authoritative proof of life and outranks
+		// the last exit status. Periodic jobs report findings through their
+		// exit code by design -- absence-alarm exits 1 whenever any pulse is
+		// absent -- so treating a non-zero exit as a wedge restarts a healthy
+		// monitor every tick precisely when it is doing its job. Only fall
+		// through to the exit-status heuristic when no pulse vouches for it.
+		if job.Pulse != "" && truth.Present(job.Pulse) {
+			return ActionNone, StatusHealthy, fmt.Sprintf("pulse %q is present", job.Pulse)
+		}
+		// RL-04 (continued): non-zero exit when not running and no pulse
+		// evidence either way.
+		if info.PID == 0 && info.Status != 0 {
+			return ActionKickstart, StatusUnhealthy, fmt.Sprintf("launchd job %s is not running and last exited %d with no pulse evidence", job.LaunchdLabel, info.Status)
 		}
 	}
 

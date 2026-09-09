@@ -52,6 +52,21 @@ func testHostOps() (recoveryloop.HostOps, *[]string) {
 	}, calls
 }
 
+// isolate points every state-bearing flag at a temp dir. Without it these
+// tests read and write the operator's real recovery state, escalation journal
+// and heartbeat under ~/.local/state and ~/.agm.
+func isolate(dir string, extra ...string) []string {
+	return append([]string{
+		"--state", filepath.Join(dir, "state.json"),
+		"--journal", filepath.Join(dir, "recovery.jsonl"),
+		"--absence-journal", filepath.Join(dir, "absence.jsonl"),
+		"--absence-heartbeat", filepath.Join(dir, "absence.heartbeat.json"),
+		"--absence-state", filepath.Join(dir, "absence-state.json"),
+		"--heartbeat", filepath.Join(dir, "heartbeat.json"),
+		"--snooze", filepath.Join(dir, "snooze.json"),
+	}, extra...)
+}
+
 // RL-11: Exit 0 when all jobs healthy.
 func TestCLI_Exit0_AllHealthy(t *testing.T) {
 	host, _ := testHostOps()
@@ -60,7 +75,7 @@ func TestCLI_Exit0_AllHealthy(t *testing.T) {
 	_ = os.WriteFile(cfgPath, []byte(`{"jobs":[{"name":"j1","launchd_label":"com.dear-agent.mergeloop"}]}`), 0o600)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--config", cfgPath}, &stdout, &stderr, host, nil)
+	code := run(isolate(dir, "--config", cfgPath), &stdout, &stderr, host, nil)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d. stderr: %s", code, stderr.String())
 	}
@@ -72,9 +87,22 @@ func TestCLI_Exit0_AllHealthy(t *testing.T) {
 // RL-11: Exit 0 when recovery succeeds.
 func TestCLI_Exit0_Recovered(t *testing.T) {
 	host, calls := testHostOps()
-	// Simulate unloaded job
+	// The job starts unloaded and becomes loaded once bootstrap runs, so
+	// verification has something real to observe. A fake that never changes
+	// state would assert that an action which fixed nothing is a recovery.
+	loaded := false
 	host.LaunchdList = func(ctx context.Context) (map[string]recoveryloop.LaunchdJobInfo, error) {
-		return map[string]recoveryloop.LaunchdJobInfo{}, nil
+		if !loaded {
+			return map[string]recoveryloop.LaunchdJobInfo{}, nil
+		}
+		return map[string]recoveryloop.LaunchdJobInfo{
+			"com.dear-agent.mergeloop": {Loaded: true, Status: 0, PID: 100},
+		}, nil
+	}
+	host.LaunchctlBootstrap = func(ctx context.Context, plistPath string) error {
+		*calls = append(*calls, "bootstrap:"+plistPath)
+		loaded = true
+		return nil
 	}
 
 	dir := t.TempDir()
@@ -82,7 +110,7 @@ func TestCLI_Exit0_Recovered(t *testing.T) {
 	_ = os.WriteFile(cfgPath, []byte(`{"jobs":[{"name":"j1","launchd_label":"com.dear-agent.mergeloop","plist_path":"/Library/LaunchAgents/com.dear-agent.mergeloop.plist"}]}`), 0o600)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--config", cfgPath}, &stdout, &stderr, host, nil)
+	code := run(isolate(dir, "--config", cfgPath), &stdout, &stderr, host, nil)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d. stderr: %s", code, stderr.String())
 	}
@@ -117,7 +145,7 @@ func TestCLI_Exit1_RecoveryFails(t *testing.T) {
 	_ = os.WriteFile(cfgPath, []byte(`{"jobs":[{"name":"j1","launchd_label":"com.dear-agent.mergeloop","plist_path":"/Library/LaunchAgents/com.dear-agent.mergeloop.plist"}]}`), 0o600)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--config", cfgPath}, &stdout, &stderr, host, nil)
+	code := run(isolate(dir, "--config", cfgPath), &stdout, &stderr, host, nil)
 	if code != 1 {
 		t.Fatalf("expected exit 1, got %d. stderr: %s", code, stderr.String())
 	}
@@ -161,13 +189,13 @@ func TestCLI_DryRun_NoExecutionOrWrites(t *testing.T) {
 	journalPath := filepath.Join(dir, "journal.jsonl")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{
+	code := run(isolate(dir,
 		"--config", cfgPath,
 		"--state", statePath,
 		"--heartbeat", hbPath,
 		"--journal", journalPath,
 		"--dry-run",
-	}, &stdout, &stderr, host, nil)
+	), &stdout, &stderr, host, nil)
 
 	if code != 0 {
 		t.Fatalf("expected exit 0 in dry-run, got %d", code)
@@ -197,7 +225,7 @@ func TestCLI_JSONOutput(t *testing.T) {
 	_ = os.WriteFile(cfgPath, []byte(`{"jobs":[{"name":"j1","launchd_label":"com.dear-agent.mergeloop"}]}`), 0o600)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--config", cfgPath, "--json"}, &stdout, &stderr, host, nil)
+	code := run(isolate(dir, "--config", cfgPath, "--json"), &stdout, &stderr, host, nil)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
@@ -219,7 +247,7 @@ func TestCLI_WritesHeartbeat(t *testing.T) {
 	hbPath := filepath.Join(dir, "heartbeat.json")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--config", cfgPath, "--heartbeat", hbPath}, &stdout, &stderr, host, nil)
+	code := run(isolate(dir, "--config", cfgPath, "--heartbeat", hbPath), &stdout, &stderr, host, nil)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
@@ -270,10 +298,10 @@ func TestCLI_SecondFailure_EscalationNotification(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{
+	code := run(isolate(dir,
 		"--config", cfgPath,
 		"--state", statePath,
-	}, &stdout, &stderr, host, notifyFn)
+	), &stdout, &stderr, host, notifyFn)
 
 	if code != 1 {
 		t.Fatalf("expected exit 1 on recovery failure, got %d", code)

@@ -1,14 +1,14 @@
 # Recovery Loop Specification
 
-<!-- Last audited at: 2026-09-05 -->
+<!-- Last audited at: 2026-09-09 -->
 <!-- Audit scope: pkg/recoveryloop (domain) + cmd/recovery-loop (CLI), both
      present at this revision. cmd/recovery-loop/SPEC.owner delegates here.
 
      Domain (pkg/recoveryloop/*_test.go):
-       RL-01 through RL-10, RL-18 through RL-22.
+       RL-01 through RL-10, RL-18 through RL-29.
 
-     CLI (cmd/recovery-loop/main_test.go):
-       RL-11 through RL-17. -->
+     CLI (cmd/recovery-loop/*_test.go):
+       RL-11 through RL-17, RL-30 through RL-32. -->
 
 **Status:** Production-ready
 **Scope:** Host critical job self-healing loop and escalation engine
@@ -34,6 +34,18 @@ unexpired snooze is treated as a defect and recovered.
 
 Every recovery attempt and outcome is journaled to ensure that recovery actions
 themselves remain observable and cannot fail silently.
+
+Recovery is an observed post-condition, never an executed command. Between
+2026-09-05 and 2026-09-09 this loop reported `status: recovered,
+human_needed: false` on 1243 consecutive ticks across three jobs while taking
+no action that changed anything: success was measured as "`launchctl kickstart`
+exited 0", the pulse condition was never re-read, and the consecutive failure
+count was reset on every one of those ticks, which made the RL-09 escalation
+unreachable. Two of the three jobs were healthy the whole time and were being
+restarted because they exit non-zero to signal an alarm. RL-23 through RL-32
+close that gap: pulse truth is read from a source that can clear, planning may
+not claim recovery, and a recovery counts only once the condition is observed
+to have gone away.
 
 ## Applicability
 
@@ -87,9 +99,31 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-22** When a snooze entry has expired, the system shall treat the job as active and eligible for recovery.
 
+**RL-23** The system shall read current pulse truth from the absence-alarm heartbeat, which reports presence as well as absence, and the system shall not derive pulse health from the append-only escalation journal alone.
+
+**RL-24** When a job's pulse is present, the system shall classify the job as HEALTHY regardless of its last launchd exit status.
+
+**RL-25** When planning a recovery action, the system shall classify the job as UNHEALTHY and the system shall not classify any job as RECOVERED before an action has been executed and verified.
+
+**RL-26** When a recovery action's command succeeds and the job's pulse has not returned, the system shall classify the job as PENDING VERIFICATION and the system shall not reset the consecutive failure count.
+
+**RL-27** When a job's pulse is observed present after a recovery action, the system shall classify the recovery as RECOVERED and the system shall reset the consecutive failure count to 0.
+
+**RL-28** When a structural condition (missing binary, unloaded launchd job, or status 78/-9) persists after a recovery action, the system shall classify the recovery as FAILED.
+
+**RL-29** When a job's pulse was not observed by any evidence source, the system shall not classify the recovery as RECOVERED.
+
+**RL-30** When a job's pulse has not returned within the verification grace period, the system shall increment the consecutive failure count, and when that count reaches the escalation threshold the system shall append a `recovery.human_needed` record to the absence-alarm journal naming the pulse and how long it has been absent.
+
+**RL-31** When a job's consecutive failure count reaches the give-up threshold, the system shall suppress further remediation for that job and the system shall continue to report it as requiring human intervention.
+
+**RL-32** When the absence-alarm heartbeat is older than the maximum heartbeat age, the system shall treat all pulse truth as unavailable rather than acting on stale evidence.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Package tests: `pkg/recoveryloop/loop_test.go` (RL-01..RL-10, RL-18..RL-22)
+- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29)
 - CLI tests: `cmd/recovery-loop/main_test.go` (RL-11..RL-17)
+- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30)
 
