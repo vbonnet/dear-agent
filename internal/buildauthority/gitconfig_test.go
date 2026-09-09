@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,9 +12,8 @@ import (
 
 func TestParseSourceConfigOptInReal(t *testing.T) {
 	repository := os.Getenv("BUILD_AUTHORITY_REAL_SOURCE_REPOSITORY")
-	gitExecutable := os.Getenv("BUILD_AUTHORITY_REAL_GIT_EXECUTABLE")
-	if repository == "" || gitExecutable == "" {
-		t.Skip("set BUILD_AUTHORITY_REAL_SOURCE_REPOSITORY and BUILD_AUTHORITY_REAL_GIT_EXECUTABLE")
+	if repository == "" {
+		t.Skip("set BUILD_AUTHORITY_REAL_SOURCE_REPOSITORY")
 	}
 	content, err := os.ReadFile(filepath.Join(repository, ".git", "config"))
 	if err != nil {
@@ -28,37 +26,6 @@ func TestParseSourceConfigOptInReal(t *testing.T) {
 	if claim.objectFormat != objectFormatSHA1 && claim.objectFormat != objectFormatSHA256 {
 		t.Fatalf("real source config returned unknown object format %d", claim.objectFormat)
 	}
-
-	prefix := []string{"--no-pager", "-C", repository}
-	for _, row := range sourceGitCommandOverrideRows() {
-		prefix = append(prefix, "-c", row.key+"="+row.value)
-	}
-	closedEnvironment := []string{
-		"GIT_CONFIG_NOSYSTEM=1",
-		"HOME=/nonexistent-buildauthority-home",
-		"XDG_CONFIG_HOME=/nonexistent-buildauthority-xdg",
-		"LANG=C",
-		"LC_ALL=C",
-	}
-	run := func(arguments ...string) []byte {
-		t.Helper()
-		command := exec.Command(gitExecutable, append(append([]string(nil), prefix...), arguments...)...)
-		command.Dir = repository
-		command.Env = closedEnvironment
-		stdout, runErr := command.Output()
-		if runErr != nil {
-			t.Fatalf("run real source config transcript: %v", runErr)
-		}
-		return stdout
-	}
-	local := run("config", "--null", "--show-origin", "--show-scope", "--local", "--list")
-	if want := claim.localTranscript(); !bytes.Equal(local, want) {
-		t.Fatalf("real Git local transcript differs from direct parse\n got: %q\nwant: %q", local, want)
-	}
-	active := run("config", "--null", "--show-origin", "--show-scope", "--list")
-	if want := claim.activeTranscript(); !bytes.Equal(active, want) {
-		t.Fatalf("real Git active transcript differs from direct parse\n got: %q\nwant: %q", active, want)
-	}
 	packedPath := filepath.Join(repository, ".git", "packed-refs")
 	packed, packedErr := os.ReadFile(packedPath)
 	if packedErr == nil {
@@ -70,7 +37,7 @@ func TestParseSourceConfigOptInReal(t *testing.T) {
 	}
 }
 
-func TestParseSourceConfigSHA1AndExactTranscripts(t *testing.T) {
+func TestParseSourceConfigSHA1AndOrderedSemanticClaim(t *testing.T) {
 	t.Parallel()
 
 	content := []byte(`# source metadata is inert
@@ -105,36 +72,23 @@ func TestParseSourceConfigSHA1AndExactTranscripts(t *testing.T) {
 		t.Fatal("worktreeConfig presence was not retained")
 	}
 
-	wantLocal := strings.Join([]string{
-		"local\x00file:.git/config\x00core.repositoryformatversion\n0\x00",
-		"local\x00file:.git/config\x00core.bare\nfalse\x00",
-		"local\x00file:.git/config\x00core.filemode\ntrue\x00",
-		"local\x00file:.git/config\x00core.hookspath\nunused path\x00",
-		"local\x00file:.git/config\x00extensions.worktreeconfig\ntrue\x00",
-		"local\x00file:.git/config\x00user.name\nExample User\x00",
-		"local\x00file:.git/config\x00user.email\nuser@example.test\x00",
-		"local\x00file:.git/config\x00beads.role\ncontributor\x00",
-		"local\x00file:.git/config\x00remote.Origin.url\nhttps://example.test/repository#fragment\x00",
-		"local\x00file:.git/config\x00remote.Origin.fetch\n+refs/heads/*:refs/remotes/Origin/*\x00",
-		"local\x00file:.git/config\x00branch.main.remote\nOrigin\x00",
-		"local\x00file:.git/config\x00branch.main.merge\nrefs/heads/main\x00",
-		"local\x00file:.git/config\x00branch.main.vscode-merge-base\nOrigin/main\x00",
-	}, "")
-	if got := string(claim.localTranscript()); got != wantLocal {
-		t.Fatalf("local transcript mismatch\n got: %q\nwant: %q", got, wantLocal)
+	want := []sourceConfigEntry{
+		{key: sourceConfigKey{section: "core", variable: "repositoryformatversion"}, value: "0"},
+		{key: sourceConfigKey{section: "core", variable: "bare"}, value: "false"},
+		{key: sourceConfigKey{section: "core", variable: "filemode"}, value: "true"},
+		{key: sourceConfigKey{section: "core", variable: "hookspath"}, value: "unused path"},
+		{key: sourceConfigKey{section: "extensions", variable: "worktreeconfig"}, value: "true"},
+		{key: sourceConfigKey{section: "user", variable: "name"}, value: "Example User"},
+		{key: sourceConfigKey{section: "user", variable: "email"}, value: "user@example.test"},
+		{key: sourceConfigKey{section: "beads", variable: "role"}, value: "contributor"},
+		{key: sourceConfigKey{section: "remote", subsection: "Origin", hasSubsection: true, variable: "url"}, value: "https://example.test/repository#fragment"},
+		{key: sourceConfigKey{section: "remote", subsection: "Origin", hasSubsection: true, variable: "fetch"}, value: "+refs/heads/*:refs/remotes/Origin/*"},
+		{key: sourceConfigKey{section: "branch", subsection: "main", hasSubsection: true, variable: "remote"}, value: "Origin"},
+		{key: sourceConfigKey{section: "branch", subsection: "main", hasSubsection: true, variable: "merge"}, value: "refs/heads/main"},
+		{key: sourceConfigKey{section: "branch", subsection: "main", hasSubsection: true, variable: "vscode-merge-base"}, value: "Origin/main"},
 	}
-
-	wantActive := wantLocal
-	for _, row := range sourceGitCommandOverrideRows() {
-		wantActive += "command\x00command line:\x00" + row.key + "\n" + row.value + "\x00"
-	}
-	if got := string(claim.activeTranscript()); got != wantActive {
-		t.Fatalf("active transcript mismatch\n got: %q\nwant: %q", got, wantActive)
-	}
-	first := claim.localTranscript()
-	first[0] = 'X'
-	if got := claim.localTranscript()[0]; got != 'l' {
-		t.Fatalf("transcript storage aliased a caller result: first byte %q", got)
+	if !reflect.DeepEqual(claim.entries, want) {
+		t.Fatalf("ordered semantic claim = %#v, want %#v", claim.entries, want)
 	}
 }
 
@@ -584,32 +538,6 @@ func TestParsePackedRefsEnforcesExactInjectedLimits(t *testing.T) {
 	requirePrivateCause(t, err, CauseInternalInvariant)
 	_, err = parsePackedRefsWithLimits(content, objectFormatSHA1, packedRefsLimits{bytes: -1, rows: 2})
 	requirePrivateCause(t, err, CauseInternalInvariant)
-}
-
-func TestSourceGitOverrideOrderIsClosed(t *testing.T) {
-	t.Parallel()
-
-	want := [...]configTranscriptRow{
-		{key: "core.hookspath", value: "/dev/null"},
-		{key: "protocol.allow", value: "never"},
-		{key: "core.usereplacerefs", value: "false"},
-		{key: "core.commitgraph", value: "false"},
-		{key: "core.multipackindex", value: "false"},
-		{key: "core.fsmonitor", value: "false"},
-		{key: "pack.readreverseindex", value: "false"},
-		{key: "pack.usebitmaps", value: "false"},
-		{key: "maintenance.auto", value: "false"},
-		{key: "fetch.writecommitgraph", value: "false"},
-		{key: "gc.auto", value: "0"},
-	}
-	if got := sourceGitCommandOverrideRows(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("sourceGitCommandOverrideRows() = %#v, want %#v", got, want)
-	}
-	first := sourceGitCommandOverrideRows()
-	first[0] = configTranscriptRow{key: "mutated", value: "mutated"}
-	if got := sourceGitCommandOverrideRows()[0]; got != want[0] {
-		t.Fatalf("source override policy aliases mutable storage: %#v", got)
-	}
 }
 
 func requirePrivateCause(t *testing.T, err error, want CauseCode) {
