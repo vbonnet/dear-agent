@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-09-09 -->
 
-**Version:** 3.8
+**Version:** 3.9
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads` and repository-generated remediation guidance for it.
 
@@ -188,6 +188,10 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-86** When a non-force resolve mutation reports success or an independently confirmed resolved state, the system shall atomically re-prove the opening and answer author boundary from the returned or fresh provider state and shall reopen or refuse the resolution when either identity is missing, changes from the pre-read boundary, or becomes equal.
 
 **RESOLVE-REVIEW-THREADS-87** While a non-Unix platform lacks runtime proof that private, durable local issuer state can be established, the system shall reject `reply-resolve` continuation preparation before issuing a reply mutation and shall reject `continue-resolve` receipt loading before reading the body source or contacting the provider; support for that platform shall require equivalent privacy and durability evidence.
+
+**RESOLVE-REVIEW-THREADS-88** When a reply-history decision follows retrieval spanning more than one comment page, the system shall perform one provider GraphQL operation that uses deterministic `nodes(ids:)` aliases of at most 100 identifiers per field to revalidate every observed comment's node ID, author login, exact body, update time, edit-history count, and latest retained edit ID together with the exact comment count, opening comment, final two comments, requested thread identity, resolved state, and path; the system shall rebuild classification evidence only from the complete combined response, shall not split revalidation across provider operations, and shall fail closed before any mutation on provider failure, resource refusal, an incomplete or missing alias, duplicated identity, or inconsistent evidence, without claiming that the operation is atomic or linearizable.
+
+**RESOLVE-REVIEW-THREADS-89** When reply placement is accepted as exact, the system shall require the sole success path to validate distinct non-empty predecessor and reply IDs together with both exact-body digests and shall not permit any ID-only or incomplete-evidence success path.
 
 ## BDD Traceability
 

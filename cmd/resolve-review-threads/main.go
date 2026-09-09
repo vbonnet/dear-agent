@@ -310,7 +310,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			fmt.Sprintf("initially observed tail %s changed before full history reached tail %s", initial.LastID, boundary.LastID),
 		)
 	}
-	priorReply := classifyPriorReply(history, body)
+	priorReply := history.classify(body)
 	if priorReply == priorReplyIsLast {
 		if initial.PrevID == "" || !initial.PrevBodyPresent {
 			return rejectInitialHistoryMismatch(
@@ -358,7 +358,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		// this command began. Do not carry that foreign resolved state into the
 		// placement or resolution seams: a later edit or reopen must be handled by
 		// a fresh invocation, never "corrected" by this non-mutating observation.
-		if history[len(history)-1].Body != body {
+		if history.last().Body != body {
 			return fail("thread %s was already resolved with a trim-equivalent reply whose exact bytes differ from the selected source; no mutation was attempted.\n%s",
 				threadID, stableDifferentAnswerGuidance(threadID, bodyFile))
 		}
@@ -396,7 +396,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 			"cannot be proved; nothing was posted or resolved.\n%s", threadID,
 			unavailableAuthorEvidenceGuidance(threadID, bodyFile))
 	case priorReplyIsLast:
-		if exactBodySHA256([]byte(history[len(history)-1].Body)) != exactBodySHA256([]byte(body)) {
+		if exactBodySHA256([]byte(history.last().Body)) != exactBodySHA256([]byte(body)) {
 			return fail("thread %s has a matching independently authored answer at the current tail, but "+
 				"its exact bytes differ from the selected source; nothing was posted or resolved.\n%s",
 				threadID, stableDifferentAnswerGuidance(threadID, bodyFile))
@@ -415,7 +415,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 		}
 		// Our reply must land directly after the comment we just read.
 		anchorPrevID = boundary.LastID
-		anchorPrevBody = history[len(history)-1].Body
+		anchorPrevBody = history.last().Body
 		predecessorEvidence = replyIssuancePredecessor{
 			ID:                anchorPrevID,
 			BodySHA256:        exactBodySHA256([]byte(anchorPrevBody)),

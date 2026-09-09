@@ -237,6 +237,10 @@ exit 1
 }
 
 func TestGraphQLOperationSensitiveBodyDetection(t *testing.T) {
+	pagedSnapshotQuery := buildPagedHistorySnapshotOperation(
+		"PRRT_sensitive_query",
+		[]string{"PRRC_sensitive_query"},
+	).Query
 	tests := []struct {
 		name      string
 		query     string
@@ -247,6 +251,7 @@ func TestGraphQLOperationSensitiveBodyDetection(t *testing.T) {
 		{name: "list response bodies", query: listQuery, want: true},
 		{name: "single thread response bodies", query: threadByIDQuery, want: true},
 		{name: "history response bodies", query: threadCommentsQuery, want: true},
+		{name: "paged history snapshot bodies", query: pagedSnapshotQuery, want: true},
 		{name: "resolve response bodies without body variable", query: resolveMutation, variables: map[string]any{"threadId": "PRRT_exact"}, want: true},
 		{name: "body alias", query: `query { node { comments { nodes { answer: body } } } }`, want: true},
 		{name: "body-free unresolve", query: unresolveMutation},

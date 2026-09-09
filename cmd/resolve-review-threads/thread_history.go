@@ -24,6 +24,78 @@ const threadCommentsQuery = `query($id:ID!, $after:String) {
   }
 }`
 
+const maxPagedHistorySnapshotIDsPerField = 100
+
+const pagedHistorySnapshotTargetSelection = `  target: node(id:$thread) {
+    ... on PullRequestReviewThread {
+      id
+      isResolved
+      path
+      opening: comments(first:1) {
+        totalCount
+        nodes { __typename id author { login } body updatedAt userContentEdits(last:1) { totalCount nodes { id } } }
+      }
+      recent: comments(last:2) {
+        nodes { __typename id author { login } body updatedAt userContentEdits(last:1) { totalCount nodes { id } } }
+      }
+    }
+  }`
+
+const pagedHistorySnapshotNodeSelection = `{
+    __typename
+    ... on PullRequestReviewComment {
+      id
+      author { login }
+      body
+      updatedAt
+      userContentEdits(last:1) { totalCount nodes { id } }
+    }
+  }`
+
+type pagedHistorySnapshotOperation struct {
+	Query     string
+	Variables map[string]any
+	Aliases   []string
+	BatchIDs  [][]string
+}
+
+// buildPagedHistorySnapshotOperation refreshes every comment that a
+// multi-request history walk observed and binds that refreshed set to the same
+// thread's count and end points in one provider operation. GitHub rejects more
+// than 100 IDs in one nodes(ids:) field, so deterministic aliases partition the
+// IDs within the single GraphQL document and response. The lookup is never
+// split across independently timed provider operations.
+func buildPagedHistorySnapshotOperation(
+	threadID string,
+	commentIDs []string,
+) pagedHistorySnapshotOperation {
+	definitions := []string{"$thread:ID!"}
+	selections := []string{pagedHistorySnapshotTargetSelection}
+	variables := map[string]any{"thread": threadID}
+	aliases := make([]string, 0, (len(commentIDs)+maxPagedHistorySnapshotIDsPerField-1)/maxPagedHistorySnapshotIDsPerField)
+	batchIDs := make([][]string, 0, cap(aliases))
+	for start, batch := 0, 0; start < len(commentIDs); start, batch = start+maxPagedHistorySnapshotIDsPerField, batch+1 {
+		end := start + maxPagedHistorySnapshotIDsPerField
+		if end > len(commentIDs) {
+			end = len(commentIDs)
+		}
+		variableName := fmt.Sprintf("commentIDs%d", batch)
+		alias := fmt.Sprintf("snapshot%d", batch)
+		definitions = append(definitions, fmt.Sprintf("$%s:[ID!]!", variableName))
+		selections = append(selections, fmt.Sprintf("  %s: nodes(ids:$%s) %s", alias, variableName, pagedHistorySnapshotNodeSelection))
+		ids := append([]string(nil), commentIDs[start:end]...)
+		variables[variableName] = ids
+		aliases = append(aliases, alias)
+		batchIDs = append(batchIDs, ids)
+	}
+	return pagedHistorySnapshotOperation{
+		Query:     fmt.Sprintf("query(%s) {\n%s\n}", strings.Join(definitions, ","), strings.Join(selections, "\n")),
+		Variables: variables,
+		Aliases:   aliases,
+		BatchIDs:  batchIDs,
+	}
+}
+
 // tailComment is one provider-visible review-thread comment.
 type tailComment struct {
 	ID                string
@@ -34,6 +106,51 @@ type tailComment struct {
 	EditCountPresent  bool
 	LastEditID        string
 	LastEditIDPresent bool
+}
+
+// stableReplyHistory is the only full-history type reply-resolve may classify.
+// A one-page connection is one provider observation; a multi-page connection
+// enters this type only after the generated paged snapshot operation validates
+// and refreshes every decision-bearing field.
+type stableReplyHistory struct {
+	comments []tailComment
+}
+
+func (h stableReplyHistory) classify(body string) priorReplyState {
+	return classifyPriorReply(h.comments, body)
+}
+
+func (h stableReplyHistory) last() tailComment {
+	return h.comments[len(h.comments)-1]
+}
+
+type pagedHistoryCommentNode struct {
+	TypeName         string                    `json:"__typename"`
+	ID               string                    `json:"id"`
+	UpdatedAt        string                    `json:"updatedAt"`
+	UserContentEdits *userContentEditsEvidence `json:"userContentEdits"`
+	Author           struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Body *string `json:"body"`
+}
+
+type pagedHistoryTarget struct {
+	ID         string `json:"id"`
+	IsResolved *bool  `json:"isResolved"`
+	Path       string `json:"path"`
+	Opening    struct {
+		TotalCount *int                        `json:"totalCount"`
+		Nodes      *[]*pagedHistoryCommentNode `json:"nodes"`
+	} `json:"opening"`
+	Recent struct {
+		Nodes *[]*pagedHistoryCommentNode `json:"nodes"`
+	} `json:"recent"`
+}
+
+type pagedHistorySnapshotResponse struct {
+	Data   map[string]json.RawMessage `json:"data"`
+	Errors []json.RawMessage          `json:"errors"`
 }
 
 // replyHistoryBoundary binds the final pair of comments used to classify a
@@ -380,8 +497,16 @@ func checkCursorAdvances(endCursor, current string) error {
 // cursor pagination. It verifies the exact requested thread and requires IDs
 // and bodies because continuation evidence binds both.
 func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, error) {
+	return fetchAllCommentsObserved(ctx, threadID, nil)
+}
+
+// fetchAllCommentsObserved optionally reports whether the complete walk
+// required more than one provider request. Callers that make classification
+// decisions use that fact to require a coherent one-operation refresh.
+func fetchAllCommentsObserved(ctx context.Context, threadID string, paged *bool) ([]tailComment, error) {
 	var all []tailComment
 	cursor := ""
+	pages := 0
 	for {
 		variables := map[string]any{"id": threadID}
 		if cursor != "" {
@@ -390,6 +515,10 @@ func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, erro
 		raw, err := ghGraphQL(ctx, threadCommentsQuery, variables)
 		if err != nil {
 			return nil, err
+		}
+		pages++
+		if paged != nil {
+			*paged = pages > 1
 		}
 		var resp struct {
 			Data struct {
@@ -462,37 +591,315 @@ func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, erro
 	}
 }
 
+func decodePagedHistoryComment(
+	threadID, location string,
+	node *pagedHistoryCommentNode,
+) (tailComment, error) {
+	if node == nil {
+		return tailComment{}, fmt.Errorf("paged history snapshot for %s returned a null %s", threadID, location)
+	}
+	if node.TypeName != "PullRequestReviewComment" {
+		return tailComment{}, fmt.Errorf(
+			"paged history snapshot for %s returned non-review-comment %s evidence",
+			threadID,
+			location,
+		)
+	}
+	if !validContinuationReceiptID(node.ID) {
+		return tailComment{}, fmt.Errorf("paged history snapshot for %s omitted a safe %s ID", threadID, location)
+	}
+	if !validContinuationAuthor(node.Author.Login) {
+		return tailComment{}, fmt.Errorf("paged history snapshot for %s omitted a safe %s author", threadID, location)
+	}
+	if node.Body == nil {
+		return tailComment{}, fmt.Errorf("paged history snapshot for %s omitted the %s body", threadID, location)
+	}
+	if !validContinuationTimestamp(node.UpdatedAt) {
+		return tailComment{}, fmt.Errorf("paged history snapshot for %s omitted a valid %s update timestamp", threadID, location)
+	}
+	editCount, lastEditID, present := observedEditRevision(node.UserContentEdits)
+	if !present {
+		return tailComment{}, fmt.Errorf("paged history snapshot for %s omitted complete %s edit evidence", threadID, location)
+	}
+	return tailComment{
+		ID:                node.ID,
+		Login:             node.Author.Login,
+		Body:              *node.Body,
+		UpdatedAt:         node.UpdatedAt,
+		EditCount:         editCount,
+		EditCountPresent:  true,
+		LastEditID:        lastEditID,
+		LastEditIDPresent: true,
+	}, nil
+}
+
+func samePagedHistoryComment(left, right tailComment) bool {
+	return left == right
+}
+
+// revalidatePagedHistory turns a mixed-request history walk into the stable
+// classification input. The observed IDs define the set and order; one bulk
+// provider operation refreshes every field and binds it to the target's count,
+// opening comment, and final pair. It intentionally makes no claim about a
+// provider transaction spanning this read and a later mutation.
+func revalidatePagedHistory(
+	ctx context.Context,
+	threadID string,
+	observed []tailComment,
+) (stableReplyHistory, error) {
+	if len(observed) == 0 {
+		return stableReplyHistory{}, fmt.Errorf("paged history for %s was empty", threadID)
+	}
+	commentIDs := make([]string, 0, len(observed))
+	seenObserved := make(map[string]struct{}, len(observed))
+	for _, comment := range observed {
+		if !validContinuationReceiptID(comment.ID) {
+			return stableReplyHistory{}, fmt.Errorf("paged history for %s omitted a safe comment ID", threadID)
+		}
+		if _, duplicate := seenObserved[comment.ID]; duplicate {
+			return stableReplyHistory{}, fmt.Errorf("paged history for %s repeated comment ID %s", threadID, comment.ID)
+		}
+		seenObserved[comment.ID] = struct{}{}
+		commentIDs = append(commentIDs, comment.ID)
+	}
+
+	operation := buildPagedHistorySnapshotOperation(threadID, commentIDs)
+	raw, err := ghGraphQL(ctx, operation.Query, operation.Variables)
+	if err != nil {
+		return stableReplyHistory{}, fmt.Errorf("refresh paged history for %s: %w", threadID, err)
+	}
+	var resp pagedHistorySnapshotResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return stableReplyHistory{}, fmt.Errorf("parse paged history snapshot for %s: %w", threadID, err)
+	}
+	if len(resp.Errors) != 0 {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s contained provider errors", threadID)
+	}
+	if resp.Data == nil {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s was partial", threadID)
+	}
+	if len(resp.Data) != len(operation.Aliases)+1 {
+		return stableReplyHistory{}, fmt.Errorf(
+			"paged history snapshot for %s returned an unexpected number of fields",
+			threadID,
+		)
+	}
+	targetRaw, present := resp.Data["target"]
+	if !present {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its target", threadID)
+	}
+	var target *pagedHistoryTarget
+	if err := json.Unmarshal(targetRaw, &target); err != nil {
+		return stableReplyHistory{}, fmt.Errorf("parse paged history target for %s: %w", threadID, err)
+	}
+	if target == nil {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s returned a null target", threadID)
+	}
+	if target.ID == "" {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot omitted the requested thread ID %s", threadID)
+	}
+	if target.ID != threadID {
+		return stableReplyHistory{}, fmt.Errorf(
+			"paged history snapshot for %s returned mismatched thread ID %s",
+			threadID,
+			target.ID,
+		)
+	}
+	if target.IsResolved == nil {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its resolved state", threadID)
+	}
+	if target.Path == "" {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its path", threadID)
+	}
+	if target.Opening.TotalCount == nil || target.Opening.Nodes == nil || target.Recent.Nodes == nil {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its count, opening, or tail", threadID)
+	}
+	if *target.Opening.TotalCount != len(observed) {
+		return stableReplyHistory{}, fmt.Errorf(
+			"paged history snapshot for %s changed comment count from %d to %d",
+			threadID,
+			len(observed),
+			*target.Opening.TotalCount,
+		)
+	}
+
+	snapshot := make([]tailComment, 0, len(observed))
+	for i, alias := range operation.Aliases {
+		batchRaw, ok := resp.Data[alias]
+		if !ok {
+			return stableReplyHistory{}, fmt.Errorf(
+				"paged history snapshot for %s omitted alias %s",
+				threadID,
+				alias,
+			)
+		}
+		var batch []*pagedHistoryCommentNode
+		if err := json.Unmarshal(batchRaw, &batch); err != nil {
+			return stableReplyHistory{}, fmt.Errorf(
+				"parse paged history snapshot alias %s for %s: %w",
+				alias,
+				threadID,
+				err,
+			)
+		}
+		if len(batch) != len(operation.BatchIDs[i]) {
+			return stableReplyHistory{}, fmt.Errorf(
+				"paged history snapshot alias %s for %s returned %d comments, want %d",
+				alias,
+				threadID,
+				len(batch),
+				len(operation.BatchIDs[i]),
+			)
+		}
+		expectedBatchIDs := make(map[string]struct{}, len(operation.BatchIDs[i]))
+		for _, id := range operation.BatchIDs[i] {
+			expectedBatchIDs[id] = struct{}{}
+		}
+		seenBatchIDs := make(map[string]struct{}, len(batch))
+		for j, node := range batch {
+			comment, err := decodePagedHistoryComment(
+				threadID,
+				fmt.Sprintf("alias %s comment %d", alias, j+1),
+				node,
+			)
+			if err != nil {
+				return stableReplyHistory{}, err
+			}
+			if _, requested := expectedBatchIDs[comment.ID]; !requested {
+				return stableReplyHistory{}, fmt.Errorf(
+					"paged history snapshot alias %s for %s returned an ID requested through another alias",
+					alias,
+					threadID,
+				)
+			}
+			if _, duplicate := seenBatchIDs[comment.ID]; duplicate {
+				return stableReplyHistory{}, fmt.Errorf(
+					"paged history snapshot alias %s for %s repeated a comment ID",
+					alias,
+					threadID,
+				)
+			}
+			seenBatchIDs[comment.ID] = struct{}{}
+			snapshot = append(snapshot, comment)
+		}
+	}
+	refreshedByID := make(map[string]tailComment, len(snapshot))
+	for _, comment := range snapshot {
+		if _, known := seenObserved[comment.ID]; !known {
+			return stableReplyHistory{}, fmt.Errorf(
+				"paged history snapshot for %s returned unrequested comment ID %s",
+				threadID,
+				comment.ID,
+			)
+		}
+		if _, duplicate := refreshedByID[comment.ID]; duplicate {
+			return stableReplyHistory{}, fmt.Errorf(
+				"paged history snapshot for %s repeated refreshed comment ID %s",
+				threadID,
+				comment.ID,
+			)
+		}
+		refreshedByID[comment.ID] = comment
+	}
+	refreshed := make([]tailComment, 0, len(observed))
+	for _, id := range commentIDs {
+		comment, ok := refreshedByID[id]
+		if !ok {
+			return stableReplyHistory{}, fmt.Errorf(
+				"paged history snapshot for %s omitted observed comment ID %s",
+				threadID,
+				id,
+			)
+		}
+		refreshed = append(refreshed, comment)
+	}
+
+	openingNodes := *target.Opening.Nodes
+	if len(openingNodes) != 1 {
+		return stableReplyHistory{}, fmt.Errorf(
+			"paged history snapshot for %s returned %d opening comments",
+			threadID,
+			len(openingNodes),
+		)
+	}
+	opening, err := decodePagedHistoryComment(threadID, "opening comment", openingNodes[0])
+	if err != nil {
+		return stableReplyHistory{}, err
+	}
+	if !samePagedHistoryComment(opening, refreshed[0]) {
+		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s returned an inconsistent opening comment", threadID)
+	}
+
+	recentNodes := *target.Recent.Nodes
+	recentStart := len(refreshed) - 2
+	if recentStart < 0 {
+		recentStart = 0
+	}
+	expectedRecent := refreshed[recentStart:]
+	if len(recentNodes) != len(expectedRecent) {
+		return stableReplyHistory{}, fmt.Errorf(
+			"paged history snapshot for %s returned %d tail comments, want %d",
+			threadID,
+			len(recentNodes),
+			len(expectedRecent),
+		)
+	}
+	for i, node := range recentNodes {
+		comment, err := decodePagedHistoryComment(threadID, fmt.Sprintf("tail comment %d", i+1), node)
+		if err != nil {
+			return stableReplyHistory{}, err
+		}
+		if !samePagedHistoryComment(comment, expectedRecent[i]) {
+			return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s returned an inconsistent tail", threadID)
+		}
+	}
+
+	return stableReplyHistory{comments: refreshed}, nil
+}
+
 // fetchHistoryTail returns full history and the exact last-two-comment
 // boundary. A thread with no comments cannot be reasoned about safely.
 func fetchHistoryTail(
 	ctx context.Context,
 	threadID, bodyFile string,
-) (history []tailComment, boundary replyHistoryBoundary, code int) {
-	history, err := fetchAllComments(ctx, threadID)
+) (history stableReplyHistory, boundary replyHistoryBoundary, code int) {
+	paged := false
+	observed, err := fetchAllCommentsObserved(ctx, threadID, &paged)
 	if err != nil {
-		return nil, replyHistoryBoundary{}, fail(
+		return stableReplyHistory{}, replyHistoryBoundary{}, fail(
 			"provider state is unverified: cannot read complete thread history, nothing posted: %v\n%s",
 			err,
 			providerReadRecoveryGuidance(err, inspectReplyOutcomeGuidance(threadID, bodyFile)),
 		)
 	}
-	if len(history) == 0 {
-		return nil, replyHistoryBoundary{}, fail(
+	if len(observed) == 0 {
+		return stableReplyHistory{}, replyHistoryBoundary{}, fail(
 			"thread %s has no comments to read; nothing was posted\n%s",
 			threadID,
 			inspectReplyOutcomeGuidance(threadID, bodyFile),
 		)
 	}
-	boundary = boundaryFromHistory(history)
+	history = stableReplyHistory{comments: observed}
+	if paged {
+		history, err = revalidatePagedHistory(ctx, threadID, observed)
+		if err != nil {
+			return stableReplyHistory{}, replyHistoryBoundary{}, fail(
+				"provider state is unverified: cannot establish a coherent paged thread history, nothing posted: %v\n%s",
+				err,
+				providerReadRecoveryGuidance(err, inspectReplyOutcomeGuidance(threadID, bodyFile)),
+			)
+		}
+	}
+	boundary = boundaryFromHistory(history.comments)
 	if boundary.LastID == "" {
-		return nil, replyHistoryBoundary{}, fail(
+		return stableReplyHistory{}, replyHistoryBoundary{}, fail(
 			"thread %s history omitted the last comment ID needed as a predecessor; nothing was posted\n%s",
 			threadID,
 			inspectReplyOutcomeGuidance(threadID, bodyFile),
 		)
 	}
-	if boundary.PredecessorID == "" && len(history) > 1 {
-		return nil, replyHistoryBoundary{}, fail(
+	if boundary.PredecessorID == "" && len(history.comments) > 1 {
+		return stableReplyHistory{}, replyHistoryBoundary{}, fail(
 			"thread %s history omitted the predecessor comment ID needed for exact evidence; nothing was posted\n%s",
 			threadID,
 			inspectReplyOutcomeGuidance(threadID, bodyFile),

@@ -99,6 +99,10 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		ambiguousReplyOutcomesShouldPreservePredecessorEvidence,
 	)
 	ctx.Step(
+		`^paged reply-history decisions should revalidate every classification fact before mutation$`,
+		pagedReplyHistoryDecisionsShouldRevalidateEveryClassificationFact,
+	)
+	ctx.Step(
 		`^stale resolved continuation mismatches should reopen before recovery guidance$`,
 		staleResolvedContinuationMismatchesShouldReopen,
 	)
@@ -109,6 +113,10 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(
 		`^resolved buried or jumped replies should reopen before recovery guidance$`,
 		resolvedPlacementMismatchesShouldReopenBeforeGuidance,
+	)
+	ctx.Step(
+		`^reply placement should have no ID-only success path$`,
+		replyPlacementShouldHaveNoIDOnlySuccessPath,
 	)
 	ctx.Step(
 		`^uncertain thread evidence should retain the actual source pending inspection$`,
@@ -218,6 +226,11 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestRecoveredReplyRejectsChangedLastEditIDAtFixedCount",
 		"TestContinuationBoundaryRejectsChangedLastEditIDAtFixedCount",
 		"TestReplyHistoryBoundaryRejectsChangedLastEditIDAtFixedCount",
+		"TestPagedHistorySnapshotReclassifiesOlderEditedMatchBeforeMutation",
+		"TestPagedHistorySnapshotStableControlProceeds",
+		"TestPagedHistorySnapshotRejectsIncompleteOrInconsistentEvidence",
+		"TestPagedHistorySnapshotProviderFailureIsSingleBodySafeRequest",
+		"TestPagedHistorySnapshotQueryContract",
 		"TestValidateContinuationHistory",
 		"TestContinueResolveRejectsMismatchedProviderThreadIdentity",
 		"TestReplyResolveRefusesHistoryThatAdvancedPastInitialTail",
@@ -280,6 +293,9 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestContinueResolvePreReadPrioritizesChangedPredecessorIDOverMissingBody",
 		"TestStableHistoryPrioritizesChangedPredecessorIDOverMissingLastBody",
 		"TestReplyPlacementPrioritizesChangedLastIDOverMissingPredecessorID",
+		"TestCheckReplyPlacement",
+		"TestCheckReplyPlacementRejectsBlankAnchors",
+		"TestVerifyExactReplyPlacementRejectsIDOnlyOrIncompleteEvidenceBeforeProviderAccess",
 		"TestResolveMutationEvidencePrioritizesChangedPredecessorIDOverMissingBody",
 		"TestInitialHistoryMismatchPrioritizesChangedLastIDOverMissingBody",
 		"TestIncompleteCommentIdentityRequiresInspection",
@@ -391,6 +407,10 @@ func ambiguousReplyOutcomesShouldPreservePredecessorEvidence(ctx context.Context
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 
+func pagedReplyHistoryDecisionsShouldRevalidateEveryClassificationFact(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
 func staleResolvedContinuationMismatchesShouldReopen(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
@@ -400,6 +420,10 @@ func resolutionAnchorRecoveryShouldDistinguishAbsenceFromChange(ctx context.Cont
 }
 
 func resolvedPlacementMismatchesShouldReopenBeforeGuidance(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func replyPlacementShouldHaveNoIDOnlySuccessPath(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 

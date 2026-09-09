@@ -24,9 +24,11 @@ Feature: Review thread reply safety
     And generated reply-file guidance should prescribe per-thread external creation, retry retention, and confirmed-terminal cleanup
     And superseded reply guidance should revise the same source without losing its cleanup identity
     And ambiguous reply outcomes should preserve the full predecessor identity, time, edit, and author boundary before choosing unchanged retry or same-source revision
+    And paged reply-history decisions should revalidate every classification fact before mutation
     And stale resolved continuation mismatches should reopen before recovery guidance
     And resolution-anchor recovery should distinguish unverifiable absence from confirmed change
     And resolved buried or jumped replies should reopen before recovery guidance
+    And reply placement should have no ID-only success path
     And uncertain thread evidence should retain the actual source pending inspection
     And unchanged and revised guidance should preserve the caller's named path or standard-input form
     And every mutation response should prove the requested thread identity, state, and answer-author boundary

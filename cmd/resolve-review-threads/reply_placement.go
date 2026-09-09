@@ -34,16 +34,6 @@ func checkReplyPlacement(gotPrev, gotLast, wantPrev, wantLast string) replyPlace
 	return replyExact
 }
 
-// verifyReplyPlacement retains the ID-only seam used by focused placement
-// tests. Production reply-resolve uses verifyExactReplyPlacement.
-func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID, bodyFile string) int {
-	_, code := verifyReplyPlacementAgainst(ctx, threadID, resolutionEvidence{
-		LastID:        wantLastID,
-		PredecessorID: wantPrevID,
-	}, bodyFile)
-	return code
-}
-
 // verifyExactReplyPlacement binds both adjacent comment IDs and both exact
 // bodies. GitHub permits review-comment edits without changing node IDs, so
 // an ID-only placement check cannot prove what the reply actually answered.
@@ -63,14 +53,6 @@ func verifyExactReplyPlacementState(
 	evidence resolutionEvidence,
 	bodyFile string,
 ) (thread, int) {
-	if err := evidence.validate(); err != nil {
-		return thread{}, fail("the reply is posted, but its exact placement evidence is invalid; resolution was not attempted: %v\n%s",
-			err, inspectReplyOutcomeGuidance(threadID, bodyFile))
-	}
-	if !evidence.exactReply() {
-		return thread{}, fail("the reply is posted, but its exact placement evidence is incomplete; resolution was not attempted\n%s",
-			inspectReplyOutcomeGuidance(threadID, bodyFile))
-	}
 	return verifyReplyPlacementAgainst(ctx, threadID, evidence, bodyFile)
 }
 
@@ -80,6 +62,14 @@ func verifyReplyPlacementAgainst(
 	evidence resolutionEvidence,
 	bodyFile string,
 ) (thread, int) {
+	if err := evidence.validate(); err != nil {
+		return thread{}, fail("the reply is posted, but its exact placement evidence is invalid; resolution was not attempted: %v\n%s",
+			err, inspectReplyOutcomeGuidance(threadID, bodyFile))
+	}
+	if !evidence.exactReply() {
+		return thread{}, fail("the reply is posted, but its exact placement evidence is incomplete; resolution was not attempted\n%s",
+			inspectReplyOutcomeGuidance(threadID, bodyFile))
+	}
 	after, err := fetchThread(ctx, threadID)
 	if err != nil {
 		return thread{}, fail("your reply may be posted, but placement and current resolved state could not be re-read; this command did not attempt resolution: %v\n%s",
@@ -122,9 +112,6 @@ func verifyReplyPlacementAgainst(
 		)
 		return after, fail("%s", message)
 	case replyExact:
-		if !evidence.exactReply() {
-			return after, 0
-		}
 		if !after.PrevBodyPresent || !after.LastBodyPresent {
 			message, _ := replyResolutionEvidenceFailure(
 				threadID,
@@ -150,7 +137,8 @@ func verifyReplyPlacementAgainst(
 		}
 		return after, 0
 	}
-	return after, 0
+	return after, fail("the reply is posted, but its placement classification was invalid; resolution was not attempted\n%s",
+		inspectReplyOutcomeGuidance(threadID, bodyFile))
 }
 
 func replyPlacementEvidenceError(

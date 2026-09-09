@@ -99,10 +99,15 @@ func TestObservedEditRevisionRequiresCountAndLastNode(t *testing.T) {
 
 func TestProviderQueriesRequestLastEditNodeID(t *testing.T) {
 	const selection = "userContentEdits(last:1) { totalCount nodes { id } }"
+	pagedSnapshotQuery := buildPagedHistorySnapshotOperation(
+		"PRRT_query_contract",
+		[]string{"PRRC_query_contract"},
+	).Query
 	queries := map[string]string{
 		"list":           listQuery,
 		"thread":         threadByIDQuery,
 		"history":        threadCommentsQuery,
+		"paged snapshot": pagedSnapshotQuery,
 		"resolve":        resolveMutation,
 		"reply mutation": replyMutation,
 	}

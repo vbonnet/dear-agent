@@ -167,6 +167,8 @@ func queryKinds(requests []recoveryGraphQLRequest) []string {
 			kinds = append(kinds, "unresolve")
 		case strings.Contains(request.Query, "resolveReviewThread"):
 			kinds = append(kinds, "resolve")
+		case strings.Contains(request.Query, "snapshot0: nodes(ids:$commentIDs0)"):
+			kinds = append(kinds, "history-snapshot")
 		case strings.Contains(request.Query, "comments(first:100"):
 			kinds = append(kinds, "history")
 		case strings.Contains(request.Query, "node(id:$id)"):
