@@ -195,6 +195,104 @@ func TestReplyResolvePreflightsSigningKeyBeforeReplyMutation(t *testing.T) {
 	assertContainsNone(t, diagnostics, body)
 }
 
+func TestReplyResolveAcceptsHomeFallbackSharedStateBeforeMutation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX continuation state is not supported on Windows")
+	}
+	const (
+		threadID = "PRRT_home_fallback_shared_state"
+		body     = "The normal shared state layout must not block this reply."
+	)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	sharedStateDirectory := filepath.Join(home, ".local", "state", "dear-agent")
+	if err := os.MkdirAll(sharedStateDirectory, 0o755); err != nil {
+		t.Fatalf("create fallback shared state namespace: %v", err)
+	}
+	if err := os.Chmod(sharedStateDirectory, 0o755); err != nil {
+		t.Fatalf("set fallback shared state namespace mode: %v", err)
+	}
+	before, err := os.Lstat(sharedStateDirectory)
+	if err != nil {
+		t.Fatalf("inspect fallback shared state before command: %v", err)
+	}
+	bodyFile := writeContinuationBody(t, body)
+	opening := providerComment{id: "PRRC_home_fallback_opening", login: "reviewer", body: "P1: exercise the deployed state layout."}
+	reply := providerComment{id: "PRRC_home_fallback_reply", login: "author", body: body}
+	provider := installSequencedProvider(t,
+		providerStep{stdout: threadResponse(threadID, false, opening)},
+		providerStep{stdout: historyResponse(threadID, opening)},
+		providerStep{stdout: threadResponse(threadID, false, opening)},
+		providerStep{stdout: replyResponse(reply)},
+		providerStep{stdout: threadResponse(threadID, false, opening, reply)},
+		providerStep{stdout: threadResponse(threadID, false, opening, reply)},
+		providerStep{stdout: resolveResponseWithExactComments(threadID, true, opening, reply)},
+	)
+
+	code, stdout, diagnostics := provider.capture(func() int {
+		return run([]string{"reply-resolve", threadID, "--body-file", bodyFile})
+	})
+	if code != 0 {
+		t.Fatalf("fallback shared state blocked reply with code %d:\nstdout:\n%s\nstderr:\n%s", code, stdout, diagnostics)
+	}
+	provider.assertExhausted()
+	assertQueryKinds(t, provider, "thread", "history", "thread", "reply", "thread", "thread", "resolve")
+	assertReplyMutationBody(t, provider, body)
+	after, err := os.Lstat(sharedStateDirectory)
+	if err != nil {
+		t.Fatalf("inspect fallback shared state after command: %v", err)
+	}
+	if !os.SameFile(before, after) || after.Mode().Perm() != 0o755 {
+		t.Fatalf("fallback shared state changed: same=%t mode=%04o", os.SameFile(before, after), after.Mode().Perm())
+	}
+}
+
+func TestReplyResolveRejectsWritableSharedStateBeforeMutation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX continuation state is not supported on Windows")
+	}
+	const (
+		threadID = "PRRT_writable_shared_state"
+		body     = "Do not post through externally writable state."
+	)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	sharedStateDirectory := filepath.Join(home, ".local", "state", "dear-agent")
+	if err := os.MkdirAll(sharedStateDirectory, 0o700); err != nil {
+		t.Fatalf("create fallback shared state namespace: %v", err)
+	}
+	if err := os.Chmod(sharedStateDirectory, 0o775); err != nil {
+		t.Fatalf("make fallback shared state namespace group writable: %v", err)
+	}
+	bodyFile := writeContinuationBody(t, body)
+	opening := providerComment{id: "PRRC_writable_shared_state_opening", login: "reviewer", body: "P1: fail before provider mutation."}
+	provider := installSequencedProvider(t,
+		providerStep{stdout: threadResponse(threadID, false, opening)},
+		providerStep{stdout: historyResponse(threadID, opening)},
+		providerStep{stdout: threadResponse(threadID, false, opening)},
+	)
+
+	code, stdout, diagnostics := provider.capture(func() int {
+		return run([]string{"reply-resolve", threadID, "--body-file", bodyFile})
+	})
+	if code == 0 {
+		t.Fatal("reply-resolve accepted writable shared state")
+	}
+	provider.assertExhausted()
+	assertQueryKinds(t, provider, "thread", "history", "thread")
+	assertNoProviderMutation(t, provider)
+	if stdout != "" {
+		t.Fatalf("writable shared state printed success: %q", stdout)
+	}
+	assertContainsAll(t, diagnostics, "signing state could not be established", "nothing was posted")
+	assertContainsNone(t, diagnostics, body)
+	if _, err := os.Lstat(filepath.Join(sharedStateDirectory, "resolve-review-threads")); err == nil {
+		t.Fatal("writable shared state created private continuation state")
+	}
+}
+
 func TestReplyResolveRequiresExistingExplicitXDGStateRootBeforeMutation(t *testing.T) {
 	const (
 		threadID = "PRRT_missing_xdg_boundary"

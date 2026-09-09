@@ -724,12 +724,17 @@ func TestHelpDocumentsStateRootOwnership(t *testing.T) {
 			t.Fatalf("run(--help) = %d, want 0", code)
 		}
 	})
+	diagnostics = strings.Join(strings.Fields(diagnostics), " ")
 	for _, want := range []string{
+		"dear-agent state directory is a shared namespace",
+		"POSIX mode may grant group or other read and traverse access",
+		"real directory with no group or other write bits",
+		"leaves an existing shared namespace unchanged",
+		"resolve-review-threads child and signing key private",
 		"An explicitly selected XDG_STATE_HOME must already exist",
-		"synchronizes only command-managed descendant entries with their parents",
+		"synchronizes descendant entries with their parents",
 		"never synchronizes the selected state root's own entry",
-		"or walks another",
-		"caller-owned ancestor",
+		"walks another caller-owned ancestor",
 	} {
 		if !strings.Contains(diagnostics, want) {
 			t.Fatalf("help omitted %q:\n%s", want, diagnostics)

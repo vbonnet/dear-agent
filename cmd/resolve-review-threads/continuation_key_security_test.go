@@ -47,6 +47,183 @@ func TestContinuationReceiptKeyIsPrivateStableAndReused(t *testing.T) {
 	}
 }
 
+func TestContinuationReceiptKeyAcceptsSharedStateNamespace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX directory permissions are required")
+	}
+	tests := []struct {
+		name     string
+		explicit bool
+	}{
+		{name: "home fallback"},
+		{name: "explicit XDG root", explicit: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := t.TempDir()
+			var stateRoot string
+			if test.explicit {
+				stateRoot = filepath.Join(base, "state")
+				if err := os.Mkdir(stateRoot, 0o700); err != nil {
+					t.Fatalf("create explicit XDG state root: %v", err)
+				}
+				t.Setenv("XDG_STATE_HOME", stateRoot)
+			} else {
+				t.Setenv("HOME", base)
+				t.Setenv("XDG_STATE_HOME", "")
+				stateRoot = filepath.Join(base, ".local", "state")
+			}
+			sharedStateDirectory := filepath.Join(stateRoot, "dear-agent")
+			if err := os.MkdirAll(sharedStateDirectory, 0o755); err != nil {
+				t.Fatalf("create shared state namespace: %v", err)
+			}
+			if err := os.Chmod(sharedStateDirectory, 0o755); err != nil {
+				t.Fatalf("set shared state namespace mode: %v", err)
+			}
+			before, err := os.Lstat(sharedStateDirectory)
+			if err != nil {
+				t.Fatalf("inspect shared state namespace before key creation: %v", err)
+			}
+
+			first, err := loadOrCreateContinuationReceiptKey()
+			if err != nil {
+				t.Fatalf("create continuation key below shared state namespace: %v", err)
+			}
+			second, err := loadOrCreateContinuationReceiptKey()
+			if err != nil {
+				t.Fatalf("reload continuation key below shared state namespace: %v", err)
+			}
+			loaded, err := loadContinuationReceiptKey()
+			if err != nil {
+				t.Fatalf("load continuation key below shared state namespace: %v", err)
+			}
+			after, err := os.Lstat(sharedStateDirectory)
+			if err != nil {
+				t.Fatalf("inspect shared state namespace after key creation: %v", err)
+			}
+			if !os.SameFile(before, after) {
+				t.Fatal("shared state namespace was replaced")
+			}
+			if got := after.Mode().Perm(); got != 0o755 {
+				t.Fatalf("shared state namespace mode = %04o, want unchanged 0755", got)
+			}
+			if !bytes.Equal(first, second) || !bytes.Equal(first, loaded) {
+				t.Fatal("continuation key below shared state namespace was not stable")
+			}
+			privateDirectory := filepath.Join(sharedStateDirectory, "resolve-review-threads")
+			privateInfo, err := os.Lstat(privateDirectory)
+			if err != nil {
+				t.Fatalf("inspect private continuation directory: %v", err)
+			}
+			if got := privateInfo.Mode().Perm(); got != 0o700 {
+				t.Fatalf("private continuation directory mode = %04o, want 0700", got)
+			}
+			keyInfo, err := os.Lstat(filepath.Join(privateDirectory, continuationReceiptKeyFile))
+			if err != nil {
+				t.Fatalf("inspect continuation key: %v", err)
+			}
+			if got := keyInfo.Mode().Perm(); got != 0o600 {
+				t.Fatalf("continuation key mode = %04o, want 0600", got)
+			}
+		})
+	}
+}
+
+func TestContinuationReceiptKeyRejectsUnsafeSharedStateNamespace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX directory permissions are required")
+	}
+	tests := []struct {
+		name string
+		mode os.FileMode
+		file bool
+	}{
+		{name: "group writable", mode: 0o775},
+		{name: "world writable", mode: 0o777},
+		{name: "not a directory", file: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stateRoot := filepath.Join(t.TempDir(), "state")
+			if err := os.Mkdir(stateRoot, 0o700); err != nil {
+				t.Fatalf("create explicit XDG state root: %v", err)
+			}
+			t.Setenv("XDG_STATE_HOME", stateRoot)
+			sharedStateDirectory := filepath.Join(stateRoot, "dear-agent")
+			if test.file {
+				if err := os.WriteFile(sharedStateDirectory, []byte("not a directory"), 0o600); err != nil {
+					t.Fatalf("create non-directory shared state fixture: %v", err)
+				}
+			} else {
+				if err := os.Mkdir(sharedStateDirectory, 0o700); err != nil {
+					t.Fatalf("create shared state fixture: %v", err)
+				}
+				if err := os.Chmod(sharedStateDirectory, test.mode); err != nil {
+					t.Fatalf("set unsafe shared state mode: %v", err)
+				}
+			}
+
+			if _, err := loadOrCreateContinuationReceiptKey(); err == nil {
+				t.Fatal("unsafe shared state namespace was accepted")
+			}
+			privateDirectory := filepath.Join(sharedStateDirectory, "resolve-review-threads")
+			if _, err := os.Lstat(privateDirectory); err == nil {
+				t.Fatal("unsafe shared state created private continuation state")
+			}
+		})
+	}
+}
+
+func TestLoadContinuationReceiptKeyRejectsUnsafeSharedStateNamespace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX directory permissions and symlinks are required")
+	}
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, stateRoot, sharedStateDirectory string)
+	}{
+		{
+			name: "group writable",
+			mutate: func(t *testing.T, _, sharedStateDirectory string) {
+				t.Helper()
+				if err := os.Chmod(sharedStateDirectory, 0o775); err != nil {
+					t.Fatalf("make shared state namespace group writable: %v", err)
+				}
+			},
+		},
+		{
+			name: "symlink",
+			mutate: func(t *testing.T, stateRoot, sharedStateDirectory string) {
+				t.Helper()
+				redirect := filepath.Join(stateRoot, "redirected-dear-agent")
+				if err := os.Rename(sharedStateDirectory, redirect); err != nil {
+					t.Fatalf("move shared state namespace for symlink fixture: %v", err)
+				}
+				if err := os.Symlink(redirect, sharedStateDirectory); err != nil {
+					t.Fatalf("replace shared state namespace with symlink: %v", err)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stateRoot := filepath.Join(t.TempDir(), "state")
+			if err := os.Mkdir(stateRoot, 0o700); err != nil {
+				t.Fatalf("create explicit XDG state root: %v", err)
+			}
+			t.Setenv("XDG_STATE_HOME", stateRoot)
+			if _, err := loadOrCreateContinuationReceiptKey(); err != nil {
+				t.Fatalf("create safe continuation key fixture: %v", err)
+			}
+			sharedStateDirectory := filepath.Join(stateRoot, "dear-agent")
+			test.mutate(t, stateRoot, sharedStateDirectory)
+			if _, err := loadContinuationReceiptKey(); err == nil {
+				t.Fatal("continuation key loaded through unsafe shared state namespace")
+			}
+		})
+	}
+}
+
 func TestConcurrentContinuationReceiptKeyCreationConverges(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	if err := os.Mkdir(stateRoot, 0o700); err != nil {

@@ -109,6 +109,47 @@ func TestExplicitXDGDirectoryPlanSyncsOnlyManagedDescendants(t *testing.T) {
 	}
 }
 
+func TestHomeFallbackDirectoryPlanPreservesAnchorAndSyncOrder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX continuation state is not supported on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	sharedStateDirectory := filepath.Join(home, ".local", "state", "dear-agent")
+	if err := os.MkdirAll(sharedStateDirectory, 0o755); err != nil {
+		t.Fatalf("create fallback shared state directory: %v", err)
+	}
+	if err := os.Chmod(sharedStateDirectory, 0o755); err != nil {
+		t.Fatalf("set fallback shared state directory mode: %v", err)
+	}
+	target := filepath.Join(sharedStateDirectory, "resolve-review-threads")
+
+	plan, err := buildContinuationReceiptDirectoryPlan(target)
+	if err != nil {
+		t.Fatalf("build fallback directory plan: %v", err)
+	}
+	if plan.anchor != home {
+		t.Fatalf("fallback durability anchor = %q, want %q", plan.anchor, home)
+	}
+	expectedParents := []string{
+		home,
+		filepath.Join(home, ".local"),
+		filepath.Join(home, ".local", "state"),
+		sharedStateDirectory,
+	}
+	var syncCalls []string
+	if err := ensurePrivateContinuationDirectoryWithSync(plan.anchor, plan.target, func(path string) error {
+		syncCalls = append(syncCalls, path)
+		return nil
+	}); err != nil {
+		t.Fatalf("prepare fallback state: %v", err)
+	}
+	if !reflect.DeepEqual(syncCalls, expectedParents) {
+		t.Fatalf("fallback parent syncs = %q, want %q", syncCalls, expectedParents)
+	}
+}
+
 func TestExplicitXDGDirectoryPlanRequiresExistingBoundary(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "missing-state-root")
 	t.Setenv("XDG_STATE_HOME", stateRoot)

@@ -165,6 +165,9 @@ func loadContinuationReceiptKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateContinuationReceiptSharedStateDirectory(filepath.Dir(filepath.Dir(path))); err != nil {
+		return nil, err
+	}
 	return readContinuationReceiptKey(path)
 }
 
@@ -212,13 +215,39 @@ func validateContinuationReceiptKeyDirectory(path string) error {
 	return nil
 }
 
+func validateContinuationReceiptSharedStateDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect shared dear-agent state directory: %w", err)
+	}
+	if !info.IsDir() {
+		return errors.New("shared dear-agent state directory must be a real directory")
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf(
+			"shared dear-agent state directory permissions %04o allow group or world writes",
+			info.Mode().Perm(),
+		)
+	}
+	return nil
+}
+
 func ensurePrivateContinuationDirectory(path string) error {
 	plan, err := buildContinuationReceiptDirectoryPlan(path)
 	if err != nil {
 		return err
 	}
-	managed := []string{filepath.Dir(plan.target), plan.target}
-	if err := validateExistingContinuationDirectories(managed); err != nil {
+	sharedStateDirectory := filepath.Dir(plan.target)
+	if err := validateExistingContinuationDirectory(
+		sharedStateDirectory,
+		validateContinuationReceiptSharedStateDirectory,
+	); err != nil {
+		return err
+	}
+	if err := validateExistingContinuationDirectory(
+		plan.target,
+		validateContinuationReceiptKeyDirectory,
+	); err != nil {
 		return err
 	}
 	if err := ensurePrivateContinuationDirectoryWithSync(
@@ -228,29 +257,22 @@ func ensurePrivateContinuationDirectory(path string) error {
 	); err != nil {
 		return err
 	}
-	// The configured XDG hierarchy can contain provider-owned or user-selected
-	// ancestors, but these two command-owned directories must never be symlinks
-	// or shared paths, including when they predate this invocation.
-	for _, path := range managed {
-		if err := validateContinuationReceiptKeyDirectory(path); err != nil {
-			return err
-		}
+	// dear-agent is shared by multiple commands and may legitimately be 0755,
+	// but it must remain a real directory whose entries cannot be replaced by
+	// group or other users. Only the command-specific child is private.
+	if err := validateContinuationReceiptSharedStateDirectory(sharedStateDirectory); err != nil {
+		return err
 	}
-	return nil
+	return validateContinuationReceiptKeyDirectory(plan.target)
 }
 
-func validateExistingContinuationDirectories(paths []string) error {
-	for _, path := range paths {
-		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return fmt.Errorf("inspect continuation receipt key directory: %w", err)
-		}
-		if err := validateContinuationReceiptKeyDirectory(path); err != nil {
-			return err
-		}
+func validateExistingContinuationDirectory(path string, validate func(string) error) error {
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect continuation state directory: %w", err)
 	}
-	return nil
+	return validate(path)
 }
 
 type continuationReceiptDirectoryPlan struct {

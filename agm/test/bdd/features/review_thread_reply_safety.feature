@@ -14,7 +14,7 @@ Feature: Review thread reply safety
     And body-free provider diagnostics should remain available
     And retry guidance should reuse the body-file source without rendering its content
     And posted-reply continuation receipts should authenticate host-bound body, identity, time, and edit evidence without reposting
-    And continuation issuance should require private, durable, stable local issuer state before posting
+    And continuation issuance should accept a safe shared state namespace while keeping command-owned issuer state private and preflighted
     And unsupported continuation platforms should fail before reply mutation and before continuation body-source or provider access
     And continuation environment failures should retain the exact receipt and source for issuer-state restoration
     And continuation replay should require the unchanged current provider-visible extant boundary

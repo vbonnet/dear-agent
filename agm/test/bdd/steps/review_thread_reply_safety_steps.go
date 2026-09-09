@@ -59,7 +59,7 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		postedReplyContinuationReceiptsShouldBindEvidenceWithoutReposting,
 	)
 	ctx.Step(
-		`^continuation issuance should require private, durable, stable local issuer state before posting$`,
+		`^continuation issuance should accept a safe shared state namespace while keeping command-owned issuer state private and preflighted$`,
 		continuationIssuerStateShouldBePrivateDurableAndPreflighted,
 	)
 	ctx.Step(
@@ -187,6 +187,9 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestEffectiveContinuationProviderHostDefaultsAndCanonicalizes",
 		"TestReplyResolvePreflightsSigningKeyBeforeReplyMutation",
 		"TestContinuationReceiptKeyIsPrivateStableAndReused",
+		"TestContinuationReceiptKeyAcceptsSharedStateNamespace",
+		"TestContinuationReceiptKeyRejectsUnsafeSharedStateNamespace",
+		"TestLoadContinuationReceiptKeyRejectsUnsafeSharedStateNamespace",
 		"TestConcurrentContinuationReceiptKeyCreationConverges",
 		"TestReadContinuationReceiptKeyRejectsUnsafeLeaf",
 		"TestReadContinuationReceiptKeyRejectsSymlink",
@@ -194,10 +197,13 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestEnsurePrivateContinuationDirectoryRejectsManagedSymlink",
 		"TestEnsurePrivateContinuationDirectoryRetriesEveryParentSync",
 		"TestExplicitXDGDirectoryPlanSyncsOnlyManagedDescendants",
+		"TestHomeFallbackDirectoryPlanPreservesAnchorAndSyncOrder",
 		"TestExplicitXDGDirectoryPlanRequiresExistingBoundary",
 		"TestExplicitXDGStateRootBelowExecuteOnlyAncestor",
 		"TestEnsurePrivateContinuationDirectoryRejectsPublicFinalDirectory",
 		"TestReplyResolveRequiresExistingExplicitXDGStateRootBeforeMutation",
+		"TestReplyResolveAcceptsHomeFallbackSharedStateBeforeMutation",
+		"TestReplyResolveRejectsWritableSharedStateBeforeMutation",
 		"TestContinuationPlatformBoundaryRejectsNonUnix",
 		"TestReplyResolveRejectsUnsupportedContinuationPlatformBeforeMutation",
 		"TestContinueResolveRejectsUnsupportedPlatformBeforeBodyOrProvider",
