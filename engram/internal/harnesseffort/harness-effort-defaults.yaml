@@ -63,8 +63,13 @@ tiers:
       anthropic:
         model: "latest-opus"
         effort: "high"
+      # GPT-6 Astra is the frontier OpenAI tier the codex account actually
+      # serves; o3 is no longer in the catalog. "ultra" is Astra's top
+      # reasoning level (maximum depth with automatic task delegation), which
+      # is what the deep tier is for. The other tiers still name retired o-series
+      # models and need the same treatment; see docs/model-registry.md.
       openai:
-        model: "o3"
-        reasoning_effort: "high"
+        model: "gpt-6-astra"
+        reasoning_effort: "ultra"
       google:
         model: "gemini-2.5-pro"

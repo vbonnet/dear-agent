@@ -36,6 +36,15 @@ var table = []ModelPrice{
 	// Anthropic — Claude Fable (Mythos-class, most capable; 1M context, 128k max output)
 	{Model: "fable", InputPerMillion: 10.00, OutputPerMillion: 50.00},
 
+	// OpenAI — GPT-6 Astra. Standard service tier, short-context band
+	// (<= 272k, the model's default context window). The long-context band
+	// prices at $20/$75 and the "fast" speed tier at $20/$100; this table has
+	// one rate per model, so it carries the band our launches actually use.
+	// "gpt-6-astra" shares no substring with the 5.x rows, so without this
+	// entry it matched nothing and priced at zero.
+	{Model: "gpt-6-astra", InputPerMillion: 10.00, OutputPerMillion: 50.00, Source: "https://developers.openai.com/api/docs/pricing", AsOf: "2026-09-09"},
+	{Model: "astra", InputPerMillion: 10.00, OutputPerMillion: 50.00, Source: "https://developers.openai.com/api/docs/pricing", AsOf: "2026-09-09"},
+
 	// Anthropic — Claude 4.x
 	{Model: "opus", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 	{Model: "sonnet", InputPerMillion: 3.00, OutputPerMillion: 15.00},

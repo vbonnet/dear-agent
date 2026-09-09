@@ -11,6 +11,7 @@ var openCodeModelMap = map[string]string{
 	"claude-haiku-4-5":  "google-vertex-anthropic/claude-haiku-4-5@20251001",
 	"claude-sonnet-4":   "google-vertex-anthropic/claude-sonnet-4@20250514",
 	"claude-opus-4":     "google-vertex-anthropic/claude-opus-4@20250514",
+	"gpt-6-astra":       "openai/gpt-6-astra",
 	"o4-mini":           "openai/o4-mini",
 	"o3":                "openai/o3",
 	"codex-mini-latest": "openai/codex-mini-latest",

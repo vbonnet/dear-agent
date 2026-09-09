@@ -107,6 +107,20 @@ var (
 		CacheWrite: 0.00, // Context caching priced separately; sink not yet tracking it
 		CacheRead:  0.15, // $0.15 per 1M tokens (cached input)
 	}
+
+	// GPT-6 Astra, standard service tier, short-context band (<= 272k, the
+	// model's default context window). The provider catalog codex fetches
+	// reports context_window 272000 and max_context_window 872000; crossing
+	// into the long-context band reprices to $20 in / $2 cache read / $75 out,
+	// and the "fast" speed tier to $20 / $2 / $100. This entry is the band our
+	// launches actually use. OpenAI does not bill a separate cache-write.
+	// Source: developers.openai.com/api/docs/pricing (2026-09-09).
+	GPT6Astra = Pricing{
+		Input:      10.00, // $10 per 1M tokens
+		Output:     50.00, // $50 per 1M tokens
+		CacheWrite: 0.00,  // OpenAI prices cached input only; no write-side charge
+		CacheRead:  1.00,  // $1 per 1M tokens (0.1x input)
+	}
 )
 
 // ModelAliases maps short aliases to canonical model IDs.
@@ -127,6 +141,8 @@ var PricingTable = map[string]Pricing{
 	"claude-opus-5":              Claude5Opus5,
 	"anthropic/claude-opus-5":    Claude5Opus5,           // OpenRouter and Pi provider-qualified naming
 	"claude-sonnet-4-5@20250929": Claude35Sonnet20241022, // Vertex AI naming
+	"gpt-6-astra":                GPT6Astra,
+	"openai/gpt-6-astra":         GPT6Astra, // OpenRouter and Pi provider-qualified naming
 	"gemini-2.0-flash-exp":       Gemini20FlashExp,
 	"gemini-1.5-pro":             Gemini15Pro,
 	"gemini-3.5-flash":           Gemini35Flash,
