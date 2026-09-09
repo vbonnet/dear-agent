@@ -76,6 +76,216 @@ func unchangedReplyBodyGuidance(threadID, bodyFile string) string {
 	return strings.ReplaceAll(template, "<threadId>", threadID)
 }
 
+const continuationNamedReplyBodyGuidanceTemplate = `Keep the exact same named reply-body source and continuation receipt; do not edit or replace either:
+  continuation_receipt=<receipt>
+  reply_file=<bodyFile>
+Retry the resolve-only continuation with:
+  resolve-review-threads continue-resolve "$continuation_receipt" --body-file "$reply_file"
+This continuation validates the original predecessor ID and body, reply ID and exact body bytes, and cannot post another reply.
+Retain that file unchanged together with the receipt through every applicable retry.
+After terminal resolution is confirmed, remove the file only if it is the task-owned temporary file created by generated guidance:
+  rm -f -- "$reply_file"
+Do not remove a user-owned source.
+Only then continue to another thread or safe-merge.`
+
+const continuationStdinReplyBodyGuidanceTemplate = `Keep the exact same retained standard-input bytes and continuation receipt; do not revise either:
+  continuation_receipt=<receipt>
+Replay the exact retained bytes with the resolve-only continuation:
+  resolve-review-threads continue-resolve "$continuation_receipt" --body-file -
+This continuation validates the original predecessor ID and body, reply ID and exact body bytes, and cannot post another reply.
+Retain the receipt and bytes through every applicable retry.
+Standard input has no named source to clean up.
+Only after terminal resolution is confirmed may you continue to another thread or safe-merge.`
+
+func continuationReplyBodyGuidance(receiptToken, bodyFile string) string {
+	template := strings.ReplaceAll(
+		continuationStdinReplyBodyGuidanceTemplate,
+		"<receipt>",
+		shellQuoteArgument(receiptToken),
+	)
+	if bodyFile != "-" {
+		template = strings.ReplaceAll(
+			continuationNamedReplyBodyGuidanceTemplate,
+			"<bodyFile>",
+			shellQuoteArgument(bodyFile),
+		)
+		template = strings.ReplaceAll(template, "<receipt>", shellQuoteArgument(receiptToken))
+	}
+	return template
+}
+
+func inspectContinuationGuidance(threadID, receiptToken, bodyFile string) string {
+	if bodyFile == "-" {
+		return fmt.Sprintf(
+			"Retain the exact standard-input bytes and continuation receipt unchanged while provider state is unverified:\n"+
+				"  continuation_receipt=%s\n"+
+				"Do not revise or discard the bytes, and do not continue to another thread or safe-merge.\n"+
+				"Inspect the live thread before any retry. If the receipt's unchanged predecessor and reply bodies remain directly adjacent, "+
+				"and the reply is still last, replay these bytes with continue-resolve. If a reviewer "+
+				"has taken thread %s back, revise the retained bytes and start a fresh reply-resolve lifecycle.",
+			shellQuoteArgument(receiptToken),
+			threadID,
+		)
+	}
+	return fmt.Sprintf(
+		"Retain the exact named reply-body source unchanged and retain the continuation receipt while provider state is unverified:\n"+
+			"  continuation_receipt=%s\n"+
+			"  reply_file=%s\n"+
+			"Do not edit or remove that source, and do not continue to another thread or safe-merge.\n"+
+			"Inspect the live thread before any retry. If the receipt's unchanged predecessor and reply bodies remain directly adjacent, "+
+			"and the reply is still last, retry with continue-resolve. If a reviewer has taken "+
+			"thread %s back, revise this same source and start a fresh reply-resolve lifecycle.",
+		shellQuoteArgument(receiptToken),
+		shellQuoteArgument(bodyFile),
+		threadID,
+	)
+}
+
+func inspectContinuationAuthorGuidance(threadID, receiptToken, bodyFile string) string {
+	source := "Retain the exact standard-input bytes unchanged."
+	if bodyFile != "-" {
+		source = fmt.Sprintf(
+			"Retain the exact named reply-body source unchanged:\n  reply_file=%s",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return fmt.Sprintf(
+		"%s\nRetain the continuation receipt:\n  continuation_receipt=%s\n"+
+			"Do not retry continue-resolve while the opening and current reply authors for thread %s are missing, equal, or inconsistent across fresh reads; unchanged IDs and bodies do not repair that identity boundary. "+
+			"Inspect the live thread before any retry and repair provider-visible author evidence before any resolution attempt. Do not post another reply, discard the source or receipt, clean up, or safe-merge on this evidence.",
+		source,
+		shellQuoteArgument(receiptToken),
+		threadID,
+	)
+}
+
+func inspectContinuationMismatchGuidance(threadID, receiptToken, bodyFile string) string {
+	source := "Retain the current standard-input bytes for inspection; do not discard them while the mismatch is unresolved."
+	if bodyFile != "-" {
+		source = fmt.Sprintf(
+			"Retain the current named source for inspection; do not remove it while the mismatch is unresolved:\n  reply_file=%s",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return fmt.Sprintf(
+		"%s\nRetain the continuation receipt:\n  continuation_receipt=%s\n"+
+			"Do not mutate provider state, clean up, or safe-merge on this evidence. Inspect thread %s. "+
+			"Restore the exact original bytes only if this receipt is still the intended continuation; "+
+			"otherwise keep or revise the source for a fresh reply-resolve after confirmed reviewer hand-back.",
+		source,
+		shellQuoteArgument(receiptToken),
+		threadID,
+	)
+}
+
+func invalidContinuationReceiptGuidance(bodyFile string) string {
+	if bodyFile == "-" {
+		return "Retain the intended exact standard-input bytes for inspection or revision; " +
+			"do not discard them, mutate provider state, clean up, or safe-merge on an invalid receipt."
+	}
+	return fmt.Sprintf(
+		"Retain the selected named reply-body source for inspection or revision; do not edit or remove it, "+
+			"mutate provider state, clean up, or safe-merge on an invalid receipt:\n  reply_file=%s",
+		shellQuoteArgument(bodyFile),
+	)
+}
+
+func continuationIssuerStateRecoveryGuidance(receiptToken, bodyFile string) string {
+	source := "Retain the exact intended standard-input bytes; do not discard or revise them while issuer state is being restored."
+	if bodyFile != "-" {
+		source = fmt.Sprintf(
+			"Retain the exact selected named reply-body source; do not edit or remove it while issuer state is being restored:\n  reply_file=%s",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return fmt.Sprintf(
+		"%s\nRetain the continuation receipt exactly as issued:\n  continuation_receipt=%s\n"+
+			"Restore the exact issuing GH_HOST, XDG_STATE_HOME, and signing key on a supported Unix environment before retrying continue-resolve. "+
+			"Do not regenerate or overwrite the key: a replacement cannot recreate issuance authority and can strand every outstanding receipt. "+
+			"If the exact issuer state and token still do not authenticate, inspect the live thread and treat the token as suspect. "+
+			"Do not read the source into a new command, mutate provider state, clean up, or safe-merge until this boundary is restored or inspected.",
+		source,
+		shellQuoteArgument(receiptToken),
+	)
+}
+
+func stableDifferentAnswerGuidance(threadID, bodyFile string) string {
+	source := "Retain the current standard-input bytes while you inspect the provider-visible answer."
+	if bodyFile != "-" {
+		source = fmt.Sprintf(
+			"Retain the current named reply-body source while you inspect the provider-visible answer:\n  reply_file=%s",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return fmt.Sprintf(
+		"%s\nDo not retry ordinary reply-resolve or clean up yet. Inspect thread %s. "+
+			"If this source was changed from the already-posted answer, restore the exact original bytes and "+
+			"use their retained continuation receipt. Current adjacency cannot recreate that temporal evidence "+
+			"or license a fresh receipt. If no receipt was retained, keep the source and inspect the live thread; "+
+			"do not ask ordinary reply-resolve to adopt the existing answer. If a reviewer has "+
+			"taken the thread back, revise this same source to answer that hand-back and start a fresh "+
+			"reply-resolve lifecycle. Otherwise, do not stack a second independent answer or safe-merge.",
+		source,
+		threadID,
+	)
+}
+
+func unreceiptedExistingReplyGuidance(threadID, bodyFile string) string {
+	source := "Retain the exact standard-input bytes and any receipt emitted by the original posting attempt."
+	if bodyFile != "-" {
+		source = fmt.Sprintf(
+			"Retain the exact named reply-body source and any receipt emitted by the original posting attempt:\n  reply_file=%s",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return fmt.Sprintf(
+		"%s\nA provider-visible reply and predecessor observed only now do not prove their temporal pairing, cannot be rebound, and cannot be freshly receipted. "+
+			"The retained receipt is required for continue-resolve with these exact bytes. If it does not exist, inspect thread %s; "+
+			"do not rerun ordinary reply-resolve, resolve directly, clean up, or safe-merge on this evidence. "+
+			"Only a confirmed reviewer hand-back permits revising this same source and beginning a fresh reply-resolve lifecycle.",
+		source,
+		threadID,
+	)
+}
+
+func resolvedReviewerHandbackGuidance(threadID, bodyFile string) string {
+	return fmt.Sprintf(
+		"Inspect the live reviewer hand-back before treating the existing resolution as terminal. If it still needs this answer, first reopen the thread with:\n"+
+			"  resolve-review-threads unresolve %s\n"+
+			"After that reopen is confirmed, use this same-source revised-answer lifecycle:\n%s",
+		threadID,
+		revisedReplyBodyGuidance(threadID, bodyFile),
+	)
+}
+
+func resolvedSupersededReplyGuidance(threadID, bodyFile string) string {
+	return fmt.Sprintf(
+		"The newer commentary is still hidden behind an existing resolution. First reopen the thread with:\n"+
+			"  resolve-review-threads unresolve %s\n"+
+			"After that reopen is confirmed, use this same-source revised-answer lifecycle:\n%s",
+		threadID,
+		revisedReplyBodyGuidance(threadID, bodyFile),
+	)
+}
+
+func unavailableAuthorEvidenceGuidance(threadID, bodyFile string) string {
+	source := "Retain the selected standard-input bytes unchanged while you inspect the live thread."
+	if bodyFile != "-" {
+		source = fmt.Sprintf(
+			"Retain the selected named reply-body source unchanged while you inspect the live thread:\n  reply_file=%s",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return fmt.Sprintf(
+		"%s\nThread %s has provider author identity that is missing or inconsistent across stable reads. Do not post, resolve, or use an "+
+			"exact-body retry while that identity boundary is unavailable; identical text cannot prove who "+
+			"answered. Inspect or repair the provider-visible identity evidence, then begin a fresh "+
+			"reply-resolve decision from current history. Do not clean up or safe-merge on this evidence.",
+		source,
+		threadID,
+	)
+}
+
 func accessDeniedReplyGuidance(threadID, bodyFile string) string {
 	return fmt.Sprintf(
 		"This is an access problem: run `gh auth status` and fix credentials before retrying; "+
@@ -83,6 +293,40 @@ func accessDeniedReplyGuidance(threadID, bodyFile string) string {
 			"source unchanged. After credential repair, use this unchanged-source lifecycle:\n%s",
 		unchangedReplyBodyGuidance(threadID, bodyFile),
 	)
+}
+
+func deniedObservedReplyGuidance(threadID, bodyFile string) string {
+	source := "Retain the exact standard-input bytes while the independently observed reply is inspected."
+	if bodyFile != "-" {
+		source = fmt.Sprintf(
+			"Retain the exact named reply-body source while the independently observed reply is inspected:\n  reply_file=%s",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return fmt.Sprintf(
+		"%s\nRepair `gh` credentials before any later provider mutation; unchanged credentials will be denied again. "+
+			"Inspect thread %s and determine which actor or retained receipt owns the visible reply. Do not rerun ordinary reply-resolve, "+
+			"mint a receipt from current adjacency, resolve directly, clean up, or safe-merge on this evidence.",
+		source,
+		threadID,
+	)
+}
+
+func providerReadRecoveryGuidance(err error, inspect string) string {
+	if !isAccessDenied(err) {
+		return inspect
+	}
+	return "GitHub denied the provider-state read. Repair `gh` credentials before inspection or retry; " +
+		"unchanged credentials will be denied again.\n" + inspect
+}
+
+func replyPostReadRecoveryGuidance(postErr, readErr error, inspect string) string {
+	guidance := providerReadRecoveryGuidance(readErr, inspect)
+	if !isAccessDenied(postErr) {
+		return guidance
+	}
+	return "GitHub denied the original reply mutation. Repair `gh` credentials before inspection or retry; " +
+		"unchanged credentials will be denied again.\n" + guidance
 }
 
 const inspectNamedReplyOutcomeGuidanceTemplate = `Retain the exact named reply-body source unchanged while provider state is unverified:
@@ -127,6 +371,7 @@ type evidenceRecoveryGuidance struct {
 	answer         string
 	unchanged      string
 	inspect        string
+	author         string
 	replyWasPosted bool
 }
 
@@ -146,6 +391,17 @@ func revisedAnswerRecoveryGuidance(threadID, bodyFile string, replyWasPosted boo
 		unchanged:      unchangedReplyBodyGuidance(threadID, bodyFile),
 		inspect:        inspectReplyOutcomeGuidance(threadID, bodyFile),
 		replyWasPosted: replyWasPosted,
+	}
+}
+
+func continuationRecoveryGuidance(threadID, receiptToken, bodyFile string) evidenceRecoveryGuidance {
+	return evidenceRecoveryGuidance{
+		answerKind:     "revised-answer",
+		answer:         revisedReplyBodyGuidance(threadID, bodyFile),
+		unchanged:      continuationReplyBodyGuidance(receiptToken, bodyFile),
+		inspect:        inspectContinuationGuidance(threadID, receiptToken, bodyFile),
+		author:         inspectContinuationAuthorGuidance(threadID, receiptToken, bodyFile),
+		replyWasPosted: true,
 	}
 }
 

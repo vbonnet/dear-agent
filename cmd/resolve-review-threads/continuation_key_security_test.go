@@ -1,0 +1,150 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"testing"
+)
+
+func TestContinuationReceiptKeyIsPrivateStableAndReused(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	first, err := loadOrCreateContinuationReceiptKey()
+	if err != nil {
+		t.Fatalf("create continuation key: %v", err)
+	}
+	keyPath, err := continuationReceiptKeyPath()
+	if err != nil {
+		t.Fatalf("resolve continuation key path: %v", err)
+	}
+	firstInfo, err := os.Lstat(keyPath)
+	if err != nil {
+		t.Fatalf("inspect first continuation key: %v", err)
+	}
+	second, err := loadOrCreateContinuationReceiptKey()
+	if err != nil {
+		t.Fatalf("reload continuation key: %v", err)
+	}
+	secondInfo, err := os.Lstat(keyPath)
+	if err != nil {
+		t.Fatalf("inspect reloaded continuation key: %v", err)
+	}
+	if len(first) != continuationReceiptKeyBytes || !bytes.Equal(first, second) {
+		t.Fatal("continuation key was not reused byte-for-byte")
+	}
+	if !os.SameFile(firstInfo, secondInfo) {
+		t.Fatal("continuation key leaf was replaced during reload")
+	}
+	if runtime.GOOS != "windows" && firstInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("continuation key mode = %04o, want 0600", firstInfo.Mode().Perm())
+	}
+}
+
+func TestConcurrentContinuationReceiptKeyCreationConverges(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	const workers = 12
+	keys := make([][]byte, workers)
+	errs := make([]error, workers)
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	for index := range workers {
+		group.Go(func() {
+			<-start
+			keys[index], errs[index] = loadOrCreateContinuationReceiptKey()
+		})
+	}
+	close(start)
+	group.Wait()
+
+	for index := range workers {
+		if errs[index] != nil {
+			t.Fatalf("worker %d key creation: %v", index, errs[index])
+		}
+		if !bytes.Equal(keys[0], keys[index]) {
+			t.Fatalf("worker %d observed a different continuation key", index)
+		}
+	}
+}
+
+func TestReadContinuationReceiptKeyRejectsUnsafeLeaf(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX key modes and symlink semantics are required")
+	}
+	tests := []struct {
+		name    string
+		content []byte
+		mode    os.FileMode
+	}{
+		{name: "short", content: bytes.Repeat([]byte{'s'}, continuationReceiptKeyBytes-1), mode: 0o600},
+		{name: "long", content: bytes.Repeat([]byte{'l'}, continuationReceiptKeyBytes+1), mode: 0o600},
+		{name: "over permissive", content: bytes.Repeat([]byte{'p'}, continuationReceiptKeyBytes), mode: 0o644},
+		{name: "wrong private mode", content: bytes.Repeat([]byte{'r'}, continuationReceiptKeyBytes), mode: 0o400},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Chmod(dir, 0o700); err != nil {
+				t.Fatalf("protect key directory: %v", err)
+			}
+			path := filepath.Join(dir, continuationReceiptKeyFile)
+			if err := os.WriteFile(path, test.content, test.mode); err != nil {
+				t.Fatalf("write unsafe key fixture: %v", err)
+			}
+			if err := os.Chmod(path, test.mode); err != nil {
+				t.Fatalf("set unsafe key mode: %v", err)
+			}
+			if _, err := readContinuationReceiptKey(path); err == nil {
+				t.Fatal("unsafe continuation key leaf was accepted")
+			}
+		})
+	}
+}
+
+func TestReadContinuationReceiptKeyRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("protect key directory: %v", err)
+	}
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, bytes.Repeat([]byte{'k'}, continuationReceiptKeyBytes), 0o600); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	link := filepath.Join(dir, continuationReceiptKeyFile)
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("create Windows key symlink without required host privilege: %v", err)
+		}
+		t.Fatalf("create key symlink: %v", err)
+	}
+	if _, err := readContinuationReceiptKey(link); err == nil {
+		t.Fatal("continuation key symlink was accepted")
+	}
+}
+
+func TestEnsurePrivateContinuationDirectoryRejectsManagedSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation may require elevated Windows privileges")
+	}
+	stateRoot := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	redirect := filepath.Join(t.TempDir(), "redirect")
+	if err := os.Mkdir(redirect, 0o700); err != nil {
+		t.Fatalf("create redirect directory: %v", err)
+	}
+	if err := os.Symlink(redirect, filepath.Join(stateRoot, "dear-agent")); err != nil {
+		t.Fatalf("create managed-directory symlink: %v", err)
+	}
+	keyPath, err := continuationReceiptKeyPath()
+	if err != nil {
+		t.Fatalf("resolve continuation key path: %v", err)
+	}
+	if err := ensurePrivateContinuationDirectory(filepath.Dir(keyPath)); err == nil {
+		t.Fatal("managed continuation directory symlink was accepted")
+	}
+}

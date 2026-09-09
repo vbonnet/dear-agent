@@ -179,9 +179,58 @@ func queryKinds(requests []recoveryGraphQLRequest) []string {
 }
 
 type providerComment struct {
-	id    string
-	login string
-	body  string
+	id            string
+	login         string
+	body          string
+	updatedAt     string
+	omitUpdatedAt bool
+	editCount     int
+	omitEditCount bool
+	lastEditID    string
+	omitEditNodes bool
+}
+
+func (c providerComment) providerEditEvidence() string {
+	if c.omitEditCount {
+		return ""
+	}
+	nodes := ""
+	if !c.omitEditNodes {
+		nodes = `,"nodes":[]`
+		if c.lastEditID != "" {
+			nodes = fmt.Sprintf(`,"nodes":[{"id":%q}]`, c.lastEditID)
+		}
+	}
+	return fmt.Sprintf(`,"userContentEdits":{"totalCount":%d%s}`, c.editCount, nodes)
+}
+
+const providerFixtureUpdatedAt = "2026-09-09T00:00:00Z"
+
+func (c providerComment) providerUpdatedAt() string {
+	if c.omitUpdatedAt {
+		return ""
+	}
+	if c.updatedAt != "" {
+		return c.updatedAt
+	}
+	return providerFixtureUpdatedAt
+}
+
+func testReplyIssuancePredecessor(comment providerComment, replyBody string) replyIssuancePredecessor {
+	editRevisionPresent := !comment.omitEditCount && !comment.omitEditNodes &&
+		validContinuationEditRevision(comment.editCount, comment.lastEditID)
+	return replyIssuancePredecessor{
+		ID:                comment.id,
+		BodySHA256:        exactBodySHA256([]byte(comment.body)),
+		UpdatedAt:         comment.providerUpdatedAt(),
+		EditCount:         comment.editCount,
+		EditCountPresent:  editRevisionPresent,
+		LastEditID:        comment.lastEditID,
+		LastEditIDPresent: editRevisionPresent,
+		OpeningAuthor:     comment.login,
+		Author:            comment.login,
+		ReplyBodySHA256:   exactBodySHA256([]byte(replyBody)),
+	}
 }
 
 func threadResponse(threadID string, resolved bool, comments ...providerComment) string {
@@ -195,8 +244,8 @@ func threadNodeResponse(threadID string, resolved bool, comments ...providerComm
 	}
 	recent := make([]string, 0, len(comments))
 	for _, comment := range comments {
-		recent = append(recent, fmt.Sprintf(`{"id":%q,"author":{"login":%q},"body":%q}`,
-			comment.id, comment.login, comment.body))
+		recent = append(recent, fmt.Sprintf(`{"id":%q,"author":{"login":%q},"body":%q,"updatedAt":%q%s}`,
+			comment.id, comment.login, comment.body, comment.providerUpdatedAt(), comment.providerEditEvidence()))
 	}
 	return fmt.Sprintf(`{"id":%q,"isResolved":%t,"isOutdated":false,"path":"review.go","opening":{"totalCount":%d,"nodes":[%s]},"recent":{"nodes":[%s]}}`,
 		threadID, resolved, len(comments), opening, strings.Join(recent, ","))
@@ -206,17 +255,18 @@ func listResponse(nodes ...string) string {
 	return fmt.Sprintf(`{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[%s]}}}}}`, strings.Join(nodes, ","))
 }
 
-func historyResponse(comments ...providerComment) string {
+func historyResponse(threadID string, comments ...providerComment) string {
 	nodes := make([]string, 0, len(comments))
 	for _, comment := range comments {
-		nodes = append(nodes, fmt.Sprintf(`{"id":%q,"author":{"login":%q},"body":%q}`,
-			comment.id, comment.login, comment.body))
+		nodes = append(nodes, fmt.Sprintf(`{"id":%q,"author":{"login":%q},"body":%q,"updatedAt":%q%s}`,
+			comment.id, comment.login, comment.body, comment.providerUpdatedAt(), comment.providerEditEvidence()))
 	}
-	return fmt.Sprintf(`{"data":{"node":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[%s]}}}}`, strings.Join(nodes, ","))
+	return fmt.Sprintf(`{"data":{"node":{"id":%q,"comments":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[%s]}}}}`, threadID, strings.Join(nodes, ","))
 }
 
-func replyResponse(commentID string) string {
-	return fmt.Sprintf(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":%q}}}}`, commentID)
+func replyResponse(comment providerComment) string {
+	return fmt.Sprintf(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":%q,"author":{"login":%q},"body":%q,"updatedAt":%q%s}}}}`,
+		comment.id, comment.login, comment.body, comment.providerUpdatedAt(), comment.providerEditEvidence())
 }
 
 func resolveResponse(threadID, lastCommentID string) string {
@@ -224,11 +274,32 @@ func resolveResponse(threadID, lastCommentID string) string {
 }
 
 func resolveResponseWithState(threadID, lastCommentID string, resolved bool) string {
-	nodes := ""
+	opening := ""
+	recent := ""
 	if lastCommentID != "" {
-		nodes = fmt.Sprintf(`{"id":%q}`, lastCommentID)
+		opening = `{"author":{"login":"reviewer"}}`
+		recent = fmt.Sprintf(`{"id":%q,"author":{"login":"author"}}`, lastCommentID)
 	}
-	return fmt.Sprintf(`{"data":{"resolveReviewThread":{"thread":{"id":%q,"isResolved":%t,"comments":{"nodes":[%s]}}}}}`, threadID, resolved, nodes)
+	return fmt.Sprintf(`{"data":{"resolveReviewThread":{"thread":{"id":%q,"isResolved":%t,"opening":{"nodes":[%s]},"recent":{"nodes":[%s]}}}}}`,
+		threadID, resolved, opening, recent)
+}
+
+func resolveResponseWithExactComments(threadID string, resolved bool, comments ...providerComment) string {
+	opening := ""
+	if len(comments) > 0 {
+		opening = fmt.Sprintf(`{"author":{"login":%q}}`, comments[0].login)
+	}
+	start := 0
+	if len(comments) > 2 {
+		start = len(comments) - 2
+	}
+	recent := make([]string, 0, len(comments)-start)
+	for _, comment := range comments[start:] {
+		recent = append(recent, fmt.Sprintf(`{"id":%q,"author":{"login":%q},"body":%q,"updatedAt":%q%s}`,
+			comment.id, comment.login, comment.body, comment.providerUpdatedAt(), comment.providerEditEvidence()))
+	}
+	return fmt.Sprintf(`{"data":{"resolveReviewThread":{"thread":{"id":%q,"isResolved":%t,"opening":{"nodes":[%s]},"recent":{"nodes":[%s]}}}}}`,
+		threadID, resolved, opening, strings.Join(recent, ","))
 }
 
 func unresolveResponse(threadID string) string {

@@ -121,15 +121,20 @@ func mkNode(id string, outdated bool, authors ...string) threadNode {
 	// Recent mirrors comments(last:2): newest last.
 	for i := max(0, len(authors)-2); i < len(authors); i++ {
 		var c struct {
-			ID     string `json:"id"`
-			Author struct {
+			ID               string                    `json:"id"`
+			UpdatedAt        string                    `json:"updatedAt"`
+			UserContentEdits *userContentEditsEvidence `json:"userContentEdits"`
+			Author           struct {
 				Login string `json:"login"`
 			} `json:"author"`
-			Body string `json:"body"`
+			Body *string `json:"body"`
 		}
 		c.ID = fmt.Sprintf("%s-c%d", id, i)
+		c.UpdatedAt = providerFixtureUpdatedAt
+		c.UserContentEdits = zeroUserContentEditsEvidence()
 		c.Author.Login = authors[i]
-		c.Body = "comment from " + authors[i]
+		body := "comment from " + authors[i]
+		c.Body = &body
 		n.Recent.Nodes = append(n.Recent.Nodes, c)
 	}
 	return n
@@ -268,14 +273,20 @@ func mkNodeLogins(id, opening, latest string, total int) threadNode {
 	open.Author.Login = opening
 	n.Opening.Nodes = append(n.Opening.Nodes, open)
 	var last struct {
-		ID     string `json:"id"`
-		Author struct {
+		ID               string                    `json:"id"`
+		UpdatedAt        string                    `json:"updatedAt"`
+		UserContentEdits *userContentEditsEvidence `json:"userContentEdits"`
+		Author           struct {
 			Login string `json:"login"`
 		} `json:"author"`
-		Body string `json:"body"`
+		Body *string `json:"body"`
 	}
 	last.ID = id + "-last"
+	last.UpdatedAt = providerFixtureUpdatedAt
+	last.UserContentEdits = zeroUserContentEditsEvidence()
 	last.Author.Login = latest
+	body := ""
+	last.Body = &body
 	n.Recent.Nodes = append(n.Recent.Nodes, last)
 	return n
 }
@@ -467,7 +478,7 @@ func TestClassifyPriorReply(t *testing.T) {
 		{
 			name: "empty tail",
 			tail: nil,
-			want: noPriorReply,
+			want: unavailableReplyIntent,
 		},
 		{
 			name: "similar but different reply is not ours",
@@ -581,8 +592,10 @@ func TestParseReplyCommentID(t *testing.T) {
 // stopped selecting the comment ID, parseReplyCommentID would fail every time
 // and reply-resolve would never resolve anything.
 func TestReplyMutationRequestsCommentID(t *testing.T) {
-	if !strings.Contains(replyMutation, "comment { id }") {
-		t.Errorf("reply mutation must select the comment ID, got: %s", replyMutation)
+	for _, field := range []string{"comment { id", "author { login }", "body", "updatedAt"} {
+		if !strings.Contains(replyMutation, field) {
+			t.Errorf("reply mutation must select exact comment evidence %q, got: %s", field, replyMutation)
+		}
 	}
 }
 
@@ -592,9 +605,16 @@ func TestReplyMutationRequestsCommentID(t *testing.T) {
 // empty lastCommentID, silently disabling the check for a comment landing
 // while the resolve mutation itself was in flight.
 func TestResolveMutationRequestsLastComment(t *testing.T) {
-	if !strings.Contains(resolveMutation, "comments(last:1)") {
-		t.Errorf("resolve mutation must select the last comment, got: %s", resolveMutation)
+	if !strings.Contains(resolveMutation, "comments(last:2)") ||
+		!strings.Contains(resolveMutation, "nodes { id author { login } body updatedAt userContentEdits(last:1) { totalCount nodes { id } } }") {
+		t.Errorf("resolve mutation must select the last two comment IDs and bodies, got: %s", resolveMutation)
 	}
+}
+
+func zeroUserContentEditsEvidence() *userContentEditsEvidence {
+	count := 0
+	nodes := []userContentEditNodeEvidence{}
+	return &userContentEditsEvidence{TotalCount: &count, Nodes: &nodes}
 }
 
 // TestCheckReplyPlacement pins BOTH conditions reply-resolve depends on, and
@@ -676,6 +696,25 @@ func TestRunHelpExitsZero(t *testing.T) {
 	}
 	if code := run(nil); code == 0 {
 		t.Error("no arguments must still fail")
+	}
+}
+
+func TestHelpDocumentsUnixOnlyContinuationBoundary(t *testing.T) {
+	diagnostics := captureStderr(t, func() {
+		if code := run([]string{"--help"}); code != 0 {
+			t.Fatalf("run(--help) = %d, want 0", code)
+		}
+	})
+	for _, want := range []string{
+		"Continuation issuance and replay currently require Unix",
+		"Non-Unix platforms fail",
+		"before reply mutation",
+		"For continue-resolve, failure precedes both",
+		"body-source and provider access",
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Fatalf("help omitted %q:\n%s", want, diagnostics)
+		}
 	}
 }
 

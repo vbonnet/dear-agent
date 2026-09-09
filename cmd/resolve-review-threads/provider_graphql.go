@@ -214,9 +214,9 @@ func isProviderDiagnosticSpace(b byte) bool {
 
 // ghGraphQL sends one typed GraphQL envelope through standard input and
 // returns stdout. Query text and variable values never enter child argv.
-// Body-free failures preserve gh's stderr. Body-bearing failures retain only
-// the redacted access-denied category because gh debug output can echo the
-// request envelope, including the reply body.
+// Body-free failures preserve gh's stderr. Body-sensitive failures retain only
+// the redacted access-denied category because gh debug output can echo either
+// the request envelope or a provider response containing comment bodies.
 func ghGraphQL(ctx context.Context, query string, variables map[string]any) ([]byte, error) {
 	payload, err := json.Marshal(struct {
 		Query     string         `json:"query"`
@@ -231,9 +231,9 @@ func ghGraphQL(ctx context.Context, query string, variables map[string]any) ([]b
 	cmd.Stdin = bytes.NewReader(payload)
 	var out, errBuf bytes.Buffer
 	classifier := newRedactedProviderDiagnosticClassifier()
-	_, carriesReplyBody := variables["body"]
+	carriesSensitiveBody := graphQLOperationCarriesSensitiveBody(query, variables)
 	cmd.Stdout = &out
-	if carriesReplyBody {
+	if carriesSensitiveBody {
 		cmd.Stderr = classifier
 		cmd.Env = withoutProviderDebugEnvironment(os.Environ())
 	} else {
@@ -244,8 +244,8 @@ func ghGraphQL(ctx context.Context, query string, variables map[string]any) ([]b
 		if classifier.AccessDenied() {
 			cause = &providerAccessDeniedError{cause: err}
 		}
-		if carriesReplyBody {
-			return nil, fmt.Errorf("gh api graphql: %w (provider diagnostics suppressed because the request contains a reply body)", cause)
+		if carriesSensitiveBody {
+			return nil, fmt.Errorf("gh api graphql: %w (provider diagnostics suppressed because the operation carries sensitive comment-body data)", cause)
 		}
 		if msg := bytes.TrimSpace(errBuf.Bytes()); len(msg) > 0 {
 			return nil, fmt.Errorf("gh api graphql: %w: %s", cause, msg)
@@ -253,6 +253,44 @@ func ghGraphQL(ctx context.Context, query string, variables map[string]any) ([]b
 		return nil, fmt.Errorf("gh api graphql: %w", cause)
 	}
 	return out.Bytes(), nil
+}
+
+// graphQLOperationCarriesSensitiveBody is deliberately conservative. A body
+// variable can expose a reply through a debug request dump, while a standalone
+// GraphQL body name can expose an existing comment through a debug response
+// dump. Treating a body name in another trusted document position as sensitive
+// is a safe false positive: it suppresses diagnostics instead of exposing data.
+func graphQLOperationCarriesSensitiveBody(query string, variables map[string]any) bool {
+	if _, ok := variables["body"]; ok {
+		return true
+	}
+	return containsGraphQLName(query, "body")
+}
+
+func containsGraphQLName(document, target string) bool {
+	for start := 0; start < len(document); {
+		if !isGraphQLNameStart(document[start]) {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(document) && isGraphQLNameContinue(document[end]) {
+			end++
+		}
+		if document[start:end] == target {
+			return true
+		}
+		start = end
+	}
+	return false
+}
+
+func isGraphQLNameStart(b byte) bool {
+	return b == '_' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+}
+
+func isGraphQLNameContinue(b byte) bool {
+	return isGraphQLNameStart(b) || b >= '0' && b <= '9'
 }
 
 func withoutProviderDebugEnvironment(env []string) []string {

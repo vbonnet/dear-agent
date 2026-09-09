@@ -55,6 +55,38 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		retryGuidanceShouldReuseBodyFileWithoutRenderingContent,
 	)
 	ctx.Step(
+		`^posted-reply continuation receipts should authenticate host-bound body, identity, time, and edit evidence without reposting$`,
+		postedReplyContinuationReceiptsShouldBindEvidenceWithoutReposting,
+	)
+	ctx.Step(
+		`^continuation key state should be private, durable, stable, and established before posting$`,
+		continuationKeyStateShouldBePrivateDurableAndPreflighted,
+	)
+	ctx.Step(
+		`^unsupported continuation platforms should fail before reply mutation and before continuation body-source or provider access$`,
+		unsupportedContinuationPlatformsShouldFailClosed,
+	)
+	ctx.Step(
+		`^continuation environment failures should retain the exact receipt and source for issuer-state restoration$`,
+		continuationEnvironmentFailuresShouldRetainReceiptAndSource,
+	)
+	ctx.Step(
+		`^continuation replay should require the unchanged current provider-visible extant boundary$`,
+		continuationReplayShouldRequireCurrentExtantBoundary,
+	)
+	ctx.Step(
+		`^unreceipted existing replies should not be rebound into fresh temporal evidence$`,
+		unreceiptedExistingRepliesShouldNotBeRebound,
+	)
+	ctx.Step(
+		`^changed retry bodies should not bypass provider-history deduplication while reviewer hand-back permits revision$`,
+		changedRetryBodiesShouldNotBypassProviderHistory,
+	)
+	ctx.Step(
+		`^resolved reviewer hand-backs should never be skipped as terminal$`,
+		resolvedReviewerHandbacksShouldNeverBeSkipped,
+	)
+	ctx.Step(
 		`^generated reply-file guidance should prescribe per-thread external creation, retry retention, and confirmed-terminal cleanup$`,
 		generatedReplyFileGuidanceShouldStayOutsideWorktreeThroughTerminalCleanup,
 	)
@@ -63,8 +95,12 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		supersededReplyGuidanceShouldReviseSameSourceWithoutLosingCleanupIdentity,
 	)
 	ctx.Step(
-		`^ambiguous reply outcomes should preserve predecessor evidence before choosing unchanged retry or same-source revision$`,
+		`^ambiguous reply outcomes should preserve the full predecessor identity, time, edit, and author boundary before choosing unchanged retry or same-source revision$`,
 		ambiguousReplyOutcomesShouldPreservePredecessorEvidence,
+	)
+	ctx.Step(
+		`^stale resolved continuation mismatches should reopen before recovery guidance$`,
+		staleResolvedContinuationMismatchesShouldReopen,
 	)
 	ctx.Step(
 		`^resolution-anchor recovery should distinguish unverifiable absence from confirmed change$`,
@@ -83,7 +119,7 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		recoveryGuidanceShouldPreserveCallerSourceForm,
 	)
 	ctx.Step(
-		`^every mutation response should prove the requested thread identity and state$`,
+		`^every mutation response should prove the requested thread identity, state, and answer-author boundary$`,
 		mutationResponsesShouldProveRequestedIdentityAndState,
 	)
 	ctx.Step(
@@ -124,14 +160,95 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestGHGraphQLSendsQueryAndVariablesAsJSONStdin",
 		"TestGHGraphQLSuppressesReplyBodyEchoedByChildStderr",
 		"TestBodyBearingAccessDenialIsRedactedAndRequiresCredentialRepair",
+		"TestResolveAccessDenialCannotBeRecoveredAsAppliedMutation",
+		"TestFailedCorrectiveReopenPreservesAccessDenialCause",
+		"TestDeniedResolveWithChangedUnresolvedEvidencePreservesAccessCause",
+		"TestResolveErrorRecoveryReopensChangedAuthorEvidence",
+		"TestResolveErrorRecoveryPrioritizesChangedAnchorOverAuthorEvidence",
+		"TestResolveTransportRecoveryNeverAttributesConcurrentMatchingState",
+		"TestDirectUnresolveAccessDenialUsesNeutralConfirmedStateGuidance",
+		"TestDeniedReplyCannotAdoptIndependentlyObservedExactBody",
+		"TestDeniedObservedReplyPrioritizesChangedPredecessorIDOverMissingBody",
+		"TestDeniedObservedReplyReopensResolvedUnansweredAuthorEvidence",
+		"TestDeniedAmbiguousReplyRetainsCredentialRepairAcrossChangedEvidence",
+		"TestResolveAllAbortsOnAccessDeniedSupersessionCause",
 		"TestReplyBodyAccessMarkersDoNotForgeAccessDenial",
 		"TestRedactedProviderDiagnosticClassifier",
 		"TestBodyBearingProviderDropsDebugEnvironment",
+		"TestBodySelectingProviderFailureSuppressesPayloadAndKeepsAccessCategory",
 		"TestBodyFreeAmbiguousDiagnosticsStayTransportErrors",
 		"TestIsAccessDenied",
 		"TestGHGraphQLPreservesBodyFreeChildStderr",
 		"TestRetryAdviceDoesNotRenderReplyBody",
 		"TestAmbiguousPostFailureRetainsUnchangedBodySource",
+		"TestContinueResolveRejectsInvalidReceiptBeforeProviderAccess",
+		"TestContinuationReceiptHMACRoundTripAndTamperRejection",
+		"TestContinueResolveEnvironmentFailuresRetainReceiptBeforeBodyOrProvider",
+		"TestEffectiveContinuationProviderHostDefaultsAndCanonicalizes",
+		"TestReplyResolvePreflightsSigningKeyBeforeReplyMutation",
+		"TestContinuationReceiptKeyIsPrivateStableAndReused",
+		"TestConcurrentContinuationReceiptKeyCreationConverges",
+		"TestReadContinuationReceiptKeyRejectsUnsafeLeaf",
+		"TestReadContinuationReceiptKeyRejectsSymlink",
+		"TestReadContinuationReceiptKeyRejectsFIFOWithoutBlocking",
+		"TestEnsurePrivateContinuationDirectoryRejectsManagedSymlink",
+		"TestEnsurePrivateContinuationDirectoryRetriesEveryParentSync",
+		"TestExplicitXDGDirectoryPlanRetriesCreatedAncestorSync",
+		"TestEnsurePrivateContinuationDirectoryRejectsPublicFinalDirectory",
+		"TestContinuationPlatformBoundaryRejectsNonUnix",
+		"TestReplyResolveRejectsUnsupportedContinuationPlatformBeforeMutation",
+		"TestContinueResolveRejectsUnsupportedPlatformBeforeBodyOrProvider",
+		"TestHelpDocumentsUnixOnlyContinuationBoundary",
+		"TestObservedEditRevisionRequiresCountAndLastNode",
+		"TestProviderQueriesRequestLastEditNodeID",
+		"TestProviderReadsCarryLastEditNodeIDs",
+		"TestReplyMutationEvidenceCarriesLastEditNodeID",
+		"TestValidateContinuationHistoryRejectsChangedLastEditIDAtFixedCount",
+		"TestRecoveredReplyRejectsChangedLastEditIDAtFixedCount",
+		"TestContinuationBoundaryRejectsChangedLastEditIDAtFixedCount",
+		"TestReplyHistoryBoundaryRejectsChangedLastEditIDAtFixedCount",
+		"TestValidateContinuationHistory",
+		"TestContinueResolveRejectsMismatchedProviderThreadIdentity",
+		"TestReplyResolveRefusesHistoryThatAdvancedPastInitialTail",
+		"TestReplyResolveRefusesResolvedStateDriftBeforeMutation",
+		"TestReplyResolveRefusesSameIDPredecessorBodyEditBeforePosting",
+		"TestContinueResolveRefusesEditedBodyAtSamePreResolveAnchor",
+		"TestContinueResolveReopensWhenResolveResponseBodyChangedAtSameAnchor",
+		"TestContinueResolveRefusesPredecessorBodyEditAfterReceipt",
+		"TestReplyResolveReopensResolvedThreadWhenPredecessorEditedBeforePlacementVerification",
+		"TestContinueResolveRefusesSameIDPredecessorEditAtImmediatePreResolveRead",
+		"TestContinueResolveReopensWhenResolveResponsePredecessorEditedAtSameID",
+		"TestReplyResolveInitiallyResolvedExactReplyStopsAfterStableClassification",
+		"TestReplyResolveNeverSkipsResolvedReviewerHandbackAsTerminal",
+		"TestStableReviewerHandbackWithUnknownAuthorNeverLeavesStaleResolution",
+		"TestInitiallyResolvedSupersededReplyRequiresExplicitReopen",
+		"TestReplyResolveRefusesChangedOrMissingStableAuthorEvidenceBeforePosting",
+		"TestAmbiguousReplyRejectsSameIDPredecessorEditBeforeUnchangedRetry",
+		"TestAmbiguousAbsentReplyBindsFullPrePostPredecessorSnapshot",
+		"TestAmbiguousAbsentReplyRequiresBothRecoveryReadsToMatchSnapshot",
+		"TestAmbiguousReplyReconcilesDeletedPredecessorBeforeRecovery",
+		"TestAmbiguousReplyRecoversDelayedVisibleExactReply",
+		"TestInitialHistoryMismatchReopensConcurrentResolution",
+		"TestContinueResolveReopensAlreadyResolvedBuriedReceiptEvidence",
+		"TestContinueResolveReopensAlreadyResolvedSameIDPredecessorEdit",
+		"TestContinueResolveTreatsMissingResolvedIdentityAsUnverified",
+		"TestContinueResolveCarriesConclusiveHistoryContradictionAcrossOmittedCurrentEvidence",
+		"TestContinueResolveLeavesResolvedThreadUnchangedWhenFullHistoryIsIncomplete",
+		"TestAmbiguousReplyAccessDeniedStateReadRequiresCredentialRepair",
+		"TestContinuationMismatchAccessDeniedStateReadRequiresCredentialRepair",
+		"TestReplyResolveRefusesToRebindExistingExactReplyWithoutReceipt",
+		"TestReplyResolveRefusesTrimEquivalentByteDifferentTail",
+		"TestReplyResolveResolvedShortcutRefusesSameIDTrimEquivalentBodyEdit",
+		"TestReplyResolveEmitsReplayableContinuationReceipt",
+		"TestContinueResolveUsesReceiptWithoutReplyMutation",
+		"TestContinueResolveAuthorEvidenceRequiresIdentityRepair",
+		"TestContinueResolveRejectsChangedNamedBodyBeforeProviderAccess",
+		"TestContinueResolveRejectsChangedStdinBeforeProviderAccess",
+		"TestReplyResolveRefusesChangedBodyAfterProviderVisibleReply",
+		"TestReplyResolveAllowsRevisedBodyAfterReviewerHandback",
+		"TestReplyResolveRefusesMissingAuthorEvidenceBeforeMutation",
+		"TestReplyResolveDoesNotAdoptMatchingReviewerText",
+		"TestReplyResolveResolvedDifferentAnswerDoesNotReopenOrClaimSuccess",
 		"TestNewReplyBodyGuidanceUsesExternalTemporaryFileLifecycle",
 		"TestRevisedReplyBodyGuidanceReusesExistingSource",
 		"TestUnchangedReplyBodyGuidancePreservesExistingSource",
@@ -142,7 +259,18 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestResolutionMutationRecoveryDistinguishesUnverifiableFromSuperseded",
 		"TestUnavailableOrEqualAuthorEvidenceInspectsAndRetains",
 		"TestMutationResponsesRequireRequestedIdentityAndState",
+		"TestResolveMutationRequestsAndParsesAtomicAuthorBoundary",
+		"TestBareNonForceResolveReopensChangedAuthorBoundary",
+		"TestExactNonForceResolveReopensChangedOpeningAuthor",
+		"TestForcedResolveDoesNotRequireIndependentAuthorBoundary",
 		"TestMovedResolvedTailReopensBeforeGuidance",
+		"TestResolvedSupersededReplyWithUnknownAuthorIsReopened",
+		"TestContinuationMismatchPrioritizesMovedLastIDOverMissingBody",
+		"TestContinueResolvePreReadPrioritizesChangedPredecessorIDOverMissingBody",
+		"TestStableHistoryPrioritizesChangedPredecessorIDOverMissingLastBody",
+		"TestReplyPlacementPrioritizesChangedLastIDOverMissingPredecessorID",
+		"TestResolveMutationEvidencePrioritizesChangedPredecessorIDOverMissingBody",
+		"TestInitialHistoryMismatchPrioritizesChangedLastIDOverMissingBody",
 		"TestIncompleteCommentIdentityRequiresInspection",
 		"TestResolveErrorRecoveryClassifiesFreshState",
 		"TestUnresolveErrorRecoveryReconcilesFreshState",
@@ -207,6 +335,38 @@ func retryGuidanceShouldReuseBodyFileWithoutRenderingContent(ctx context.Context
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 
+func postedReplyContinuationReceiptsShouldBindEvidenceWithoutReposting(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func continuationKeyStateShouldBePrivateDurableAndPreflighted(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func unsupportedContinuationPlatformsShouldFailClosed(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func continuationEnvironmentFailuresShouldRetainReceiptAndSource(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func continuationReplayShouldRequireCurrentExtantBoundary(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func unreceiptedExistingRepliesShouldNotBeRebound(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func changedRetryBodiesShouldNotBypassProviderHistory(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func resolvedReviewerHandbacksShouldNeverBeSkipped(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
 func generatedReplyFileGuidanceShouldStayOutsideWorktreeThroughTerminalCleanup(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
@@ -216,6 +376,10 @@ func supersededReplyGuidanceShouldReviseSameSourceWithoutLosingCleanupIdentity(c
 }
 
 func ambiguousReplyOutcomesShouldPreservePredecessorEvidence(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func staleResolvedContinuationMismatchesShouldReopen(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 

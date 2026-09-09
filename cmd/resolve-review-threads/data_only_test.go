@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -216,7 +217,7 @@ func TestGHGraphQLSendsQueryAndVariablesAsJSONStdin(t *testing.T) {
 		"second line 🧪 e\u0301\n"
 	argsPath, inputPath := installFakeGH(
 		t,
-		"{\"data\":{\"addPullRequestReviewThreadReply\":{\"comment\":{\"id\":\"PRRC_exact\"}}}}",
+		fmt.Sprintf(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRRC_exact","author":{"login":"reply-author"},"body":%q,"updatedAt":%q,"userContentEdits":{"totalCount":0,"nodes":[]}}}}}`, body, providerFixtureUpdatedAt),
 	)
 	if _, err := ghGraphQL(context.Background(), "query", map[string]any{"bad": make(chan int)}); err == nil {
 		t.Fatal("unsupported JSON variable reached the provider boundary")
@@ -229,8 +230,8 @@ func TestGHGraphQLSendsQueryAndVariablesAsJSONStdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("postReply: %v", err)
 	}
-	if id != "PRRC_exact" {
-		t.Fatalf("reply id = %q, want PRRC_exact", id)
+	if id.ID != "PRRC_exact" {
+		t.Fatalf("reply id = %q, want PRRC_exact", id.ID)
 	}
 	assertFixedGHArgs(t, argsPath)
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
@@ -313,10 +314,8 @@ func TestGHGraphQLSuppressesReplyBodyEchoedByChildStderr(t *testing.T) {
 func TestGHGraphQLPreservesBodyFreeChildStderr(t *testing.T) {
 	_, _ = installEchoingFailingGH(t)
 
-	_, err := ghGraphQL(context.Background(), listQuery, map[string]any{
-		"owner": "BODY-FREE-DIAGNOSTIC",
-		"repo":  "repo",
-		"pr":    37,
+	_, err := ghGraphQL(context.Background(), unresolveMutation, map[string]any{
+		"threadId": "BODY-FREE-DIAGNOSTIC",
 	})
 	if err == nil {
 		t.Fatal("failing gh command succeeded")
@@ -330,19 +329,32 @@ func TestRetryAdviceDoesNotRenderReplyBody(t *testing.T) {
 	sentinel := filepath.Join(t.TempDir(), "must-not-exist")
 	tick := string(rune(96))
 	body := "PAYLOAD-MUST-STAY-DATA " + tick + "cmd" + tick + " $" + "(touch " + sentinel + ")"
-	installFakeGH(t, "{\"data\":{\"addPullRequestReviewThreadReply\":{}}}")
+	const threadID = "PRRT_exact"
+	original := providerComment{id: "PRRC_original", login: "reviewer", body: "unavailable original body"}
+	provider := installSequencedProvider(t,
+		providerStep{stdout: `{"data":{"addPullRequestReviewThreadReply":{}}}`},
+		providerStep{stdout: historyResponse(threadID)},
+		providerStep{stdout: threadResponse(threadID, false, original)},
+	)
 	bodyFile := "/tmp/reply body's source"
 
 	diagnostics := captureStderr(t, func() {
-		if _, code := postReplyOrExit(context.Background(), "PRRT_exact", body, "PRRC_original", bodyFile); code == 0 {
+		if _, code := postReplyOrExit(
+			context.Background(),
+			threadID,
+			body,
+			testReplyIssuancePredecessor(original, body),
+			bodyFile,
+		); code == 0 {
 			t.Fatal("missing reply ID must fail")
 		}
 	})
+	provider.assertExhausted()
 	if strings.Contains(diagnostics, body) || strings.Contains(diagnostics, "PAYLOAD-MUST-STAY-DATA") {
 		t.Fatalf("retry diagnostics rendered reply body: %q", diagnostics)
 	}
 	for _, want := range []string{
-		"original predecessor PRRC_original was not found",
+		"full history omitted original predecessor PRRC_original",
 		`reply_file='/tmp/reply body'"'"'s source'`,
 		"Inspect the live thread before any retry",
 	} {
@@ -362,10 +374,17 @@ func TestRetryAdviceDoesNotRenderReplyBody(t *testing.T) {
 
 func TestAmbiguousPostFailureRetainsUnchangedBodySource(t *testing.T) {
 	body := "AMBIGUOUS-PAYLOAD-MUST-STAY-DATA"
+	original := providerComment{id: "PRRC_original", login: "reviewer", body: "unavailable original body"}
 	_, _ = installEchoingFailingGH(t)
 
 	diagnostics := captureStderr(t, func() {
-		if _, code := postReplyOrExit(context.Background(), "PRRT_ambiguous", body, "PRRC_original", "-"); code == 0 {
+		if _, code := postReplyOrExit(
+			context.Background(),
+			"PRRT_ambiguous",
+			body,
+			testReplyIssuancePredecessor(original, body),
+			"-",
+		); code == 0 {
 			t.Fatal("provider-ambiguous reply failure succeeded")
 		}
 	})
@@ -554,15 +573,23 @@ func TestRevisedReplyBodyGuidanceReusesExistingSource(t *testing.T) {
 }
 
 func TestGeneratedReplyGuidanceRoutesThroughExternalLifecycle(t *testing.T) {
-	mainSource, err := os.ReadFile("main.go")
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("read main.go: %v", err)
+		t.Fatalf("read package directory: %v", err)
 	}
-	threadSource, err := os.ReadFile("threads.go")
-	if err != nil {
-		t.Fatalf("read threads.go: %v", err)
+	var production strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		source, readErr := os.ReadFile(entry.Name())
+		if readErr != nil {
+			t.Fatalf("read production source %s: %v", entry.Name(), readErr)
+		}
+		production.Write(source)
+		production.WriteByte('\n')
 	}
-	productionSource := string(mainSource) + "\n" + string(threadSource)
+	productionSource := production.String()
 	for _, forbidden := range []string{
 		"--body-file reply.md",
 		"mktemp -t",

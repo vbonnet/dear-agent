@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -39,12 +41,13 @@ func TestBodyBearingAccessDenialIsRedactedAndRequiresCredentialRepair(t *testing
 		opening := providerComment{id: original, login: "reviewer", body: "P2: permission handling"}
 		provider := installSequencedProvider(t,
 			providerStep{stderr: bodyEcho + "\ngh: Must have push permission to resolve\n", exit: 1},
-			providerStep{stdout: historyResponse(opening)},
+			providerStep{stdout: historyResponse(threadID, opening)},
 			providerStep{stdout: threadResponse(threadID, false, opening)},
 		)
 		code, _, diagnostics := provider.capture(func() int {
 			_, postCode := postReplyOrExit(
-				context.Background(), threadID, body, original, bodyFile,
+				context.Background(), threadID, body,
+				testReplyIssuancePredecessor(opening, body), bodyFile,
 			)
 			return postCode
 		})
@@ -82,12 +85,13 @@ func TestReplyBodyAccessMarkersDoNotForgeAccessDenial(t *testing.T) {
 	opening := providerComment{id: original, login: "reviewer", body: "P2: classify safely"}
 	provider := installSequencedProvider(t,
 		providerStep{stderr: bodyEcho + "\ngh: connection reset by peer (HTTP 403 rate limit)\n", exit: 1},
-		providerStep{stdout: historyResponse(opening)},
+		providerStep{stdout: historyResponse(threadID, opening)},
 		providerStep{stdout: threadResponse(threadID, false, opening)},
 	)
 	code, _, diagnostics := provider.capture(func() int {
 		_, postCode := postReplyOrExit(
-			context.Background(), threadID, body, original, bodyFile,
+			context.Background(), threadID, body,
+			testReplyIssuancePredecessor(opening, body), bodyFile,
 		)
 		return postCode
 	})
@@ -174,10 +178,8 @@ func TestBodyFreeAmbiguousDiagnosticsStayTransportErrors(t *testing.T) {
 	} {
 		t.Run(diagnostic, func(t *testing.T) {
 			provider := installSequencedProvider(t, providerStep{stderr: diagnostic + "\n", exit: 1})
-			_, err := ghGraphQL(context.Background(), listQuery, map[string]any{
-				"owner": "owner",
-				"repo":  "repo",
-				"pr":    37,
+			_, err := ghGraphQL(context.Background(), unresolveMutation, map[string]any{
+				"threadId": "PRRT_body_free",
 			})
 			if err == nil {
 				t.Fatal("failing body-free provider call succeeded")
@@ -188,6 +190,72 @@ func TestBodyFreeAmbiguousDiagnosticsStayTransportErrors(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), diagnostic) {
 				t.Fatalf("body-free diagnostic was not retained: %v", err)
+			}
+		})
+	}
+}
+
+func TestBodySelectingProviderFailureSuppressesPayloadAndKeepsAccessCategory(t *testing.T) {
+	const (
+		secret = "SECRET-PROVIDER-COMMENT-BODY"
+		denial = "gh: GraphQL: Resource not accessible by personal access token"
+	)
+	dir := t.TempDir()
+	script := `#!/bin/sh
+set -eu
+cat >/dev/null
+if [ "${GH_DEBUG+x}" = x ] || [ "${DEBUG+x}" = x ]; then
+  printf '%s\n' 'gh: debug environment reached body-selecting operation' >&2
+  exit 2
+fi
+printf '%s' '{"data":{"resolveReviewThread":{"thread":{"comments":{"nodes":[{"body":"SECRET-PROVIDER-COMMENT-BODY"}]}}}}}'
+printf '%s\n' 'provider response contained SECRET-PROVIDER-COMMENT-BODY' >&2
+printf '%s\n' 'gh: GraphQL: Resource not accessible by personal access token' >&2
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write failing fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_DEBUG", "api")
+	t.Setenv("DEBUG", "true")
+
+	raw, err := ghGraphQL(context.Background(), resolveMutation, map[string]any{
+		"threadId": "PRRT_sensitive_response",
+	})
+	if err == nil {
+		t.Fatal("failing body-selecting provider call succeeded")
+	}
+	if len(raw) != 0 {
+		t.Fatalf("failing body-selecting provider call returned raw payload: %q", raw)
+	}
+	if !isAccessDenied(err) {
+		t.Fatalf("body-selecting denial lost its typed category: %v", err)
+	}
+	assertContainsAll(t, err.Error(), "provider access denied", "provider diagnostics suppressed")
+	assertContainsNone(t, err.Error(), secret, denial, "debug environment reached")
+}
+
+func TestGraphQLOperationSensitiveBodyDetection(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		variables map[string]any
+		want      bool
+	}{
+		{name: "reply request body", query: replyMutation, variables: map[string]any{"body": "secret"}, want: true},
+		{name: "list response bodies", query: listQuery, want: true},
+		{name: "single thread response bodies", query: threadByIDQuery, want: true},
+		{name: "history response bodies", query: threadCommentsQuery, want: true},
+		{name: "resolve response bodies without body variable", query: resolveMutation, variables: map[string]any{"threadId": "PRRT_exact"}, want: true},
+		{name: "body alias", query: `query { node { comments { nodes { answer: body } } } }`, want: true},
+		{name: "body-free unresolve", query: unresolveMutation},
+		{name: "larger name is not body", query: `query { node { somebody bodyText } }`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := graphQLOperationCarriesSensitiveBody(tc.query, tc.variables); got != tc.want {
+				t.Fatalf("sensitive operation = %t, want %t", got, tc.want)
 			}
 		})
 	}

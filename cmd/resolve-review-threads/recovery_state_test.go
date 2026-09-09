@@ -23,15 +23,16 @@ func TestPostReplyRecoveryMatrixPreservesOriginalTail(t *testing.T) {
 
 	t.Run("missing id recovers exact reply and verifies against original tail", func(t *testing.T) {
 		provider := installSequencedProvider(t,
-			providerStep{stdout: replyResponse("")},
-			providerStep{stdout: historyResponse(original, recovered)},
+			providerStep{stdout: replyResponse(providerComment{})},
+			providerStep{stdout: historyResponse(threadID, original, recovered)},
 			providerStep{stdout: threadResponse(threadID, false, original, recovered)},
 		)
 		var gotID string
 		code, _, diagnostics := provider.capture(func() int {
 			var postCode int
 			gotID, postCode = postReplyOrExit(
-				context.Background(), threadID, body, originalID, customPath,
+				context.Background(), threadID, body,
+				testReplyIssuancePredecessor(original, body), customPath,
 			)
 			if postCode >= 0 {
 				return postCode
@@ -54,12 +55,13 @@ func TestPostReplyRecoveryMatrixPreservesOriginalTail(t *testing.T) {
 	t.Run("moved tail without exact reply revises same custom source", func(t *testing.T) {
 		provider := installSequencedProvider(t,
 			providerStep{stderr: "transport dropped after write", exit: 1},
-			providerStep{stdout: historyResponse(original, followup)},
+			providerStep{stdout: historyResponse(threadID, original, followup)},
 			providerStep{stdout: threadResponse(threadID, false, original, followup)},
 		)
 		code, _, diagnostics := provider.capture(func() int {
 			_, postCode := postReplyOrExit(
-				context.Background(), threadID, body, originalID, customPath,
+				context.Background(), threadID, body,
+				testReplyIssuancePredecessor(original, body), customPath,
 			)
 			return postCode
 		})
@@ -82,12 +84,13 @@ func TestPostReplyRecoveryMatrixPreservesOriginalTail(t *testing.T) {
 	t.Run("unchanged tail selects source-aware exact retry", func(t *testing.T) {
 		provider := installSequencedProvider(t,
 			providerStep{stderr: "transport dropped before acknowledgement", exit: 1},
-			providerStep{stdout: historyResponse(original)},
+			providerStep{stdout: historyResponse(threadID, original)},
 			providerStep{stdout: threadResponse(threadID, false, original)},
 		)
 		code, _, diagnostics := provider.capture(func() int {
 			_, postCode := postReplyOrExit(
-				context.Background(), threadID, body, originalID, canonical,
+				context.Background(), threadID, body,
+				testReplyIssuancePredecessor(original, body), canonical,
 			)
 			return postCode
 		})
@@ -114,7 +117,8 @@ func TestPostReplyRecoveryMatrixPreservesOriginalTail(t *testing.T) {
 		)
 		code, _, diagnostics := provider.capture(func() int {
 			_, postCode := postReplyOrExit(
-				context.Background(), threadID, body, originalID, "-",
+				context.Background(), threadID, body,
+				testReplyIssuancePredecessor(original, body), "-",
 			)
 			return postCode
 		})
@@ -246,7 +250,12 @@ func TestResolutionMutationRecoveryDistinguishesUnverifiableFromSuperseded(t *te
 			)
 			var recovery string
 			code, _, diagnostics := provider.capture(func() int {
-				_, mutated, err := resolveWithEvidence(context.Background(), threadID, false, anchorID)
+				_, mutated, err := resolveWithEvidence(
+					context.Background(),
+					threadID,
+					false,
+					resolutionEvidence{LastID: anchorID},
+				)
 				if err == nil || mutated {
 					t.Fatalf("resolveWithEvidence = (mutated=%t, err=%v), want reopened failure", mutated, err)
 				}
@@ -294,7 +303,12 @@ func TestUnavailableOrEqualAuthorEvidenceInspectsAndRetains(t *testing.T) {
 			)
 			var recovery string
 			code, _, diagnostics := provider.capture(func() int {
-				_, mutated, err := resolveWithEvidence(context.Background(), threadID, false, anchorID)
+				_, mutated, err := resolveWithEvidence(
+					context.Background(),
+					threadID,
+					false,
+					resolutionEvidence{LastID: anchorID},
+				)
 				if err == nil || mutated {
 					t.Fatalf("resolveWithEvidence = (mutated=%t, err=%v), want evidence refusal", mutated, err)
 				}
@@ -336,11 +350,12 @@ func TestUnavailableOrEqualAuthorEvidenceInspectsAndRetains(t *testing.T) {
 		reply := providerComment{id: anchorID, login: original.login, body: body}
 		provider := installSequencedProvider(t,
 			providerStep{stdout: threadResponse(threadID, false, original)},
-			providerStep{stdout: historyResponse(original)},
+			providerStep{stdout: historyResponse(threadID, original)},
 			providerStep{stdout: threadResponse(threadID, false, original)},
-			providerStep{stdout: replyResponse(anchorID)},
+			providerStep{stdout: replyResponse(reply)},
 			providerStep{stdout: threadResponse(threadID, false, original, reply)},
 			providerStep{stdout: threadResponse(threadID, true, original, reply)},
+			providerStep{stdout: unresolveResponse(threadID)},
 		)
 		code, stdout, diagnostics := provider.capture(func() int {
 			return run([]string{"reply-resolve", threadID, "--body-file", bodyFile})
@@ -353,10 +368,12 @@ func TestUnavailableOrEqualAuthorEvidenceInspectsAndRetains(t *testing.T) {
 			t.Errorf("evidence refusal printed terminal success output:\n%s", stdout)
 		}
 		provider.assertExhausted()
-		assertQueryKinds(t, provider, "thread", "history", "thread", "reply", "thread", "thread")
+		assertQueryKinds(t, provider, "thread", "history", "thread", "reply", "thread", "thread", "unresolve")
 		assertQueryTargets(t, provider, threadID)
 		assertContainsAll(t, diagnostics,
-			"author evidence is insufficient",
+			"continuation issuance boundary could not be proved",
+			"requires safe distinct opening and reply authors",
+			"no receipt was minted and no resolution was attempted",
 			"Retain the exact named reply-body source unchanged",
 			"Inspect the live thread before any retry",
 		)
@@ -548,8 +565,8 @@ func TestIncompleteCommentIdentityRequiresInspection(t *testing.T) {
 		{
 			name: "history predecessor id missing",
 			steps: []providerStep{
-				{stdout: replyResponse("")},
-				{stdout: historyResponse(providerComment{id: "", login: original.login, body: original.body})},
+				{stdout: replyResponse(providerComment{})},
+				{stdout: historyResponse(threadID, providerComment{id: "", login: original.login, body: original.body})},
 			},
 			want: []string{"provider state is unverified", "Inspect the live thread before any retry"},
 		},
@@ -557,7 +574,7 @@ func TestIncompleteCommentIdentityRequiresInspection(t *testing.T) {
 			name: "matching recovered reply id missing",
 			steps: []providerStep{
 				{stderr: "connection closed after write", exit: 1},
-				{stdout: historyResponse(original, providerComment{id: "", login: "author", body: body})},
+				{stdout: historyResponse(threadID, original, providerComment{id: "", login: "author", body: body})},
 			},
 			want: []string{"provider state is unverified", "Inspect the live thread before any retry"},
 		},
@@ -565,10 +582,10 @@ func TestIncompleteCommentIdentityRequiresInspection(t *testing.T) {
 			name: "current tail id missing",
 			steps: []providerStep{
 				{stderr: "connection closed before acknowledgement", exit: 1},
-				{stdout: historyResponse(original)},
+				{stdout: historyResponse(threadID, original)},
 				{stdout: threadResponse(threadID, false, providerComment{id: "", login: original.login, body: original.body})},
 			},
-			want: []string{"current thread state could not be matched", "Inspect the live thread before any retry"},
+			want: []string{"current thread state could not be read with a nonempty tail ID", "Inspect the live thread before any retry"},
 		},
 	}
 
@@ -577,7 +594,8 @@ func TestIncompleteCommentIdentityRequiresInspection(t *testing.T) {
 			provider := installSequencedProvider(t, tc.steps...)
 			code, _, diagnostics := provider.capture(func() int {
 				_, postCode := postReplyOrExit(
-					context.Background(), threadID, body, originalID, bodyFile,
+					context.Background(), threadID, body,
+					testReplyIssuancePredecessor(original, body), bodyFile,
 				)
 				return postCode
 			})
@@ -626,7 +644,7 @@ func TestResolveErrorRecoveryClassifiesFreshState(t *testing.T) {
 			name:  "unchanged nonempty tail permits exact-body retry",
 			after: threadResponse(threadID, false, original, reply),
 			want: []string{
-				"Keep the exact same named reply-body source",
+				"Keep the exact same named reply-body source and continuation receipt",
 				"Retain that file unchanged",
 			},
 			forbidden: []string{"revise the same named body source in place"},
@@ -666,23 +684,28 @@ func TestResolveErrorRecoveryClassifiesFreshState(t *testing.T) {
 			if err := os.WriteFile(bodyFile, []byte(body), 0o600); err != nil {
 				t.Fatalf("write reply body: %v", err)
 			}
+			receipt := continuationToken(
+				t,
+				threadID,
+				original.id,
+				original.body,
+				reply.id,
+				reply.body,
+			)
 			provider := installSequencedProvider(t,
-				providerStep{stdout: threadResponse(threadID, false, original, reply)},
-				providerStep{stdout: historyResponse(original, reply)},
-				providerStep{stdout: threadResponse(threadID, false, original, reply)},
-				providerStep{stdout: threadResponse(threadID, false, original, reply)},
+				providerStep{stdout: historyResponse(threadID, original, reply)},
 				providerStep{stdout: threadResponse(threadID, false, original, reply)},
 				providerStep{stderr: "connection reset after resolve", exit: 1},
 				providerStep{stdout: tc.after},
 			)
 			code, _, diagnostics := provider.capture(func() int {
-				return run([]string{"reply-resolve", threadID, "--body-file", bodyFile})
+				return run([]string{"continue-resolve", receipt, "--body-file", bodyFile})
 			})
 			if code == 0 {
 				t.Fatalf("ambiguous resolve with unresolved reread succeeded:\n%s", diagnostics)
 			}
 			provider.assertExhausted()
-			assertQueryKinds(t, provider, "thread", "history", "thread", "thread", "thread", "resolve", "thread")
+			assertQueryKinds(t, provider, "history", "thread", "resolve", "thread")
 			assertQueryTargets(t, provider, threadID)
 			assertContainsAll(t, diagnostics, tc.want...)
 			assertContainsNone(t, diagnostics, tc.forbidden...)
@@ -771,7 +794,7 @@ func TestMovedResolvedTailReopensBeforeGuidance(t *testing.T) {
 		}
 		provider := installSequencedProvider(t,
 			providerStep{stdout: threadResponse(threadID, false, original, oldReply, followup)},
-			providerStep{stdout: historyResponse(original, oldReply, followup)},
+			providerStep{stdout: historyResponse(threadID, original, oldReply, followup)},
 			providerStep{stdout: threadResponse(threadID, false, original, oldReply, followup)},
 		)
 		code, stdout, diagnostics := provider.capture(func() int {
@@ -808,7 +831,7 @@ func TestMovedResolvedTailReopensBeforeGuidance(t *testing.T) {
 		}
 		provider := installSequencedProvider(t,
 			providerStep{stdout: threadResponse(threadID, false, original, oldReply, followup)},
-			providerStep{stdout: historyResponse(original, oldReply, followup)},
+			providerStep{stdout: historyResponse(threadID, original, oldReply, followup)},
 			providerStep{stdout: threadResponse(threadID, true, original, oldReply, followup)},
 			providerStep{stdout: unresolveResponse(threadID)},
 		)
@@ -849,7 +872,7 @@ func TestMovedResolvedTailReopensBeforeGuidance(t *testing.T) {
 		}
 		provider := installSequencedProvider(t,
 			providerStep{stdout: threadResponse(threadID, false, original)},
-			providerStep{stdout: historyResponse(original)},
+			providerStep{stdout: historyResponse(threadID, original)},
 			providerStep{stdout: threadResponse(threadID, true, original, followup)},
 			providerStep{stdout: unresolveResponse(threadID)},
 		)
@@ -894,10 +917,10 @@ func testResolvedMovedAmbiguousReplyOutcome(t *testing.T) {
 	}
 	provider := installSequencedProvider(t,
 		providerStep{stdout: threadResponse(threadID, false, original)},
-		providerStep{stdout: historyResponse(original)},
+		providerStep{stdout: historyResponse(threadID, original)},
 		providerStep{stdout: threadResponse(threadID, false, original)},
 		providerStep{stderr: "connection closed after reply write", exit: 1},
-		providerStep{stdout: historyResponse(original, followup)},
+		providerStep{stdout: historyResponse(threadID, original, followup)},
 		providerStep{stdout: threadResponse(threadID, true, original, followup)},
 		providerStep{stdout: unresolveResponse(threadID)},
 	)
@@ -924,53 +947,5 @@ func testResolvedMovedAmbiguousReplyOutcome(t *testing.T) {
 	assertContainsNone(t, diagnostics,
 		"Keep the exact same named reply-body source",
 		"provider state is unverified",
-	)
-}
-
-func TestResolveAllRefusalSummaryIsTruthful(t *testing.T) {
-	const (
-		unansweredID = "PRRT_unanswered"
-		supersededID = "PRRT_superseded"
-		answerID     = "PRRC_answer"
-	)
-	unansweredOpening := providerComment{
-		id: "PRRC_unanswered_opening", login: "reviewer", body: "P1: answer this",
-	}
-	supersededOpening := providerComment{
-		id: "PRRC_superseded_opening", login: "reviewer", body: "P2: prove this",
-	}
-	answer := providerComment{id: answerID, login: "author", body: "Initially proved."}
-	followup := providerComment{id: "PRRC_followup", login: "reviewer", body: "The proof is stale."}
-
-	provider := installSequencedProvider(t,
-		providerStep{stdout: listResponse(
-			threadNodeResponse(unansweredID, false, unansweredOpening),
-			threadNodeResponse(supersededID, false, supersededOpening, answer),
-		)},
-		providerStep{stdout: threadResponse(unansweredID, false, unansweredOpening)},
-		providerStep{stdout: threadResponse(supersededID, false, supersededOpening, answer)},
-		providerStep{stdout: resolveResponse(supersededID, followup.id)},
-		providerStep{stdout: unresolveResponse(supersededID)},
-	)
-	code, stdout, diagnostics := provider.capture(func() int {
-		return run([]string{"resolve-all", "owner", "repo", "42"})
-	})
-	if code == 0 {
-		t.Fatalf("resolve-all succeeded despite two evidence refusals:\nstdout:\n%s\nstderr:\n%s",
-			stdout, diagnostics)
-	}
-	provider.assertExhausted()
-	assertQueryKinds(t, provider, "list", "thread", "thread", "resolve", "unresolve")
-	assertContainsAll(t, stdout, "resolved 0 thread(s), refused 2, skipped 0")
-	assertContainsAll(t, diagnostics,
-		"REFUSED",
-		unansweredID,
-		supersededID,
-		"may have no independent reply yet",
-		"superseded by newer commentary",
-	)
-	assertContainsNone(t, diagnostics,
-		"nobody replied",
-		"all refused threads are unanswered",
 	)
 }
