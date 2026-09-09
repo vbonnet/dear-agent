@@ -24,18 +24,14 @@ func TestEnvironmentProfilesAreExactClosedProjections(t *testing.T) {
 	t.Setenv("GOFLAGS", "ambient-flags")
 	t.Setenv("GO_TELEMETRY_CHILD_ID", "ambient-telemetry-child")
 
-	workspace, err := newWorkspacePaths("/private/state/.sandbox-gc-build-0123456789abcdef")
-	if err != nil {
-		t.Fatalf("construct workspace paths: %v", err)
-	}
-	preallocation, err := newPreallocationEnvironment("/private/toolchain/go", "/private/cache/pkg/mod")
-	if err != nil {
-		t.Fatalf("construct preallocation environment: %v", err)
-	}
-	taskPrivate, err := newTaskPrivateEnvironment(workspace, "/private/toolchain/go", "/private/cache/pkg/mod")
-	if err != nil {
-		t.Fatalf("construct task-private environment: %v", err)
-	}
+	taskRoot := "/private/state/.sandbox-gc-build-0123456789abcdef01234567"
+	preallocation := mustTestPreallocationEnvironment(t, "/private/toolchain/go", "/private/cache/pkg/mod")
+	taskPrivate := mustTestTaskPrivateEnvironment(
+		t,
+		taskRoot,
+		"/private/toolchain/go",
+		"/private/cache/pkg/mod",
+	)
 
 	wantPreallocation := []string{
 		"CGO_ENABLED=0",
@@ -81,19 +77,19 @@ func TestEnvironmentProfilesAreExactClosedProjections(t *testing.T) {
 	wantTaskPrivate := []string{
 		"CGO_ENABLED=0",
 		"GIT_ATTR_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/private/state/.sandbox-gc-build-0123456789abcdef/git-global.conf",
+		"GIT_CONFIG_GLOBAL=/private/state/.sandbox-gc-build-0123456789abcdef01234567/git-global.conf",
 		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_EXEC_PATH=/private/state/.sandbox-gc-build-0123456789abcdef/git-exec",
+		"GIT_EXEC_PATH=/private/state/.sandbox-gc-build-0123456789abcdef01234567/git-exec",
 		"GIT_NO_LAZY_FETCH=1",
 		"GIT_NO_REPLACE_OBJECTS=1",
 		"GIT_OPTIONAL_LOCKS=0",
 		"GIT_PROTOCOL_FROM_USER=0",
-		"GIT_TEMPLATE_DIR=/private/state/.sandbox-gc-build-0123456789abcdef/git-template",
+		"GIT_TEMPLATE_DIR=/private/state/.sandbox-gc-build-0123456789abcdef01234567/git-template",
 		"GIT_TERMINAL_PROMPT=0",
 		"GO111MODULE=on",
 		"GOARCH=arm64",
 		"GOARM64=v8.0",
-		"GOCACHE=/private/state/.sandbox-gc-build-0123456789abcdef/gocache",
+		"GOCACHE=/private/state/.sandbox-gc-build-0123456789abcdef01234567/gocache",
 		"GOENV=off",
 		"GOEXPERIMENT=none",
 		"GO_EXTLINK_ENABLED=0",
@@ -101,21 +97,21 @@ func TestEnvironmentProfilesAreExactClosedProjections(t *testing.T) {
 		"GOFLAGS=-mod=readonly",
 		"GOMODCACHE=/private/cache/pkg/mod",
 		"GOOS=darwin",
-		"GOPATH=/private/state/.sandbox-gc-build-0123456789abcdef/gopath",
+		"GOPATH=/private/state/.sandbox-gc-build-0123456789abcdef01234567/gopath",
 		"GOPROXY=off",
 		"GOROOT=/private/toolchain/go",
 		"GOSUMDB=off",
-		"GOTMPDIR=/private/state/.sandbox-gc-build-0123456789abcdef/gotmp",
+		"GOTMPDIR=/private/state/.sandbox-gc-build-0123456789abcdef01234567/gotmp",
 		"GOTOOLCHAIN=local",
 		"GOVCS=*:off",
 		"GOWORK=off",
 		"HOME=",
 		"LANG=C",
 		"LC_ALL=C",
-		"PATH=/private/state/.sandbox-gc-build-0123456789abcdef/git-path",
-		"TEMP=/private/state/.sandbox-gc-build-0123456789abcdef/tmp",
-		"TMP=/private/state/.sandbox-gc-build-0123456789abcdef/tmp",
-		"TMPDIR=/private/state/.sandbox-gc-build-0123456789abcdef/tmp",
+		"PATH=/private/state/.sandbox-gc-build-0123456789abcdef01234567/git-path",
+		"TEMP=/private/state/.sandbox-gc-build-0123456789abcdef01234567/tmp",
+		"TMP=/private/state/.sandbox-gc-build-0123456789abcdef01234567/tmp",
+		"TMPDIR=/private/state/.sandbox-gc-build-0123456789abcdef01234567/tmp",
 		"TZ=UTC",
 		"XDG_CONFIG_HOME=",
 	}
@@ -148,7 +144,7 @@ func TestEnvironmentProfilesAreExactClosedProjections(t *testing.T) {
 			keys[key] = struct{}{}
 		}
 	}
-	if strings.Contains(strings.Join(preallocation.clone(), "\n"), workspace.taskRoot) {
+	if strings.Contains(strings.Join(preallocation.clone(), "\n"), taskRoot) {
 		t.Fatal("preallocation environment contains a task-private path")
 	}
 	for _, forbidden := range []string{
@@ -227,18 +223,13 @@ func TestWorkspacePolicyRowsAreFresh(t *testing.T) {
 }
 
 func TestEnvironmentProfileClonesAreFresh(t *testing.T) {
-	workspace, err := newWorkspacePaths("/private/state/task")
-	if err != nil {
-		t.Fatalf("construct workspace paths: %v", err)
-	}
-	preallocation, err := newPreallocationEnvironment("/private/go", "/private/mod")
-	if err != nil {
-		t.Fatalf("construct preallocation environment: %v", err)
-	}
-	taskPrivate, err := newTaskPrivateEnvironment(workspace, "/private/go", "/private/mod")
-	if err != nil {
-		t.Fatalf("construct task-private environment: %v", err)
-	}
+	preallocation := mustTestPreallocationEnvironment(t, "/private/go", "/private/mod")
+	taskPrivate := mustTestTaskPrivateEnvironment(
+		t,
+		"/private/state/.sandbox-gc-build-0123456789abcdef01234567",
+		"/private/go",
+		"/private/mod",
+	)
 	for _, profile := range []struct {
 		name  string
 		clone func() []string
@@ -265,7 +256,8 @@ func TestEnvironmentProfilesRejectUnvalidatedPaths(t *testing.T) {
 		{name: "NUL GOROOT", goroot: "/go\x00bad", gomodcache: "/mod"},
 	} {
 		t.Run("preallocation "+test.name, func(t *testing.T) {
-			if _, err := newPreallocationEnvironment(test.goroot, test.gomodcache); err == nil {
+			authorities := testEnvironmentAuthorityInputs(test.goroot, test.gomodcache)
+			if _, err := newPreallocationEnvironment(authorities); err == nil {
 				t.Fatal("invalid path entered closed preallocation environment")
 			}
 		})
@@ -285,11 +277,9 @@ func TestEnvironmentProfilesRejectUnvalidatedPaths(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			workspace, workspaceErr := newWorkspacePaths(test.workspace)
-			if workspaceErr != nil {
-				return
-			}
-			if _, err := newTaskPrivateEnvironment(workspace, test.goroot, test.gomodcache); err == nil {
+			authorities := testEnvironmentAuthorityInputs(test.goroot, test.gomodcache)
+			workspace := testEnvironmentWorkspace(test.workspace, authorities.gitExecutable)
+			if _, err := newTaskPrivateEnvironment(workspace, authorities); err == nil {
 				t.Fatal("invalid path entered closed task-private environment")
 			}
 		})
