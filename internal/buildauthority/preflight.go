@@ -52,9 +52,9 @@ const (
 )
 
 // goEnvironmentFileClaim binds parsed literal Go defaults to the exact
-// regular-file row authenticated by the retained GOROOT capture. It has no
-// production constructor yet: the future owner must create it only inside an
-// operation-attributed root-freshness window that also owns leaf closure.
+// regular-file row authenticated by the retained GOROOT capture. Its sole
+// production constructor runs inside an operation-attributed root-freshness
+// window that also owns every transient descriptor closure.
 type goEnvironmentFileClaim struct {
 	goroot       *treeCapture
 	gorootDigest Digest
@@ -219,7 +219,7 @@ func malformedGoEnvironment() error {
 }
 
 func (claim *goEnvironmentFileClaim) validFor(goroot *treeCapture) bool {
-	if claim == nil || claim.seal != validGoEnvironmentFileClaim ||
+	if goroot == nil || claim == nil || claim.seal != validGoEnvironmentFileClaim ||
 		claim.goroot != goroot || claim.gorootDigest == (Digest{}) ||
 		claim.gorootDigest != goroot.digest {
 		return false

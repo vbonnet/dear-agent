@@ -139,8 +139,11 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 		"processRequest":         true,
 	}
 	owners := map[string]map[string]bool{
-		"darwinProcessRun":       {"process_darwin.go": true},
-		"goEnvironmentFileClaim": {"preflight.go": true},
+		"darwinProcessRun": {"process_darwin.go": true},
+		"goEnvironmentFileClaim": {
+			"preflight.go":           true,
+			"preflight_authority.go": true,
+		},
 		"processRequest": {
 			"process.go":        true,
 			"process_darwin.go": true,
@@ -151,6 +154,8 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 		"processSupervisor": {"processRequest": true},
 	}
 	darwinRunLiterals := 0
+	goEnvironmentClaimLiterals := 0
+	goEnvironmentClaimResults := 0
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("read buildauthority package: %v", err)
@@ -165,6 +170,23 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 		parsed, err := parser.ParseFile(files, name, nil, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
+		}
+		allowedResult := make(map[*ast.FuncType]bool)
+		var goEnvironmentClaimOwner *ast.FuncDecl
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || !functionReturnsTarget(function, "goEnvironmentFileClaim") {
+				continue
+			}
+			if !canonicalGoEnvironmentClaimResult(name, function) {
+				t.Fatalf(
+					"%s returns unowned authority goEnvironmentFileClaim",
+					files.Position(function.Pos()),
+				)
+			}
+			allowedResult[function.Type] = true
+			goEnvironmentClaimOwner = function
+			goEnvironmentClaimResults++
 		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
 			switch current := node.(type) {
@@ -186,6 +208,14 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 							files.Position(current.Pos()),
 						)
 					}
+					break
+				}
+				if name == "goEnvironmentFileClaim" &&
+					goEnvironmentClaimOwner != nil &&
+					goEnvironmentClaimOwner.Pos() <= current.Pos() &&
+					current.End() <= goEnvironmentClaimOwner.End() &&
+					canonicalGoEnvironmentClaimLiteral(entry.Name(), current) {
+					goEnvironmentClaimLiterals++
 					break
 				}
 				if name != "" {
@@ -251,6 +281,9 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 					)
 				}
 			case *ast.FuncType:
+				if allowedResult[current] {
+					break
+				}
 				if current.Results == nil {
 					break
 				}
@@ -269,6 +302,159 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 	}
 	if darwinRunLiterals != 1 {
 		t.Fatalf("production darwinProcessRun literals = %d, want exact owner", darwinRunLiterals)
+	}
+	if goEnvironmentClaimLiterals != 1 || goEnvironmentClaimResults != 1 {
+		t.Fatalf(
+			"production goEnvironmentFileClaim owners = %d literals / %d results, want 1 / 1",
+			goEnvironmentClaimLiterals,
+			goEnvironmentClaimResults,
+		)
+	}
+}
+
+func functionReturnsTarget(function *ast.FuncDecl, target string) bool {
+	if function == nil || function.Type == nil || function.Type.Results == nil {
+		return false
+	}
+	for _, field := range function.Type.Results.List {
+		found := false
+		ast.Inspect(field.Type, func(node ast.Node) bool {
+			identifier, ok := node.(*ast.Ident)
+			if ok && identifier.Name == target {
+				found = true
+				return false
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalGoEnvironmentClaimResult(name string, function *ast.FuncDecl) bool {
+	if name != "preflight_authority.go" || function == nil ||
+		function.Name.Name != "admitLiveGoEnvironment" || function.Recv == nil ||
+		len(function.Recv.List) != 1 || function.Type.Results == nil ||
+		len(function.Type.Results.List) != 2 {
+		return false
+	}
+	receiver, ok := function.Recv.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	receiverName, ok := receiver.X.(*ast.Ident)
+	if !ok || receiverName.Name != "preflightAuthorityRevalidator" {
+		return false
+	}
+	first := targetTypeName(
+		function.Type.Results.List[0].Type,
+		map[string]bool{"goEnvironmentFileClaim": true},
+	)
+	second, ok := function.Type.Results.List[1].Type.(*ast.Ident)
+	return first == "goEnvironmentFileClaim" && ok && second.Name == "authorityUseOutcome"
+}
+
+func canonicalGoEnvironmentClaimLiteral(name string, literal *ast.CompositeLit) bool {
+	if name != "preflight_authority.go" {
+		return false
+	}
+	identifier, ok := literal.Type.(*ast.Ident)
+	if !ok || identifier.Name != "goEnvironmentFileClaim" {
+		return false
+	}
+	want := map[string]string{
+		"goroot":       "goroot",
+		"gorootDigest": "inputs.gorootDigest",
+		"entry":        "inputs.entry",
+		"seal":         "validGoEnvironmentFileClaim",
+	}
+	if len(literal.Elts) != len(want) {
+		return false
+	}
+	seen := make(map[string]bool, len(want))
+	for _, element := range literal.Elts {
+		field, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			return false
+		}
+		key, keyOK := field.Key.(*ast.Ident)
+		if !keyOK || seen[key.Name] {
+			return false
+		}
+		value := ""
+		switch current := field.Value.(type) {
+		case *ast.Ident:
+			value = current.Name
+		case *ast.SelectorExpr:
+			owner, ownerOK := current.X.(*ast.Ident)
+			if ownerOK {
+				value = owner.Name + "." + current.Sel.Name
+			}
+		}
+		if want[key.Name] != value {
+			return false
+		}
+		seen[key.Name] = true
+	}
+	return len(seen) == len(want)
+}
+
+func TestLiveGoEnvironmentOwnerCannotRunProcessesOrAllocateWorkspace(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read buildauthority package: %v", err)
+	}
+	forbiddenCalls := map[string]bool{
+		"allocateWorkspace":       true,
+		"allocateWorkspaceWith":   true,
+		"createTaskWorkspaceWith": true,
+		"Command":                 true,
+		"CommandContext":          true,
+		"Exec":                    true,
+		"ForkExec":                true,
+		"Mkdir":                   true,
+		"MkdirAll":                true,
+		"Mkdirat":                 true,
+		"newProcessSupervisor":    true,
+		"PosixSpawn":              true,
+		"runPreallocation":        true,
+		"runTaskPrivate":          true,
+		"StartProcess":            true,
+	}
+	files := token.NewFileSet()
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "preflight_authority") ||
+			!strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(files, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			called := ""
+			switch function := call.Fun.(type) {
+			case *ast.Ident:
+				called = function.Name
+			case *ast.SelectorExpr:
+				called = function.Sel.Name
+			}
+			if forbiddenCalls[called] {
+				t.Fatalf(
+					"%s invokes forbidden process/allocation surface %s",
+					files.Position(call.Pos()),
+					called,
+				)
+			}
+			return true
+		})
 	}
 }
 
