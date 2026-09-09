@@ -60,6 +60,18 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "2.5-flash-lite", FullName: "gemini-2.5-flash-lite", Description: "Budget multimodal"},
 	},
 	"codex-cli": {
+		// GPT-6 Astra. The slug came from the catalog codex itself fetches
+		// (~/.codex/models_cache.json, priority 1, supported_in_api true) and was
+		// confirmed with a live `codex exec -m gpt-6-astra`.
+		//
+		// Astra's reasoning levels are low, medium, high, xhigh, max, and ultra.
+		// "Ultra" is an effort level on this one model, NOT a separate tier id:
+		// `codex exec -m gpt-6-astra-ultra` returns HTTP 400
+		// invalid_request_error. There is therefore exactly one Astra alias here.
+		// Effort is chosen per launch through model_reasoning_effort, which AGM
+		// does not yet expose for local codex launches (see docs/model-registry.md).
+		{Alias: "astra", FullName: "gpt-6-astra", Description: "GPT-6 Astra, frontier tier ($10/$50) — 272k ctx, efforts low..ultra"},
+		{Alias: "6-astra", FullName: "gpt-6-astra", Description: "GPT-6 Astra (explicit generation spelling)"},
 		// GPT-5.6 explicit tiers. "gpt-5.6" alone is a pre-announcement/alias
 		// string codex CLI rejects ("model metadata for gpt-5.6 not found"); the
 		// resolvable IDs are the sol/terra/luna tiers. Verified pricing (in/out
@@ -167,6 +179,8 @@ var CrossHarnessAliases = map[string]map[string]string{
 		"2.5-pro":   "opus",   // gemini alias → claude equivalent
 		"3.1-pro":   "sonnet", // gemini alias → claude equivalent
 		"3.5-flash": "haiku",  // gemini alias → claude equivalent
+		"astra":     "opus",   // codex tier → claude equivalent (frontier)
+		"6-astra":   "opus",   // codex tier → claude equivalent (frontier)
 		"5.6":       "opus",   // codex alias → claude equivalent
 		"5.6-sol":   "opus",   // codex tier → claude equivalent (frontier)
 		"5.6-terra": "sonnet", // codex tier → claude equivalent (balanced)

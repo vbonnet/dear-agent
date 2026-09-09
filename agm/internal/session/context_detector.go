@@ -456,7 +456,11 @@ func piKnownDirectModelContextWindow(model string) (int, bool) {
 		return 128000, true
 	case "gpt-5.3-codex", "gpt-5.4-mini", "gpt-5.4-nano":
 		return 400000, true
-	case "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+	// gpt-6-astra reports context_window 272000 and max_context_window 872000.
+	// We wire the default, not the max: the larger window is the long-context
+	// pricing band ($20/$75 per Mtok instead of $10/$50), so treating 872k as
+	// the routine budget would silently double the rate a session bills at.
+	case "gpt-6-astra", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
 		return 272000, true
 	case "gpt-5.4-pro", "gpt-5.5-pro":
 		return 1050000, true

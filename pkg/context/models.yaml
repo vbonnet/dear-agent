@@ -352,6 +352,19 @@ models:
 
   # ==================== Current Parity Defaults ====================
 
+  - model_id: "gpt-6-astra"
+    provider: "openai"
+    max_context_tokens: 272000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "codex provider model catalog (~/.codex/models_cache.json, 2026-09-09)"
+    notes: "Frontier codex tier. context_window 272000, max_context_window 872000; the 872k band reprices to $20/$75 per Mtok, so the default window is the budget. effective_context_window_percent 95. Efforts low..ultra; 'ultra' is an effort level, not a separate model id."
+    confidence: "MEDIUM"
+    last_updated: "2026-09-09T00:00:00Z"
+
   - model_id: "gpt-5.5"
     provider: "openai"
     max_context_tokens: 200000
