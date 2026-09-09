@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-09-08 -->
 
-**Version:** 2.8
+**Version:** 2.9
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -121,7 +121,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-53** When the provider client fails an operation whose variables include a reply body, the system shall not copy the client's standard error into operator diagnostics because debug output can echo the request body.
 
-**RESOLVE-REVIEW-THREADS-54** When a named body-file source is selected, the system shall verify that it is a regular file before opening it and shall direct streaming input to the explicit standard-input source.
+**RESOLVE-REVIEW-THREADS-54** When a named body-file source is selected, the system shall open it without blocking on a substituted non-regular object on Unix, validate the opened descriptor as a regular file before reading it, and direct streaming input to the explicit standard-input source.
 
 **RESOLVE-REVIEW-THREADS-55** When any body source emits more than 262,144 bytes or valid UTF-8 contains more than 65,536 Unicode code points, the system shall stop after reading at most 262,145 bytes and fail before issuing any provider mutation.
 

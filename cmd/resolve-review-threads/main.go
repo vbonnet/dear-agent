@@ -187,21 +187,7 @@ func loadReplyBody(path string, stdin io.Reader) (string, error) {
 		}
 		reader = stdin
 	} else {
-		info, err := os.Stat(path) //nolint:gosec // G703: path is the operator-selected reply body source
-		if err != nil {
-			return "", fmt.Errorf("read reply body from %q: %w", path, err)
-		}
-		if !info.Mode().IsRegular() {
-			return "", fmt.Errorf(
-				"reply body source %q must be a regular file; use --body-file - for standard input",
-				path,
-			)
-		}
-		if info.Size() > maxReplyBodyBytes {
-			return "", replyBodyTooLargeError(path)
-		}
-
-		file, err := os.Open(path) //nolint:gosec // path is the operator-selected reply body source
+		file, err := openReplyBodyFile(path)
 		if err != nil {
 			return "", fmt.Errorf("read reply body from %q: %w", path, err)
 		}
@@ -215,7 +201,7 @@ func loadReplyBody(path string, stdin io.Reader) (string, error) {
 		}
 		if !openedInfo.Mode().IsRegular() {
 			return "", fmt.Errorf(
-				"reply body source %q must remain a regular file; use --body-file - for standard input",
+				"reply body source %q must be a regular file; use --body-file - for standard input",
 				path,
 			)
 		}

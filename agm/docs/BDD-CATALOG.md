@@ -937,14 +937,16 @@ locations.
 
 **File:** [`review_thread_reply_safety.feature`](../test/bdd/features/review_thread_reply_safety.feature)
 
-**Drives:** body-file-only and bounded review reply input, byte-preserving
-GitHub delivery, payload-aware provider diagnostics, and non-executable retry
-guidance for `resolve-review-threads`.
+**Drives:** body-file-only and bounded review reply input, descriptor-validated
+nonblocking named-file handling, byte-preserving GitHub delivery, payload-aware
+provider diagnostics, and non-executable retry guidance for
+`resolve-review-threads`.
 
 **Key scenarios:**
 - Review reply bodies remain exact, bounded data outside process arguments and
-  shell evaluation; invalid sources fail before provider mutation; body-bearing
-  errors suppress echoed payloads while body-free provider diagnostics remain.
+  shell evaluation; invalid or replaced named sources fail without blocking and
+  before provider mutation; body-bearing errors suppress echoed payloads while
+  body-free provider diagnostics remain.
 
 **Why this matters:** Review text can contain shell syntax, newlines, and
 Unicode. Treating those bytes as command text can alter the recorded reply or

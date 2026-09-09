@@ -31,6 +31,10 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		oversizedAndEndlessBodySourcesShouldBeBoundedBeforeGitHubMutation,
 	)
 	ctx.Step(
+		`^a replaced named source should fail without blocking$`,
+		replacedNamedSourceShouldFailWithoutBlocking,
+	)
+	ctx.Step(
 		`^GitHub should receive the exact reply bytes without shell evaluation$`,
 		githubShouldReceiveExactReplyBytesWithoutShellEvaluation,
 	)
@@ -59,6 +63,8 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestReplyResolveRejectsInvalidBodySourcesBeforeProviderMutation",
 		"TestLoadReplyBodyPreservesExactBytes",
 		"TestLoadReplyBodyRejectsOversizedOrEndlessSources",
+		"TestLoadReplyBodyRejectsReplacedFIFOWithoutBlocking",
+		"TestLoadReplyBodyUsesNonblockingOpenerWithoutPathStat",
 		"TestGHGraphQLSendsQueryAndVariablesAsJSONStdin",
 		"TestGHGraphQLSuppressesReplyBodyEchoedByChildStderr",
 		"TestGHGraphQLPreservesBodyFreeChildStderr",
@@ -76,6 +82,10 @@ func invalidBodySourcesShouldFailBeforeGitHubMutation(ctx context.Context) error
 }
 
 func oversizedAndEndlessBodySourcesShouldBeBoundedBeforeGitHubMutation(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func replacedNamedSourceShouldFailWithoutBlocking(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 
