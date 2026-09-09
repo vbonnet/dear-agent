@@ -27,12 +27,20 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		invalidBodySourcesShouldFailBeforeGitHubMutation,
 	)
 	ctx.Step(
+		`^oversized and endless body sources should be bounded before GitHub mutation$`,
+		oversizedAndEndlessBodySourcesShouldBeBoundedBeforeGitHubMutation,
+	)
+	ctx.Step(
 		`^GitHub should receive the exact reply bytes without shell evaluation$`,
 		githubShouldReceiveExactReplyBytesWithoutShellEvaluation,
 	)
 	ctx.Step(
 		`^failed provider diagnostics should not echo the reply body$`,
 		failedProviderDiagnosticsShouldNotEchoReplyBody,
+	)
+	ctx.Step(
+		`^body-free provider diagnostics should remain available$`,
+		bodyFreeProviderDiagnosticsShouldRemainAvailable,
 	)
 	ctx.Step(
 		`^retry guidance should reuse the body-file source without rendering its content$`,
@@ -50,8 +58,10 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestReplyResolveRequiresBodyFile",
 		"TestReplyResolveRejectsInvalidBodySourcesBeforeProviderMutation",
 		"TestLoadReplyBodyPreservesExactBytes",
+		"TestLoadReplyBodyRejectsOversizedOrEndlessSources",
 		"TestGHGraphQLSendsQueryAndVariablesAsJSONStdin",
 		"TestGHGraphQLSuppressesReplyBodyEchoedByChildStderr",
+		"TestGHGraphQLPreservesBodyFreeChildStderr",
 		"TestRetryAdviceDoesNotRenderReplyBody",
 	)
 	return nil
@@ -65,11 +75,19 @@ func invalidBodySourcesShouldFailBeforeGitHubMutation(ctx context.Context) error
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 
+func oversizedAndEndlessBodySourcesShouldBeBoundedBeforeGitHubMutation(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
 func githubShouldReceiveExactReplyBytesWithoutShellEvaluation(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 
 func failedProviderDiagnosticsShouldNotEchoReplyBody(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func bodyFreeProviderDiagnosticsShouldRemainAvailable(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 

@@ -66,6 +66,10 @@ func TestReplyResolveRejectsInvalidBodySourcesBeforeProviderMutation(t *testing.
 	if err := os.WriteFile(whitespace, []byte(" \r\n\t"), 0o600); err != nil {
 		t.Fatalf("write whitespace body: %v", err)
 	}
+	oversized := filepath.Join(t.TempDir(), "oversized.md")
+	if err := os.WriteFile(oversized, []byte(strings.Repeat("x", maxReplyBodyBytes+1)), 0o600); err != nil {
+		t.Fatalf("write oversized body: %v", err)
+	}
 
 	for name, args := range map[string][]string{
 		"missing file":  {"PRRT_exact", "--body-file", filepath.Join(t.TempDir(), "missing.md")},
@@ -73,6 +77,7 @@ func TestReplyResolveRejectsInvalidBodySourcesBeforeProviderMutation(t *testing.
 		"invalid UTF-8": {"PRRT_exact", "--body-file", invalidUTF8},
 		"empty":         {"PRRT_exact", "--body-file", empty},
 		"whitespace":    {"PRRT_exact", "--body-file", whitespace},
+		"oversized":     {"PRRT_exact", "--body-file", oversized},
 		"duplicate": {
 			"PRRT_exact", "--body-file", empty, "--body-file", whitespace,
 		},
@@ -92,6 +97,54 @@ func TestReplyResolveRejectsInvalidBodySourcesBeforeProviderMutation(t *testing.
 			}
 		})
 	}
+}
+
+func TestLoadReplyBodyRejectsOversizedOrEndlessSources(t *testing.T) {
+	maxASCII := strings.Repeat("x", maxReplyBodyCharacters)
+	got, err := loadReplyBody("-", strings.NewReader(maxASCII))
+	if err != nil {
+		t.Fatalf("load maximum-sized ASCII body: %v", err)
+	}
+	if got != maxASCII {
+		t.Fatal("maximum-sized ASCII body changed")
+	}
+
+	maxCharacters := strings.Repeat("🧪", maxReplyBodyCharacters)
+	got, err = loadReplyBody("-", strings.NewReader(maxCharacters))
+	if err != nil {
+		t.Fatalf("load maximum-sized UTF-8 body: %v", err)
+	}
+	if got != maxCharacters {
+		t.Fatal("maximum-sized UTF-8 body changed")
+	}
+
+	if _, err := loadReplyBody("-", strings.NewReader(strings.Repeat("x", maxReplyBodyCharacters+1))); err == nil {
+		t.Fatal("character-oversized stdin succeeded")
+	}
+
+	endless := &endlessReplyReader{}
+	if _, err := loadReplyBody("-", endless); err == nil {
+		t.Fatal("endless stdin succeeded")
+	}
+	if endless.read != maxReplyBodyBytes+1 {
+		t.Fatalf("endless stdin read %d bytes, want bounded read of %d", endless.read, maxReplyBodyBytes+1)
+	}
+
+	if _, err := loadReplyBody(t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("non-regular named source error = %v, want regular-file refusal", err)
+	}
+}
+
+type endlessReplyReader struct {
+	read int
+}
+
+func (r *endlessReplyReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	r.read += len(p)
+	return len(p), nil
 }
 
 func TestLoadReplyBodyPreservesExactBytes(t *testing.T) {
@@ -254,6 +307,22 @@ func TestGHGraphQLSuppressesReplyBodyEchoedByChildStderr(t *testing.T) {
 	}
 	if gotBody != body {
 		t.Fatalf("provider body = %q, want exact %q", gotBody, body)
+	}
+}
+
+func TestGHGraphQLPreservesBodyFreeChildStderr(t *testing.T) {
+	_, _ = installEchoingFailingGH(t)
+
+	_, err := ghGraphQL(context.Background(), listQuery, map[string]any{
+		"owner": "BODY-FREE-DIAGNOSTIC",
+		"repo":  "repo",
+		"pr":    37,
+	})
+	if err == nil {
+		t.Fatal("failing gh command succeeded")
+	}
+	if !strings.Contains(err.Error(), "BODY-FREE-DIAGNOSTIC") {
+		t.Fatalf("body-free provider stderr was not retained: %q", err)
 	}
 }
 

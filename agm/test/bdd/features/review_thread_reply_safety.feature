@@ -6,6 +6,8 @@ Feature: Review thread reply safety
     When AGM runs the review reply data-only regressions
     Then reply-resolve should require a body-file source
     And invalid body sources should fail before GitHub mutation
+    And oversized and endless body sources should be bounded before GitHub mutation
     And GitHub should receive the exact reply bytes without shell evaluation
     And failed provider diagnostics should not echo the reply body
+    And body-free provider diagnostics should remain available
     And retry guidance should reuse the body-file source without rendering its content

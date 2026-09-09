@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-09-08 -->
 
-**Version:** 2.7
+**Version:** 2.8
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads`.
 
@@ -111,15 +111,19 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-48** When a resolution's named anchor is no longer the thread's last comment AND the thread is already resolved, the system shall reopen it before reporting the evidence refusal, so a later retry does not silently no-op against a resolved thread whose intervening comment was never read.
 
-**RESOLVE-REVIEW-THREADS-49** When a body-file source contains valid UTF-8 reply content, the system shall preserve its complete byte sequence as the provider-visible reply body without trimming or normalization.
+**RESOLVE-REVIEW-THREADS-49** When a body-file source contains valid UTF-8 reply content within the declared size limits, the system shall preserve its complete byte sequence as the provider-visible reply body without trimming or normalization.
 
-**RESOLVE-REVIEW-THREADS-50** When a body-file source is missing, duplicated, unreadable, invalid UTF-8, empty, or whitespace-only, the system shall fail before issuing any provider mutation.
+**RESOLVE-REVIEW-THREADS-50** When a body-file source is missing, duplicated, non-regular, unreadable, oversized, invalid UTF-8, empty, or whitespace-only, the system shall fail before issuing any provider mutation.
 
 **RESOLVE-REVIEW-THREADS-51** When invoking an external process for a review-thread GraphQL operation, the system shall pass the query and variables as data input and shall not place any variable value in process arguments.
 
 **RESOLVE-REVIEW-THREADS-52** The system shall not evaluate reply-body content as shell syntax or permit embedded command substitutions to execute.
 
 **RESOLVE-REVIEW-THREADS-53** When the provider client fails an operation whose variables include a reply body, the system shall not copy the client's standard error into operator diagnostics because debug output can echo the request body.
+
+**RESOLVE-REVIEW-THREADS-54** When a named body-file source is selected, the system shall verify that it is a regular file before opening it and shall direct streaming input to the explicit standard-input source.
+
+**RESOLVE-REVIEW-THREADS-55** When any body source emits more than 262,144 bytes or valid UTF-8 contains more than 65,536 Unicode code points, the system shall stop after reading at most 262,145 bytes and fail before issuing any provider mutation.
 
 ## BDD Traceability
 

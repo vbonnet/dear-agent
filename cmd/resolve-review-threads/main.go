@@ -68,8 +68,15 @@ import (
 	"unicode/utf8"
 )
 
-// bodyPreviewLen caps the comment-body preview surfaced in list output.
-const bodyPreviewLen = 120
+const (
+	// bodyPreviewLen caps the comment-body preview surfaced in list output.
+	bodyPreviewLen = 120
+	// GitHub-owned review tooling caps comment bodies at 65,536 Unicode code
+	// points. The byte ceiling keeps reads finite while allowing UTF-8's
+	// largest encoding for every accepted code point.
+	maxReplyBodyCharacters = 65_536
+	maxReplyBodyBytes      = maxReplyBodyCharacters * utf8.UTFMax
+)
 
 const unchangedBodySourceAdvice = "re-run reply-resolve with the unchanged --body-file source; " +
 	"if the original source was standard input, replay retained bytes or save them to a named file"
@@ -168,33 +175,82 @@ func parseReplyResolveArgs(args []string) (threadID, bodyFile string, err error)
 	return args[0], args[2], nil
 }
 
-// loadReplyBody reads the caller-selected data source once and returns its
-// bytes unchanged. UTF-8 is validated before conversion because encoding/json
-// replaces invalid string bytes with U+FFFD, which would silently violate the
-// exact-body contract.
+// loadReplyBody reads the caller-selected data source once, within a fixed
+// memory bound, and returns accepted bytes unchanged. UTF-8 is validated before
+// conversion because encoding/json replaces invalid string bytes with U+FFFD,
+// which would silently violate the exact-body contract.
 func loadReplyBody(path string, stdin io.Reader) (string, error) {
-	var (
-		body []byte
-		err  error
-	)
+	var reader io.Reader
 	if path == "-" {
 		if stdin == nil {
 			return "", errors.New("read reply body from stdin: input is unavailable")
 		}
-		body, err = io.ReadAll(stdin)
+		reader = stdin
 	} else {
-		body, err = os.ReadFile(path) //nolint:gosec // path is the operator-selected reply body source
+		info, err := os.Stat(path) //nolint:gosec // G703: path is the operator-selected reply body source
+		if err != nil {
+			return "", fmt.Errorf("read reply body from %q: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf(
+				"reply body source %q must be a regular file; use --body-file - for standard input",
+				path,
+			)
+		}
+		if info.Size() > maxReplyBodyBytes {
+			return "", replyBodyTooLargeError(path)
+		}
+
+		file, err := os.Open(path) //nolint:gosec // path is the operator-selected reply body source
+		if err != nil {
+			return "", fmt.Errorf("read reply body from %q: %w", path, err)
+		}
+		defer func() {
+			_ = file.Close()
+		}()
+
+		openedInfo, err := file.Stat()
+		if err != nil {
+			return "", fmt.Errorf("inspect reply body source %q: %w", path, err)
+		}
+		if !openedInfo.Mode().IsRegular() {
+			return "", fmt.Errorf(
+				"reply body source %q must remain a regular file; use --body-file - for standard input",
+				path,
+			)
+		}
+		if openedInfo.Size() > maxReplyBodyBytes {
+			return "", replyBodyTooLargeError(path)
+		}
+		reader = file
 	}
+
+	body, err := io.ReadAll(io.LimitReader(reader, maxReplyBodyBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read reply body from %q: %w", path, err)
 	}
+	if len(body) > maxReplyBodyBytes {
+		return "", replyBodyTooLargeError(path)
+	}
 	if !utf8.Valid(body) {
 		return "", fmt.Errorf("reply body from %q must be valid UTF-8", path)
+	}
+	if utf8.RuneCount(body) > maxReplyBodyCharacters {
+		return "", replyBodyTooLargeError(path)
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return "", errors.New("reply body must not be empty: resolution needs a stated reason")
 	}
 	return string(body), nil
+}
+
+func replyBodyTooLargeError(path string) error {
+	return fmt.Errorf(
+		"reply body from %q exceeds the limit of %d Unicode characters or %d UTF-8 bytes",
+		path,
+		maxReplyBodyCharacters,
+		maxReplyBodyBytes,
+	)
 }
 
 // cmdReplyResolve posts a reply on one thread and then resolves it, so the
@@ -660,6 +716,7 @@ reported but never sufficient: the hunk moving is not the point being fixed.
 
 Resolution is GraphQL-only; all calls go through an authenticated gh CLI.
 Use a named body file when durable retry may matter; standard input cannot be
-replayed unless the caller retains the same bytes.
+replayed unless the caller retains the same bytes. Reply bodies are limited to
+65,536 Unicode characters and 262,144 UTF-8 bytes.
 `)
 }
