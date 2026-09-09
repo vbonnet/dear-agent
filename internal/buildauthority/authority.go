@@ -45,7 +45,8 @@ type retainedNullDevice struct {
 // retained null descriptor. It intentionally exposes neither Close nor the
 // descriptor itself to the process request.
 type retainedNullProcessBorrow struct {
-	device *retainedNullDevice
+	device     *retainedNullDevice
+	descriptor *os.File
 }
 
 func (device *retainedNullDevice) borrowProcessInput() (retainedNullProcessBorrow, bool) {
@@ -61,14 +62,17 @@ func (device *retainedNullDevice) borrowProcessInput() (retainedNullProcessBorro
 		) != nil {
 		return retainedNullProcessBorrow{}, false
 	}
-	return retainedNullProcessBorrow{device: device}, true
+	return retainedNullProcessBorrow{
+		device:     device,
+		descriptor: device.leaf.descriptor,
+	}, true
 }
 
 func (borrow retainedNullProcessBorrow) processReader() io.Reader {
-	if borrow.device == nil || borrow.device.leaf == nil {
+	if borrow.descriptor == nil {
 		return nil
 	}
-	return borrow.device.leaf.descriptor
+	return borrow.descriptor
 }
 
 func (borrow retainedNullProcessBorrow) revalidate(ctx context.Context) error {

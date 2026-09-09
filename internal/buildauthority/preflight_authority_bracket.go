@@ -23,6 +23,21 @@ type authorityDescriptorComparisonObservation struct {
 	policyFailure *authorityPrimitiveFailure
 }
 
+// authoritySentinelAbsenceMode closes the two meanings of a sentinel
+// observation. The primitive owns the distinct initial-policy and later-drift
+// operation attribution.
+type authoritySentinelAbsenceMode uint8
+
+const (
+	authorityInitialSentinelAbsence authoritySentinelAbsenceMode = iota + 1
+	authorityExpectedSentinelAbsence
+)
+
+func (mode authoritySentinelAbsenceMode) valid() bool {
+	return mode == authorityInitialSentinelAbsence ||
+		mode == authorityExpectedSentinelAbsence
+}
+
 func validateDeferredAuthorityPolicy(
 	ctx context.Context,
 	failure *authorityPrimitiveFailure,
@@ -42,9 +57,15 @@ func validateDeferredAuthorityPolicy(
 
 // preflightAuthorityBracketPrimitives is the deterministic substitution seam
 // for the authority brackets consumed by the future non-source runner. The
-// runner never sees this mechanism vocabulary; it receives only the six
-// nominal revalidation methods below.
+// runner never sees this mechanism vocabulary; it receives only the nominal
+// authority methods below.
 type preflightAuthorityBracketPrimitives struct {
+	probeSentinelAbsence func(
+		context.Context,
+		*os.File,
+		string,
+		authoritySentinelAbsenceMode,
+	) *authorityPrimitiveFailure
 	openAbsoluteRoot func(
 		context.Context,
 	) (*authorityDescriptorAcquisition, *authorityPrimitiveFailure)
@@ -115,7 +136,8 @@ type preflightAuthorityBracketPrimitives struct {
 }
 
 func (primitives preflightAuthorityBracketPrimitives) valid() bool {
-	return primitives.openAbsoluteRoot != nil &&
+	return primitives.probeSentinelAbsence != nil &&
+		primitives.openAbsoluteRoot != nil &&
 		primitives.openRootHandle != nil &&
 		primitives.openNullRelativeNoFollow != nil &&
 		primitives.probeRelativeKind != nil &&
@@ -133,6 +155,76 @@ func (primitives preflightAuthorityBracketPrimitives) valid() bool {
 func (revalidator *preflightAuthorityRevalidator) validForBrackets() bool {
 	return revalidator != nil && revalidator.primitives.valid() &&
 		revalidator.primitives.brackets.valid()
+}
+
+func (revalidator *preflightAuthorityRevalidator) admitPhysicalRootSentinels(
+	ctx context.Context,
+	root *physicalRootAuthority,
+) (physicalRootSentinelClaim, authorityUseOutcome) {
+	var outcome authorityUseOutcome
+	if ctx == nil || !revalidator.validForBrackets() {
+		outcome.addPrimitive(newAuthorityPrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		))
+		return physicalRootSentinelClaim{}, outcome
+	}
+	directory, err := validatePhysicalRootAuthorityShape(root)
+	if err != nil {
+		outcome.addPrimitive(newAuthorityPrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		))
+		return physicalRootSentinelClaim{}, outcome
+	}
+	for _, name := range physicalRootSentinelNames() {
+		failure := revalidator.primitives.brackets.probeSentinelAbsence(
+			ctx,
+			directory.descriptor,
+			name,
+			authorityInitialSentinelAbsence,
+		)
+		if failure != nil {
+			outcome.addPrimitive(failure)
+			return physicalRootSentinelClaim{}, outcome
+		}
+	}
+	return physicalRootSentinelClaim{
+		root: root,
+		seal: validPhysicalRootSentinelClaim,
+	}, outcome
+}
+
+func (revalidator *preflightAuthorityRevalidator) revalidatePhysicalRootSentinels(
+	ctx context.Context,
+	claim physicalRootSentinelClaim,
+) authorityUseOutcome {
+	var outcome authorityUseOutcome
+	if ctx == nil || !revalidator.validForBrackets() ||
+		claim.seal != validPhysicalRootSentinelClaim {
+		outcome.addPrimitive(newAuthorityPrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		))
+		return outcome
+	}
+	directory, err := validatePhysicalRootAuthorityShape(claim.root)
+	if err != nil {
+		outcome.addPrimitive(newAuthorityPrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		))
+		return outcome
+	}
+	for _, name := range physicalRootSentinelNames() {
+		outcome.addPrimitive(revalidator.primitives.brackets.probeSentinelAbsence(
+			ctx,
+			directory.descriptor,
+			name,
+			authorityExpectedSentinelAbsence,
+		))
+	}
+	return outcome
 }
 
 // resolvedAuthorityPath owns only descriptors acquired after the borrowed

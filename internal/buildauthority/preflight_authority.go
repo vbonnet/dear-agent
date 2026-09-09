@@ -391,6 +391,26 @@ func (revalidator *preflightAuthorityRevalidator) revalidateLiveGoEnvironment(
 	)
 }
 
+// revalidateGoEnvironmentPlan is the nominal runner-facing seam. The runner
+// never receives the owned go.env claim directly; only the sealed plan that
+// already binds that claim to its exact GOROOT may request this bracket.
+func (revalidator *preflightAuthorityRevalidator) revalidateGoEnvironmentPlan(
+	ctx context.Context,
+	plan goEnvironmentPlan,
+) authorityUseOutcome {
+	if !plan.valid() {
+		return authorityUseOutcome{
+			primary: authorityFailure(OperationValidate, CauseInternalInvariant),
+		}
+	}
+	return revalidator.revalidateLiveGoEnvironment(
+		ctx,
+		plan.environment.authorities.physicalRoot,
+		plan.environment.authorities.goroot,
+		plan.goEnvironmentFile,
+	)
+}
+
 func validateLiveGoEnvironmentInputs(
 	ctx context.Context,
 	physicalRoot *physicalRootAuthority,

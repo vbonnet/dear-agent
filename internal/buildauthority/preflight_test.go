@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -154,6 +155,7 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 		"processSupervisor": {"processRequest": true},
 	}
 	darwinRunLiterals := 0
+	nonSourceRequestLiterals := make(map[string]int)
 	goEnvironmentClaimLiterals := 0
 	goEnvironmentClaimResults := 0
 	entries, err := os.ReadDir(".")
@@ -172,9 +174,13 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 			t.Fatalf("parse %s: %v", name, err)
 		}
 		allowedResult := make(map[*ast.FuncType]bool)
+		requestOwners := make([]*ast.FuncDecl, 0, 5)
 		var goEnvironmentClaimOwner *ast.FuncDecl
 		for _, declaration := range parsed.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
+			if ok && canonicalNonSourceRequestOwner(name, function) {
+				requestOwners = append(requestOwners, function)
+			}
 			if !ok || !functionReturnsTarget(function, "goEnvironmentFileClaim") {
 				continue
 			}
@@ -216,6 +222,21 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 					current.End() <= goEnvironmentClaimOwner.End() &&
 					canonicalGoEnvironmentClaimLiteral(entry.Name(), current) {
 					goEnvironmentClaimLiterals++
+					break
+				}
+				if name == "processRequest" {
+					owner := containingFunction(requestOwners, current)
+					if owner == nil || !canonicalNonSourceProcessRequestLiteral(
+						files,
+						owner.Name.Name,
+						current,
+					) {
+						t.Fatalf(
+							"%s constructs unowned non-source process request",
+							files.Position(current.Pos()),
+						)
+					}
+					nonSourceRequestLiterals[owner.Name.Name]++
 					break
 				}
 				if name != "" {
@@ -310,6 +331,107 @@ func TestUnownedPreflightAuthoritiesHaveNoProductionConstructors(t *testing.T) {
 			goEnvironmentClaimResults,
 		)
 	}
+	for _, name := range []string{
+		"runGoVersion",
+		"runGoEnvironment",
+		"runCompilerVersion",
+		"runGitVersion",
+		"runGitBuiltinInventory",
+	} {
+		if nonSourceRequestLiterals[name] != 1 {
+			t.Fatalf(
+				"production non-source request literals for %s = %d, want 1",
+				name,
+				nonSourceRequestLiterals[name],
+			)
+		}
+	}
+}
+
+func canonicalNonSourceRequestOwner(name string, function *ast.FuncDecl) bool {
+	if name != "process.go" || function == nil || function.Recv == nil ||
+		len(function.Recv.List) != 1 {
+		return false
+	}
+	want := map[string]bool{
+		"runGoVersion":           true,
+		"runGoEnvironment":       true,
+		"runCompilerVersion":     true,
+		"runGitVersion":          true,
+		"runGitBuiltinInventory": true,
+	}
+	if !want[function.Name.Name] {
+		return false
+	}
+	receiver, ok := function.Recv.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	receiverName, ok := receiver.X.(*ast.Ident)
+	return ok && receiverName.Name == "preallocationNonSourceProcessOwner"
+}
+
+func containingFunction(
+	functions []*ast.FuncDecl,
+	node ast.Node,
+) *ast.FuncDecl {
+	for _, function := range functions {
+		if function.Pos() <= node.Pos() && node.End() <= function.End() {
+			return function
+		}
+	}
+	return nil
+}
+
+func canonicalNonSourceProcessRequestLiteral(
+	files *token.FileSet,
+	owner string,
+	literal *ast.CompositeLit,
+) bool {
+	wantArguments := map[string]string{
+		"runGoVersion":           `[]string{"version"}`,
+		"runGoEnvironment":       "goEnvironmentArguments()",
+		"runCompilerVersion":     `[]string{"-V=full"}`,
+		"runGitVersion":          `[]string{"version","--build-options"}`,
+		"runGitBuiltinInventory": `[]string{"--git-dir=/dev/null","--list-cmds=builtins"}`,
+	}
+	want := map[string]string{
+		"ctx":                 "authority.ctx",
+		"phase":               "PhaseAuthority",
+		"executable":          "plan.executable.retained.leaf.path",
+		"arguments":           wantArguments[owner],
+		"directory":           "physicalRootPath",
+		"input":               "newBracketedRetainedNullProcessInput(authority.nullWitness)",
+		"stdoutLimit":         "processMaxStructuredOutputBytes",
+		"phaseDeadline":       "authority.phaseDeadline",
+		"callerDeadline":      "authority.callerDeadline",
+		"transactionDeadline": "authority.transactionDeadline",
+	}
+	if wantArguments[owner] == "" || len(literal.Elts) != len(want) {
+		return false
+	}
+	seen := make(map[string]bool, len(want))
+	for _, element := range literal.Elts {
+		field, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			return false
+		}
+		key, ok := field.Key.(*ast.Ident)
+		if !ok || seen[key.Name] || want[key.Name] == "" {
+			return false
+		}
+		var rendered bytes.Buffer
+		if err := format.Node(&rendered, files, field.Value); err != nil {
+			return false
+		}
+		compact := strings.Join(strings.Fields(rendered.String()), "")
+		compact = strings.ReplaceAll(compact, ",}", "}")
+		if compact != want[key.Name] {
+			return false
+		}
+		seen[key.Name] = true
+	}
+	return len(seen) == len(want)
 }
 
 func functionReturnsTarget(function *ast.FuncDecl, target string) bool {
