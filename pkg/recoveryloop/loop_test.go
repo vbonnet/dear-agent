@@ -64,8 +64,8 @@ func TestPlan_MissingBinary_Reinstall(t *testing.T) {
 	if action != ActionReinstall {
 		t.Fatalf("expected ActionReinstall, got %s", action)
 	}
-	if status != StatusRecovered {
-		t.Fatalf("expected StatusRecovered, got %s", status)
+	if status != StatusUnhealthy {
+		t.Fatalf("expected StatusUnhealthy, got %s", status)
 	}
 }
 
@@ -83,8 +83,8 @@ func TestPlan_UnloadedJob_Bootstrap(t *testing.T) {
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap, got %s", action)
 	}
-	if status != StatusRecovered {
-		t.Fatalf("expected StatusRecovered, got %s", status)
+	if status != StatusUnhealthy {
+		t.Fatalf("expected StatusUnhealthy, got %s", status)
 	}
 	if !strings.Contains(reason, "not loaded") {
 		t.Fatalf("unexpected reason: %s", reason)
@@ -107,8 +107,8 @@ func TestPlan_Exit78_Rebootstrap(t *testing.T) {
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap, got %s", action)
 	}
-	if status != StatusRecovered {
-		t.Fatalf("expected StatusRecovered, got %s", status)
+	if status != StatusUnhealthy {
+		t.Fatalf("expected StatusUnhealthy, got %s", status)
 	}
 	if !strings.Contains(reason, "78") {
 		t.Fatalf("unexpected reason: %s", reason)
@@ -127,15 +127,13 @@ func TestPlan_PulseAlarming_Kickstart(t *testing.T) {
 	launchdJobs := map[string]LaunchdJobInfo{
 		"com.example.myjob": {Loaded: true, Status: 0, PID: 1234},
 	}
-	alarmingPulses := map[string]bool{
-		"myjob-pulse": true,
-	}
-	action, status, _ := PlanJob(job, nil, alarmingPulses, launchdJobs, host, host.Now())
+	truth := PulseTruth{"myjob-pulse": {Known: true, Alarming: true}}
+	action, status, _ := PlanJob(job, nil, truth, launchdJobs, host, host.Now())
 	if action != ActionKickstart {
 		t.Fatalf("expected ActionKickstart, got %s", action)
 	}
-	if status != StatusRecovered {
-		t.Fatalf("expected StatusRecovered, got %s", status)
+	if status != StatusUnhealthy {
+		t.Fatalf("expected StatusUnhealthy, got %s", status)
 	}
 }
 
@@ -188,8 +186,8 @@ func TestPlan_UnloadedWithoutSnooze_AttemptsRecovery(t *testing.T) {
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap, got %s", action)
 	}
-	if status != StatusRecovered {
-		t.Fatalf("expected StatusRecovered, got %s", status)
+	if status != StatusUnhealthy {
+		t.Fatalf("expected StatusUnhealthy, got %s", status)
 	}
 }
 
@@ -212,8 +210,8 @@ func TestPlan_ExpiredSnooze_EligibleForRecovery(t *testing.T) {
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap for expired snooze, got %s", action)
 	}
-	if status != StatusRecovered {
-		t.Fatalf("expected StatusRecovered, got %s", status)
+	if status != StatusUnhealthy {
+		t.Fatalf("expected StatusUnhealthy, got %s", status)
 	}
 }
 
