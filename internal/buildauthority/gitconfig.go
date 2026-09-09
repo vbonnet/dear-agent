@@ -74,7 +74,7 @@ type sourceConfigEntry struct {
 	value string
 }
 
-// sourceConfigClaim is the complete semantic and ordered transcript claim for
+// sourceConfigClaim is the complete semantic and ordered-entry claim for
 // one directly parsed source .git/config. Its fields remain private so callers
 // cannot invent a partially validated configuration.
 type sourceConfigClaim struct {
@@ -764,49 +764,6 @@ func validObjectID(value string, format repositoryObjectFormat) bool {
 type configTranscriptRow struct {
 	key   string
 	value string
-}
-
-func sourceGitCommandOverrideRows() [11]configTranscriptRow {
-	return [...]configTranscriptRow{
-		{key: "core.hookspath", value: "/dev/null"},
-		{key: "protocol.allow", value: "never"},
-		{key: "core.usereplacerefs", value: "false"},
-		{key: "core.commitgraph", value: "false"},
-		{key: "core.multipackindex", value: "false"},
-		{key: "core.fsmonitor", value: "false"},
-		{key: "pack.readreverseindex", value: "false"},
-		{key: "pack.usebitmaps", value: "false"},
-		{key: "maintenance.auto", value: "false"},
-		{key: "fetch.writecommitgraph", value: "false"},
-		{key: "gc.auto", value: "0"},
-	}
-}
-
-func (claim sourceConfigClaim) localTranscript() []byte {
-	var transcript bytes.Buffer
-	for _, entry := range claim.entries {
-		appendConfigTranscriptRow(&transcript, "local", "file:.git/config", entry.key.normalizedName(), entry.value)
-	}
-	return transcript.Bytes()
-}
-
-func (claim sourceConfigClaim) activeTranscript() []byte {
-	transcript := bytes.NewBuffer(claim.localTranscript())
-	for _, row := range sourceGitCommandOverrideRows() {
-		appendConfigTranscriptRow(transcript, "command", "command line:", row.key, row.value)
-	}
-	return transcript.Bytes()
-}
-
-func appendConfigTranscriptRow(destination *bytes.Buffer, scope, origin, key, value string) {
-	destination.WriteString(scope)
-	destination.WriteByte(0)
-	destination.WriteString(origin)
-	destination.WriteByte(0)
-	destination.WriteString(key)
-	destination.WriteByte('\n')
-	destination.WriteString(value)
-	destination.WriteByte(0)
 }
 
 func parseRequestedRevision(revision string, format repositoryObjectFormat) (string, error) {

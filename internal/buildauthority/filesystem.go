@@ -167,18 +167,6 @@ func gomodcachePolicy() treePolicy {
 	}
 }
 
-func repositoryPolicy() treePolicy {
-	return treePolicy{
-		domain: domainRepository,
-		owners: ownerEffectiveOnly,
-		limits: treeLimits{
-			maxEntries:   maxRepositoryEntries,
-			maxBytes:     maxRepositoryBytes,
-			maxFileBytes: maxRepositoryFileBytes,
-		},
-	}
-}
-
 func admitAuthorityTree(ctx context.Context, path string, policy treePolicy) (*treeCapture, error) {
 	if err := checkContext(ctx, "admit authority tree"); err != nil {
 		return nil, err

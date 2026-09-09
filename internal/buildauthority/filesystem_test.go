@@ -113,7 +113,6 @@ func TestTreeBudgetExactAndOneOver(t *testing.T) {
 	}{
 		{name: "goroot", policy: gorootPolicy()},
 		{name: "gomodcache", policy: gomodcachePolicy()},
-		{name: "repository", policy: repositoryPolicy()},
 	}
 	for _, test := range policies {
 		t.Run(test.name, func(t *testing.T) {
