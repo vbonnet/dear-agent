@@ -378,8 +378,30 @@ func inspectDescriptorContextWithACLReader(
 	descriptor *os.File,
 	readAttributes darwinFgetattrlistFunc,
 ) (fileSnapshot, mountSnapshot, Digest, error) {
+	if readAttributes == nil {
+		return fileSnapshot{}, mountSnapshot{}, Digest{}, fail(CauseInternalInvariant, "missing authority ACL reader")
+	}
+	return inspectDescriptorContextWithACLDigest(
+		ctx,
+		descriptor,
+		func(ctx context.Context, fd int) (Digest, error) {
+			return descriptorACLDigestWith(ctx, fd, readAttributes)
+		},
+	)
+}
+
+type descriptorACLDigestFunc func(context.Context, int) (Digest, error)
+
+func inspectDescriptorContextWithACLDigest(
+	ctx context.Context,
+	descriptor *os.File,
+	inspectACL descriptorACLDigestFunc,
+) (fileSnapshot, mountSnapshot, Digest, error) {
 	if descriptor == nil {
 		return fileSnapshot{}, mountSnapshot{}, Digest{}, fail(CauseInternalInvariant, "missing authority descriptor")
+	}
+	if inspectACL == nil {
+		return fileSnapshot{}, mountSnapshot{}, Digest{}, fail(CauseInternalInvariant, "missing authority ACL inspector")
 	}
 	if err := checkContext(ctx, "inspect authority descriptor"); err != nil {
 		return fileSnapshot{}, mountSnapshot{}, Digest{}, err
@@ -401,7 +423,7 @@ func inspectDescriptorContextWithACLReader(
 	if err != nil {
 		return fileSnapshot{}, mountSnapshot{}, Digest{}, err
 	}
-	aclDigest, err := descriptorACLDigestWith(ctx, fd, readAttributes)
+	aclDigest, err := inspectACL(ctx, fd)
 	if err != nil {
 		return fileSnapshot{}, mountSnapshot{}, Digest{}, err
 	}
@@ -477,13 +499,22 @@ func descriptorACLDigestWith(
 }
 
 func darwinFgetattrlist(fd int, attributes *unix.Attrlist, buffer []byte) error {
+	return darwinFgetattrlistWithOptions(fd, attributes, buffer, darwinFSOptReportFullSize)
+}
+
+func darwinFgetattrlistWithOptions(
+	fd int,
+	attributes *unix.Attrlist,
+	buffer []byte,
+	options uintptr,
+) error {
 	_, _, errno := unix.Syscall6(
 		darwinSysFgetattrlist,
 		uintptr(fd),
 		uintptr(unsafe.Pointer(attributes)),
 		uintptr(unsafe.Pointer(&buffer[0])),
 		uintptr(len(buffer)),
-		darwinFSOptReportFullSize,
+		options,
 		0,
 	)
 	runtime.KeepAlive(attributes)

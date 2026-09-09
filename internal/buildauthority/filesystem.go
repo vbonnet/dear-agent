@@ -307,8 +307,8 @@ func openRetainedDirectoryFromRootContextWithInspect(
 	}
 	return nil, joinFilesystemFailures(
 		inspectErr,
-		closeDescriptorFailure(root.Close()),
 		closeDescriptorFailure(descriptor.Close()),
+		closeDescriptorFailure(root.Close()),
 	)
 }
 
