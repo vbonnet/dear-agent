@@ -75,10 +75,7 @@ func buildPagedHistorySnapshotOperation(
 	aliases := make([]string, 0, (len(commentIDs)+maxPagedHistorySnapshotIDsPerField-1)/maxPagedHistorySnapshotIDsPerField)
 	batchIDs := make([][]string, 0, cap(aliases))
 	for start, batch := 0, 0; start < len(commentIDs); start, batch = start+maxPagedHistorySnapshotIDsPerField, batch+1 {
-		end := start + maxPagedHistorySnapshotIDsPerField
-		if end > len(commentIDs) {
-			end = len(commentIDs)
-		}
+		end := min(start+maxPagedHistorySnapshotIDsPerField, len(commentIDs))
 		variableName := fmt.Sprintf("commentIDs%d", batch)
 		alias := fmt.Sprintf("snapshot%d", batch)
 		definitions = append(definitions, fmt.Sprintf("$%s:[ID!]!", variableName))
@@ -637,97 +634,108 @@ func samePagedHistoryComment(left, right tailComment) bool {
 	return left == right
 }
 
-// revalidatePagedHistory turns a mixed-request history walk into the stable
-// classification input. The observed IDs define the set and order; one bulk
-// provider operation refreshes every field and binds it to the target's count,
-// opening comment, and final pair. It intentionally makes no claim about a
-// provider transaction spanning this read and a later mutation.
-func revalidatePagedHistory(
-	ctx context.Context,
+func validatePagedHistoryObservation(
 	threadID string,
 	observed []tailComment,
-) (stableReplyHistory, error) {
+) ([]string, map[string]struct{}, error) {
 	if len(observed) == 0 {
-		return stableReplyHistory{}, fmt.Errorf("paged history for %s was empty", threadID)
+		return nil, nil, fmt.Errorf("paged history for %s was empty", threadID)
 	}
 	commentIDs := make([]string, 0, len(observed))
 	seenObserved := make(map[string]struct{}, len(observed))
 	for _, comment := range observed {
 		if !validContinuationReceiptID(comment.ID) {
-			return stableReplyHistory{}, fmt.Errorf("paged history for %s omitted a safe comment ID", threadID)
+			return nil, nil, fmt.Errorf("paged history for %s omitted a safe comment ID", threadID)
 		}
 		if _, duplicate := seenObserved[comment.ID]; duplicate {
-			return stableReplyHistory{}, fmt.Errorf("paged history for %s repeated comment ID %s", threadID, comment.ID)
+			return nil, nil, fmt.Errorf("paged history for %s repeated comment ID %s", threadID, comment.ID)
 		}
 		seenObserved[comment.ID] = struct{}{}
 		commentIDs = append(commentIDs, comment.ID)
 	}
+	return commentIDs, seenObserved, nil
+}
 
-	operation := buildPagedHistorySnapshotOperation(threadID, commentIDs)
-	raw, err := ghGraphQL(ctx, operation.Query, operation.Variables)
-	if err != nil {
-		return stableReplyHistory{}, fmt.Errorf("refresh paged history for %s: %w", threadID, err)
-	}
+func decodePagedHistorySnapshotEnvelope(
+	threadID string,
+	raw []byte,
+	operation pagedHistorySnapshotOperation,
+) (map[string]json.RawMessage, *pagedHistoryTarget, error) {
 	var resp pagedHistorySnapshotResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return stableReplyHistory{}, fmt.Errorf("parse paged history snapshot for %s: %w", threadID, err)
+		return nil, nil, fmt.Errorf("parse paged history snapshot for %s: %w", threadID, err)
 	}
 	if len(resp.Errors) != 0 {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s contained provider errors", threadID)
+		return nil, nil, fmt.Errorf("paged history snapshot for %s contained provider errors", threadID)
 	}
 	if resp.Data == nil {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s was partial", threadID)
+		return nil, nil, fmt.Errorf("paged history snapshot for %s was partial", threadID)
 	}
 	if len(resp.Data) != len(operation.Aliases)+1 {
-		return stableReplyHistory{}, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"paged history snapshot for %s returned an unexpected number of fields",
 			threadID,
 		)
 	}
 	targetRaw, present := resp.Data["target"]
 	if !present {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its target", threadID)
+		return nil, nil, fmt.Errorf("paged history snapshot for %s omitted its target", threadID)
 	}
 	var target *pagedHistoryTarget
 	if err := json.Unmarshal(targetRaw, &target); err != nil {
-		return stableReplyHistory{}, fmt.Errorf("parse paged history target for %s: %w", threadID, err)
+		return nil, nil, fmt.Errorf("parse paged history target for %s: %w", threadID, err)
 	}
 	if target == nil {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s returned a null target", threadID)
+		return nil, nil, fmt.Errorf("paged history snapshot for %s returned a null target", threadID)
 	}
+	return resp.Data, target, nil
+}
+
+func validatePagedHistorySnapshotTarget(
+	threadID string,
+	target *pagedHistoryTarget,
+	observedCount int,
+) error {
 	if target.ID == "" {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot omitted the requested thread ID %s", threadID)
+		return fmt.Errorf("paged history snapshot omitted the requested thread ID %s", threadID)
 	}
 	if target.ID != threadID {
-		return stableReplyHistory{}, fmt.Errorf(
+		return fmt.Errorf(
 			"paged history snapshot for %s returned mismatched thread ID %s",
 			threadID,
 			target.ID,
 		)
 	}
 	if target.IsResolved == nil {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its resolved state", threadID)
+		return fmt.Errorf("paged history snapshot for %s omitted its resolved state", threadID)
 	}
 	if target.Path == "" {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its path", threadID)
+		return fmt.Errorf("paged history snapshot for %s omitted its path", threadID)
 	}
 	if target.Opening.TotalCount == nil || target.Opening.Nodes == nil || target.Recent.Nodes == nil {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s omitted its count, opening, or tail", threadID)
+		return fmt.Errorf("paged history snapshot for %s omitted its count, opening, or tail", threadID)
 	}
-	if *target.Opening.TotalCount != len(observed) {
-		return stableReplyHistory{}, fmt.Errorf(
+	if *target.Opening.TotalCount != observedCount {
+		return fmt.Errorf(
 			"paged history snapshot for %s changed comment count from %d to %d",
 			threadID,
-			len(observed),
+			observedCount,
 			*target.Opening.TotalCount,
 		)
 	}
+	return nil
+}
 
-	snapshot := make([]tailComment, 0, len(observed))
+func decodePagedHistorySnapshotAliases(
+	threadID string,
+	data map[string]json.RawMessage,
+	operation pagedHistorySnapshotOperation,
+) ([]tailComment, error) {
+	snapshot := make([]tailComment, 0)
 	for i, alias := range operation.Aliases {
-		batchRaw, ok := resp.Data[alias]
+		batchRaw, ok := data[alias]
 		if !ok {
-			return stableReplyHistory{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"paged history snapshot for %s omitted alias %s",
 				threadID,
 				alias,
@@ -735,7 +743,7 @@ func revalidatePagedHistory(
 		}
 		var batch []*pagedHistoryCommentNode
 		if err := json.Unmarshal(batchRaw, &batch); err != nil {
-			return stableReplyHistory{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"parse paged history snapshot alias %s for %s: %w",
 				alias,
 				threadID,
@@ -743,7 +751,7 @@ func revalidatePagedHistory(
 			)
 		}
 		if len(batch) != len(operation.BatchIDs[i]) {
-			return stableReplyHistory{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"paged history snapshot alias %s for %s returned %d comments, want %d",
 				alias,
 				threadID,
@@ -763,17 +771,17 @@ func revalidatePagedHistory(
 				node,
 			)
 			if err != nil {
-				return stableReplyHistory{}, err
+				return nil, err
 			}
 			if _, requested := expectedBatchIDs[comment.ID]; !requested {
-				return stableReplyHistory{}, fmt.Errorf(
+				return nil, fmt.Errorf(
 					"paged history snapshot alias %s for %s returned an ID requested through another alias",
 					alias,
 					threadID,
 				)
 			}
 			if _, duplicate := seenBatchIDs[comment.ID]; duplicate {
-				return stableReplyHistory{}, fmt.Errorf(
+				return nil, fmt.Errorf(
 					"paged history snapshot alias %s for %s repeated a comment ID",
 					alias,
 					threadID,
@@ -783,17 +791,26 @@ func revalidatePagedHistory(
 			snapshot = append(snapshot, comment)
 		}
 	}
+	return snapshot, nil
+}
+
+func orderPagedHistorySnapshot(
+	threadID string,
+	commentIDs []string,
+	seenObserved map[string]struct{},
+	snapshot []tailComment,
+) ([]tailComment, error) {
 	refreshedByID := make(map[string]tailComment, len(snapshot))
 	for _, comment := range snapshot {
 		if _, known := seenObserved[comment.ID]; !known {
-			return stableReplyHistory{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"paged history snapshot for %s returned unrequested comment ID %s",
 				threadID,
 				comment.ID,
 			)
 		}
 		if _, duplicate := refreshedByID[comment.ID]; duplicate {
-			return stableReplyHistory{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"paged history snapshot for %s repeated refreshed comment ID %s",
 				threadID,
 				comment.ID,
@@ -801,11 +818,11 @@ func revalidatePagedHistory(
 		}
 		refreshedByID[comment.ID] = comment
 	}
-	refreshed := make([]tailComment, 0, len(observed))
+	refreshed := make([]tailComment, 0, len(commentIDs))
 	for _, id := range commentIDs {
 		comment, ok := refreshedByID[id]
 		if !ok {
-			return stableReplyHistory{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"paged history snapshot for %s omitted observed comment ID %s",
 				threadID,
 				id,
@@ -813,10 +830,17 @@ func revalidatePagedHistory(
 		}
 		refreshed = append(refreshed, comment)
 	}
+	return refreshed, nil
+}
 
+func validatePagedHistorySnapshotEndpoints(
+	threadID string,
+	target *pagedHistoryTarget,
+	refreshed []tailComment,
+) error {
 	openingNodes := *target.Opening.Nodes
 	if len(openingNodes) != 1 {
-		return stableReplyHistory{}, fmt.Errorf(
+		return fmt.Errorf(
 			"paged history snapshot for %s returned %d opening comments",
 			threadID,
 			len(openingNodes),
@@ -824,20 +848,17 @@ func revalidatePagedHistory(
 	}
 	opening, err := decodePagedHistoryComment(threadID, "opening comment", openingNodes[0])
 	if err != nil {
-		return stableReplyHistory{}, err
+		return err
 	}
 	if !samePagedHistoryComment(opening, refreshed[0]) {
-		return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s returned an inconsistent opening comment", threadID)
+		return fmt.Errorf("paged history snapshot for %s returned an inconsistent opening comment", threadID)
 	}
 
 	recentNodes := *target.Recent.Nodes
-	recentStart := len(refreshed) - 2
-	if recentStart < 0 {
-		recentStart = 0
-	}
+	recentStart := max(len(refreshed)-2, 0)
 	expectedRecent := refreshed[recentStart:]
 	if len(recentNodes) != len(expectedRecent) {
-		return stableReplyHistory{}, fmt.Errorf(
+		return fmt.Errorf(
 			"paged history snapshot for %s returned %d tail comments, want %d",
 			threadID,
 			len(recentNodes),
@@ -847,11 +868,52 @@ func revalidatePagedHistory(
 	for i, node := range recentNodes {
 		comment, err := decodePagedHistoryComment(threadID, fmt.Sprintf("tail comment %d", i+1), node)
 		if err != nil {
-			return stableReplyHistory{}, err
+			return err
 		}
 		if !samePagedHistoryComment(comment, expectedRecent[i]) {
-			return stableReplyHistory{}, fmt.Errorf("paged history snapshot for %s returned an inconsistent tail", threadID)
+			return fmt.Errorf("paged history snapshot for %s returned an inconsistent tail", threadID)
 		}
+	}
+	return nil
+}
+
+// revalidatePagedHistory turns a mixed-request history walk into the stable
+// classification input. The observed IDs define the set and order; one bulk
+// provider operation refreshes every field and binds it to the target's count,
+// opening comment, and final pair. It intentionally makes no claim about a
+// provider transaction spanning this read and a later mutation.
+func revalidatePagedHistory(
+	ctx context.Context,
+	threadID string,
+	observed []tailComment,
+) (stableReplyHistory, error) {
+	commentIDs, seenObserved, err := validatePagedHistoryObservation(threadID, observed)
+	if err != nil {
+		return stableReplyHistory{}, err
+	}
+
+	operation := buildPagedHistorySnapshotOperation(threadID, commentIDs)
+	raw, err := ghGraphQL(ctx, operation.Query, operation.Variables)
+	if err != nil {
+		return stableReplyHistory{}, fmt.Errorf("refresh paged history for %s: %w", threadID, err)
+	}
+	data, target, err := decodePagedHistorySnapshotEnvelope(threadID, raw, operation)
+	if err != nil {
+		return stableReplyHistory{}, err
+	}
+	if err := validatePagedHistorySnapshotTarget(threadID, target, len(observed)); err != nil {
+		return stableReplyHistory{}, err
+	}
+	snapshot, err := decodePagedHistorySnapshotAliases(threadID, data, operation)
+	if err != nil {
+		return stableReplyHistory{}, err
+	}
+	refreshed, err := orderPagedHistorySnapshot(threadID, commentIDs, seenObserved, snapshot)
+	if err != nil {
+		return stableReplyHistory{}, err
+	}
+	if err := validatePagedHistorySnapshotEndpoints(threadID, target, refreshed); err != nil {
+		return stableReplyHistory{}, err
 	}
 
 	return stableReplyHistory{comments: refreshed}, nil

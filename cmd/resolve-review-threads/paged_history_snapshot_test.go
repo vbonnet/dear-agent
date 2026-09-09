@@ -83,10 +83,7 @@ func pagedSnapshotResponse(
 	}
 	batches := make([][]string, 0, (len(snapshotNodes)+maxPagedHistorySnapshotIDsPerField-1)/maxPagedHistorySnapshotIDsPerField)
 	for start := 0; start < len(snapshotNodes); start += maxPagedHistorySnapshotIDsPerField {
-		end := start + maxPagedHistorySnapshotIDsPerField
-		if end > len(snapshotNodes) {
-			end = len(snapshotNodes)
-		}
+		end := min(start+maxPagedHistorySnapshotIDsPerField, len(snapshotNodes))
 		batches = append(batches, snapshotNodes[start:end])
 	}
 	return pagedSnapshotRaw(
