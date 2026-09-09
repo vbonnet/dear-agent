@@ -43,10 +43,78 @@ type processRequest struct {
 	executable          string
 	arguments           []string
 	directory           string
-	input               []byte
+	input               *processInput
 	stdoutLimit         uint64
 	phaseDeadline       time.Time
 	transactionDeadline time.Time
+}
+
+type processInputKind uint8
+
+const (
+	processInputRetainedNull processInputKind = iota + 1
+	processInputBounded
+)
+
+// processInput is a closed tagged union. A retained-null input borrows the
+// transaction-owned descriptor; a bounded input owns a clone and requires one
+// supervisor-owned pipe.
+type processInput struct {
+	kind         processInputKind
+	retainedNull *retainedNullDevice
+	bounded      []byte
+}
+
+func newRetainedNullProcessInput(device *retainedNullDevice) *processInput {
+	return &processInput{kind: processInputRetainedNull, retainedNull: device}
+}
+
+func newBoundedProcessInput(input []byte) *processInput {
+	return &processInput{kind: processInputBounded, bounded: append([]byte(nil), input...)}
+}
+
+type resolvedProcessInput struct {
+	kind         processInputKind
+	retainedNull retainedNullProcessBorrow
+	bounded      []byte
+}
+
+func validProcessInput(input *processInput) bool {
+	if input == nil {
+		return false
+	}
+	switch input.kind {
+	case processInputRetainedNull:
+		if input.bounded != nil {
+			return false
+		}
+		_, ok := input.retainedNull.borrowProcessInput()
+		return ok
+	case processInputBounded:
+		return input.retainedNull == nil
+	default:
+		return false
+	}
+}
+
+func resolveProcessInput(ctx context.Context, input *processInput) (resolvedProcessInput, error) {
+	if !validProcessInput(input) {
+		return resolvedProcessInput{}, fail(CauseInternalInvariant, "invalid process input")
+	}
+	if input.kind == processInputRetainedNull {
+		borrow, ok := input.retainedNull.borrowProcessInput()
+		if !ok {
+			return resolvedProcessInput{}, fail(CauseInternalInvariant, "missing retained null-device input")
+		}
+		if err := borrow.revalidate(ctx); err != nil {
+			return resolvedProcessInput{}, err
+		}
+		return resolvedProcessInput{kind: input.kind, retainedNull: borrow}, nil
+	}
+	return resolvedProcessInput{
+		kind:    input.kind,
+		bounded: append([]byte(nil), input.bounded...),
+	}, nil
 }
 
 // processResult is deliberately package-private. structuredOutput is the only
@@ -151,6 +219,7 @@ func validateProcessRequest(request processRequest) *FailureRecord {
 		phase = PhaseAuthority
 	}
 	invalid := request.ctx == nil || !validPhase(request.phase) ||
+		!validProcessInput(request.input) ||
 		request.stdoutLimit == 0 || request.stdoutLimit > processMaxStructuredOutputBytes ||
 		!cleanAbsoluteProcessPath(request.executable) ||
 		!cleanAbsoluteProcessPath(request.directory)
