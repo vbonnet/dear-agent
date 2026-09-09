@@ -65,7 +65,7 @@ additional product requirements.
 **BUILD-AUTH-039** When either sealed Go environment profile is probed, the build authority shall require its exact keyed canonical-JSON Go projection, including computed `GOTELEMETRY=off` and empty `GOTELEMETRYDIR`.
 **BUILD-AUTH-040** When the Go authority is admitted, the build authority shall require the effective GOCACHEPROG value to be empty.
 **BUILD-AUTH-041** If GOROOT/go.env is missing, then the build authority shall refuse the Go authority.
-**BUILD-AUTH-042** When GOROOT/go.env is admitted, the build authority shall require it to match the normative closed grammar and assignment allowlist.
+**BUILD-AUTH-042** When GOROOT/go.env is admitted or revalidated, the build authority shall use the normative physical-root-anchored fresh-leaf transaction and require the leaf to match the retained GOROOT row, digest, closed grammar, and assignment allowlist.
 **BUILD-AUTH-043** When the compiler authority is derived from the authenticated GOROOT leaf, the build authority shall invoke that distinct retained absolute compiler capability directly under the preallocation profile and require the exact compiler-full-version report in the normative tool-pin table.
 **BUILD-AUTH-044** When the Git authority is admitted, the build authority shall require the exact audited whole-file digest.
 **BUILD-AUTH-045** When the Git authority is admitted, the build authority shall require the normative Apple Git-155 architecture, subtype, and loader policy.
@@ -96,7 +96,7 @@ additional product requirements.
 **BUILD-AUTH-067** When a fixed command plan invokes Go, Git, or the compiler probe directly, the build authority shall execute only the applicable nominal retained absolute executable authority.
 **BUILD-AUTH-068** When a command phase runs, the build authority shall enforce its exact direct-or-derived argv, cwd, environment, stdin, phase, output, diagnostic, and resource contract and shall not publish a successful result until child quiescence, empty stderr, and closure without DescriptorClose of every supervisor-owned transient child-I/O endpoint due at that boundary are proved.
 **BUILD-AUTH-069** When a command phase runs, the build authority shall honor context cancellation and the whole-transaction deadline.
-**BUILD-AUTH-070** When a command phase starts or ends, the build authority shall revalidate every retained authority applicable to that phase, including the physical-root and retained-null capabilities around every command that depends on them.
+**BUILD-AUTH-070** When a command is about to invoke its named process owner or that invocation returns, the build authority shall run every applicable retained-authority revalidation in the fixed normative order, including the physical-root and retained-null checks around every dependent command, and shall run the complete command-end bracket even when request validation, setup, Start, execution, output validation, descriptor closure, or quiescence failed.
 **BUILD-AUTH-071** When a pair is about to be returned, the build authority shall revalidate every retained authority, including physical root, null device, nominal executables, selective source rows, and sealed manifest claims.
 **BUILD-AUTH-072** When the first module-owned direct operational Go child is about to start, the build authority shall require the task-private keyed projection, empty private GOTMPDIR and GOCACHE trees, and the normative physical-root/null bracket for pinned-Go-owned nil-stdin descendants.
 **BUILD-AUTH-073** When a module-owned direct Git or Go child completes or the next module-owned child, final return, or cleanup is about to begin, the build authority shall enforce the applicable private-derived-tree limits and unchanged-workspace invariants.
@@ -205,7 +205,7 @@ additional product requirements.
 **BUILD-AUTH-167** When the rechecked task child is empty and identical, the build authority shall remove only that child.
 **BUILD-AUTH-168** If task-root identity was never observed, quiescence is uncertain, non-root descriptor closure fails, or preflight before the first cleanup unlink encounters a replaced identity, unsafe ownership or mode, nested mount, symlink ambiguity, or incomplete proof, then the build authority shall preserve the complete task and return the corresponding typed refusal without claiming complete task-root absence.
 **BUILD-AUTH-169** When cleanup proof becomes incomplete after the deletion barrier, the build authority shall stop further removal, preserve the remainder, avoid broad recursive or pathname-only deletion, and not claim complete task-root absence.
-**BUILD-AUTH-170** When failures coexist, the build authority shall return one typed refusal whose populated primary, descriptor-close, and cleanup slots appear in that exact order.
+**BUILD-AUTH-170** When failures coexist, the build authority shall preserve the first Primary-eligible failure in write-once Primary, retain at most the first later non-close command-end or block-end authority failure only as the normative private sanitized record, aggregate acquired-descriptor close failures only in DescriptorClose, retain process-quiescence uncertainty only in Cleanup, expose no secondary public slot, and return populated Primary, DescriptorClose, and Cleanup slots in that exact order.
 
 ## Normative outcomes, refusals, and cleanup
 
@@ -225,8 +225,8 @@ value. The report contains these fields and no raw wrapped cause:
 
 | Field | Exact contract |
 | --- | --- |
-| `Primary` | Optional sanitized record for the initiating request or staging operation that failed before cleanup; cleanup never replaces or relabels it |
-| `DescriptorClose` | Optional sanitized record aggregating one or more retained-descriptor close failures; its operation is the earliest failing closure category in transaction order |
+| `Primary` | Optional write-once sanitized record for the first Primary-eligible initiating failure; descriptor closure and cleanup/quiescence never compete for it, and later non-close command-end or block-end authority failures never replace, relabel, or extend it |
+| `DescriptorClose` | Optional sanitized record aggregating one or more acquired-descriptor close failures; its operation is the earliest failing closure category in transaction order |
 | `Cleanup` | Optional sanitized record for uncertain quiescence or for refused, failed, or incomplete identity-gated removal; uncertain quiescence skips removal, so these operations cannot coexist |
 | Populated-slot invariant | At least one slot is populated; populated slots retain `Primary`, `DescriptorClose`, `Cleanup` order |
 | Sanitized record | One fixed phase, one fixed operation, and a nonempty deduplicated cause-code array in the fixed order below |
@@ -235,6 +235,33 @@ value. The report contains these fields and no raw wrapped cause:
 | `Recovery` | Optional exactly when complete absence of an allocated task child was not proved; includes the generated absolute task path, the last verified StateRoot identity, and the task-root identity only when that identity was observed |
 | Root identity record | Device, inode, UID, complete mode, and filesystem identity captured by the last successful descriptor-bound verification |
 | Raw state | Captured diagnostic bytes and raw OS or tool causes remain private and are absent from the report and unwrap chain |
+
+Primary-eligible means an initiating request, validation, authority, process,
+output, source, dependency, build, verification, or final failure. Acquired-
+descriptor closure and process-quiescence or removal conditions use only their
+dedicated slots and never compete for Primary. Primary is write-once for the
+first Primary-eligible failure.
+
+After every named process-owner invocation returns, including a return caused
+by request validation, setup, or `Start` failure, every applicable command-end
+authority check runs in its fixed order. A precheck failure invokes no process
+owner and has no command-end bracket; it closes every transient resource it
+acquired. Successful initial physical-root, retained-null, and sentinel
+admission arms the separate block-end bracket, which runs once on every later
+block exit, including a first-row precheck failure.
+
+If Primary is empty, the earliest failed non-close command-end or block-end
+check becomes Primary even when DescriptorClose or Cleanup is already
+populated. If Primary is occupied, exactly the first later non-close command-end
+or block-end failure in fixed check order is retained only as one private
+sanitized `{phase, operation, cause}` record. It carries one cause and no raw
+error, path, output, or Child; later such failures create no additional record.
+The record exists only until the current block outcome is composed, never
+crosses the module seam or mutates the public report, and its presence withholds
+proof and prevents future execution. DescriptorClose remains dedicated to
+acquired-descriptor closure and Cleanup to process-quiescence uncertainty or
+identity-gated removal. There is no public Secondary or Postcondition slot, and
+deterministic report order is not a claim of chronology.
 
 `Recovery.TaskRoot` is a `*FileIdentity`: it is nil exactly when task-root
 identity was never observed, and every `Report` deep copy also copies the
@@ -278,9 +305,10 @@ even though the quiescence attempt occurred first.
 
 ### Closed non-process failure attribution
 
-Before allocation, the first failing primitive owns the Primary phase and
-operation; a wrapper never relabels it. Every non-process no-scratch boundary
-uses this closed table:
+Before allocation, the first Primary-eligible failing primitive owns the
+write-once Primary phase and operation; a wrapper never relabels it, and
+descriptor closure or cleanup/quiescence never competes for it. Every
+non-process no-scratch boundary uses this closed table:
 
 | First failing primitive | Primary phase and operation |
 | --- | --- |
@@ -303,6 +331,16 @@ uses this closed table:
 | Compare source-row output, physical paths, formats, origins, independent claims, or a repeated source snapshot | `source/compare` |
 | Context cancellation or expiry between primitives | The phase and operation assigned to the next primitive, with `canceled` or `deadline` |
 | Impossible sealed-plan, dependency, or adapter state | The current phase with `validate/internal-invariant` |
+
+At an authority boundary, orchestration may reuse pure parsers, classifiers,
+and claim comparators, but it may not invoke a cause-only composite that spans
+two or more public operations. Each fallible primitive returns its owning
+operation with the classified cause. Descriptor stat and mount probing remain
+distinct from raw ACL acquisition and ACL parsing; a fixed-size `ReaderAt`
+failure belongs to the consuming parse or hash operation. Every primitive that
+acquires a transient leaf transfers one explicit exact-once close obligation to
+its immediate owner, whose close outcome remains separately reportable. A
+later wrapper may preserve this attribution but never infer or replace it.
 
 Descriptor reads have no generic public `read` operation. A read that supplies a
 parser is owned by `parse`; one that supplies a digest by `hash`; a directory
@@ -367,10 +405,12 @@ After complete no-scratch capture, workspace allocation uses this closed table:
 | Other exclusive `mkdirat` failure | `workspace/open` with `not-found`, `permission`, `identity`, `unsupported`, or `unstable`; no allocation or Recovery |
 | Exclusive `mkdirat` succeeds | Immediately record generated name plus retained StateRoot identity as an unobserved allocation before any fallible retain; every later failure has Recovery but no fabricated task-root identity |
 
-Before allocation, failure to close a retained non-StateRoot descriptor adds
-`DescriptorClose/close/close-nonroot/descriptor-close`; StateRoot close failure
-uses `close-root` unless an earlier non-root failure already owns the aggregate
-slot. A no-scratch refusal has no Recovery.
+Before allocation, failure to close any acquired non-StateRoot descriptor adds
+`DescriptorClose/close/close-nonroot/descriptor-close`, including a transient
+leaf whose admission failed before it could become a retained capability. Each
+acquired descriptor has one exact-once close owner independent of Primary.
+StateRoot close failure uses `close-root` unless an earlier non-root failure
+already owns the aggregate slot. A no-scratch refusal has no Recovery.
 
 ## Normative platform and tool pins
 
@@ -482,6 +522,27 @@ Every assignment is overridden by the fixed nonempty child value. Missing,
 duplicate, differently valued, malformed, or unknown assignments and any
 `GOCACHEPROG` assignment refuse.
 
+Initial admission and every applicable command bracket use the same exact
+`revalidateLiveGoEnvironment` transaction. It first resolves the original
+absolute GOROOT pathname no-follow from retained physical `/` and proves that
+it still names the retained GOROOT root and ancestry. Beneath that root it opens
+a fresh no-follow `go.env` leaf and immediately assigns one exact-once owner.
+The operation-attributed primitives then perform descriptor metadata and mount
+probes, raw ACL acquisition and separate ACL parsing, the exact-size parser-
+owned `ReaderAt` read, literal grammar parsing, content hashing, post-read
+descriptor observation, and comparison with the captured tree row and digest.
+The owner closes the fresh leaf on every path. Finally, even after leaf
+validation or close failure, the transaction repeats the physical-root-
+anchored GOROOT pathname resolution and comparison whenever its retained
+prerequisites remain usable. The child-consumed path is therefore proved to
+name the retained tree on both sides of every fresh-leaf transaction.
+
+The initial live claim cannot be published from the captured tree row alone,
+and revalidation never reuses an earlier leaf descriptor. A close failure stays
+in DescriptorClose even when an earlier primitive owns Primary; no cause-only
+composite may erase the initiating operation or the acquired leaf's close
+result.
+
 ### Exact no-scratch capture and probes
 
 No-scratch capture follows this exact eight-step, two-block order:
@@ -502,7 +563,8 @@ nominal Go/compiler/Git, GOROOT, GOMODCACHE, Repository administration, config,
 packed-ref, object-inventory, and revision capabilities; the exact
 `goroot/v1`, `gomodcache/v1`, `repository/v1`, and
 `source-object-content/v1` manifests; and the sealed direct environments and
-nine fixed plans. It is one shared pending/moved/closed move cell: no
+the opaque whole-transaction window plus nine fixed plans. It is one shared
+pending/moved/closed move cell: no
 constituent, copy, raw path, manifest digest, or generic process plan authorizes
 workspace allocation.
 
@@ -518,6 +580,52 @@ and 30-second limit, and require exit zero plus empty stderr:
 | 3 | Compiler: `-V=full` | The exact 96-byte compiler report wire in the tool-pin table |
 | 4 | Git: `version --build-options` | The exact 225-byte transcript below |
 | 5 | Git: `--git-dir=/dev/null --list-cmds=builtins` | The exact 1,467-byte builtin wire; required positions are `cat-file=12`, `check-attr=13`, `checkout=17`, `config=28`, `for-each-ref=47`, `fsck=50`, `init=60`, `log=63`, `ls-tree=66`, `rev-parse=111`, and `status=123` |
+
+One deep private `nonSourceBlock.run` owns this complete five-command segment;
+the commands are not reorderable caller operations. For each row it samples
+one opaque command window, runs every ordered precheck, invokes that row's one
+named process owner only after all prechecks succeed, runs the fixed private
+output validator only if the supervisor releases candidate stdout, and then
+runs every ordered postcheck after the invocation returns. The invocation is
+the exact attempt boundary: request validation, setup, or `Start` failure after
+entry still requires the command-end bracket, while successful `Start` is not
+required. A precheck failure invokes no process owner, has no command-end
+bracket, closes every transient resource it acquired, and prevents all later
+children. Structured stdout, proof, the next child, and the outer caller remain
+unavailable until the applicable bracket succeeds.
+
+Prechecks and postchecks use the same left-to-right order in this closed table:
+
+| Named non-source materializer | Exact ordered precheck and postcheck row |
+| --- | --- |
+| Go version | physical root; retained null; retained GOROOT tree and physical pathname binding; live `go.env`; Go executable role |
+| Go environment | physical root; retained null; retained GOROOT tree and physical pathname binding; live `go.env`; Go executable role |
+| Compiler version | physical root; retained null; retained GOROOT tree and physical pathname binding; compiler executable role |
+| Git version | physical root; retained null; Git executable role |
+| Git builtin inventory | physical root; retained null; Git executable role |
+
+The physical-root sentinels are block-level checks, not per-command checks.
+Successful initial step-4 physical-root, retained-null, and sentinel admission
+arms the block-end bracket. Step 5 then runs exactly once on every later block
+exit, including a first-row precheck failure before any named invocation,
+whenever its retained prerequisites remain usable. Its exact order is physical
+root, retained null, `/go.mod`, `/go.work`, `/.git`, Go role, compiler role, and
+Git role. An unattempted command has no command-end bracket; the armed block-end
+bracket is distinct. If initial step-4 admission fails, the bracket is not armed
+and the transaction closes only what it retained. All checks in an entered
+command-end or block-end bracket are attempted in order even after an earlier
+check fails.
+
+The process owner provides exactly five named non-source materializers: Go
+version, Go environment, compiler version, Git version, and Git builtin
+inventory. Each accepts only its nominal plan and a module-minted command-
+window token, copies the token's exact context and deadlines into one fully
+keyed private `processRequest`, and invokes the preallocation supervisor. A
+production-source guard admits exactly those five request literals with their
+exact direct fields and forbids a generic producer for this block. Later source
+and task-private commands require separate named materializers and closed
+guards; the generic supervisor carrier or an environment value alone confers no
+command authority.
 
 Each of the four source plans uses the same direct profile, retained null stdin,
 deadline, and successful empty-stderr gate, but runs only from the retained
@@ -1154,6 +1262,20 @@ phase or transaction deadline still refuses an otherwise within-bound workload.
 The private derived-tree limit is a phase-boundary admission gate rather than a
 continuous filesystem quota.
 
+At entry, `noScratch.capture` samples the one-hour transaction deadline from
+the same injected monotonic clock used by the process supervisor and retains
+that opaque transaction window through every later validated state.
+Immediately before the first precheck for each non-source command,
+`nonSourceBlock` samples that clock again and mints a private command-window
+token binding the exact caller context, including cancellation without a
+deadline, the retained transaction window, and the new phase sample. After
+precheck success, only the named materializer may consume that token; it places
+the exact context and both derived deadlines in `processRequest` and cannot
+accept raw times or a replacement context. The effective command bound is the
+earliest of the caller-context deadline, retained transaction deadline, and
+phase sample plus 30 seconds. Caller context may shorten either module deadline
+but never extend it, and the supervisor observes time through that same clock.
+
 For every selected external module, cache paths use the pinned Go module-cache
 case-escaping format, while ZIP entries begin with the canonical unescaped
 `<module>@<version>/` prefix. A bounded EOCD/ZIP64 pass validates counts,
@@ -1580,11 +1702,11 @@ merge, installation, or activation.
 | Requirements | Required evidence |
 | --- | --- |
 | 001-019 | Compile-time interface checks plus public lifecycle and receipt tests; every eight-step no-scratch failure closes the already-retained capability prefix, returns no allocation or Recovery, and survives `-race`; successful-`mkdirat` partial-allocation, descriptor, and concurrent Close cases |
-| 020-058 | Public filesystem fixtures plus distinct nominal Go/compiler/Git and retained physical-root/null capability checks; exact `0755` physical-root success, one-off root-mode failures, and wrong null kind, owner, complete `020666` mode, link count, raw major, or raw minor; literal `GOROOT/go.env`, exact Go/compiler/Git wire lengths and digests, root-sentinel outcomes, and per-use identity/security drift; golden SHA-256 vectors for all six manifest domains, fixed root framing, raw-byte ordering, root-count exclusion, control/newline names, and symlink target-record binding; selective `.git` authority/forbidden/inert classification, inert add/remove/replace/reclassify and identity/security drift, and allowed same-inode unread inert-byte change; absent/no-ACL/empty-ACL, bad-filesec-magic, endian, bounds, unknown-bit, permit/deny, and 128/129-entry ACL cases; injected exact/one-over accounting for GOROOT 65,536 descendants, 2 GiB aggregate, and 128 MiB/file, GOMODCACHE 500,000 descendants, 16 GiB aggregate, and 512 MiB/file, and Repository 1,000,000 descendants, 64 GiB aggregate, and 8 GiB/pack; dual-open root identity mismatch and pathname replacement; local/ignore-ownership, visible-flag masking, and descendant FSID/device transition; GOROOT 4-KiB and 40-link exact/one-over, absolute, dangling, directory-target, cycle, escape, and target drift; thin/fat 0/1/32/33 rows, duplicate row, table/slice overlap, alignment, outer/inner mismatch, swapped/FAT64/ARM64e, exact header flags, every allowed command family exact/one-off size, multiplicity, extent, padding, path-prefix lookalike, and panic containment; all five linkedit-data commands with zero-size interior, exact-end, and one-over cursors, a synthetic pinned-Git-shaped empty `LC_DATA_IN_CODE`, and zero-count/nonzero-offset refusal for every other extent family |
-| 059-111 | Public synthetic standalone repositories; exact eight-step/two-block command order and four-manifest move-once aggregate before allocation; first pending pointer-alias transfer success, losing/repeated/concurrent alias refusal before handle access, and exactly-once transfer or close; exact 12-byte lowercase name framing, entropy error/short read, context stop, collision without allocation, 100-candidate exhaustion, every closed noncollision `mkdirat` cause, and immediate post-success unobserved claim; exact no-home initial workspace, sole symlink, and unchanged-policy boundary; retained read/write spool-to-`ReaderAt`, same-inode one-to-zero unlink proof, rename/swap refusal, 4,096/4,097 files, 2-GiB exact/one-over, generations, empty-before-Git, and cleanup; distinct exact 39-row byte-sorted preallocation/task-private direct environments and fresh clones; hostile ambient home/telemetry/sidecar/cache/temp/proxy/loader variables absent; pinned empty-home telemetry-off/no-artifact probe and writable-home negative; every preallocation command and four source rows before allocator count changes, retained-null stdin, root/null brackets, filesystem-write-denied evidence allowing only `/dev/null`, exact 39-to-50 mutation, 51-row Git, 50-row tool-ID, 52-row compile/assembler, and 51-row link projections; object/zlib/pack/delta accounting, same-ID canonical equivalence, commit grammar, raw-tree `40000` to transcript `040000`, tree-DAG/path collision; byte-exact SHA-1/SHA-256 config; raw batch/tree/attribute framing including inert `diff=set`; copy completeness, raw projection equality, checkout, and exact Git state |
+| 020-058 | Public filesystem fixtures plus distinct nominal Go/compiler/Git and retained physical-root/null capability checks; exact `0755` physical-root success, one-off root-mode failures, and wrong null kind, owner, complete `020666` mode, link count, raw major, or raw minor; physical-root-anchored fresh-leaf initial and repeated `GOROOT/go.env` transactions with operation-attributed open/probe/ACL-parse/exact-read/grammar/hash/post-observation/compare, retained-row and digest binding, every primitive failure, and exact-once close including Primary plus DescriptorClose; exact Go/compiler/Git wire lengths and digests, root-sentinel outcomes, and per-use identity/security drift; golden SHA-256 vectors for all six manifest domains, fixed root framing, raw-byte ordering, root-count exclusion, control/newline names, and symlink target-record binding; selective `.git` authority/forbidden/inert classification, inert add/remove/replace/reclassify and identity/security drift, and allowed same-inode unread inert-byte change; absent/no-ACL/empty-ACL, bad-filesec-magic, endian, bounds, unknown-bit, permit/deny, and 128/129-entry ACL cases; injected exact/one-over accounting for GOROOT 65,536 descendants, 2 GiB aggregate, and 128 MiB/file, GOMODCACHE 500,000 descendants, 16 GiB aggregate, and 512 MiB/file, and Repository 1,000,000 descendants, 64 GiB aggregate, and 8 GiB/pack; dual-open root identity mismatch and pathname replacement; local/ignore-ownership, visible-flag masking, and descendant FSID/device transition; GOROOT 4-KiB and 40-link exact/one-over, absolute, dangling, directory-target, cycle, escape, and target drift; thin/fat 0/1/32/33 rows, duplicate row, table/slice overlap, alignment, outer/inner mismatch, swapped/FAT64/ARM64e, exact header flags, every allowed command family exact/one-off size, multiplicity, extent, padding, path-prefix lookalike, and panic containment; all five linkedit-data commands with zero-size interior, exact-end, and one-over cursors, a synthetic pinned-Git-shaped empty `LC_DATA_IN_CODE`, and zero-count/nonzero-offset refusal for every other extent family |
+| 059-111 | Public synthetic standalone repositories; exact eight-step/two-block command order and four-manifest move-once aggregate before allocation; the deep five-command interface, exact pre/post matrix, mandatory entered-bracket completion, separately armed block-end bracket on every later exit, five named request materializers with no raw caller command or timing authority, same-clock opaque command windows, earliest caller/transaction/phase deadline, and zero allocation; first pending pointer-alias transfer success, losing/repeated/concurrent alias refusal before handle access, and exactly-once transfer or close; exact 12-byte lowercase name framing, entropy error/short read, context stop, collision without allocation, 100-candidate exhaustion, every closed noncollision `mkdirat` cause, and immediate post-success unobserved claim; exact no-home initial workspace, sole symlink, and unchanged-policy boundary; retained read/write spool-to-`ReaderAt`, same-inode one-to-zero unlink proof, rename/swap refusal, 4,096/4,097 files, 2-GiB exact/one-over, generations, empty-before-Git, and cleanup; distinct exact 39-row byte-sorted preallocation/task-private direct environments and fresh clones; hostile ambient home/telemetry/sidecar/cache/temp/proxy/loader variables absent; pinned empty-home telemetry-off/no-artifact probe and writable-home negative; every preallocation command and four source rows before allocator count changes, retained-null stdin, root/null brackets, filesystem-write-denied evidence allowing only `/dev/null`, exact 39-to-50 mutation, 51-row Git, 50-row tool-ID, 52-row compile/assembler, and 51-row link projections; object/zlib/pack/delta accounting, same-ID canonical equivalence, commit grammar, raw-tree `40000` to transcript `040000`, tree-DAG/path collision; byte-exact SHA-1/SHA-256 config; raw batch/tree/attribute framing including inert `diff=set`; copy completeness, raw projection equality, checkout, and exact Git state |
 | 112-138 | Synthetic module-cache, `go.sum`, ZIP/ZIP64, cancellation, no-follow source/symlink, graph recheck, assembly, `go_asm.h`, and exact derived-tree threshold cases; all twelve role-list seven-plus-three bundles, no operational role-list child, six module-list/two-mod-verify negative traces, and exact 42 tool-ID total |
 | 139-154 | Deterministic build-info; exact seven-row Go-owned Git argv/output/exit/order traces for all twelve role-package queries and both role builds; exact 98 Git and 42 tool-ID totals; no fifth pinned-Go child constructor; each role's exact operational child multiset and causal partial order with every argv/cwd/environment, allowed ready-action interleavings, and host-derived `GOMAXPROCS`/compiler `-c`; thin-Mach-O, retained-output-identity, role-order, graph comparison, and partial-pair cases plus one opt-in exact real pair build |
-| 155-170 | Public real-process and instance-local supervisor cases plus tagged retained-null and bounded-input-pipe plans, nil/untyped-input refusal, pinned-Go nil-stdin/root-null exception, exit-zero/nonempty-stderr refusal and successful-result withholding until quiescence/closure/empty stderr; production-source guard for the exact 16-byte sigaction ABI, admitted/ignored/changed/query-error `SIGCHLD`, forbidden broad reapers, and allowed exact-PID waits; exact descriptor-read/EOF attribution, required/optional/forbidden observations, sentinel and allocator mappings, preallocation root/non-root close ordering, setup failure before and after task allocation, including successful `mkdirat` with failed retained open and optional recovery identity; exact report mappings, exact-once pipe close/join, captured `Setpgid=true`/`Pgid=0`, Start/process-group-establishment failure, immediate and deliberately delayed observation of a fast exit without post-Start `getpgid`, Darwin/arm64 siginfo size/alignment/field offsets and every exact terminal code/status boundary, nonblocking waitid terminal/anomalous/stopped states, preterminal `ECHILD`/lost-identity no-signal handoff with permanently absent public status despite early or late private Wait return, post-terminal sigaction drift with no signal/probe plus synchronous status-preserving reap, single and persistent EINTR/deadline resampling with the exact positive channel-free five-millisecond retry and second-EINTR handoff, waitid-versus-ProcessState mismatch, natural/nonzero/signaled exit, cancel/deadline/limit/parse/input/read races and fixed precedence including one-read limit-before-parse publication, five-millisecond maximum programmed wait, exact handoff-plus-one-second pipe finalization before every background return, structured-versus-streamed mode validation, a greater-than-256-MiB valid streamed fixture without whole-output retention, concrete-tagged-plan and no-function/writer/open-interface source guards, incomplete-stream-worker no-result and task-preservation proof, terminal-latch versus late-I/O-fault cases, cloned-input concurrent-mutation coverage, a deterministic completion-channel scheduler, five-second post-attempt observation and `child-wait` handoff, leader pinning, required zombie leader, empty/missing/live/wrong-state snapshots, raw sysctl overflow, terminate/wait/probe/drain/survivor faults, provisional `ESRCH`/`EPERM`, 4,096/4,097 members, 1,000-snapshot follow-up, held stdout and stderr, common one-second EOF bound, signed/absent status, exact stderr prefix/count/digest/truncation, earliest-child/single-Child reporting, all disposition/Recovery rows, whole-ledger preflight before any delete, removal plus root-close failure, Primary+DescriptorClose+Cleanup order, replacement root, nested mount, descriptor failure, and concurrent Close |
+| 155-170 | Public real-process and instance-local supervisor cases plus tagged retained-null and bounded-input-pipe plans, nil/untyped-input refusal, pinned-Go nil-stdin/root-null exception, exit-zero/nonempty-stderr refusal and successful-result withholding until quiescence/closure/empty stderr; production-source guard for the exact 16-byte sigaction ABI, admitted/ignored/changed/query-error `SIGCHLD`, forbidden broad reapers, and allowed exact-PID waits; exact descriptor-read/EOF attribution, required/optional/forbidden observations, sentinel and allocator mappings, preallocation root/non-root close ordering, setup failure before and after task allocation, including successful `mkdirat` with failed retained open and optional recovery identity; exact write-once Primary mappings, first-postcheck-as-Primary, child-Primary plus one bounded private non-close postcheck record, proof withholding, no later record, no public secondary slot, independent DescriptorClose and Cleanup, and rendered slot order; exact-once pipe close/join, captured `Setpgid=true`/`Pgid=0`, Start/process-group-establishment failure, immediate and deliberately delayed observation of a fast exit without post-Start `getpgid`, Darwin/arm64 siginfo size/alignment/field offsets and every exact terminal code/status boundary, nonblocking waitid terminal/anomalous/stopped states, preterminal `ECHILD`/lost-identity no-signal handoff with permanently absent public status despite early or late private Wait return, post-terminal sigaction drift with no signal/probe plus synchronous status-preserving reap, single and persistent EINTR/deadline resampling with the exact positive channel-free five-millisecond retry and second-EINTR handoff, waitid-versus-ProcessState mismatch, natural/nonzero/signaled exit, cancel/deadline/limit/parse/input/read races and fixed precedence including one-read limit-before-parse publication, five-millisecond maximum programmed wait, exact handoff-plus-one-second pipe finalization before every background return, structured-versus-streamed mode validation, a greater-than-256-MiB valid streamed fixture without whole-output retention, concrete-tagged-plan and no-function/writer/open-interface source guards, incomplete-stream-worker no-result and task-preservation proof, terminal-latch versus late-I/O-fault cases, cloned-input concurrent-mutation coverage, a deterministic completion-channel scheduler, five-second post-attempt observation and `child-wait` handoff, leader pinning, required zombie leader, empty/missing/live/wrong-state snapshots, raw sysctl overflow, terminate/wait/probe/drain/survivor faults, provisional `ESRCH`/`EPERM`, 4,096/4,097 members, 1,000-snapshot follow-up, held stdout and stderr, common one-second EOF bound, signed/absent status, exact stderr prefix/count/digest/truncation, earliest-child/single-Child reporting, all disposition/Recovery rows, whole-ledger preflight before any delete, removal plus root-close failure, replacement root, nested mount, descriptor failure, and concurrent Close |
 | SPEC ownership | `internal/buildauthority/SPEC.md`; its `# RELATED-SPEC` reciprocal link; the `internal/buildauthority` row and wait-ownership scenario in `agm/test/bdd/features/internal_foundation_guardrails.feature`; and the production-source scanner plus allowed-exact-PID and forbidden-wildcard/foreign-reaper fixtures in `agm/test/bdd/steps/internal_foundation_guardrails_steps.go` and `internal_foundation_guardrails_steps_test.go` |
 
 The current Homebrew ancestry rejection is an acceptance case for
