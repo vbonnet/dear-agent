@@ -1,8 +1,8 @@
 package recoveryloop
 
 import (
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )

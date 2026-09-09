@@ -266,10 +266,13 @@ func processJob(
 ) {
 	prev := state.Jobs[job.Name]
 
+	// A verification left open by an earlier tick is always conclusive: it
+	// either confirms the pulse returned, converts to a counted failure, or
+	// reports that the grace window is still open. In every case this job is
+	// done for this tick and firing another action would only reset the clock.
 	if !prev.PendingDeadline.IsZero() {
-		if settlePending(job, opts, state, rep, truth, prev, now, notifyFn, stderr) {
-			return
-		}
+		settlePending(job, opts, state, rep, truth, prev, now, notifyFn, stderr)
+		return
 	}
 
 	action, plannedStatus, reason := recoveryloop.PlanJob(job, snoozes, truth, launchdJobs, host, now)
@@ -325,8 +328,7 @@ func processJob(
 	}
 }
 
-// settlePending resolves a verification left open by an earlier tick. It
-// reports whether the job is fully handled for this tick.
+// settlePending resolves a verification left open by an earlier tick.
 func settlePending(
 	job recoveryloop.Job,
 	opts *options,
@@ -337,11 +339,11 @@ func settlePending(
 	now time.Time,
 	notifyFn notifier,
 	stderr io.Writer,
-) bool {
+) {
 	if job.Pulse != "" && truth.Present(job.Pulse) {
 		recordVerified(job, prev.PendingAction, fmt.Sprintf("verified: pulse %q returned after %s",
 			job.Pulse, prev.PendingAction), now, state, rep, opts.journalPath, stderr)
-		return true
+		return
 	}
 	if now.After(prev.PendingDeadline) {
 		absentFor := truth.AbsentFor(job.Pulse, now)
@@ -351,7 +353,7 @@ func settlePending(
 			reason += fmt.Sprintf("; absent for %s", absentFor.Round(time.Minute))
 		}
 		recordFailure(job, prev.PendingAction, reason, errors.New(reason), now, state, rep, opts, truth, notifyFn, stderr)
-		return true
+		return
 	}
 	// Still inside the grace window: the answer is not in yet, and firing
 	// another action would only reset the clock.
@@ -367,7 +369,6 @@ func settlePending(
 			job.Pulse, prev.PendingDeadline.Format(time.RFC3339)),
 	})
 	rep.Pending++
-	return true
 }
 
 // recordClear handles a job that needs no action.
@@ -404,6 +405,10 @@ func recordClear(
 		rep.Healthy++
 	case recoveryloop.StatusSnoozed:
 		rep.Snoozed++
+	case recoveryloop.StatusRecovered, recoveryloop.StatusFailed,
+		recoveryloop.StatusUnhealthy, recoveryloop.StatusPending:
+		// Not reachable: PlanJob returns only healthy or snoozed alongside
+		// ActionNone, and every other status is recorded by its own path.
 	}
 }
 
