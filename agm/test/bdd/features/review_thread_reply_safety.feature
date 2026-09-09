@@ -2,7 +2,7 @@
 Feature: Review thread reply safety
   Review reply content must remain exact data throughout thread resolution.
 
-  Scenario: Review reply bodies remain exact non-executable data
+  Scenario: Review reply bodies and thread mutations remain safely verifiable
     When AGM runs the review reply data-only regressions
     Then reply-resolve should require a body-file source
     And invalid body sources should fail before GitHub mutation
@@ -12,3 +12,16 @@ Feature: Review thread reply safety
     And failed provider diagnostics should not echo the reply body
     And body-free provider diagnostics should remain available
     And retry guidance should reuse the body-file source without rendering its content
+    And generated reply-file guidance should prescribe per-thread external creation, retry retention, and confirmed-terminal cleanup
+    And superseded reply guidance should revise the same source without losing its cleanup identity
+    And ambiguous reply outcomes should preserve predecessor evidence before choosing unchanged retry or same-source revision
+    And resolution-anchor recovery should distinguish unverifiable absence from confirmed change
+    And resolved buried or jumped replies should reopen before recovery guidance
+    And uncertain thread evidence should retain the actual source pending inspection
+    And unchanged and revised guidance should preserve the caller's named path or standard-input form
+    And every mutation response should prove the requested thread identity and state
+    And moved resolved tails should reopen before already-resolved guidance
+    And incomplete comment identities should require inspection
+    And resolve transport errors should be classified from a fresh state read
+    And unresolve transport errors should reconcile fresh state before claims
+    And aggregate refusal summaries should report only confirmed outcomes

@@ -331,20 +331,353 @@ func TestRetryAdviceDoesNotRenderReplyBody(t *testing.T) {
 	tick := string(rune(96))
 	body := "PAYLOAD-MUST-STAY-DATA " + tick + "cmd" + tick + " $" + "(touch " + sentinel + ")"
 	installFakeGH(t, "{\"data\":{\"addPullRequestReviewThreadReply\":{}}}")
+	bodyFile := "/tmp/reply body's source"
 
 	diagnostics := captureStderr(t, func() {
-		if _, code := postReplyOrExit(context.Background(), "PRRT_exact", body); code == 0 {
+		if _, code := postReplyOrExit(context.Background(), "PRRT_exact", body, "PRRC_original", bodyFile); code == 0 {
 			t.Fatal("missing reply ID must fail")
 		}
 	})
 	if strings.Contains(diagnostics, body) || strings.Contains(diagnostics, "PAYLOAD-MUST-STAY-DATA") {
 		t.Fatalf("retry diagnostics rendered reply body: %q", diagnostics)
 	}
-	if !strings.Contains(diagnostics, "unchanged --body-file source") {
-		t.Fatalf("retry diagnostics omit body-file recovery contract: %q", diagnostics)
+	for _, want := range []string{
+		"original predecessor PRRC_original was not found",
+		`reply_file='/tmp/reply body'"'"'s source'`,
+		"Inspect the live thread before any retry",
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Errorf("unverified reply diagnostics missing %q: %q", want, diagnostics)
+		}
+	}
+	for _, forbidden := range []string{"rm -f", "trap ", "mktemp", "exact-body retry remains applicable"} {
+		if strings.Contains(diagnostics, forbidden) {
+			t.Fatalf("unverified reply diagnostics licensed an unsafe action %q: %q", forbidden, diagnostics)
+		}
 	}
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Fatalf("retry diagnostics executed embedded command or returned unexpected stat error: %v", err)
+	}
+}
+
+func TestAmbiguousPostFailureRetainsUnchangedBodySource(t *testing.T) {
+	body := "AMBIGUOUS-PAYLOAD-MUST-STAY-DATA"
+	_, _ = installEchoingFailingGH(t)
+
+	diagnostics := captureStderr(t, func() {
+		if _, code := postReplyOrExit(context.Background(), "PRRT_ambiguous", body, "PRRC_original", "-"); code == 0 {
+			t.Fatal("provider-ambiguous reply failure succeeded")
+		}
+	})
+	if strings.Contains(diagnostics, body) {
+		t.Fatalf("ambiguous reply diagnostics rendered reply body: %q", diagnostics)
+	}
+	for _, want := range []string{
+		"reply outcome is ambiguous",
+		"current history could not be re-read",
+		"Retain the exact standard-input bytes",
+		"Inspect the live thread before any retry",
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Errorf("ambiguous reply diagnostics missing %q: %q", want, diagnostics)
+		}
+	}
+	for _, forbidden := range []string{"rm -f", "mktemp", "named file"} {
+		if strings.Contains(diagnostics, forbidden) {
+			t.Errorf("ambiguous reply diagnostics must retain the caller's source, found %q: %q", forbidden, diagnostics)
+		}
+	}
+}
+
+func TestUnchangedReplyBodyGuidancePreservesExistingSource(t *testing.T) {
+	t.Run("named source", func(t *testing.T) {
+		const bodyFile = "/tmp/resolve-review-thread.custom reply's body"
+		got := unchangedReplyBodyGuidance("PRRT_unchanged", bodyFile)
+		for _, want := range []string{
+			`reply_file='/tmp/resolve-review-thread.custom reply'"'"'s body'`,
+			`resolve-review-threads reply-resolve PRRT_unchanged --body-file "$reply_file"`,
+			`rm -f -- "$reply_file"`,
+			"Retain that file unchanged",
+			"Only then continue to another thread or safe-merge",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("unchanged named-source guidance missing %q:\n%s", want, got)
+			}
+		}
+		for _, forbidden := range []string{"mktemp", "reply.md", "<bodyFile>", "--body-file -"} {
+			if strings.Contains(got, forbidden) {
+				t.Errorf("unchanged named-source guidance contains replacement form %q:\n%s", forbidden, got)
+			}
+		}
+	})
+
+	t.Run("standard input", func(t *testing.T) {
+		got := unchangedReplyBodyGuidance("PRRT_stdin_retry", "-")
+		for _, want := range []string{
+			"Replay the exact same retained standard-input bytes",
+			"resolve-review-threads reply-resolve PRRT_stdin_retry --body-file -",
+			"Standard input has no named source to clean up",
+			"terminal resolution is confirmed",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("unchanged standard-input guidance missing %q:\n%s", want, got)
+			}
+		}
+		for _, forbidden := range []string{"reply_file=", "rm -f", "mktemp"} {
+			if strings.Contains(got, forbidden) {
+				t.Errorf("unchanged standard-input guidance contains named-source form %q:\n%s", forbidden, got)
+			}
+		}
+	})
+}
+
+func TestNewReplyBodyGuidanceUsesExternalTemporaryFileLifecycle(t *testing.T) {
+	got := newReplyBodyGuidance("PRRT_thread_specific")
+	normalized := strings.ToLower(got)
+	for _, want := range []string{
+		`reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"`,
+		`resolve-review-threads reply-resolve PRRT_thread_specific --body-file "$reply_file"`,
+		`rm -f -- "$reply_file"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("new-reply guidance missing %q:\n%s", want, got)
+		}
+	}
+	for _, want := range []string{
+		"exact-body retry remains valid",
+		"retain this same file unchanged through the retry",
+		"after terminal resolution is confirmed",
+		"only then continue to the next thread or safe-merge",
+	} {
+		if !strings.Contains(normalized, want) {
+			t.Errorf("new-reply guidance missing %q:\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{
+		"reply.md",
+		"mktemp -t",
+		"mktemp -u",
+		`--body-file $reply_file`,
+		"trap ",
+		"<threadId>",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("new-reply guidance contains unsafe form %q:\n%s", forbidden, got)
+		}
+	}
+	create := strings.Index(got, `reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"`)
+	bodyFile := strings.Index(got, `--body-file "$reply_file"`)
+	retention := strings.Index(normalized, "file unchanged")
+	confirmation := strings.Index(normalized, "terminal resolution is confirmed")
+	cleanup := strings.Index(got, `rm -f -- "$reply_file"`)
+	nextThread := strings.Index(normalized, "next thread")
+	merge := strings.LastIndex(normalized, "safe-merge")
+	if create >= bodyFile || bodyFile >= retention || retention >= confirmation || confirmation >= cleanup || cleanup >= nextThread || cleanup >= merge {
+		t.Errorf("new-reply lifecycle is out of order (create=%d body=%d retain=%d confirm=%d cleanup=%d next=%d merge=%d):\n%s",
+			create, bodyFile, retention, confirmation, cleanup, nextThread, merge, got)
+	}
+}
+
+func TestRevisedReplyBodyGuidanceReusesExistingSource(t *testing.T) {
+	t.Run("named source", func(t *testing.T) {
+		const bodyFile = "/tmp/custom reply's body"
+		got := revisedReplyBodyGuidance("PRRT_revised", bodyFile)
+		normalized := strings.ToLower(got)
+		for _, want := range []string{
+			`reply_file='/tmp/custom reply'"'"'s body'`,
+			`resolve-review-threads reply-resolve PRRT_revised --body-file "$reply_file"`,
+			`rm -f -- "$reply_file"`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("revised named-source guidance missing %q:\n%s", want, got)
+			}
+		}
+		for _, want := range []string{
+			"revise the same named body source in place",
+			"do not create or choose another path",
+			"exact-body retry remains valid",
+			"retain that same source unchanged through the retry",
+			"after terminal resolution is confirmed",
+			"only if it is the task-owned temporary file",
+			"only then continue to the next thread or safe-merge",
+		} {
+			if !strings.Contains(normalized, want) {
+				t.Errorf("revised named-source guidance missing %q:\n%s", want, got)
+			}
+		}
+		for _, forbidden := range []string{
+			"reply.md",
+			"mktemp",
+			`--body-file $reply_file`,
+			"trap ",
+			"<threadId>",
+			"<bodyFile>",
+			"--body-file -",
+		} {
+			if strings.Contains(got, forbidden) {
+				t.Errorf("revised named-source guidance contains unsafe replacement form %q:\n%s", forbidden, got)
+			}
+		}
+		bodyArg := strings.Index(got, `--body-file "$reply_file"`)
+		retention := strings.Index(normalized, "source unchanged")
+		confirmation := strings.Index(normalized, "terminal resolution is confirmed")
+		cleanup := strings.Index(got, `rm -f -- "$reply_file"`)
+		nextThread := strings.Index(normalized, "next thread")
+		merge := strings.LastIndex(normalized, "safe-merge")
+		if bodyArg >= retention || retention >= confirmation || confirmation >= cleanup || cleanup >= nextThread || cleanup >= merge {
+			t.Errorf("revised named-source lifecycle is out of order (body=%d retain=%d confirm=%d cleanup=%d next=%d merge=%d):\n%s",
+				bodyArg, retention, confirmation, cleanup, nextThread, merge, got)
+		}
+	})
+
+	t.Run("standard input", func(t *testing.T) {
+		got := revisedReplyBodyGuidance("PRRT_stdin", "-")
+		normalized := strings.ToLower(got)
+		for _, want := range []string{
+			"revise the retained standard-input bytes",
+			`resolve-review-threads reply-resolve PRRT_stdin --body-file -`,
+			"retain those same revised bytes unchanged through the retry",
+			"standard input has no named source to clean up",
+			"terminal resolution is confirmed",
+			"next thread or safe-merge",
+		} {
+			if !strings.Contains(normalized, strings.ToLower(want)) {
+				t.Errorf("revised standard-input guidance missing %q:\n%s", want, got)
+			}
+		}
+		for _, forbidden := range []string{"mktemp", "reply_file=", "rm -f", "<threadId>"} {
+			if strings.Contains(got, forbidden) {
+				t.Errorf("revised standard-input guidance contains named-source form %q:\n%s", forbidden, got)
+			}
+		}
+	})
+}
+
+func TestGeneratedReplyGuidanceRoutesThroughExternalLifecycle(t *testing.T) {
+	mainSource, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	threadSource, err := os.ReadFile("threads.go")
+	if err != nil {
+		t.Fatalf("read threads.go: %v", err)
+	}
+	productionSource := string(mainSource) + "\n" + string(threadSource)
+	for _, forbidden := range []string{
+		"--body-file reply.md",
+		"mktemp -t",
+		"mktemp -u",
+	} {
+		if strings.Contains(productionSource, forbidden) {
+			t.Errorf("generated reply guidance contains unsafe form %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"newAnswerRecoveryGuidance(",
+		"revisedAnswerRecoveryGuidance(",
+		"unchangedReplyBodyGuidance(",
+		"inspectReplyOutcomeGuidance(",
+	} {
+		if !strings.Contains(productionSource, required) {
+			t.Errorf("production recovery routing omits %q", required)
+		}
+	}
+}
+
+func TestReplyResolutionEvidenceFailureEmitsOneLifecycle(t *testing.T) {
+	threadID := "PRRT_one_lifecycle"
+	tests := []struct {
+		name          string
+		err           error
+		guidance      evidenceRecoveryGuidance
+		marker        string
+		forbidden     []string
+		wantUnresolve bool
+	}{
+		{
+			name:          "reply failed reopen after changed anchor",
+			err:           &failedReopenError{msg: "thread is STILL RESOLVED", recovery: answerChangedEvidence},
+			guidance:      revisedAnswerRecoveryGuidance(threadID, "/tmp/reply-body", true),
+			marker:        "For this thread, revise the same named body source",
+			wantUnresolve: true,
+		},
+		{
+			name:     "reply confirmed follow-up",
+			err:      &supersededEvidenceError{msg: "reviewer commented again"},
+			guidance: revisedAnswerRecoveryGuidance(threadID, "/tmp/reply-body", true),
+			marker:   "For this thread, revise the same named body source",
+		},
+		{
+			name:          "bare failed reopen after changed anchor",
+			err:           &failedReopenError{msg: "thread is STILL RESOLVED", recovery: answerChangedEvidence},
+			guidance:      newAnswerRecoveryGuidance(threadID, false),
+			marker:        "For this thread, create a task-owned reply file",
+			wantUnresolve: true,
+		},
+		{
+			name:     "bare unanswered",
+			err:      &unansweredError{msg: "reviewer commented again"},
+			guidance: newAnswerRecoveryGuidance(threadID, false),
+			marker:   "For this thread, create a task-owned reply file",
+		},
+		{
+			name:          "reply failed reopen after empty anchor",
+			err:           &failedReopenError{msg: "thread is STILL RESOLVED", recovery: retryUnchangedEvidence},
+			guidance:      revisedAnswerRecoveryGuidance(threadID, "/tmp/reply-body", true),
+			marker:        "Inspect the live thread before any retry",
+			forbidden:     []string{"Retry with:", "revise the same", "mktemp", "rm -f"},
+			wantUnresolve: true,
+		},
+		{
+			name:      "reply reopened after empty anchor",
+			err:       &unverifiableResolutionError{msg: "response anchor missing"},
+			guidance:  revisedAnswerRecoveryGuidance(threadID, "/tmp/reply-body", true),
+			marker:    "Keep the exact same named reply-body source",
+			forbidden: []string{"reviewer has since commented", "revise the same", "mktemp"},
+		},
+		{
+			name:      "author evidence unavailable",
+			err:       &unavailableAnswerEvidenceError{msg: "author identity missing"},
+			guidance:  revisedAnswerRecoveryGuidance(threadID, "/tmp/reply-body", true),
+			marker:    "Inspect the live thread before any retry",
+			forbidden: []string{"first-answer lifecycle", "revised-answer lifecycle", "rm -f"},
+		},
+		{
+			name:      "provider state unreadable",
+			err:       &unverifiedProviderStateError{msg: "state read failed"},
+			guidance:  revisedAnswerRecoveryGuidance(threadID, "-", true),
+			marker:    "Inspect the live thread before any retry",
+			forbidden: []string{"exact-body retry remains applicable", "rm -f"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, handled := replyResolutionEvidenceFailure(threadID, tc.err, tc.guidance)
+			if !handled {
+				t.Fatal("evidence failure was not handled")
+			}
+			if count := strings.Count(got, tc.marker); count != 1 {
+				t.Fatalf("evidence failure contains %d matching reply lifecycles, want exactly one:\n%s", count, got)
+			}
+			if tc.guidance.replyWasPosted && strings.Contains(got, "mktemp") {
+				t.Fatalf("evidence failure allocated a replacement path for the retained source:\n%s", got)
+			}
+			if !tc.guidance.replyWasPosted && strings.Contains(got, "your reply is posted") {
+				t.Fatalf("bare resolution failure falsely claims a reply was posted:\n%s", got)
+			}
+			for _, forbidden := range tc.forbidden {
+				if strings.Contains(got, forbidden) {
+					t.Errorf("evidence failure contains forbidden recovery %q:\n%s", forbidden, got)
+				}
+			}
+			if tc.wantUnresolve {
+				unresolve := strings.Index(got, "resolve-review-threads unresolve "+threadID)
+				answer := strings.Index(got, tc.marker)
+				if unresolve < 0 || answer < 0 || unresolve >= answer {
+					t.Fatalf("failed-reopen recovery must unresolve before answering the reply: unresolve=%d answer=%d\n%s", unresolve, answer, got)
+				}
+			}
+		})
 	}
 }
 

@@ -78,8 +78,144 @@ const (
 	maxReplyBodyBytes      = maxReplyBodyCharacters * utf8.UTFMax
 )
 
-const unchangedBodySourceAdvice = "re-run reply-resolve with the unchanged --body-file source; " +
-	"if the original source was standard input, replay retained bytes or save them to a named file"
+const newReplyBodyGuidanceTemplate = `For this thread, create a task-owned reply file in the system temporary directory outside the repository or merge worktree:
+  reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"
+Write a thread-specific reason to "$reply_file", then run:
+  resolve-review-threads reply-resolve <threadId> --body-file "$reply_file"
+Whenever exact-body retry remains valid, retain this same file unchanged through the retry.
+After terminal resolution is confirmed, remove it:
+  rm -f -- "$reply_file"
+Only then continue to the next thread or safe-merge.`
+
+func newReplyBodyGuidance(threadID string) string {
+	return strings.ReplaceAll(newReplyBodyGuidanceTemplate, "<threadId>", threadID)
+}
+
+const revisedNamedReplyBodyGuidanceTemplate = `For this thread, revise the same named body source in place to answer the new comments; do not create or choose another path.
+Keep the original source identity:
+  reply_file=<bodyFile>
+Replace only its contents, then run:
+  resolve-review-threads reply-resolve <threadId> --body-file "$reply_file"
+Whenever exact-body retry remains valid, retain that same source unchanged through the retry.
+After terminal resolution is confirmed, remove the source only if it is the task-owned temporary file created by generated guidance:
+  rm -f -- "$reply_file"
+Do not remove a user-owned source.
+Only then continue to the next thread or safe-merge.`
+
+const revisedStdinReplyBodyGuidanceTemplate = `For this thread, revise the retained standard-input bytes to answer the new comments; do not create or choose a named path merely for recovery.
+Replay the revised retained bytes with:
+  resolve-review-threads reply-resolve <threadId> --body-file -
+Whenever exact-body retry remains valid, retain those same revised bytes unchanged through the retry.
+Standard input has no named source to clean up.
+Only after terminal resolution is confirmed may you continue to the next thread or safe-merge.`
+
+func revisedReplyBodyGuidance(threadID, bodyFile string) string {
+	template := revisedStdinReplyBodyGuidanceTemplate
+	if bodyFile != "-" {
+		template = strings.ReplaceAll(
+			revisedNamedReplyBodyGuidanceTemplate,
+			"<bodyFile>",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return strings.ReplaceAll(template, "<threadId>", threadID)
+}
+
+const unchangedNamedReplyBodyGuidanceTemplate = `Keep the exact same named reply-body source and do not edit or replace it:
+  reply_file=<bodyFile>
+Retry with:
+  resolve-review-threads reply-resolve <threadId> --body-file "$reply_file"
+Retain that file unchanged through every applicable exact-body retry.
+After terminal resolution is confirmed, remove it only if it is the task-owned temporary file created by generated guidance:
+  rm -f -- "$reply_file"
+Do not remove a user-owned source.
+Only then continue to another thread or safe-merge.`
+
+const unchangedStdinReplyBodyGuidanceTemplate = `Replay the exact same retained standard-input bytes without revising them:
+  resolve-review-threads reply-resolve <threadId> --body-file -
+Retain those bytes unchanged through every applicable exact-body retry.
+Standard input has no named source to clean up.
+Only after terminal resolution is confirmed may you continue to another thread or safe-merge.`
+
+func unchangedReplyBodyGuidance(threadID, bodyFile string) string {
+	template := unchangedStdinReplyBodyGuidanceTemplate
+	if bodyFile != "-" {
+		template = strings.ReplaceAll(
+			unchangedNamedReplyBodyGuidanceTemplate,
+			"<bodyFile>",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return strings.ReplaceAll(template, "<threadId>", threadID)
+}
+
+const inspectNamedReplyOutcomeGuidanceTemplate = `Retain the exact named reply-body source unchanged while provider state is unverified:
+  reply_file=<bodyFile>
+Do not edit or remove it, and do not continue to another thread or safe-merge.
+Inspect the live thread before any retry. If the attempted reply is present, verify that it directly follows the comment originally read and that no newer comment follows it. If the tail moved without that reply, revise this same source in place. If the original tail is still last and the reply is absent, an exact-body retry may be applicable. If the thread is resolved on stale or unverifiable evidence, unresolve it before answering or retrying.`
+
+const inspectStdinReplyOutcomeGuidanceTemplate = `Retain the exact standard-input bytes while provider state is unverified.
+Do not revise or discard them, and do not continue to another thread or safe-merge.
+Inspect the live thread before any retry. If the attempted reply is present, verify that it directly follows the comment originally read and that no newer comment follows it. If the tail moved without that reply, prepare revised bytes for the same standard-input form. If the original tail is still last and the reply is absent, an exact-body retry may be applicable. If the thread is resolved on stale or unverifiable evidence, unresolve it before answering or retrying.`
+
+func inspectReplyOutcomeGuidance(threadID, bodyFile string) string {
+	template := inspectStdinReplyOutcomeGuidanceTemplate
+	if bodyFile != "-" {
+		template = strings.ReplaceAll(
+			inspectNamedReplyOutcomeGuidanceTemplate,
+			"<bodyFile>",
+			shellQuoteArgument(bodyFile),
+		)
+	}
+	return strings.ReplaceAll(template, "<threadId>", threadID)
+}
+
+func bareResolutionRetryGuidance(threadID string, force bool) string {
+	forceArg := ""
+	if force {
+		forceArg = " --force"
+	}
+	return fmt.Sprintf(
+		"Retry the unchanged resolution operation with:\n  resolve-review-threads resolve %s%s",
+		threadID,
+		forceArg,
+	)
+}
+
+func bareResolutionInspectionGuidance(threadID string) string {
+	return fmt.Sprintf("Inspect thread %s before retrying, continuing a sweep, or merging; do not treat unverified provider state as a completed resolution", threadID)
+}
+
+type evidenceRecoveryGuidance struct {
+	answerKind     string
+	answer         string
+	unchanged      string
+	inspect        string
+	replyWasPosted bool
+}
+
+func newAnswerRecoveryGuidance(threadID string, force bool) evidenceRecoveryGuidance {
+	return evidenceRecoveryGuidance{
+		answerKind: "first-answer",
+		answer:     newReplyBodyGuidance(threadID),
+		unchanged:  bareResolutionRetryGuidance(threadID, force),
+		inspect:    bareResolutionInspectionGuidance(threadID),
+	}
+}
+
+func revisedAnswerRecoveryGuidance(threadID, bodyFile string, replyWasPosted bool) evidenceRecoveryGuidance {
+	return evidenceRecoveryGuidance{
+		answerKind:     "revised-answer",
+		answer:         revisedReplyBodyGuidance(threadID, bodyFile),
+		unchanged:      unchangedReplyBodyGuidance(threadID, bodyFile),
+		inspect:        inspectReplyOutcomeGuidance(threadID, bodyFile),
+		replyWasPosted: replyWasPosted,
+	}
+}
+
+func shellQuoteArgument(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -152,8 +288,15 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 		return fail("usage: %s <threadId> [--force]", cmd)
 	}
 	if cmd == "unresolve" {
-		msg, _, _, err := mutateThread(ctx, cmd, args[0])
+		msg, err := unresolveWithEvidence(ctx, args[0])
 		if err != nil {
+			if recovery, handled := replyResolutionEvidenceFailure(
+				args[0],
+				err,
+				newAnswerRecoveryGuidance(args[0], false),
+			); handled {
+				return fail("%s", recovery)
+			}
 			return fail("%v", err)
 		}
 		fmt.Println(msg)
@@ -161,6 +304,13 @@ func cmdMutate(ctx context.Context, cmd string, rest []string) int {
 	}
 	msg, _, err := resolveWithEvidence(ctx, args[0], force, "")
 	if err != nil {
+		if recovery, handled := replyResolutionEvidenceFailure(
+			args[0],
+			err,
+			newAnswerRecoveryGuidance(args[0], force),
+		); handled {
+			return fail("%s", recovery)
+		}
 		return fail("%v", err)
 	}
 	fmt.Println(msg)
@@ -257,7 +407,12 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// the current state we cannot tell whether a previous run already posted
 	// this reply, and posting blind is the duplicate this guard exists to
 	// prevent, so any failure here leaves the thread untouched.
-	_, code := readOrExit(ctx, threadID, "cannot read thread state, nothing posted")
+	_, code := readOrExit(
+		ctx,
+		threadID,
+		"cannot read thread state, nothing posted",
+		bodyFile,
+	)
 	if code >= 0 {
 		return code
 	}
@@ -269,10 +424,11 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// actually reasoned about (the tail of history, oldest-first). Anchoring
 	// to these below, rather than to a later read's LastID/PrevID, keeps the
 	// anchor and the classification talking about the same comment.
-	history, historyLastID, historyPrevID, code := fetchHistoryTail(ctx, threadID)
+	history, historyLastID, historyPrevID, code := fetchHistoryTail(ctx, threadID, bodyFile)
 	if code >= 0 {
 		return code
 	}
+	priorReply := classifyPriorReply(history, body)
 
 	// Paging a long thread takes time, so re-read state before acting on it:
 	// another actor may have resolved it meanwhile, and replying then would
@@ -280,7 +436,7 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// was read, a comment landed in that gap that classifyPriorReply never
 	// saw; refuse rather than silently adopt it as the anchor, which would
 	// treat that unread comment as accounted for.
-	_, code = readMatchingTail(ctx, threadID, historyLastID)
+	_, code = readMatchingTail(ctx, threadID, historyLastID, bodyFile, priorReply)
 	if code >= 0 {
 		return code
 	}
@@ -289,15 +445,15 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	// comment before it, for resolution to be allowed. Both are required: see
 	// checkReplyPlacement.
 	var anchorID, anchorPrevID string
-	switch classifyPriorReply(history, body) {
+	switch priorReply {
 	case priorReplySuperseded:
-		// A previous run posted this reply and the reviewer has spoken since.
+		// A previous run posted this reply and newer commentary follows it.
 		// Reposting would duplicate the comment AND put our copy last, making
 		// the thread look answered while the follow-up went unread.
-		return fail("your earlier reply is already on thread %s and the reviewer "+
-			"has commented since; nothing was posted.\n"+
-			"read the comment(s) after your reply and answer those:\n"+
-			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
+		return fail("your earlier reply is already on thread %s and newer "+
+			"commentary follows it; nothing was posted.\n"+
+			"read the comment(s) after your reply and answer those:\n%s", threadID,
+			revisedReplyBodyGuidance(threadID, bodyFile))
 	case priorReplyIsLast:
 		// A previous run posted this and nothing has been said since, so the
 		// comment we matched (confirmed above to still be the true tail) is
@@ -307,42 +463,23 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 	case noPriorReply:
 		// Our reply must land directly after the comment we just read.
 		anchorPrevID = historyLastID
-		id, code := postReplyOrExit(ctx, threadID, body)
+		id, code := postReplyOrExit(ctx, threadID, body, anchorPrevID, bodyFile)
 		if code >= 0 {
 			return code
 		}
 		anchorID = id
 	}
-	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID); code != 0 {
+	if code := verifyReplyPlacement(ctx, threadID, anchorPrevID, anchorID, bodyFile); code != 0 {
 		return code
 	}
 	msg, _, rErr := resolveWithEvidence(ctx, threadID, false, anchorID)
 	if rErr != nil {
-		var reopenFailed *failedReopenError
-		if errors.As(rErr, &reopenFailed) {
-			// The thread is STILL marked resolved on GitHub. Every other
-			// branch here treats "not resolved" as ground truth and tells the
-			// operator retrying reply-resolve is safe — but retrying now
-			// would hit readOrExit's IsResolved check first, print "skipped
-			// (already resolved)", and exit 0 without ever reopening the
-			// thread or reading what landed on it. unresolve must run first.
-			return fail("your reply is posted, but resolving it failed AND "+
-				"reopening it also failed: %v\n"+
-				"do NOT just retry reply-resolve — it would see the thread as "+
-				"already resolved and silently no-op. Reopen it first:\n"+
-				"  resolve-review-threads unresolve %s\n"+
-				"then read what landed on it and answer it", rErr, threadID)
-		}
-		var unanswered *unansweredError
-		if errors.As(rErr, &unanswered) {
-			// The reviewer commented again in the gap, so they now hold the
-			// thread. Prescribing the resolve-only path here would just fail
-			// the same evidence check; the honest next step is to read the
-			// follow-up and answer it.
-			return fail("your reply is posted, but the reviewer has since "+
-				"commented again and now holds this thread:\n%v\n"+
-				"read the follow-up and answer it; reply-resolve is the right "+
-				"command once you have", rErr)
+		if message, handled := replyResolutionEvidenceFailure(
+			threadID,
+			rErr,
+			revisedAnswerRecoveryGuidance(threadID, bodyFile, true),
+		); handled {
+			return fail("%s", message)
 		}
 		if isAccessDenied(rErr) {
 			// Retrying immediately would just repeat the denied mutation; the
@@ -355,19 +492,77 @@ func cmdReplyResolve(ctx context.Context, rest []string) int {
 				"this is an access problem, not a transient one: retrying immediately "+
 				"will be denied too.\n"+
 				"check `gh auth status` and that the token can resolve threads on this "+
-				"repo, then %s; the source must yield exactly the same bytes", rErr,
-				unchangedBodySourceAdvice)
+				"repo, then follow this unchanged-source lifecycle:\n%s", rErr,
+				unchangedReplyBodyGuidance(threadID, bodyFile))
 		}
 		return fail("the reply is posted but the thread is NOT resolved (likely "+
 			"transient): %v\n"+
-			"this is safe to %s (not a "+
-			"reworded one — retry safety depends on text equality): "+
-			"reply-resolve will see your reply is already last and resolve "+
-			"without reposting it. Bare resolve would work too, but it drops "+
-			"the anchor check this thread is relying on", rErr, unchangedBodySourceAdvice)
+			"retry only with this unchanged-source lifecycle; rewording would "+
+			"break exact-body deduplication and bare resolve would drop the "+
+			"anchor check:\n%s", rErr, unchangedReplyBodyGuidance(threadID, bodyFile))
 	}
 	fmt.Println(msg)
 	return 0
+}
+
+func replyResolutionEvidenceFailure(
+	threadID string,
+	err error,
+	guidance evidenceRecoveryGuidance,
+) (string, bool) {
+	if failedReopen, ok := errors.AsType[*failedReopenError](err); ok {
+		if failedReopen.recovery == retryUnchangedEvidence {
+			return fmt.Sprintf("resolution was applied without a confirmed evidence anchor, and reopening it failed: %v\n"+
+				"do NOT retry while the thread is still resolved. Reopen it first:\n"+
+				"  resolve-review-threads unresolve %s\n"+
+				"after the explicit reopen succeeds, inspect fresh provider state before selecting unchanged retry or revision:\n%s",
+				err, threadID, guidance.inspect), true
+		}
+		prefix := "resolution was applied after the evidence changed, and reopening it failed"
+		if guidance.replyWasPosted {
+			prefix = "your reply is posted, but newer commentary invalidated its placement and reopening the resolved thread failed"
+		}
+		return fmt.Sprintf("%s: %v\n"+
+			"do NOT retry while the thread is still resolved. Reopen it first:\n"+
+			"  resolve-review-threads unresolve %s\n"+
+			"then read the confirmed follow-up and use this single %s lifecycle:\n%s",
+			prefix, err, threadID, guidance.answerKind, guidance.answer), true
+	}
+
+	if _, ok := errors.AsType[*supersededEvidenceError](err); ok {
+		prefix := "the evidence changed and the thread now requires a new answer"
+		if guidance.replyWasPosted {
+			prefix = "your reply is posted, but a newer comment is confirmed and it does not answer that comment"
+		}
+		return fmt.Sprintf("%s:\n%v\nread the follow-up and use this %s lifecycle:\n%s",
+			prefix, err, guidance.answerKind, guidance.answer), true
+	}
+
+	if _, ok := errors.AsType[*unverifiableResolutionError](err); ok {
+		return fmt.Sprintf("the resolution response did not confirm its evidence anchor, so the automatic reopen restored a safe retry state:\n%v\n"+
+			"no newer comment was confirmed; do not revise the reply source. Use this unchanged-operation lifecycle:\n%s",
+			err, guidance.unchanged), true
+	}
+
+	if _, ok := errors.AsType[*unavailableAnswerEvidenceError](err); ok {
+		return fmt.Sprintf("the thread's author evidence is insufficient to prove an independent answer; another reply would not repair that evidence:\n%v\n%s",
+			err, guidance.inspect), true
+	}
+
+	if _, ok := errors.AsType[*unverifiedProviderStateError](err); ok {
+		return fmt.Sprintf("provider state could not be verified, so no retry or cleanup is yet safe:\n%v\n%s",
+			err, guidance.inspect), true
+	}
+
+	if _, ok := errors.AsType[*unansweredError](err); ok {
+		if guidance.replyWasPosted {
+			return fmt.Sprintf("the posted reply is still last, but the thread is not provably answered:\n%v\n%s",
+				err, guidance.inspect), true
+		}
+		return fmt.Sprintf("resolution was refused because the thread still needs an answer:\n%v\n"+
+			"use this %s lifecycle:\n%s", err, guidance.answerKind, guidance.answer), true
+	}
+	return "", false
 }
 
 // postReply posts a reply and returns the new comment's node ID. That ID is
@@ -385,33 +580,73 @@ func postReply(ctx context.Context, threadID, body string) (string, error) {
 }
 
 // postReplyOrExit posts a reply and reports whether the caller should return
-// immediately. code is -1 when id is a fresh anchor safe to resolve against.
-// errReplyIDMissing gets distinct advice from every other failure: the reply
-// text is already live, so telling the operator to just retry — as a generic
-// failure would — risks a real duplicate if they reword it while retrying.
-func postReplyOrExit(ctx context.Context, threadID, body string) (id string, code int) {
+// immediately. code is -1 only when id names a reply observed after the exact
+// predecessor the caller read. Any ambiguous outcome is reconciled against
+// that predecessor before recovery can call an unchanged retry safe.
+func postReplyOrExit(
+	ctx context.Context,
+	threadID, body, originalTailID, bodyFile string,
+) (id string, code int) {
 	id, err := postReply(ctx, threadID, body)
 	if err == nil {
 		return id, -1
 	}
-	if errors.Is(err, errReplyIDMissing) {
-		return "", fail("your reply was posted, but GitHub's response did not "+
-			"confirm its ID, so it cannot be used as the resolution anchor: %v\n"+
-			"the thread was left UNRESOLVED on purpose. Do NOT reword and repost: "+
-			"%s. It will find your reply by its exact text and resolve without "+
-			"duplicating it", err, unchangedBodySourceAdvice)
+
+	// A missing response ID and a client-side transport error are both
+	// ambiguous until history is re-read. The mutation can have applied before
+	// either signal reached this process. Recover only a matching body observed
+	// AFTER originalTailID; an older identical comment is not this attempt.
+	history, historyErr := fetchAllComments(ctx, threadID)
+	if historyErr != nil {
+		return "", fail("provider state is unverified: reply outcome is ambiguous and current history could not be re-read: %v (history read: %v)\n%s",
+			err, historyErr, inspectReplyOutcomeGuidance(threadID, bodyFile))
 	}
-	// gh can fail client-side (network drop, timeout) after GitHub already
-	// applied the mutation server-side: this error alone does not prove the
-	// reply never posted. Re-read history before reporting "failed, safe to
-	// retry" — a retry with different wording would duplicate an already-
-	// live comment, same risk as errReplyIDMissing above.
-	if history, histErr := fetchAllComments(ctx, threadID); histErr == nil {
-		if foundID := findReplyID(history, body); foundID != "" {
-			return foundID, -1
+	foundID, predecessorFound := findReplyIDAfter(history, originalTailID, body)
+	if !predecessorFound {
+		return "", fail("provider state is unverified: reply outcome is ambiguous and the original predecessor %s was not found in current history: %v\n%s",
+			originalTailID, err, inspectReplyOutcomeGuidance(threadID, bodyFile))
+	}
+	if foundID != "" {
+		return foundID, -1
+	}
+
+	// Confirm that the lightweight state read and full-history read describe
+	// the same tail before selecting unchanged versus revised recovery. If the
+	// provider changes between those reads, neither branch is proven.
+	historyTailID := history[len(history)-1].ID
+	cur, stateErr := fetchThread(ctx, threadID)
+	if stateErr != nil || cur.LastID == "" || cur.LastID != historyTailID {
+		return "", fail("reply was not observed, but current thread state could not be matched to the history snapshot after the ambiguous outcome: %v (state read: %v)\n%s",
+			err, stateErr, inspectReplyOutcomeGuidance(threadID, bodyFile))
+	}
+	if cur.LastID == originalTailID {
+		if cur.IsResolved {
+			return "", fail("reply was not observed and the original tail is unchanged, but the thread is now resolved by another actor: %v\n%s",
+				err, inspectReplyOutcomeGuidance(threadID, bodyFile))
+		}
+		return "", fail("reply was not observed after the ambiguous provider outcome, and the original tail is still last: %v\n"+
+			"an exact-body retry remains applicable:\n%s",
+			err, unchangedReplyBodyGuidance(threadID, bodyFile))
+	}
+
+	if cur.IsResolved {
+		reason := fmt.Sprintf(
+			"resolved after the reply predecessor changed from %s to %s while the reply was not observed",
+			originalTailID,
+			cur.LastID,
+		)
+		if reopenErr := reopenOrFail(ctx, threadID, cur.Path, reason, answerChangedEvidence); reopenErr != nil {
+			message, _ := replyResolutionEvidenceFailure(
+				threadID,
+				reopenErr,
+				revisedAnswerRecoveryGuidance(threadID, bodyFile, false),
+			)
+			return "", fail("%s", message)
 		}
 	}
-	return "", fail("reply failed, thread left unresolved: %v", err)
+	return "", fail("reply was not observed and the thread tail moved from %s to %s; the old body must not be replayed against the new comment: %v\n"+
+		"read the follow-up and use this revised-answer lifecycle:\n%s",
+		originalTailID, cur.LastID, err, revisedReplyBodyGuidance(threadID, bodyFile))
 }
 
 // parseReplyCommentID extracts the new comment's node ID from the reply
@@ -438,14 +673,11 @@ func parseReplyCommentID(raw []byte) (string, error) {
 	return id, nil
 }
 
-// errReplyIDMissing marks a reply mutation GitHub accepted — the comment is
-// live on the thread — whose response simply omitted the new comment's ID.
-// It is distinguished from a genuine post failure because the two need
-// opposite advice: retrying with a DIFFERENT body would create a real
-// duplicate, but retrying reply-resolve with the SAME body stays safe, since
-// classifyPriorReply finds the posted comment by its text and resolves
-// without reposting it.
-var errReplyIDMissing = errors.New("reply posted but GitHub returned no comment ID")
+// errReplyIDMissing marks a nominally successful reply response that omitted
+// the new comment's ID. It does not by itself prove placement or even that the
+// comment is observable; postReplyOrExit must reconcile history against the
+// original predecessor before selecting recovery.
+var errReplyIDMissing = errors.New("reply response omitted the comment ID")
 
 // replyPlacement describes where our reply ended up relative to what we read.
 type replyPlacement int
@@ -481,35 +713,75 @@ func checkReplyPlacement(gotPrev, gotLast, wantPrev, wantLast string) replyPlace
 
 // verifyReplyPlacement re-reads the thread and applies checkReplyPlacement.
 // Returns 0 when the reply is exactly where we expect it.
-func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID string) int {
+func verifyReplyPlacement(ctx context.Context, threadID, wantPrevID, wantLastID, bodyFile string) int {
 	after, err := fetchThread(ctx, threadID)
 	if err != nil {
-		return fail("your reply is posted but the thread state could not be "+
-			"re-read, so it was NOT resolved (likely transient): %v\n"+
-			"this is safe to %s (not a "+
-			"reworded one — retry safety depends on text equality): "+
-			"reply-resolve will see your reply is already last and resolve "+
-			"without reposting it. Bare resolve would work too, but it drops "+
-			"the anchor check this thread is relying on", err, unchangedBodySourceAdvice)
+		return fail("your reply may be posted, but placement and current resolved state could not be re-read; this command did not attempt resolution: %v\n%s",
+			err, inspectReplyOutcomeGuidance(threadID, bodyFile))
 	}
-	switch checkReplyPlacement(after.PrevID, after.LastID, wantPrevID, wantLastID) {
+	placement := checkReplyPlacement(after.PrevID, after.LastID, wantPrevID, wantLastID)
+	if placement != replyExact && (after.LastID == "" || after.PrevID == "") {
+		message, _ := replyResolutionEvidenceFailure(
+			threadID,
+			&unverifiedProviderStateError{msg: "reply placement response omitted the comment IDs needed to distinguish a moved tail from incomplete evidence"},
+			revisedAnswerRecoveryGuidance(threadID, bodyFile, true),
+		)
+		return fail("%s", message)
+	}
+	switch placement {
 	case replyBuried:
-		return fail("your reply is posted, but it is not the last comment on "+
-			"thread %s: someone spoke after it, and your reply does not answer them.\n"+
-			"the thread was left UNRESOLVED on purpose. Read what came after "+
-			"your reply, then answer it with:\n"+
-			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
+		err := replyPlacementEvidenceError(
+			ctx,
+			threadID,
+			after,
+			"the posted reply is not last because comment "+after.LastID+" follows it",
+		)
+		message, _ := replyResolutionEvidenceFailure(
+			threadID,
+			err,
+			revisedAnswerRecoveryGuidance(threadID, bodyFile, true),
+		)
+		return fail("%s", message)
 	case replyJumped:
-		return fail("your reply is posted, but someone commented between the "+
-			"moment this command read thread %s and the moment it replied, so "+
-			"your reply sits on top of a comment it does not answer.\n"+
-			"the thread was left UNRESOLVED on purpose. Read the comment above "+
-			"your reply, then answer it with:\n"+
-			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
+		err := replyPlacementEvidenceError(
+			ctx,
+			threadID,
+			after,
+			"comment "+after.PrevID+" arrived between the original read and the posted reply",
+		)
+		message, _ := replyResolutionEvidenceFailure(
+			threadID,
+			err,
+			revisedAnswerRecoveryGuidance(threadID, bodyFile, true),
+		)
+		return fail("%s", message)
 	case replyExact:
 		return 0
 	}
 	return 0
+}
+
+func replyPlacementEvidenceError(
+	ctx context.Context,
+	threadID string,
+	after thread,
+	detail string,
+) error {
+	state := "the thread remains unresolved"
+	if after.IsResolved {
+		reason := "resolved despite stale reply placement: " + detail
+		if err := reopenOrFail(ctx, threadID, after.Path, reason, answerChangedEvidence); err != nil {
+			return err
+		}
+		state = "the concurrent resolution was automatically reopened and that postcondition was confirmed"
+	}
+	return &supersededEvidenceError{msg: fmt.Sprintf(
+		"%s %s: %s; %s",
+		threadID,
+		after.Path,
+		detail,
+		state,
+	)}
 }
 
 // cmdResolveAll resolves the unresolved threads on a PR that carry evidence of
@@ -552,16 +824,30 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 		msg, mutated, err := resolveWithEvidence(ctx, t.ID, force, "")
 		if err != nil {
 			var unanswered *unansweredError
-			if !errors.As(err, &unanswered) {
+			var superseded *supersededEvidenceError
+			if !errors.As(err, &unanswered) && !errors.As(err, &superseded) {
+				if recovery, handled := replyResolutionEvidenceFailure(
+					t.ID,
+					err,
+					newAnswerRecoveryGuidance(t.ID, force),
+				); handled {
+					return fail("aborting sweep after %d resolved, %d refused: %s", resolved, refused, recovery)
+				}
 				// Auth, permissions, or a GraphQL outage. Retrying it once per
 				// remaining thread would just repeat a denied call and then
 				// report the pile as "nobody replied".
 				return fail("aborting sweep after %d resolved, %d refused: %v", resolved, refused, err)
 			}
-			// A thread that went unanswered between the listing and now is a
-			// refusal, not a fatal error: keep sweeping the rest.
+			// A thread that is unanswered or whose evidence was superseded
+			// between the listing and now is a refusal, not a fatal provider
+			// error: keep sweeping the rest.
 			refused++
-			fmt.Fprintf(os.Stderr, "REFUSED %v\n", err)
+			recovery, _ := replyResolutionEvidenceFailure(
+				t.ID,
+				err,
+				newAnswerRecoveryGuidance(t.ID, force),
+			)
+			fmt.Fprintf(os.Stderr, "REFUSED %s\n", recovery)
 			continue
 		}
 		fmt.Println(msg)
@@ -577,14 +863,14 @@ func cmdResolveAll(ctx context.Context, rest []string) int {
 		return 0
 	}
 	fmt.Fprintf(os.Stderr, `
-%d thread(s) were refused because nobody has replied to them. Resolving a
-thread asserts its point was handled; without a reply there is no record that
-it was even read. Address each one in code, then close it with its reason:
+%d thread(s) were refused because they still need a current answer. A thread
+may have no independent reply yet, or its earlier answer may have been
+superseded by newer commentary. Resolving asserts the current point was
+handled; each REFUSED diagnostic above identifies the exact evidence failure
+and includes its thread-specific reply-file lifecycle.
 
-  resolve-review-threads reply-resolve <threadId> --body-file reply.md
-
---force overrides this and resolves unanswered threads. Reserve it for threads
-you are deliberately dismissing, and say so in a PR comment.
+--force overrides the current-answer evidence requirement. Reserve it for
+threads you are deliberately dismissing, and say so in a PR comment.
 `, refused)
 	return 1
 }
@@ -639,6 +925,25 @@ func findReplyID(tail []tailComment, want string) string {
 		}
 	}
 	return id
+}
+
+// findReplyIDAfter returns the last matching reply observed after predecessor
+// and whether predecessor itself was present. The caller's pre-post tail is a
+// temporal boundary: an identical body before it cannot be attributed to the
+// ambiguous mutation being reconciled.
+func findReplyIDAfter(history []tailComment, predecessor, want string) (id string, predecessorFound bool) {
+	for _, c := range history {
+		if !predecessorFound {
+			if c.ID == predecessor {
+				predecessorFound = true
+			}
+			continue
+		}
+		if sameReplyBody(c.Body, want) {
+			id = c.ID
+		}
+	}
+	return id, predecessorFound
 }
 
 // printThreads emits one compact JSON object per line, matching the original

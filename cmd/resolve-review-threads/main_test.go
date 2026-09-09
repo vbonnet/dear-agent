@@ -548,11 +548,10 @@ func TestParseReplyCommentID(t *testing.T) {
 		t.Fatalf("got (%q, %v), want (PRRC_abc, nil)", id, err)
 	}
 
-	// errReplyIDMissing distinguishes "GitHub accepted the mutation but the
-	// response omitted the ID" (the reply is live; postReplyOrExit forbids
-	// reposting) from a genuine parse failure (unknown whether it posted at
-	// all): they need opposite advice, so the sentinel must fire on exactly
-	// the first kind.
+	// errReplyIDMissing distinguishes a structurally valid mutation response
+	// that omitted the ID from malformed JSON. Neither signal proves placement;
+	// postReplyOrExit reconciles the former against the original predecessor
+	// before it can recover an anchor or select retry guidance.
 	bad := map[string]struct {
 		raw        []byte
 		wantIDMiss bool

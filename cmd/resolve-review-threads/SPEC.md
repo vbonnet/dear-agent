@@ -2,9 +2,9 @@
 
 <!-- Last audited at: 2026-09-08 -->
 
-**Version:** 2.9
+**Version:** 3.2
 **Status:** Baseline
-**Scope:** `cmd/resolve-review-threads`.
+**Scope:** `cmd/resolve-review-threads` and repository-generated remediation guidance for it.
 
 ## Overview
 
@@ -49,7 +49,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-17** When about to resolve a thread, the system shall re-read that thread and re-evaluate its answered state immediately before issuing the mutation.
 
-**RESOLVE-REVIEW-THREADS-18** When a thread is already resolved, the system shall report it as skipped rather than issuing a redundant mutation.
+**RESOLVE-REVIEW-THREADS-18** When a pre-mutation read finds a thread already resolved and every caller-named anchor and answer-evidence check required by that path succeeds, the system shall report it as skipped rather than issue a redundant resolution mutation.
 
 **RESOLVE-REVIEW-THREADS-19** When either the opening or the most recent comment author login is unavailable, the system shall not mark the thread answered.
 
@@ -57,27 +57,27 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-21** When `reply-resolve` finds its requested reply is already the thread's most recent comment, the system shall skip posting and proceed to resolution.
 
-**RESOLVE-REVIEW-THREADS-22** When `reply-resolve` posts a reply but a transient failure (the resolution itself, or the placement re-read that precedes it) prevents resolution, the system shall state that the reply is posted and direct the user to retry `reply-resolve` with the unchanged body-file source, which finds the posted reply by its text and resolves without reposting it.
+**RESOLVE-REVIEW-THREADS-22** When `reply-resolve` has confirmed both that its reply is posted and that it directly follows the originally observed predecessor, but a transient resolution failure prevents terminal resolution, the system shall retain the actual body source unchanged and direct the user to retry `reply-resolve` with that source, which finds the posted reply by its text and resolves without reposting it.
 
 **RESOLVE-REVIEW-THREADS-23** When comparing an existing comment against a requested reply, the system shall compare the bodies without whitespace collapsing or truncation, ignoring only surrounding whitespace.
 
 **RESOLVE-REVIEW-THREADS-24** When `reply-resolve` cannot read the thread's current state, the system shall post nothing, leave the thread unchanged, and exit non-zero.
 
-**RESOLVE-REVIEW-THREADS-25** When `reply-resolve` posts a reply and the subsequent resolution is refused because the reviewer commented again, the system shall report that the reviewer now holds the thread and direct the user to answer the follow-up rather than to the resolution-only command.
+**RESOLVE-REVIEW-THREADS-25** When `reply-resolve` posts a reply and a later non-empty comment anchor confirms that the thread changed before resolution, the system shall report that the reply no longer accounts for the thread and direct the user to read and answer the later comment rather than use the resolution-only command.
 
-**RESOLVE-REVIEW-THREADS-26** When a thread was already resolved by another actor before the pre-mutation re-read, the system shall report it as skipped and shall not count it among the threads it resolved.
+**RESOLVE-REVIEW-THREADS-26** When a thread was already resolved by another actor before the pre-mutation re-read and every caller-named anchor and answer-evidence check required by that path succeeds, the system shall report it as skipped and shall not count it among the threads it resolved.
 
 **RESOLVE-REVIEW-THREADS-27** When GitHub refuses a resolution for access reasons, the system shall report it as an access problem rather than prescribing an immediate retry of the same mutation.
 
-**RESOLVE-REVIEW-THREADS-28** When `reply-resolve` posts a reply, the system shall verify that the reply directly follows the comment it read before resolving, and shall leave the thread unresolved when another comment intervened.
+**RESOLVE-REVIEW-THREADS-28** When `reply-resolve` posts or recovers a reply, the system shall preserve the originally observed predecessor, verify that the reply directly follows that predecessor before resolving, and refuse resolution when another comment intervened.
 
 **RESOLVE-REVIEW-THREADS-29** When `reply-resolve` finds its requested reply already present but followed by later comments, the system shall post nothing, leave the thread unresolved, and direct the user to answer those comments.
 
-**RESOLVE-REVIEW-THREADS-30** When `reply-resolve` finds the thread already resolved, the system shall report it as skipped and post no reply.
+**RESOLVE-REVIEW-THREADS-30** When `reply-resolve`'s initial state read finds the thread already resolved before the command posts or adopts a reply, the system shall report it as skipped and post no reply.
 
 **RESOLVE-REVIEW-THREADS-31** When `reply-resolve` resolves a thread, the system shall first confirm that a specific named comment, either the reply it just posted or a matching reply already present, is the thread's last comment.
 
-**RESOLVE-REVIEW-THREADS-32** When the reply mutation returns no comment ID, the system shall treat it as an error and shall not resolve the thread.
+**RESOLVE-REVIEW-THREADS-32** When the reply mutation returns no comment ID, the system shall not use that response as proof that the reply was posted and shall not resolve the thread unless a full-history re-read recovers the exact reply directly after the originally observed predecessor and verifies that recovered comment as the current tail.
 
 **RESOLVE-REVIEW-THREADS-33** When determining whether a reply is already present, the system shall page through the thread's entire comment history rather than a bounded window.
 
@@ -89,23 +89,23 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-37** When resolving on behalf of a reply, the system shall verify at the pre-mutation read that the named reply is still the last comment.
 
-**RESOLVE-REVIEW-THREADS-38** When the thread becomes resolved while its history is being paged, the system shall report it as skipped and post no reply.
+**RESOLVE-REVIEW-THREADS-38** When the thread becomes resolved while its history is being paged and the complete history does not show a requested reply superseded by newer commentary, the system shall report it as skipped and post no reply; a superseded requested reply shall instead follow RESOLVE-REVIEW-THREADS-64.
 
 **RESOLVE-REVIEW-THREADS-39** When `reply-resolve`'s resolution is refused for access reasons, the system shall state that an immediate retry will be denied too and direct the user to fix credentials before finishing with `reply-resolve` and the unchanged body-file source, not an unguarded resolution-only command.
 
-**RESOLVE-REVIEW-THREADS-40** When a reply mutation succeeds but its response omits the new comment's ID, the system shall leave the thread unresolved, state that the reply may already be live, and direct the user to re-run `reply-resolve` with the unchanged body-file source rather than reword and repost.
+**RESOLVE-REVIEW-THREADS-40** When a reply mutation succeeds but its response omits the new comment's ID, the system shall treat whether the reply is live as ambiguous, retain the original predecessor and actual body source, and permit resolution only after reconciliation under RESOLVE-REVIEW-THREADS-58 recovers the exact reply from full history, proves that it directly follows the original predecessor, and verifies its current-tail placement.
 
-**RESOLVE-REVIEW-THREADS-41** When resolving a thread without `--force`, the system shall verify the comment its evidence read was based on against the resolution mutation's own response — using the caller-named anchor when one was given, otherwise the last comment observed by the pre-mutation evidence check — and, on a mismatch, reopen the thread rather than leave it resolved on stale evidence.
+**RESOLVE-REVIEW-THREADS-41** When resolving a thread without `--force`, the system shall verify the comment its evidence read was based on against the resolution mutation's own response — using the caller-named anchor when one was given, otherwise the last comment observed by the pre-mutation evidence check — and classify an empty or changed response anchor under RESOLVE-REVIEW-THREADS-59 rather than leave the thread resolved on unverified evidence.
 
-**RESOLVE-REVIEW-THREADS-42** When a resolution mutation succeeds but its response omits the thread's last comment, the system shall treat that as unverifiable and reopen the thread, the same as an actual mismatch, rather than treat a missing anchor as confirmed.
+**RESOLVE-REVIEW-THREADS-42** When a resolution mutation succeeds but its response omits the thread's last comment, the system shall treat that outcome as unverifiable, reopen the thread, preserve the actual body source unchanged, and shall not treat the missing anchor as a confirmed later comment or superseded answer.
 
-**RESOLVE-REVIEW-THREADS-43** When a stale-evidence resolution is detected and the automatic reopen also fails, the system shall report the thread as still resolved and direct the user to run `unresolve` before any other action, distinctly from the advice given when the reviewer has simply commented again.
+**RESOLVE-REVIEW-THREADS-43** When a stale or unverifiable resolution is detected and the automatic reopen also fails, the system shall report the thread as still resolved, direct the user to run `unresolve` before any other action, and require a fresh state inspection before selecting unchanged-retry or revised-answer guidance.
 
-**RESOLVE-REVIEW-THREADS-44** When recovery depends on matching an identical reply body, the system shall direct the user to reuse the unchanged body-file source without rendering the reply body as command-line or shell-evaluable diagnostic text.
+**RESOLVE-REVIEW-THREADS-44** When recovery depends on matching an identical reply body, the system shall direct the user to reuse the actual unchanged named path or standard-input form without rendering the reply body as command-line or shell-evaluable diagnostic text.
 
 **RESOLVE-REVIEW-THREADS-45** When a resolution mutation reports an error, the system shall re-read the thread before treating that as a clean no-op, since the client can fail after GitHub already applied the mutation server-side; if the re-read confirms it resolved, the system shall apply the same anchor verification and reopen-on-mismatch as a normally-reported success.
 
-**RESOLVE-REVIEW-THREADS-46** When a reply mutation reports an error, the system shall re-read the thread's history before reporting the reply as failed, since the client can fail after GitHub already applied the mutation server-side; if a comment matching the attempted body is found, the system shall use it as the resolution anchor rather than invite a reworded, duplicating retry.
+**RESOLVE-REVIEW-THREADS-46** When a reply mutation reports an error, the system shall preserve the predecessor observed before posting and re-read the thread's history before reporting the reply as failed, since the client can fail after GitHub already applied the mutation server-side; recovery shall follow RESOLVE-REVIEW-THREADS-58 rather than discard that predecessor or invite a blind, duplicating retry.
 
 **RESOLVE-REVIEW-THREADS-47** When an automatic reopen is attempted, the system shall verify the mutation's own resolved-state postcondition rather than treat a nil error as proof the thread reopened, since another actor can race the same thread; on an access-denial failure, the system shall say so distinctly, since retrying the same reopen with the same credentials repeats the denial.
 
@@ -125,6 +125,32 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-55** When any body source emits more than 262,144 bytes or valid UTF-8 contains more than 65,536 Unicode code points, the system shall stop after reading at most 262,145 bytes and fail before issuing any provider mutation.
 
+**RESOLVE-REVIEW-THREADS-56** When repository-generated remediation guidance instructs an operator to create a named reply-body file, the system shall prescribe a fresh task-owned system-temporary path outside the repository for each thread, quote that path in review-thread command invocations, direct retention and unchanged reuse through every applicable exact-body retry, and direct removal only after terminal resolution is confirmed and before proceeding to another thread or merge.
+
+**RESOLVE-REVIEW-THREADS-57** When later reviewer comments conclusively supersede the current reply body while its thread remains unresolved, repository-generated remediation guidance shall direct the operator to revise the same actual named path or retained standard-input source rather than create or assign a replacement path, retain the revised source unchanged through every applicable exact-body retry, and conditionally remove a task-owned temporary source only after terminal resolution is confirmed.
+
+**RESOLVE-REVIEW-THREADS-58** When a reply mutation has an ambiguous outcome or omits the new comment ID, the system shall retain the originally observed predecessor and actual body source, re-read the full thread history, recover a matching reply and verify it against that predecessor when found, permit unchanged-source retry only when no match is found and the tail is confirmed unchanged, require inspection and same-source revision when the tail is confirmed moved, and require inspection without blind retry when the state cannot be read.
+
+**RESOLVE-REVIEW-THREADS-59** When the resolution response supplies an empty last-comment anchor, the system shall classify the outcome as unverifiable and retain the actual body source unchanged for inspection and retry after reopening; when it supplies a non-empty anchor different from the expected anchor, the system shall classify the thread as changed and require the later comment to be read and answered with the same source before resolution.
+
+**RESOLVE-REVIEW-THREADS-60** When reply-placement verification finds the reply buried or jumped and the thread is already resolved, the system shall reopen the thread and verify the reopen postcondition before emitting revised-answer guidance; if reopening fails, the system shall report that the thread remains resolved and require `unresolve` before reply recovery.
+
+**RESOLVE-REVIEW-THREADS-61** When a named reply remains last but answer evidence is insufficient because an author login is missing or the opening and latest authors are equal, or when recovery state cannot be read, the system shall retain the actual body source unchanged, report the precise uncertainty, and require thread inspection without claiming that a reviewer follow-up occurred or that the source should be revised; a nonempty later comment may establish positional supersession without establishing that comment's author.
+
+**RESOLVE-REVIEW-THREADS-62** When unchanged-retry or revised-answer guidance references a reply body source, the system shall preserve the caller's actual source form by rendering a reusable named path with lossless shell quoting or the standard-input marker `-`, shall not synthesize a replacement path, and shall preserve task-owned cleanup identity until terminal resolution is confirmed.
+
+**RESOLVE-REVIEW-THREADS-63** When a resolve or unresolve mutation response is evaluated, the system shall require a non-empty target thread identity equal to the requested node ID and a resolved-state value equal to the requested postcondition before claiming, printing, or counting that mutation as successful; otherwise, it shall treat the response as unverified and reconcile fresh provider state before making a state claim.
+
+**RESOLVE-REVIEW-THREADS-64** When `reply-resolve` observes a full-history tail different from the originally observed predecessor or named reply, the system shall classify the moved tail and verify reply placement before applying an already-resolved shortcut, and when the moved thread is resolved without verified reply placement it shall reopen the thread before emitting recovery guidance.
+
+**RESOLVE-REVIEW-THREADS-65** When predecessor, recovered-reply, current-tail, or mutation-anchor evidence contains an empty comment node ID, the system shall treat the evidence as incomplete and unverified, retain the actual body source, and require fresh inspection without claiming stable placement, successful resolution, or a conclusively superseding comment.
+
+**RESOLVE-REVIEW-THREADS-66** When a resolve mutation reports a transport error, the system shall re-read the requested thread and classify the fresh result as confirmed success only when identity, requested resolved state, and expected comment anchor all match; as stale or unverifiable resolution requiring verified reopen when resolved state is present but anchor evidence is empty or changed; as an absent requested postcondition when the matching thread is currently unresolved; or as unknown state requiring inspection when the re-read fails or returns mismatched identity.
+
+**RESOLVE-REVIEW-THREADS-67** When an unresolve mutation reports a transport error or returns an unverified response, the system shall reconcile the requested thread from a fresh read before making a state claim, count success only when matching identity and unresolved state are confirmed, report the requested postcondition as absent when matching identity remains resolved, and require inspection when the fresh state is unreadable or identifies another thread.
+
+**RESOLVE-REVIEW-THREADS-68** When `resolve-all` reports an aggregate outcome, the system shall count as resolved only mutations with verified requested postconditions, count and identify each evidence refusal exactly once, exclude transport, provider-state, and verification failures from the refusal count, and report the confirmed resolved and refused totals accumulated before any abort.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/review_thread_reply_safety.feature`
@@ -133,3 +159,4 @@ safe merges until unresolved threads are handled explicitly.
 ## Test Traceability
 
 - Unit package: `cmd/resolve-review-threads`
+- Guidance regressions: `cmd/pr-blockers` and `internal/safegit`

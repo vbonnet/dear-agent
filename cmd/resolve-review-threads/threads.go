@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -182,6 +183,11 @@ func listThreads(ctx context.Context, owner, repo string, pr int) ([]thread, err
 
 		rt := resp.Data.Repository.PullRequest.ReviewThreads
 		for _, n := range rt.Nodes {
+			if n.ID == "" || n.IsResolved == nil {
+				return nil, fmt.Errorf(
+					"reviewThreads response omitted required thread identity or resolved state",
+				)
+			}
 			all = append(all, toThread(n))
 		}
 		if !rt.PageInfo.HasNextPage {
@@ -212,7 +218,7 @@ type threadsResponse struct {
 
 type threadNode struct {
 	ID         string `json:"id"`
-	IsResolved bool   `json:"isResolved"`
+	IsResolved *bool  `json:"isResolved"`
 	IsOutdated bool   `json:"isOutdated"`
 	Path       string `json:"path"`
 	// Opening is the first comment (the reviewer's point) plus the thread's
@@ -249,7 +255,11 @@ type threadNode struct {
 // comments again after our reply flips it back to unanswered, which is the
 // reading we want: the ball is in our court again.
 func toThread(n threadNode) thread {
-	t := thread{ID: n.ID, IsResolved: n.IsResolved, IsOutdated: n.IsOutdated, Path: n.Path, Author: "unknown"}
+	isResolved := false
+	if n.IsResolved != nil {
+		isResolved = *n.IsResolved
+	}
+	t := thread{ID: n.ID, IsResolved: isResolved, IsOutdated: n.IsOutdated, Path: n.Path, Author: "unknown"}
 	if len(n.Opening.Nodes) == 0 {
 		return t
 	}
@@ -303,6 +313,16 @@ func fetchThread(ctx context.Context, threadID string) (thread, error) {
 	if resp.Data.Node.ID == "" {
 		return thread{}, fmt.Errorf("no review thread with ID %s", threadID)
 	}
+	if resp.Data.Node.ID != threadID {
+		return thread{}, fmt.Errorf(
+			"thread query for %s returned mismatched ID %s",
+			threadID,
+			resp.Data.Node.ID,
+		)
+	}
+	if resp.Data.Node.IsResolved == nil {
+		return thread{}, fmt.Errorf("thread %s response omitted its resolved state", threadID)
+	}
 	return toThread(resp.Data.Node), nil
 }
 
@@ -312,10 +332,15 @@ func fetchThread(ctx context.Context, threadID string) (thread, error) {
 // context the generic error lacks; an already-resolved thread means someone
 // else closed it since the caller last looked, so the skip is reported here
 // once rather than at every call site.
-func readOrExit(ctx context.Context, threadID, errMsg string) (t thread, code int) {
+func readOrExit(ctx context.Context, threadID, errMsg, bodyFile string) (t thread, code int) {
 	cur, err := fetchThread(ctx, threadID)
 	if err != nil {
-		return thread{}, fail("%s: %v", errMsg, err)
+		return thread{}, fail("%s: %v\n%s",
+			errMsg, err, inspectReplyOutcomeGuidance(threadID, bodyFile))
+	}
+	if cur.LastID == "" {
+		return cur, fail("provider state is unverified: thread %s response omitted its last comment ID; nothing was posted\n%s",
+			threadID, inspectReplyOutcomeGuidance(threadID, bodyFile))
 	}
 	if cur.IsResolved {
 		fmt.Printf("skipped %s (already resolved)\n", threadID)
@@ -331,16 +356,80 @@ func readOrExit(ctx context.Context, threadID, errMsg string) (t thread, code in
 // now last as the anchor) would resolve a thread with unread commentary on
 // it. wantLastID is the last comment classifyPriorReply actually reasoned
 // about. code is -1 when the tail still matches and t is safe to act on.
-func readMatchingTail(ctx context.Context, threadID, wantLastID string) (t thread, code int) {
-	cur, exitCode := readOrExit(ctx, threadID, "cannot re-read thread state, nothing posted")
-	if exitCode >= 0 {
-		return cur, exitCode
+func readMatchingTail(
+	ctx context.Context,
+	threadID, wantLastID, bodyFile string,
+	priorReply priorReplyState,
+) (t thread, code int) {
+	cur, err := fetchThread(ctx, threadID)
+	if err != nil {
+		return thread{}, fail("provider state is unverified: cannot re-read thread state, nothing posted: %v\n%s",
+			err, inspectReplyOutcomeGuidance(threadID, bodyFile))
+	}
+	if wantLastID == "" {
+		return cur, fail("the history snapshot omitted the last comment ID needed for tail comparison; nothing was posted\n%s",
+			inspectReplyOutcomeGuidance(threadID, bodyFile))
+	}
+	if cur.LastID == "" {
+		return cur, fail("provider state is unverified: thread %s response omitted the current tail ID needed for comparison; nothing was posted\n%s",
+			threadID, inspectReplyOutcomeGuidance(threadID, bodyFile))
 	}
 	if cur.LastID != wantLastID {
-		return cur, fail("someone commented on thread %s while its history was "+
-			"being read; nothing was posted.\n"+
-			"read the new comment(s) and answer those:\n"+
-			"  resolve-review-threads reply-resolve %s --body-file reply.md", threadID, threadID)
+		state := "the thread remains unresolved"
+		if cur.IsResolved {
+			reason := fmt.Sprintf(
+				"resolved after the history tail changed from %s to %s before reply classification",
+				wantLastID,
+				cur.LastID,
+			)
+			if reopenErr := reopenOrFail(ctx, threadID, cur.Path, reason, answerChangedEvidence); reopenErr != nil {
+				message, _ := replyResolutionEvidenceFailure(
+					threadID,
+					reopenErr,
+					revisedAnswerRecoveryGuidance(threadID, bodyFile, false),
+				)
+				return cur, fail("%s", message)
+			}
+			state = "the stale resolution was automatically reopened and that state was confirmed"
+		}
+		message, _ := replyResolutionEvidenceFailure(
+			threadID,
+			&supersededEvidenceError{msg: fmt.Sprintf(
+				"%s %s: the history tail changed from %s to %s while it was being read; nothing was posted; %s",
+				threadID,
+				cur.Path,
+				wantLastID,
+				cur.LastID,
+				state,
+			)},
+			revisedAnswerRecoveryGuidance(threadID, bodyFile, false),
+		)
+		return cur, fail("%s", message)
+	}
+	if cur.IsResolved {
+		if priorReply == priorReplySuperseded {
+			reason := "resolved while an earlier matching reply was already followed by newer commentary"
+			if reopenErr := reopenOrFail(ctx, threadID, cur.Path, reason, answerChangedEvidence); reopenErr != nil {
+				message, _ := replyResolutionEvidenceFailure(
+					threadID,
+					reopenErr,
+					revisedAnswerRecoveryGuidance(threadID, bodyFile, false),
+				)
+				return cur, fail("%s", message)
+			}
+			message, _ := replyResolutionEvidenceFailure(
+				threadID,
+				&supersededEvidenceError{msg: fmt.Sprintf(
+					"%s %s: the earlier matching reply is followed by newer commentary; the stale resolution was automatically reopened",
+					threadID,
+					cur.Path,
+				)},
+				revisedAnswerRecoveryGuidance(threadID, bodyFile, false),
+			)
+			return cur, fail("%s", message)
+		}
+		fmt.Printf("skipped %s (already resolved)\n", threadID)
+		return cur, 0
 	}
 	return cur, -1
 }
@@ -352,6 +441,41 @@ func readMatchingTail(ctx context.Context, threadID, wantLastID string) (t threa
 type unansweredError struct{ msg string }
 
 func (e *unansweredError) Error() string { return e.msg }
+
+// supersededEvidenceError means a nonempty, newer comment ID proved that the
+// evidence used for a reply or resolution is no longer current. Recovery must
+// answer that comment; it must not replay an old body unchanged.
+type supersededEvidenceError struct{ msg string }
+
+func (e *supersededEvidenceError) Error() string { return e.msg }
+
+// unavailableAnswerEvidenceError means the named reply is still last, but the
+// author data cannot prove that a distinct participant answered the opener.
+// Posting another body cannot repair missing/equal author identity.
+type unavailableAnswerEvidenceError struct{ msg string }
+
+func (e *unavailableAnswerEvidenceError) Error() string { return e.msg }
+
+// unverifiableResolutionError means GitHub applied a resolution but returned
+// no last-comment anchor, and the automatic reopen succeeded. No newer comment
+// was proved, so the original operation remains the only valid retry.
+type unverifiableResolutionError struct{ msg string }
+
+func (e *unverifiableResolutionError) Error() string { return e.msg }
+
+// unverifiedProviderStateError means a follow-up read failed after an
+// ambiguous provider outcome. Callers must stop for inspection: neither retry,
+// cleanup, nor merge is licensed by an unknown state.
+type unverifiedProviderStateError struct{ msg string }
+
+func (e *unverifiedProviderStateError) Error() string { return e.msg }
+
+type evidenceRecoveryKind uint8
+
+const (
+	answerChangedEvidence evidenceRecoveryKind = iota
+	retryUnchangedEvidence
+)
 
 // resolveWithEvidence re-reads the thread and resolves it only if it is still
 // answered, so a reviewer comment arriving between the decision and the
@@ -365,20 +489,42 @@ func (e *unansweredError) Error() string { return e.msg }
 func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantLastID string) (msg string, mutated bool, err error) {
 	cur, err := fetchThread(ctx, threadID)
 	if err != nil {
-		return "", false, err
+		return "", false, &unverifiedProviderStateError{msg: fmt.Sprintf(
+			"thread state could not be read before resolution; no mutation was attempted: %v",
+			err,
+		)}
 	}
 	if wantLastID != "" && cur.LastID != wantLastID {
+		if cur.LastID == "" {
+			return "", false, &unverifiedProviderStateError{msg: fmt.Sprintf(
+				"thread %s response omitted the current tail ID needed to verify the named resolution anchor",
+				threadID,
+			)}
+		}
 		return "", false, staleAnchorError(ctx, threadID, cur)
+	}
+	if wantLastID != "" && !force && !cur.Answered {
+		return "", false, &unavailableAnswerEvidenceError{msg: fmt.Sprintf(
+			"%s %s: the named reply is still last, but missing or equal author identity cannot prove an independent answer%s",
+			threadID, cur.Path, outdatedNote(cur),
+		)}
 	}
 	if cur.IsResolved {
 		// Someone else closed it between the listing and now. Report it, but
 		// do not claim it as this sweep's work: the count is an audit record.
 		return fmt.Sprintf("skipped %s (already resolved)", threadID), false, nil
 	}
+	if !force && cur.LastID == "" {
+		return "", false, &unverifiedProviderStateError{msg: fmt.Sprintf(
+			"thread %s response omitted the current tail ID needed as resolution evidence",
+			threadID,
+		)}
+	}
 	if !cur.Answered && !force {
-		return "", false, &unansweredError{msg: fmt.Sprintf("%s %s: unanswered (last word: @%s)%s\n"+
-			"reply with the reason instead: resolve-review-threads reply-resolve %s --body-file reply.md",
-			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur), threadID)}
+		return "", false, &unansweredError{msg: fmt.Sprintf(
+			"%s %s: unanswered (last word: @%s)%s",
+			threadID, cur.Path, cur.LastAuthor, outdatedNote(cur),
+		)}
 	}
 	// effectiveWantID is what the post-mutation check below verifies against.
 	// reply-resolve already names its own anchor via wantLastID. resolve-all
@@ -402,9 +548,33 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 		// still gets the same reconciliation below rather than silently
 		// skipping it because the client-side signal was ambiguous.
 		after, checkErr := fetchThread(ctx, threadID)
-		if checkErr != nil || !after.IsResolved {
-			// Genuinely failed, or genuinely unclear and we can't do better:
-			// report the original error, same as before this check existed.
+		if checkErr != nil {
+			return msg, false, &unverifiedProviderStateError{msg: fmt.Sprintf(
+				"resolve mutation reported %v, and the thread could not be re-read to determine whether it applied: %v",
+				err, checkErr,
+			)}
+		}
+		if !after.IsResolved {
+			// A fresh unresolved state proves the mutation did not leave the
+			// thread resolved, but the tail still decides which recovery is
+			// safe. A nonempty changed ID is confirmed new evidence and must
+			// not receive unchanged-retry guidance.
+			if effectiveWantID != "" && after.LastID == "" {
+				return "", false, &unverifiedProviderStateError{msg: fmt.Sprintf(
+					"resolve mutation reported %v, and the fresh unresolved response for %s omitted the tail ID needed to choose unchanged retry or revision",
+					err,
+					threadID,
+				)}
+			}
+			if effectiveWantID != "" && after.LastID != effectiveWantID {
+				return "", false, &supersededEvidenceError{msg: fmt.Sprintf(
+					"%s %s: the resolve outcome is unresolved, but last comment changed from %s to %s while the mutation was in flight",
+					threadID,
+					after.Path,
+					effectiveWantID,
+					after.LastID,
+				)}
+			}
 			return msg, false, err
 		}
 		msg = fmt.Sprintf("resolved %s (isResolved=true) [recovered: the "+
@@ -422,17 +592,27 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 	// didn't confirm what it resolved against, so it cannot be treated as
 	// verified (the same reasoning as errReplyIDMissing for the reply
 	// mutation).
-	if effectiveWantID != "" && gotLastID != effectiveWantID {
-		reason := "resolved on stale or unverifiable evidence (someone " +
-			"commented while the mutation was in flight, or GitHub's " +
-			"response didn't confirm what it resolved against)"
-		if rErr := reopenOrFail(ctx, threadID, cur.Path, reason); rErr != nil {
+	if gotLastID == "" {
+		reason := "resolved without a response anchor confirming which comment it resolved against"
+		if rErr := reopenOrFail(ctx, threadID, cur.Path, reason, retryUnchangedEvidence); rErr != nil {
 			return "", false, rErr
 		}
-		return "", false, &unansweredError{msg: fmt.Sprintf(
-			"%s %s: reopened — someone commented while the resolve mutation was "+
-				"in flight, or GitHub's response didn't confirm what it resolved "+
-				"against, so it is not accounted for", threadID, cur.Path)}
+		return "", false, &unverifiableResolutionError{msg: fmt.Sprintf(
+			"%s %s: reopened — the resolve response omitted its last-comment anchor",
+			threadID, cur.Path)}
+	}
+	if effectiveWantID != "" && gotLastID != effectiveWantID {
+		reason := fmt.Sprintf(
+			"resolved after the evidence anchor changed from %s to %s",
+			effectiveWantID,
+			gotLastID,
+		)
+		if rErr := reopenOrFail(ctx, threadID, cur.Path, reason, answerChangedEvidence); rErr != nil {
+			return "", false, rErr
+		}
+		return "", false, &supersededEvidenceError{msg: fmt.Sprintf(
+			"%s %s: reopened — last comment changed from %s to %s while resolution was in flight",
+			threadID, cur.Path, effectiveWantID, gotLastID)}
 	}
 	return msg, true, nil
 }
@@ -454,35 +634,45 @@ func resolveWithEvidence(ctx context.Context, threadID string, force bool, wantL
 // IsResolved at readOrExit and silently no-op instead of reopening it.
 func staleAnchorError(ctx context.Context, threadID string, cur thread) error {
 	if cur.IsResolved {
-		if rErr := reopenOrFail(ctx, threadID, cur.Path, "resolved on stale evidence"); rErr != nil {
+		if rErr := reopenOrFail(ctx, threadID, cur.Path, "resolved on stale evidence", answerChangedEvidence); rErr != nil {
 			return rErr
 		}
 	}
-	return &unansweredError{msg: fmt.Sprintf(
+	return &supersededEvidenceError{msg: fmt.Sprintf(
 		"%s %s: the comment this resolution was based on is no longer last "+
 			"(someone commented after it)", threadID, cur.Path)}
 }
 
-func reopenOrFail(ctx context.Context, threadID, path, reason string) error {
-	_, _, stillResolved, uErr := mutateThread(ctx, "unresolve", threadID)
-	if uErr == nil && !stillResolved {
+func reopenOrFail(
+	ctx context.Context,
+	threadID, path, reason string,
+	recovery evidenceRecoveryKind,
+) error {
+	_, uErr := unresolveWithEvidence(ctx, threadID)
+	if uErr == nil {
 		return nil
 	}
-	detail := fmt.Sprintf("%s AND the reopen mutation reported the thread as "+
-		"still resolved", reason)
-	access := ""
-	if uErr != nil {
-		detail = fmt.Sprintf("%s AND reopening it failed: %v", reason, uErr)
-		if isAccessDenied(uErr) {
-			access = " This is an access problem: check `gh auth status` and " +
-				"fix credentials before retrying unresolve — re-running it " +
-				"unchanged will be denied again."
-		}
+	if _, unverified := errors.AsType[*unverifiedProviderStateError](uErr); unverified {
+		return &unverifiedProviderStateError{msg: fmt.Sprintf(
+			"%s, and the automatic reopen outcome could not be verified: %v",
+			reason,
+			uErr,
+		)}
 	}
-	return &failedReopenError{msg: fmt.Sprintf(
-		"%s %s: %s — the thread is STILL RESOLVED.%s Run this before anything "+
-			"else: resolve-review-threads unresolve %s, then read the new "+
-			"comment and answer it", threadID, path, detail, access, threadID)}
+	detail := fmt.Sprintf("%s AND a fresh provider read confirmed that the thread is still resolved", reason)
+	access := ""
+	if isAccessDenied(uErr) {
+		access = " This is an access problem: check `gh auth status` and " +
+			"fix credentials before retrying unresolve — re-running it " +
+			"unchanged will be denied again."
+	}
+	return &failedReopenError{
+		msg: fmt.Sprintf(
+			"%s %s: %s — the thread is STILL RESOLVED.%s",
+			threadID, path, detail, access,
+		),
+		recovery: recovery,
+	}
 }
 
 // failedReopenError marks a resolution that went through on stale or
@@ -492,9 +682,56 @@ func reopenOrFail(ctx context.Context, threadID, path, reason string) error {
 // type is actively wrong here — reply-resolve's own readOrExit would see
 // IsResolved, print "skipped ... (already resolved)", and exit 0 without ever
 // reading the intervening comment or reopening the thread.
-type failedReopenError struct{ msg string }
+type failedReopenError struct {
+	msg      string
+	recovery evidenceRecoveryKind
+}
 
 func (e *failedReopenError) Error() string { return e.msg }
+
+// unresolveStillResolvedError records a failed or structurally invalid
+// unresolve response whose exact-target follow-up read confirmed that the
+// requested thread remains resolved. Keeping the original cause in the text
+// preserves access-denial classification without mistaking the mutation's
+// client-side signal for proof of provider state.
+type unresolveStillResolvedError struct {
+	threadID string
+	cause    error
+}
+
+func (e *unresolveStillResolvedError) Error() string {
+	return fmt.Sprintf(
+		"unresolve %s was not confirmed by its mutation response (%v), and a fresh provider read confirms the thread is STILL RESOLVED",
+		e.threadID,
+		e.cause,
+	)
+}
+
+// unresolveWithEvidence accepts the mutation response only when mutateThread
+// validated both target identity and state. Any other outcome is reconciled
+// against a fresh exact-target read because the mutation may have applied
+// before a transport error or malformed response reached the client.
+func unresolveWithEvidence(ctx context.Context, threadID string) (string, error) {
+	msg, _, _, mutationErr := mutateThread(ctx, "unresolve", threadID)
+	if mutationErr == nil {
+		return msg, nil
+	}
+	after, readErr := fetchThread(ctx, threadID)
+	if readErr != nil {
+		return "", &unverifiedProviderStateError{msg: fmt.Sprintf(
+			"unresolve mutation reported %v, and the requested thread could not be re-read to determine whether it applied: %v",
+			mutationErr,
+			readErr,
+		)}
+	}
+	if !after.IsResolved {
+		return fmt.Sprintf(
+			"unresolved %s (isResolved=false) [recovered: the mutation response was not proof, but a fresh provider read confirmed the requested state]",
+			threadID,
+		), nil
+	}
+	return "", &unresolveStillResolvedError{threadID: threadID, cause: mutationErr}
+}
 
 // isAccessDenied reports whether an error is GitHub refusing the caller rather
 // than a transient failure. Retrying a denial just repeats it, so the two need
@@ -564,6 +801,12 @@ func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, erro
 		}
 		c := resp.Data.Node.Comments
 		for _, n := range c.Nodes {
+			if n.ID == "" {
+				return nil, fmt.Errorf(
+					"comments response for %s omitted a comment ID",
+					threadID,
+				)
+			}
 			all = append(all, tailComment{ID: n.ID, Login: n.Author.Login, Body: n.Body})
 		}
 		if !c.PageInfo.HasNextPage {
@@ -582,15 +825,24 @@ func fetchAllComments(ctx context.Context, threadID string) ([]tailComment, erro
 // code is -1 when history was read and is non-empty; a thread with no
 // comments at all cannot be reasoned about, so callers should stop rather
 // than post blind.
-func fetchHistoryTail(ctx context.Context, threadID string) (history []tailComment, lastID, prevID string, code int) {
+func fetchHistoryTail(ctx context.Context, threadID, bodyFile string) (history []tailComment, lastID, prevID string, code int) {
 	history, err := fetchAllComments(ctx, threadID)
 	if err != nil {
-		return nil, "", "", fail("cannot read thread history, nothing posted: %v", err)
+		return nil, "", "", fail("provider state is unverified: cannot read complete thread history, nothing posted: %v\n%s",
+			err, inspectReplyOutcomeGuidance(threadID, bodyFile))
 	}
 	if len(history) == 0 {
-		return nil, "", "", fail("thread %s has no comments to read; nothing was posted", threadID)
+		return nil, "", "", fail("thread %s has no comments to read; nothing was posted\n%s",
+			threadID, inspectReplyOutcomeGuidance(threadID, bodyFile))
 	}
 	lastID = history[len(history)-1].ID
+	if lastID == "" {
+		return nil, "", "", fail(
+			"thread %s history omitted the last comment ID needed as a predecessor; nothing was posted\n%s",
+			threadID,
+			inspectReplyOutcomeGuidance(threadID, bodyFile),
+		)
+	}
 	if len(history) > 1 {
 		prevID = history[len(history)-2].ID
 	}
@@ -608,8 +860,12 @@ func fetchHistoryTail(ctx context.Context, threadID string) (history []tailComme
 // check this rather than treat a nil error as the postcondition itself.
 func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommentID string, isResolved bool, err error) {
 	query, field := resolveMutation, "resolveReviewThread"
+	wantResolved := true
 	if action == "unresolve" {
 		query, field = unresolveMutation, "unresolveReviewThread"
+		wantResolved = false
+	} else if action != "resolve" {
+		return "", "", false, fmt.Errorf("unsupported thread mutation action %q", action)
 	}
 	raw, err := ghGraphQL(ctx, query, map[string]any{"threadId": threadID})
 	if err != nil {
@@ -619,7 +875,7 @@ func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommen
 		Data map[string]struct {
 			Thread struct {
 				ID         string `json:"id"`
-				IsResolved bool   `json:"isResolved"`
+				IsResolved *bool  `json:"isResolved"`
 				Comments   struct {
 					Nodes []struct {
 						ID string `json:"id"`
@@ -632,10 +888,42 @@ func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommen
 		return "", "", false, fmt.Errorf("parse %s response: %w", field, err)
 	}
 	th := resp.Data[field].Thread
+	if th.ID == "" {
+		return "", "", false, fmt.Errorf(
+			"%s response omitted the requested thread identity %s",
+			field,
+			threadID,
+		)
+	}
+	if th.ID != threadID {
+		return "", "", false, fmt.Errorf(
+			"%s response returned mismatched thread ID %s for requested %s",
+			field,
+			th.ID,
+			threadID,
+		)
+	}
+	if th.IsResolved == nil {
+		return "", "", false, fmt.Errorf(
+			"%s response for %s omitted the requested resolved-state postcondition",
+			field,
+			threadID,
+		)
+	}
+	gotResolved := *th.IsResolved
+	if gotResolved != wantResolved {
+		return "", "", gotResolved, fmt.Errorf(
+			"%s response for %s reported isResolved=%t, want %t",
+			field,
+			threadID,
+			gotResolved,
+			wantResolved,
+		)
+	}
 	if n := th.Comments.Nodes; len(n) > 0 {
 		lastCommentID = n[len(n)-1].ID
 	}
-	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, th.IsResolved), lastCommentID, th.IsResolved, nil
+	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, gotResolved), lastCommentID, gotResolved, nil
 }
 
 // ghGraphQL sends one typed GraphQL envelope through standard input and

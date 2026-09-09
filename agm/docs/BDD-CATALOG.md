@@ -939,18 +939,41 @@ locations.
 
 **Drives:** body-file-only and bounded review reply input, descriptor-validated
 nonblocking named-file handling, byte-preserving GitHub delivery, payload-aware
-provider diagnostics, and non-executable retry guidance for
+provider diagnostics, non-executable retry guidance, predecessor-preserving
+recovery from ambiguous provider outcomes, and externally located temporary
+reply-file guidance with retry retention and terminal cleanup, plus
+identity-and-state postcondition verification and transport-error
+reconciliation for
 `resolve-review-threads`.
 
 **Key scenarios:**
 - Review reply bodies remain exact, bounded data outside process arguments and
   shell evaluation; invalid or replaced named sources fail without blocking and
   before provider mutation; body-bearing errors suppress echoed payloads while
-  body-free provider diagnostics remain.
+  body-free provider diagnostics remain; generated guidance prescribes a fresh
+  external file per thread, retains it unchanged whenever exact-body retry
+  remains valid, and removes it only after confirmed terminal resolution before
+  the next thread or merge; ambiguous or missing-ID posts retain the original
+  predecessor and branch among recovered placement, unchanged-tail retry,
+  moved-tail revision, and unreadable-state inspection; an empty resolution
+  anchor remains an unverifiable unchanged-source outcome while a non-empty
+  changed anchor requires the later comment to be answered; resolved buried or
+  jumped replies reopen before recovery; missing or equal author evidence and
+  unreadable state retain the actual source for inspection; and unchanged or
+  revised guidance preserves the caller's quoted named path or standard-input
+  form without losing task-owned cleanup identity. Resolve and unresolve
+  responses must prove the requested thread identity and state; moved resolved
+  tails are classified before any already-resolved shortcut; incomplete comment
+  identities require inspection; transport errors are reconciled against fresh
+  provider state; and aggregate summaries distinguish verified resolutions,
+  evidence refusals, and operational failures.
 
 **Why this matters:** Review text can contain shell syntax, newlines, and
 Unicode. Treating those bytes as command text can alter the recorded reply or
-execute unintended local actions.
+execute unintended local actions, while discarding predecessor or source
+identity can duplicate a reply or resolve an intervening comment unread. A
+successful transport return is also not proof of the requested provider state,
+and a transport error is not proof that the provider left state unchanged.
 
 ### Workflow Tooling Guardrails
 
