@@ -74,6 +74,13 @@ type sourceConfigEntry struct {
 	value string
 }
 
+// parsedSourceConfig is the syntax-only result. Policy validation remains a
+// separate fallible primitive so C1 can preserve source/parse versus
+// source/validate attribution.
+type parsedSourceConfig struct {
+	entries []sourceConfigEntry
+}
+
 // sourceConfigClaim is the complete semantic and ordered-entry claim for
 // one directly parsed source .git/config. Its fields remain private so callers
 // cannot invent a partially validated configuration.
@@ -84,11 +91,19 @@ type sourceConfigClaim struct {
 }
 
 func parseSourceConfig(content []byte) (sourceConfigClaim, error) {
+	parsed, err := parseSourceConfigSyntax(content)
+	if err != nil {
+		return sourceConfigClaim{}, err
+	}
+	return validateSourceConfigPolicy(parsed)
+}
+
+func parseSourceConfigSyntax(content []byte) (parsedSourceConfig, error) {
 	if len(content) > maxSourceConfigBytes {
-		return sourceConfigClaim{}, fail(CauseLimit, "source config exceeds byte limit")
+		return parsedSourceConfig{}, fail(CauseLimit, "source config exceeds byte limit")
 	}
 	if bytes.IndexByte(content, 0) >= 0 {
-		return sourceConfigClaim{}, fail(CauseMalformed, "source config contains NUL")
+		return parsedSourceConfig{}, fail(CauseMalformed, "source config contains NUL")
 	}
 
 	entries := make([]sourceConfigEntry, 0, 32)
@@ -97,7 +112,7 @@ func parseSourceConfig(content []byte) (sourceConfigClaim, error) {
 	sectionSet := false
 	for lineNumber, lineBytes := range bytes.Split(content, []byte{'\n'}) {
 		if err := validateSourceConfigLineBytes(lineBytes); err != nil {
-			return sourceConfigClaim{}, failWith(err, CauseMalformed, fmt.Sprintf("source config line %d", lineNumber+1))
+			return parsedSourceConfig{}, failWith(err, CauseMalformed, fmt.Sprintf("source config line %d", lineNumber+1))
 		}
 		line := string(lineBytes)
 		trimmed := trimHorizontalLeft(line)
@@ -107,34 +122,38 @@ func parseSourceConfig(content []byte) (sourceConfigClaim, error) {
 		if trimmed[0] == '[' {
 			parsed, err := parseSourceConfigSection(trimmed)
 			if err != nil {
-				return sourceConfigClaim{}, failWith(err, CauseMalformed, fmt.Sprintf("source config section on line %d", lineNumber+1))
+				return parsedSourceConfig{}, failWith(err, CauseMalformed, fmt.Sprintf("source config section on line %d", lineNumber+1))
 			}
 			section = parsed
 			sectionSet = true
 			continue
 		}
 		if !sectionSet {
-			return sourceConfigClaim{}, fail(CauseMalformed, "source config assignment precedes a section")
+			return parsedSourceConfig{}, fail(CauseMalformed, "source config assignment precedes a section")
 		}
 		entry, err := parseSourceConfigAssignment(section, trimmed)
 		if err != nil {
-			return sourceConfigClaim{}, failWith(err, CauseMalformed, fmt.Sprintf("source config assignment on line %d", lineNumber+1))
+			return parsedSourceConfig{}, failWith(err, CauseMalformed, fmt.Sprintf("source config assignment on line %d", lineNumber+1))
 		}
 		if len(entries) == maxSourceConfigRecords {
-			return sourceConfigClaim{}, fail(CauseLimit, "source config exceeds record limit")
+			return parsedSourceConfig{}, fail(CauseLimit, "source config exceeds record limit")
 		}
 		if _, duplicate := seen[entry.key]; duplicate {
-			return sourceConfigClaim{}, fail(CauseMalformed, "source config contains a duplicate normalized key")
+			return parsedSourceConfig{}, fail(CauseMalformed, "source config contains a duplicate normalized key")
 		}
 		seen[entry.key] = struct{}{}
 		entries = append(entries, entry)
 	}
 
-	claim, err := validateSourceConfigEntries(entries)
+	return parsedSourceConfig{entries: append([]sourceConfigEntry(nil), entries...)}, nil
+}
+
+func validateSourceConfigPolicy(parsed parsedSourceConfig) (sourceConfigClaim, error) {
+	claim, err := validateSourceConfigEntries(parsed.entries)
 	if err != nil {
 		return sourceConfigClaim{}, err
 	}
-	claim.entries = append([]sourceConfigEntry(nil), entries...)
+	claim.entries = append([]sourceConfigEntry(nil), parsed.entries...)
 	return claim, nil
 }
 
@@ -607,40 +626,79 @@ type packedRefsClaim struct {
 	records []packedRefRecord
 }
 
+// parsedPackedRefs is syntax-only state. It cannot stand in for the final
+// policy-validated packedRefsClaim.
+type parsedPackedRefs struct {
+	traits  []string
+	records []packedRefRecord
+}
+
 type packedRefsLimits struct {
 	bytes int
 	rows  int
 }
 
 func parsePackedRefs(content []byte, format repositoryObjectFormat) (packedRefsClaim, error) {
-	return parsePackedRefsWithLimits(content, format, packedRefsLimits{
+	parsed, err := parsePackedRefsSyntax(content, format)
+	if err != nil {
+		return packedRefsClaim{}, err
+	}
+	return validatePackedRefsPolicy(parsed)
+}
+
+func parsePackedRefsSyntax(content []byte, format repositoryObjectFormat) (parsedPackedRefs, error) {
+	return parsePackedRefsSyntaxWithLimits(content, format, packedRefsLimits{
 		bytes: maxPackedRefsBytes,
 		rows:  maxPackedRefsRows,
 	})
 }
 
 func parsePackedRefsWithLimits(content []byte, format repositoryObjectFormat, limits packedRefsLimits) (packedRefsClaim, error) {
+	parsed, err := parsePackedRefsSyntaxWithLimits(content, format, limits)
+	if err != nil {
+		return packedRefsClaim{}, err
+	}
+	return validatePackedRefsPolicy(parsed)
+}
+
+func parsePackedRefsSyntaxWithLimits(
+	content []byte,
+	format repositoryObjectFormat,
+	limits packedRefsLimits,
+) (parsedPackedRefs, error) {
 	rows, err := splitPackedRefsRows(content, format, limits)
 	if err != nil || len(rows) == 0 {
-		return packedRefsClaim{}, err
+		return parsedPackedRefs{}, err
 	}
 	parser := packedRefsParser{
 		format: format,
-		claim:  packedRefsClaim{records: make([]packedRefRecord, 0, len(rows))},
+		parsed: parsedPackedRefs{records: make([]packedRefRecord, 0, len(rows))},
 	}
 	if bytes.HasPrefix(rows[0], []byte("#")) {
-		parser.claim.traits, err = parsePackedRefsHeader(string(rows[0]))
+		parser.parsed.traits, err = parsePackedRefsHeader(string(rows[0]))
 		if err != nil {
-			return packedRefsClaim{}, err
+			return parsedPackedRefs{}, err
 		}
 		rows = rows[1:]
 	}
 	for _, row := range rows {
 		if err := parser.accept(row); err != nil {
-			return packedRefsClaim{}, err
+			return parsedPackedRefs{}, err
 		}
 	}
-	return parser.claim, nil
+	return parser.parsed, nil
+}
+
+func validatePackedRefsPolicy(parsed parsedPackedRefs) (packedRefsClaim, error) {
+	for _, record := range parsed.records {
+		if record.name == "refs/replace" || strings.HasPrefix(record.name, "refs/replace/") {
+			return packedRefsClaim{}, fail(CauseUnsupported, "packed-refs contains a replacement ref")
+		}
+	}
+	return packedRefsClaim{
+		traits:  append([]string(nil), parsed.traits...),
+		records: append([]packedRefRecord(nil), parsed.records...),
+	}, nil
 }
 
 func splitPackedRefsRows(content []byte, format repositoryObjectFormat, limits packedRefsLimits) ([][]byte, error) {
@@ -669,7 +727,7 @@ func splitPackedRefsRows(content []byte, format repositoryObjectFormat, limits p
 
 type packedRefsParser struct {
 	format repositoryObjectFormat
-	claim  packedRefsClaim
+	parsed parsedPackedRefs
 }
 
 func (parser *packedRefsParser) accept(row []byte) error {
@@ -689,22 +747,22 @@ func (parser *packedRefsParser) accept(row []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(parser.claim.records) != 0 && record.name <= parser.claim.records[len(parser.claim.records)-1].name {
+	if len(parser.parsed.records) != 0 && record.name <= parser.parsed.records[len(parser.parsed.records)-1].name {
 		return fail(CauseMalformed, "packed-refs names are not raw-byte strictly increasing")
 	}
-	parser.claim.records = append(parser.claim.records, record)
+	parser.parsed.records = append(parser.parsed.records, record)
 	return nil
 }
 
 func (parser *packedRefsParser) acceptPeeled(raw []byte) error {
-	if len(parser.claim.records) == 0 || parser.claim.records[len(parser.claim.records)-1].peeledID != "" {
+	if len(parser.parsed.records) == 0 || parser.parsed.records[len(parser.parsed.records)-1].peeledID != "" {
 		return fail(CauseMalformed, "packed-refs contains a detached or duplicate peeled row")
 	}
 	peeledID := string(raw)
 	if !validObjectID(peeledID, parser.format) {
 		return fail(CauseMalformed, "packed-refs contains a malformed peeled object ID")
 	}
-	parser.claim.records[len(parser.claim.records)-1].peeledID = peeledID
+	parser.parsed.records[len(parser.parsed.records)-1].peeledID = peeledID
 	return nil
 }
 
@@ -719,9 +777,6 @@ func parsePackedRefRecord(row []byte, format repositoryObjectFormat) (packedRefR
 	}
 	if !validFullGitRefName(record.name) {
 		return packedRefRecord{}, fail(CauseMalformed, "packed-refs contains an invalid ref name")
-	}
-	if record.name == "refs/replace" || strings.HasPrefix(record.name, "refs/replace/") {
-		return packedRefRecord{}, fail(CauseUnsupported, "packed-refs contains a replacement ref")
 	}
 	return record, nil
 }

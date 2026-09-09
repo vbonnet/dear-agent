@@ -158,6 +158,33 @@ func TestParseSourceConfigRejectsMalformedAndForbiddenForms(t *testing.T) {
 	}
 }
 
+func TestSourceConfigSyntaxAndPolicyAreSeparate(t *testing.T) {
+	t.Parallel()
+
+	forbidden := []byte("[core]\nrepositoryformatversion = 0\nbare = true\n")
+	parsed, err := parseSourceConfigSyntax(forbidden)
+	if err != nil {
+		t.Fatalf("syntax parser rejected well-formed policy input: %v", err)
+	}
+	_, err = validateSourceConfigPolicy(parsed)
+	requirePrivateCause(t, err, CauseUnsupported)
+
+	missingRequired := []byte("[core]\nbare = false\n")
+	parsed, err = parseSourceConfigSyntax(missingRequired)
+	if err != nil {
+		t.Fatalf("syntax parser rejected well-formed incomplete input: %v", err)
+	}
+	_, err = validateSourceConfigPolicy(parsed)
+	requirePrivateCause(t, err, CauseMalformed)
+
+	malformed := []byte("[core\nrepositoryformatversion = 0\n")
+	if _, err := parseSourceConfigSyntax(malformed); err == nil {
+		t.Fatal("syntax parser admitted malformed section framing")
+	} else {
+		requirePrivateCause(t, err, CauseMalformed)
+	}
+}
+
 func TestParseSourceConfigEnforcesRemoteAndBranchClosure(t *testing.T) {
 	t.Parallel()
 
@@ -506,6 +533,59 @@ func TestParsePackedRefsRejectsMalformedAndReplacementState(t *testing.T) {
 			requirePrivateCause(t, err, test.cause)
 		})
 	}
+}
+
+func TestPackedRefsSyntaxAndPolicyAreSeparate(t *testing.T) {
+	t.Parallel()
+
+	one := strings.Repeat("1", 40)
+	parsed, err := parsePackedRefsSyntax(
+		[]byte(one+" refs/replace/target\n"),
+		objectFormatSHA1,
+	)
+	if err != nil {
+		t.Fatalf("syntax parser rejected well-formed replacement ref: %v", err)
+	}
+	if len(parsed.records) != 1 || parsed.records[0].name != "refs/replace/target" {
+		t.Fatalf("syntax claim = %#v, want one replacement-ref record", parsed)
+	}
+	_, err = validatePackedRefsPolicy(parsed)
+	requirePrivateCause(t, err, CauseUnsupported)
+
+	validParsed, err := parsePackedRefsSyntax(
+		[]byte("# pack-refs with: sorted \n"+one+" refs/heads/main\n"),
+		objectFormatSHA1,
+	)
+	if err != nil {
+		t.Fatalf("parse valid packed refs: %v", err)
+	}
+	claim, err := validatePackedRefsPolicy(validParsed)
+	if err != nil {
+		t.Fatalf("validate packed refs policy: %v", err)
+	}
+	validParsed.traits[0] = "mutated"
+	validParsed.records[0].name = "refs/heads/mutated"
+	if !reflect.DeepEqual(claim.traits, []string{"sorted"}) ||
+		len(claim.records) != 1 || claim.records[0].name != "refs/heads/main" {
+		t.Fatalf("validated claim aliases syntax state: %#v", claim)
+	}
+
+	if _, err := parsePackedRefsSyntax(
+		[]byte(one+" refs/heads/.hidden\n"),
+		objectFormatSHA1,
+	); err == nil {
+		t.Fatal("syntax parser admitted malformed ref name")
+	} else {
+		requirePrivateCause(t, err, CauseMalformed)
+	}
+
+	// Complete syntax admission precedes policy validation. A later malformed
+	// row therefore owns failure before an earlier replacement-ref predicate.
+	_, err = parsePackedRefs(
+		[]byte(one+" refs/replace/target\nmalformed row\n"),
+		objectFormatSHA1,
+	)
+	requirePrivateCause(t, err, CauseMalformed)
 }
 
 func TestParsePackedRefsEnforcesExactInjectedLimits(t *testing.T) {

@@ -485,6 +485,43 @@ func TestFilesystemCompoundFailurePreservesCloseCause(t *testing.T) {
 	requirePrivateCauses(t, wrapped, CauseIdentity, CauseNotFound, CauseDescriptorClose, CauseCleanup)
 }
 
+func TestCloseRootThenDescriptorAttemptsBothInOrder(t *testing.T) {
+	t.Parallel()
+
+	rootErr := errors.New("root close")
+	descriptorErr := errors.New("descriptor close")
+	order := make([]string, 0, 2)
+	err := closeRootThenDescriptor(
+		&orderedTestCloser{name: "root", order: &order, err: rootErr},
+		&orderedTestCloser{name: "descriptor", order: &order, err: descriptorErr},
+	)
+	if !reflect.DeepEqual(order, []string{"root", "descriptor"}) {
+		t.Fatalf("close order = %v, want root then descriptor", order)
+	}
+	if !errors.Is(err, rootErr) || !errors.Is(err, descriptorErr) {
+		t.Fatalf("joined close error = %v, want both injected failures", err)
+	}
+}
+
+func TestCloseRootThenDescriptorAcceptsMissingHandles(t *testing.T) {
+	t.Parallel()
+
+	if err := closeRootThenDescriptor(nil, nil); err != nil {
+		t.Fatalf("closeRootThenDescriptor(nil, nil) = %v", err)
+	}
+}
+
+type orderedTestCloser struct {
+	name  string
+	order *[]string
+	err   error
+}
+
+func (closer *orderedTestCloser) Close() error {
+	*closer.order = append(*closer.order, closer.name)
+	return closer.err
+}
+
 func TestUnsupportedPlatformFilesystemSeams(t *testing.T) {
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		t.Skip("supported filesystem implementation is active")
