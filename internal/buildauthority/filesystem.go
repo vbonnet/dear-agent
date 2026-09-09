@@ -506,12 +506,20 @@ func (directory *retainedDirectory) close() error {
 	if directory == nil {
 		return nil
 	}
+	return closeRootThenDescriptor(directory.root, directory.descriptor)
+}
+
+// closeRootThenDescriptor preserves the acquisition owner's root-before-file
+// order and attempts both closes. Keeping the fixed primitive separate lets
+// source-owner tests prove dual-inner-close behavior without installing
+// executable callbacks in the owner itself.
+func closeRootThenDescriptor(root, descriptor io.Closer) error {
 	var closeErrors []error
-	if directory.root != nil {
-		closeErrors = append(closeErrors, directory.root.Close())
+	if root != nil {
+		closeErrors = append(closeErrors, root.Close())
 	}
-	if directory.descriptor != nil {
-		closeErrors = append(closeErrors, directory.descriptor.Close())
+	if descriptor != nil {
+		closeErrors = append(closeErrors, descriptor.Close())
 	}
 	return errors.Join(closeErrors...)
 }
