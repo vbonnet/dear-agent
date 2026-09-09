@@ -34,4 +34,9 @@ const (
 	maxSymlinkBytes        = 4 << 10
 	maxRelativePathBytes   = 1_023
 	maxPathComponentBytes  = 255
+
+	goGOROOTRelativePath       = "bin/go"
+	compilerGOROOTRelativePath = "pkg/tool/darwin_arm64/compile"
+	goExecutableBase           = "go"
+	gitExecutableBase          = "git"
 )
