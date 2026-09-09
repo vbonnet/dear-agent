@@ -34,7 +34,7 @@ threads or an out-of-date branch. See the DEAR retro
    | `CONFLICTS` | `safe-rebase` onto base, resolve, `safe-push` |
    | `FAILING_REQUIRED_CHECK` | fix the named check; known flakes get one rerun |
    | `PENDING_REQUIRED_CHECK` | `gh pr checks <n> --watch` |
-   | `UNRESOLVED_THREADS` | address in code, then per thread: `resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
+   | `UNRESOLVED_THREADS` | address each thread, then apply the canonical per-thread reply and recovery lifecycle from `resolve-review-threads --help`; sweep with `resolve-review-threads resolve-all <owner> <repo> <n>` (it refuses unanswered threads) |
    | `CHANGES_REQUESTED` | address the review, push, re-request |
    | `REVIEW_REQUIRED` | obtain an approving review |
    | `BEHIND` | `gh pr update-branch <n>` |
@@ -78,13 +78,18 @@ last word:
 # thread IDs: pr-blockers prints them in brackets, or list them directly
 resolve-review-threads list <owner> <repo> <n>
 
-# the normal path: state the reason and close the thread in one step
-resolve-review-threads reply-resolve <threadId> "Fixed - <what changed>"
+# print the command-owned reply-source, retry, and cleanup lifecycle
+resolve-review-threads --help
+# apply that lifecycle to each thread in turn
 
-# sweep: resolves ANSWERED threads, refuses the rest by name, exits non-zero
+# final sweep: resolves ANSWERED threads, refuses the rest by name, exits non-zero
 # (add a login argument after <n> to sweep one author only)
 resolve-review-threads resolve-all <owner> <repo> <n>
 ```
+
+The command help and any command-emitted recovery diagnostic are the canonical
+owners for reply-source creation, retention, retry, and cleanup. Follow them
+directly rather than reconstructing their lifecycle from this skill.
 
 Every `resolve-review-threads` path enforces this, including single-thread
 `resolve <threadId>`, and each one re-reads the thread immediately before

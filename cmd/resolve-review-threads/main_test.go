@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -122,15 +121,20 @@ func mkNode(id string, outdated bool, authors ...string) threadNode {
 	// Recent mirrors comments(last:2): newest last.
 	for i := max(0, len(authors)-2); i < len(authors); i++ {
 		var c struct {
-			ID     string `json:"id"`
-			Author struct {
+			ID               string                    `json:"id"`
+			UpdatedAt        string                    `json:"updatedAt"`
+			UserContentEdits *userContentEditsEvidence `json:"userContentEdits"`
+			Author           struct {
 				Login string `json:"login"`
 			} `json:"author"`
-			Body string `json:"body"`
+			Body *string `json:"body"`
 		}
 		c.ID = fmt.Sprintf("%s-c%d", id, i)
+		c.UpdatedAt = providerFixtureUpdatedAt
+		c.UserContentEdits = zeroUserContentEditsEvidence()
 		c.Author.Login = authors[i]
-		c.Body = "comment from " + authors[i]
+		body := "comment from " + authors[i]
+		c.Body = &body
 		n.Recent.Nodes = append(n.Recent.Nodes, c)
 	}
 	return n
@@ -269,14 +273,20 @@ func mkNodeLogins(id, opening, latest string, total int) threadNode {
 	open.Author.Login = opening
 	n.Opening.Nodes = append(n.Opening.Nodes, open)
 	var last struct {
-		ID     string `json:"id"`
-		Author struct {
+		ID               string                    `json:"id"`
+		UpdatedAt        string                    `json:"updatedAt"`
+		UserContentEdits *userContentEditsEvidence `json:"userContentEdits"`
+		Author           struct {
 			Login string `json:"login"`
 		} `json:"author"`
-		Body string `json:"body"`
+		Body *string `json:"body"`
 	}
 	last.ID = id + "-last"
+	last.UpdatedAt = providerFixtureUpdatedAt
+	last.UserContentEdits = zeroUserContentEditsEvidence()
 	last.Author.Login = latest
+	body := ""
+	last.Body = &body
 	n.Recent.Nodes = append(n.Recent.Nodes, last)
 	return n
 }
@@ -369,61 +379,26 @@ func TestSameReplyBody(t *testing.T) {
 	}
 }
 
-// TestShellQuote pins the retry-guidance safety property %q broke: a
-// multiline body or one with shell metacharacters must survive a literal
-// copy-paste into bash unchanged, or the retried command posts a body that
-// no longer matches the original and classifyPriorReply treats it as new.
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		name, in string
-	}{
-		{"plain", "Fixed - moved the check"},
-		{"multiline", "Fixed in abc1234\n\nCovered by TestThing."},
-		{"embedded single quote", "it's fixed now"},
-		{"dollar and backtick", "cost is $5 via `cmd`"},
-		{"empty", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			quoted := shellQuote(tt.in)
-			got := unquoteSingleQuoted(t, quoted)
-			if got != tt.in {
-				t.Errorf("shellQuote(%q) = %q, round-tripped through a POSIX "+
-					"shell as %q, want %q", tt.in, quoted, got, tt.in)
-			}
-		})
-	}
-}
-
-// unquoteSingleQuoted runs the shell's own single-quote parsing rather than
-// reimplementing it, so the test proves what bash would actually see.
-func unquoteSingleQuoted(t *testing.T, quoted string) string {
-	t.Helper()
-	out, err := exec.Command("sh", "-c", "printf '%s' "+quoted).Output()
-	if err != nil {
-		t.Fatalf("sh -c failed on %q: %v", quoted, err)
-	}
-	return string(out)
-}
-
 // TestIsAccessDenied separates a refusal by GitHub from a transient failure.
 // Retrying a denial repeats it, so the two get different advice.
 func TestIsAccessDenied(t *testing.T) {
-	denied := []string{
-		"gh api graphql: HTTP 403: Resource not accessible by integration",
-		"gh api graphql: exit status 1: Bad credentials",
-		"Must have push permission to resolve",
-		"HTTP 401: requires authentication",
+	providerDenied := &providerAccessDeniedError{cause: errors.New("exit status 1")}
+	denied := []error{
+		providerDenied,
+		fmt.Errorf("wrapped provider failure: %w", providerDenied),
 	}
-	for _, m := range denied {
-		if !isAccessDenied(errors.New(m)) {
-			t.Errorf("expected access denial for %q", m)
+	for _, err := range denied {
+		if !isAccessDenied(err) {
+			t.Errorf("expected typed access denial for %v", err)
 		}
 	}
 	transient := []string{
 		"gh api graphql: exit status 1: server error 502",
 		"context deadline exceeded",
 		"gh: Not Found",
+		"gh: HTTP 403 rate limit exceeded",
+		"gh: permission metadata unavailable",
+		"Must have push permission to resolve",
 	}
 	for _, m := range transient {
 		if isAccessDenied(errors.New(m)) {
@@ -503,7 +478,7 @@ func TestClassifyPriorReply(t *testing.T) {
 		{
 			name: "empty tail",
 			tail: nil,
-			want: noPriorReply,
+			want: unavailableReplyIntent,
 		},
 		{
 			name: "similar but different reply is not ours",
@@ -586,11 +561,10 @@ func TestParseReplyCommentID(t *testing.T) {
 		t.Fatalf("got (%q, %v), want (PRRC_abc, nil)", id, err)
 	}
 
-	// errReplyIDMissing distinguishes "GitHub accepted the mutation but the
-	// response omitted the ID" (the reply is live; postReplyOrExit forbids
-	// reposting) from a genuine parse failure (unknown whether it posted at
-	// all): they need opposite advice, so the sentinel must fire on exactly
-	// the first kind.
+	// errReplyIDMissing distinguishes a structurally valid mutation response
+	// that omitted the ID from malformed JSON. Neither signal proves placement;
+	// postReplyOrExit reconciles the former against the original predecessor
+	// before it can recover an anchor or select retry guidance.
 	bad := map[string]struct {
 		raw        []byte
 		wantIDMiss bool
@@ -618,8 +592,10 @@ func TestParseReplyCommentID(t *testing.T) {
 // stopped selecting the comment ID, parseReplyCommentID would fail every time
 // and reply-resolve would never resolve anything.
 func TestReplyMutationRequestsCommentID(t *testing.T) {
-	if !strings.Contains(replyMutation, "comment { id }") {
-		t.Errorf("reply mutation must select the comment ID, got: %s", replyMutation)
+	for _, field := range []string{"comment { id", "author { login }", "body", "updatedAt"} {
+		if !strings.Contains(replyMutation, field) {
+			t.Errorf("reply mutation must select exact comment evidence %q, got: %s", field, replyMutation)
+		}
 	}
 }
 
@@ -629,9 +605,16 @@ func TestReplyMutationRequestsCommentID(t *testing.T) {
 // empty lastCommentID, silently disabling the check for a comment landing
 // while the resolve mutation itself was in flight.
 func TestResolveMutationRequestsLastComment(t *testing.T) {
-	if !strings.Contains(resolveMutation, "comments(last:1)") {
-		t.Errorf("resolve mutation must select the last comment, got: %s", resolveMutation)
+	if !strings.Contains(resolveMutation, "comments(last:2)") ||
+		!strings.Contains(resolveMutation, "nodes { id author { login } body updatedAt userContentEdits(last:1) { totalCount nodes { id } } }") {
+		t.Errorf("resolve mutation must select the last two comment IDs and bodies, got: %s", resolveMutation)
 	}
+}
+
+func zeroUserContentEditsEvidence() *userContentEditsEvidence {
+	count := 0
+	nodes := []userContentEditNodeEvidence{}
+	return &userContentEditsEvidence{TotalCount: &count, Nodes: &nodes}
 }
 
 // TestCheckReplyPlacement pins BOTH conditions reply-resolve depends on, and
@@ -713,6 +696,61 @@ func TestRunHelpExitsZero(t *testing.T) {
 	}
 	if code := run(nil); code == 0 {
 		t.Error("no arguments must still fail")
+	}
+}
+
+func TestHelpDocumentsUnixOnlyContinuationBoundary(t *testing.T) {
+	diagnostics := captureStderr(t, func() {
+		if code := run([]string{"--help"}); code != 0 {
+			t.Fatalf("run(--help) = %d, want 0", code)
+		}
+	})
+	for _, want := range []string{
+		"Continuation issuance and replay currently require Unix",
+		"Non-Unix platforms fail",
+		"before reply mutation",
+		"For continue-resolve, failure precedes both",
+		"body-source and provider access",
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Fatalf("help omitted %q:\n%s", want, diagnostics)
+		}
+	}
+}
+
+func TestHelpDocumentsStateRootOwnership(t *testing.T) {
+	diagnostics := captureStderr(t, func() {
+		if code := run([]string{"--help"}); code != 0 {
+			t.Fatalf("run(--help) = %d, want 0", code)
+		}
+	})
+	diagnostics = strings.Join(strings.Fields(diagnostics), " ")
+	for _, want := range []string{
+		"dear-agent state directory is a shared namespace",
+		"POSIX mode may grant group or other read and traverse access",
+		"real directory with no group or other write bits",
+		"leaves an existing shared namespace unchanged",
+		"resolve-review-threads child and signing key private",
+		"An explicitly selected XDG_STATE_HOME must already exist",
+		"synchronizes descendant entries with their parents",
+		"never synchronizes the selected state root's own entry",
+		"walks another caller-owned ancestor",
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Fatalf("help omitted %q:\n%s", want, diagnostics)
+		}
+	}
+}
+
+func TestHelpUsesCanonicalFirstAnswerGuidance(t *testing.T) {
+	diagnostics := captureStderr(t, func() {
+		if code := run([]string{"--help"}); code != 0 {
+			t.Fatalf("run(--help) = %d, want 0", code)
+		}
+	})
+	want := newReplyBodyGuidance("<threadId>")
+	if count := strings.Count(diagnostics, want); count != 1 {
+		t.Fatalf("help contains %d canonical first-answer lifecycles, want 1:\n%s", count, diagnostics)
 	}
 }
 

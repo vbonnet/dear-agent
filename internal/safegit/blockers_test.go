@@ -78,9 +78,7 @@ func TestClassifyBlockers_OutdatedUnresolvedThreadBlocks(t *testing.T) {
 	if !strings.Contains(bs[0].Detail, "outdated") {
 		t.Errorf("outdated threads must be called out, got: %s", bs[0].Detail)
 	}
-	if !strings.Contains(bs[0].Fix, "resolve-review-threads reply-resolve") {
-		t.Errorf("thread fix must lead with reply-resolve, got: %s", bs[0].Fix)
-	}
+	assertRoutesReviewThreadLifecycleToOwner(t, bs[0].Fix)
 	if !strings.Contains(bs[0].Fix, "resolve-review-threads resolve-all owner repo 42") {
 		t.Errorf("thread fix must name resolve-review-threads, got: %s", bs[0].Fix)
 	}
@@ -91,6 +89,22 @@ func TestClassifyBlockers_OutdatedUnresolvedThreadBlocks(t *testing.T) {
 	}
 	if !strings.Contains(bs[0].Fix, "resolve-review-threads list owner repo 42") {
 		t.Errorf("fix must offer a list command that yields thread IDs, got: %s", bs[0].Fix)
+	}
+}
+
+func assertRoutesReviewThreadLifecycleToOwner(t *testing.T, got string) {
+	t.Helper()
+	if !strings.Contains(got, "resolve-review-threads --help") {
+		t.Errorf("review-thread guidance does not route to its owning command:\n%s", got)
+	}
+	for _, forbidden := range []string{
+		"resolve-review-thread.XXXXXX",
+		"--body-file",
+		"rm -f --",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("review-thread guidance duplicates owner token %q:\n%s", forbidden, got)
+		}
 	}
 }
 
