@@ -135,18 +135,13 @@ func TestDarwinSupervisorPipeSetupAndStartFailureCloseExactlyOnce(t *testing.T) 
 }
 
 func TestRealProcessCommandsUseOnlyTypedClosedEnvironmentAndCreateNewGroup(t *testing.T) {
-	preallocation, err := newPreallocationEnvironment("/private/go", "/private/mod")
-	if err != nil {
-		t.Fatalf("preallocation environment: %v", err)
-	}
-	workspace, err := newWorkspacePaths("/private/state/task")
-	if err != nil {
-		t.Fatalf("workspace paths: %v", err)
-	}
-	taskPrivate, err := newTaskPrivateEnvironment(workspace, "/private/go", "/private/mod")
-	if err != nil {
-		t.Fatalf("task-private environment: %v", err)
-	}
+	preallocation := mustTestPreallocationEnvironment(t, "/private/go", "/private/mod")
+	taskPrivate := mustTestTaskPrivateEnvironment(
+		t,
+		"/private/state/.sandbox-gc-build-0123456789abcdef01234567",
+		"/private/go",
+		"/private/mod",
+	)
 	spec := processCommandSpec{executable: "/bin/sh", directory: "/private/tmp"}
 	for _, test := range []struct {
 		name    string
@@ -177,18 +172,13 @@ func TestRealProcessCommandsUseOnlyTypedClosedEnvironmentAndCreateNewGroup(t *te
 }
 
 func TestDarwinSupervisorTypedEntriesForwardOnlyTheirClosedProfiles(t *testing.T) {
-	workspace, err := newWorkspacePaths("/private/state/task")
-	if err != nil {
-		t.Fatalf("workspace paths: %v", err)
-	}
-	preallocation, err := newPreallocationEnvironment("/private/go", "/private/mod")
-	if err != nil {
-		t.Fatalf("preallocation environment: %v", err)
-	}
-	taskPrivate, err := newTaskPrivateEnvironment(workspace, "/private/go", "/private/mod")
-	if err != nil {
-		t.Fatalf("task-private environment: %v", err)
-	}
+	preallocation := mustTestPreallocationEnvironment(t, "/private/go", "/private/mod")
+	taskPrivate := mustTestTaskPrivateEnvironment(
+		t,
+		"/private/state/.sandbox-gc-build-0123456789abcdef01234567",
+		"/private/go",
+		"/private/mod",
+	)
 
 	for _, test := range []struct {
 		name string
@@ -1693,14 +1683,20 @@ func TestRealDarwinSupervisorSuccessAndFailure(t *testing.T) {
 	if initial != nil {
 		t.Fatalf("initial supervisor refusal = %+v", initial)
 	}
-	workspace, err := newWorkspacePaths(t.TempDir())
+	taskRoot := filepath.Join(t.TempDir(), ".sandbox-gc-build-0123456789abcdef01234567")
+	if err := os.Mkdir(taskRoot, 0o700); err != nil {
+		t.Fatalf("create test task root: %v", err)
+	}
+	workspace, err := newWorkspacePaths(taskRoot)
 	if err != nil {
 		t.Fatalf("workspace paths: %v", err)
 	}
-	environment, err := newTaskPrivateEnvironment(workspace, workspace.child("goroot-authority"), t.TempDir())
-	if err != nil {
-		t.Fatalf("task-private environment: %v", err)
-	}
+	environment := mustTestTaskPrivateEnvironment(
+		t,
+		workspace.taskRoot,
+		workspace.child("goroot-authority"),
+		t.TempDir(),
+	)
 	for _, test := range []struct {
 		name       string
 		script     string
@@ -1751,14 +1747,20 @@ func TestRealDarwinSupervisorCancellationKillsOnlyOwnedGroup(t *testing.T) {
 	if initial != nil {
 		t.Fatalf("initial supervisor refusal = %+v", initial)
 	}
-	workspace, err := newWorkspacePaths(t.TempDir())
+	taskRoot := filepath.Join(t.TempDir(), ".sandbox-gc-build-0123456789abcdef01234567")
+	if err := os.Mkdir(taskRoot, 0o700); err != nil {
+		t.Fatalf("create test task root: %v", err)
+	}
+	workspace, err := newWorkspacePaths(taskRoot)
 	if err != nil {
 		t.Fatalf("workspace paths: %v", err)
 	}
-	environment, err := newTaskPrivateEnvironment(workspace, workspace.child("goroot-authority"), t.TempDir())
-	if err != nil {
-		t.Fatalf("task-private environment: %v", err)
-	}
+	environment := mustTestTaskPrivateEnvironment(
+		t,
+		workspace.taskRoot,
+		workspace.child("goroot-authority"),
+		t.TempDir(),
+	)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	started := time.Now()
@@ -1924,11 +1926,11 @@ func (harness *darwinHarness) request() processRequest {
 }
 
 func (harness *darwinHarness) run(supervisor processSupervisor, request processRequest) processResult {
-	workspace, err := newWorkspacePaths("/private/state/task")
-	if err != nil {
-		panic(err)
-	}
-	environment, err := newTaskPrivateEnvironment(workspace, "/private/go", "/private/mod")
+	environment, err := testTaskPrivateEnvironment(
+		"/private/state/.sandbox-gc-build-0123456789abcdef01234567",
+		"/private/go",
+		"/private/mod",
+	)
 	if err != nil {
 		panic(err)
 	}

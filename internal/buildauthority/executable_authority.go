@@ -441,6 +441,26 @@ func gorootExecutableBinding(
 	goroot *treeCapture,
 	relativePath string,
 ) (gorootExecutableClaim, error) {
+	if err := checkContext(ctx, "bind GOROOT executable"); err != nil {
+		return gorootExecutableClaim{}, err
+	}
+	if goroot == nil {
+		return gorootExecutableClaim{}, fail(CauseInternalInvariant, "missing retained GOROOT capture")
+	}
+	if err := goroot.revalidate(ctx); err != nil {
+		return gorootExecutableClaim{}, err
+	}
+	return gorootExecutableClaimFromCapture(goroot, relativePath)
+}
+
+// gorootExecutableClaimFromCapture performs only the immutable relationship
+// check. Runtime admission brackets it with tree and retained-leaf
+// revalidation; sealed environment construction uses it to prevent mixing a
+// nominal role with a different GOROOT capture.
+func gorootExecutableClaimFromCapture(
+	goroot *treeCapture,
+	relativePath string,
+) (gorootExecutableClaim, error) {
 	if goroot == nil || goroot.root == nil || goroot.root.descriptor == nil {
 		return gorootExecutableClaim{}, fail(CauseInternalInvariant, "missing retained GOROOT capture")
 	}
@@ -448,9 +468,6 @@ func gorootExecutableBinding(
 		return gorootExecutableClaim{}, fail(CauseInternalInvariant, "GOROOT capture policy mismatch")
 	}
 	if err := validateRelativeManifestPath(relativePath); err != nil {
-		return gorootExecutableClaim{}, err
-	}
-	if err := goroot.revalidate(ctx); err != nil {
 		return gorootExecutableClaim{}, err
 	}
 	components := strings.Split(relativePath, string(filepath.Separator))
