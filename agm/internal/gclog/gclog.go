@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/diskledger"
 )
 
 // Entry represents a single GC log entry.
@@ -102,18 +104,21 @@ func (l *Logger) Path() string {
 	return l.path
 }
 
-// DirSize computes the total size of a directory tree in bytes.
+// DirSize computes the disk a directory tree actually occupies, in bytes.
 // Returns 0 if the path doesn't exist or on error.
+//
+// This reports ALLOCATED blocks over distinct inodes, not the sum of file
+// lengths. The distinction matters because DirSize feeds Entry.BytesReclaimed,
+// which the reclaim-health check reads to decide whether the collector is
+// doing anything at all. Summing lengths charges a hard-linked or reflinked
+// tree once per name, so a sweep would report more bytes reclaimed than the
+// filesystem returned -- overstating exactly in the direction that makes a
+// broken collector look healthy. Sandboxes here are provisioned with APFS
+// clonefile, so this is the common case and not a corner one.
 func DirSize(path string) int64 {
-	var size int64
-	filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil //nolint:nilerr // skip errors
-		}
-		if !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
-	return size
+	// A partial walk yields a lower bound rather than an error: the callers
+	// are all best-effort accounting and a hard failure here would abort a
+	// sweep over one unreadable file.
+	u, _ := diskledger.Measure(path)
+	return u.AllocatedBytes
 }
