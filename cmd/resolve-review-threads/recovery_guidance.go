@@ -76,6 +76,15 @@ func unchangedReplyBodyGuidance(threadID, bodyFile string) string {
 	return strings.ReplaceAll(template, "<threadId>", threadID)
 }
 
+func accessDeniedReplyGuidance(threadID, bodyFile string) string {
+	return fmt.Sprintf(
+		"This is an access problem: run `gh auth status` and fix credentials before retrying; "+
+			"re-running with the same credentials will be denied again. Retain the exact reply-body "+
+			"source unchanged. After credential repair, use this unchanged-source lifecycle:\n%s",
+		unchangedReplyBodyGuidance(threadID, bodyFile),
+	)
+}
+
 const inspectNamedReplyOutcomeGuidanceTemplate = `Retain the exact named reply-body source unchanged while provider state is unverified:
   reply_file=<bodyFile>
 Do not edit or remove it, and do not continue to another thread or safe-merge.

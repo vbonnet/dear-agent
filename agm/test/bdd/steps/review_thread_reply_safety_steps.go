@@ -43,6 +43,10 @@ func RegisterReviewThreadReplySafetySteps(ctx *godog.ScenarioContext) {
 		failedProviderDiagnosticsShouldNotEchoReplyBody,
 	)
 	ctx.Step(
+		`^body-bearing access denials should remain redacted and require credential repair$`,
+		bodyBearingAccessDenialsShouldRemainRedactedAndRequireCredentialRepair,
+	)
+	ctx.Step(
 		`^body-free provider diagnostics should remain available$`,
 		bodyFreeProviderDiagnosticsShouldRemainAvailable,
 	)
@@ -119,6 +123,12 @@ func agmRunsReviewReplyDataOnlyRegressions(ctx context.Context) error {
 		"TestLoadReplyBodyUsesNonblockingOpenerWithoutPathStat",
 		"TestGHGraphQLSendsQueryAndVariablesAsJSONStdin",
 		"TestGHGraphQLSuppressesReplyBodyEchoedByChildStderr",
+		"TestBodyBearingAccessDenialIsRedactedAndRequiresCredentialRepair",
+		"TestReplyBodyAccessMarkersDoNotForgeAccessDenial",
+		"TestRedactedProviderDiagnosticClassifier",
+		"TestBodyBearingProviderDropsDebugEnvironment",
+		"TestBodyFreeAmbiguousDiagnosticsStayTransportErrors",
+		"TestIsAccessDenied",
 		"TestGHGraphQLPreservesBodyFreeChildStderr",
 		"TestRetryAdviceDoesNotRenderReplyBody",
 		"TestAmbiguousPostFailureRetainsUnchangedBodySource",
@@ -182,6 +192,10 @@ func githubShouldReceiveExactReplyBytesWithoutShellEvaluation(ctx context.Contex
 }
 
 func failedProviderDiagnosticsShouldNotEchoReplyBody(ctx context.Context) error {
+	return requireReviewThreadReplySafetyRegressions(ctx)
+}
+
+func bodyBearingAccessDenialsShouldRemainRedactedAndRequireCredentialRepair(ctx context.Context) error {
 	return requireReviewThreadReplySafetyRegressions(ctx)
 }
 

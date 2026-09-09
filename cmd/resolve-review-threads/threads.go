@@ -3,13 +3,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
-	"strings"
 )
 
 // listQuery pages through review threads 100 at a time. $after is nil on the
@@ -707,6 +704,8 @@ func (e *unresolveStillResolvedError) Error() string {
 	)
 }
 
+func (e *unresolveStillResolvedError) Unwrap() error { return e.cause }
+
 // unresolveWithEvidence accepts the mutation response only when mutateThread
 // validated both target identity and state. Any other outcome is reconciled
 // against a fresh exact-target read because the mutation may have applied
@@ -740,16 +739,8 @@ func isAccessDenied(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	for _, marker := range []string{
-		"permission", "forbidden", "unauthorized", "not accessible",
-		"http 401", "http 403", "bad credentials", "requires authentication",
-	} {
-		if strings.Contains(msg, marker) {
-			return true
-		}
-	}
-	return false
+	_, ok := errors.AsType[*providerAccessDeniedError](err)
+	return ok
 }
 
 // checkCursorAdvances rejects a page cursor that has not moved. A response
@@ -924,35 +915,4 @@ func mutateThread(ctx context.Context, action, threadID string) (msg, lastCommen
 		lastCommentID = n[len(n)-1].ID
 	}
 	return fmt.Sprintf("%sd %s (isResolved=%t)", action, th.ID, gotResolved), lastCommentID, gotResolved, nil
-}
-
-// ghGraphQL sends one typed GraphQL envelope through standard input and
-// returns stdout. Query text and variable values never enter child argv.
-// Body-free failures preserve gh's stderr. Reply failures suppress it because
-// gh debug output can echo the request envelope, including the reply body.
-func ghGraphQL(ctx context.Context, query string, variables map[string]any) ([]byte, error) {
-	payload, err := json.Marshal(struct {
-		Query     string         `json:"query"`
-		Variables map[string]any `json:"variables"`
-	}{Query: query, Variables: variables})
-	if err != nil {
-		return nil, fmt.Errorf("encode gh api graphql request: %w", err)
-	}
-
-	// #nosec G702 -- fixed executable and fixed argv; request data is stdin.
-	cmd := exec.CommandContext(ctx, "gh", "api", "graphql", "--input", "-")
-	cmd.Stdin = bytes.NewReader(payload)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		if _, carriesReplyBody := variables["body"]; carriesReplyBody {
-			return nil, fmt.Errorf("gh api graphql: %w (provider diagnostics suppressed because the request contains a reply body)", err)
-		}
-		if msg := bytes.TrimSpace(errBuf.Bytes()); len(msg) > 0 {
-			return nil, fmt.Errorf("gh api graphql: %w: %s", err, msg)
-		}
-		return nil, fmt.Errorf("gh api graphql: %w", err)
-	}
-	return out.Bytes(), nil
 }

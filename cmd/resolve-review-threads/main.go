@@ -485,6 +485,10 @@ func postReplyOrExit(
 			return "", fail("reply was not observed and the original tail is unchanged, but the thread is now resolved by another actor: %v\n%s",
 				err, inspectReplyOutcomeGuidance(threadID, bodyFile))
 		}
+		if isAccessDenied(err) {
+			return "", fail("reply was denied and was not observed; the original tail %s remains last and unresolved: %v\n%s",
+				originalTailID, err, accessDeniedReplyGuidance(threadID, bodyFile))
+		}
 		return "", fail("reply was not observed after the ambiguous provider outcome, and the original tail is still last: %v\n"+
 			"an exact-body retry remains applicable:\n%s",
 			err, unchangedReplyBodyGuidance(threadID, bodyFile))

@@ -10,6 +10,7 @@ Feature: Review thread reply safety
     And a replaced named source should fail without blocking
     And GitHub should receive the exact reply bytes without shell evaluation
     And failed provider diagnostics should not echo the reply body
+    And body-bearing access denials should remain redacted and require credential repair
     And body-free provider diagnostics should remain available
     And retry guidance should reuse the body-file source without rendering its content
     And generated reply-file guidance should prescribe per-thread external creation, retry retention, and confirmed-terminal cleanup

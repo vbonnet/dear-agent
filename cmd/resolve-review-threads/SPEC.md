@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-09-08 -->
 
-**Version:** 3.2
+**Version:** 3.3
 **Status:** Baseline
 **Scope:** `cmd/resolve-review-threads` and repository-generated remediation guidance for it.
 
@@ -119,7 +119,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-52** The system shall not evaluate reply-body content as shell syntax or permit embedded command substitutions to execute.
 
-**RESOLVE-REVIEW-THREADS-53** When the provider client fails an operation whose variables include a reply body, the system shall not copy the client's standard error into operator diagnostics because debug output can echo the request body.
+**RESOLVE-REVIEW-THREADS-53** When the provider client fails an operation whose variables include a reply body, the system shall not retain, return, log, or print the client's raw standard error because debug output can echo the request body; only a redacted typed failure category may survive.
 
 **RESOLVE-REVIEW-THREADS-54** When a named body-file source is selected, the system shall open it without blocking on a substituted non-regular object on Unix, validate the opened descriptor as a regular file before reading it, and direct streaming input to the explicit standard-input source.
 
@@ -129,7 +129,7 @@ safe merges until unresolved threads are handled explicitly.
 
 **RESOLVE-REVIEW-THREADS-57** When later reviewer comments conclusively supersede the current reply body while its thread remains unresolved, repository-generated remediation guidance shall direct the operator to revise the same actual named path or retained standard-input source rather than create or assign a replacement path, retain the revised source unchanged through every applicable exact-body retry, and conditionally remove a task-owned temporary source only after terminal resolution is confirmed.
 
-**RESOLVE-REVIEW-THREADS-58** When a reply mutation has an ambiguous outcome or omits the new comment ID, the system shall retain the originally observed predecessor and actual body source, re-read the full thread history, recover a matching reply and verify it against that predecessor when found, permit unchanged-source retry only when no match is found and the tail is confirmed unchanged, require inspection and same-source revision when the tail is confirmed moved, and require inspection without blind retry when the state cannot be read.
+**RESOLVE-REVIEW-THREADS-58** When a reply mutation has an ambiguous outcome or omits the new comment ID, the system shall retain the originally observed predecessor and actual body source, re-read the full thread history, recover a matching reply and verify it against that predecessor when found, permit unchanged-source retry only when no match is found and the tail is confirmed unchanged and any classified access denial has first been repaired under RESOLVE-REVIEW-THREADS-70, require inspection and same-source revision when the tail is confirmed moved, and require inspection without blind retry when the state cannot be read.
 
 **RESOLVE-REVIEW-THREADS-59** When the resolution response supplies an empty last-comment anchor, the system shall classify the outcome as unverifiable and retain the actual body source unchanged for inspection and retry after reopening; when it supplies a non-empty anchor different from the expected anchor, the system shall classify the thread as changed and require the later comment to be read and answered with the same source before resolution.
 
@@ -150,6 +150,10 @@ safe merges until unresolved threads are handled explicitly.
 **RESOLVE-REVIEW-THREADS-67** When an unresolve mutation reports a transport error or returns an unverified response, the system shall reconcile the requested thread from a fresh read before making a state claim, count success only when matching identity and unresolved state are confirmed, report the requested postcondition as absent when matching identity remains resolved, and require inspection when the fresh state is unreadable or identifies another thread.
 
 **RESOLVE-REVIEW-THREADS-68** When `resolve-all` reports an aggregate outcome, the system shall count as resolved only mutations with verified requested postconditions, count and identify each evidence refusal exactly once, exclude transport, provider-state, and verification failures from the refusal count, and report the confirmed resolved and refused totals accumulated before any abort.
+
+**RESOLVE-REVIEW-THREADS-69** When body-bearing provider standard error is evaluated for a redacted failure category, the system shall inspect at most 4,096 bytes from physical lines beginning exactly with the GitHub CLI diagnostic prefix `gh:` by retaining only streaming matcher state, recognize an explicit authorization-denial phrase only when it begins after that prefix and optional whitespace or after the exact provider prefix `GraphQL:`, discard all other bytes including request-envelope and response-body echoes, reject a bare HTTP 403, bare permission word, or later quoted denial phrase as authorization proof, and shall not allow access-like reply-body text to create an access-denied category.
+
+**RESOLVE-REVIEW-THREADS-70** When a reply mutation failure is classified as access denied and full-history plus exact-target reconciliation confirms that the attempted reply is absent while the original tail remains last and unresolved, the system shall retain the actual body source, state that the same credentials will be denied again, direct the operator to repair `gh` credentials before retrying, and shall not present a generic immediate exact-body retry as recovery.
 
 ## BDD Traceability
 
