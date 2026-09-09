@@ -526,12 +526,35 @@ func darwinFgetattrlistWithOptions(
 }
 
 func digestExtendedSecurityResult(buffer []byte) (Digest, error) {
+	observation, err := parseExtendedSecurityResult(buffer, false)
+	if err != nil {
+		return Digest{}, err
+	}
+	if observation.policyErr != nil {
+		return Digest{}, observation.policyErr
+	}
+	return observation.digest, nil
+}
+
+type darwinACLObservation struct {
+	digest    Digest
+	policyErr error
+}
+
+func observeExtendedSecurityResult(buffer []byte) (darwinACLObservation, error) {
+	return parseExtendedSecurityResult(buffer, true)
+}
+
+func parseExtendedSecurityResult(
+	buffer []byte,
+	deferPolicy bool,
+) (darwinACLObservation, error) {
 	if len(buffer) < darwinAttrResultHeaderSize {
-		return Digest{}, fail(CauseMalformed, "short authority ACL result")
+		return darwinACLObservation{}, fail(CauseMalformed, "short authority ACL result")
 	}
 	reported := uint64(binary.LittleEndian.Uint32(buffer[:4]))
 	if reported < darwinAttrResultHeaderSize || reported > uint64(len(buffer)) {
-		return Digest{}, fail(CauseMalformed, "authority ACL result length refused")
+		return darwinACLObservation{}, fail(CauseMalformed, "authority ACL result length refused")
 	}
 	rawReferenceOffset := binary.LittleEndian.Uint32(buffer[4:8])
 	referenceOffset := int64(rawReferenceOffset)
@@ -541,50 +564,68 @@ func digestExtendedSecurityResult(buffer []byte) (Digest, error) {
 	attributeLength := uint64(binary.LittleEndian.Uint32(buffer[8:12]))
 	attributeStart := int64(4) + referenceOffset
 	if attributeStart != darwinAttrResultHeaderSize {
-		return Digest{}, fail(CauseMalformed, "noncanonical authority ACL reference")
+		return darwinACLObservation{}, fail(CauseMalformed, "noncanonical authority ACL reference")
 	}
 	attributeEnd := uint64(attributeStart) + attributeLength
 	if attributeEnd < uint64(attributeStart) || attributeEnd > reported {
-		return Digest{}, fail(CauseMalformed, "authority ACL extent refused")
+		return darwinACLObservation{}, fail(CauseMalformed, "authority ACL extent refused")
 	}
 	if attributeEnd != reported {
-		return Digest{}, fail(CauseMalformed, "noncanonical authority ACL extent")
+		return darwinACLObservation{}, fail(CauseMalformed, "noncanonical authority ACL extent")
 	}
 	if attributeLength == 0 {
-		return digestDarwinFilesec(nil)
+		return parseDarwinFilesec(nil, deferPolicy)
 	}
-	return digestDarwinFilesec(buffer[attributeStart:attributeEnd])
+	return parseDarwinFilesec(buffer[attributeStart:attributeEnd], deferPolicy)
 }
 
 func digestDarwinFilesec(attribute []byte) (Digest, error) {
+	observation, err := parseDarwinFilesec(attribute, false)
+	if err != nil {
+		return Digest{}, err
+	}
+	if observation.policyErr != nil {
+		return Digest{}, observation.policyErr
+	}
+	return observation.digest, nil
+}
+
+func observeDarwinFilesec(attribute []byte) (darwinACLObservation, error) {
+	return parseDarwinFilesec(attribute, true)
+}
+
+func parseDarwinFilesec(
+	attribute []byte,
+	deferPolicy bool,
+) (darwinACLObservation, error) {
 	canonical := bytes.NewBuffer(make([]byte, 0, 8+len(darwinACLDomain)+1+len(attribute)))
 	writeLengthPrefixed(canonical, []byte(darwinACLDomain))
 	if len(attribute) == 0 {
 		canonical.WriteByte(0)
-		return sha256.Sum256(canonical.Bytes()), nil
+		return darwinACLObservation{digest: sha256.Sum256(canonical.Bytes())}, nil
 	}
 	if len(attribute) < darwinFilesecHeaderSize {
-		return Digest{}, fail(CauseMalformed, "short authority filesec record")
+		return darwinACLObservation{}, fail(CauseMalformed, "short authority filesec record")
 	}
 
 	magic := binary.LittleEndian.Uint32(attribute[0:4])
 	entryCount := binary.LittleEndian.Uint32(attribute[36:40])
 	aclFlags := binary.LittleEndian.Uint32(attribute[40:44])
 	if magic != darwinFilesecMagic {
-		return Digest{}, fail(CauseMalformed, "authority filesec magic refused")
+		return darwinACLObservation{}, fail(CauseMalformed, "authority filesec magic refused")
 	}
 	if aclFlags&^darwinAllowedACLFlags != 0 {
-		return Digest{}, fail(CauseMalformed, "authority ACL flags refused")
+		return darwinACLObservation{}, fail(CauseMalformed, "authority ACL flags refused")
 	}
 	expectedSize := darwinFilesecHeaderSize
 	if entryCount != darwinFilesecNoACL {
 		if entryCount > darwinACLMaxEntries {
-			return Digest{}, fail(CauseLimit, "authority ACL entry count refused")
+			return darwinACLObservation{}, fail(CauseLimit, "authority ACL entry count refused")
 		}
 		expectedSize += int(entryCount) * darwinACERecordSize
 	}
 	if len(attribute) != expectedSize {
-		return Digest{}, fail(CauseMalformed, "authority filesec length refused")
+		return darwinACLObservation{}, fail(CauseMalformed, "authority filesec length refused")
 	}
 
 	canonical.WriteByte(1)
@@ -593,24 +634,36 @@ func digestDarwinFilesec(attribute []byte) (Digest, error) {
 	writeUint32(canonical, entryCount)
 	writeUint32(canonical, aclFlags)
 	if entryCount == darwinFilesecNoACL {
-		return sha256.Sum256(canonical.Bytes()), nil
+		return darwinACLObservation{digest: sha256.Sum256(canonical.Bytes())}, nil
 	}
+	var policyErr error
 	for index := range int(entryCount) {
 		offset := darwinFilesecHeaderSize + index*darwinACERecordSize
 		qualifier := attribute[offset : offset+16]
 		flags := binary.LittleEndian.Uint32(attribute[offset+16 : offset+20])
 		rights := binary.LittleEndian.Uint32(attribute[offset+20 : offset+24])
-		if err := validateDarwinACE(flags, rights); err != nil {
-			return Digest{}, err
+		if err := validateDarwinACEGrammar(flags, rights); err != nil {
+			return darwinACLObservation{}, err
+		}
+		if err := validateDarwinACEPolicy(flags, rights); err != nil {
+			if !deferPolicy {
+				return darwinACLObservation{}, err
+			}
+			if policyErr == nil {
+				policyErr = err
+			}
 		}
 		canonical.Write(qualifier)
 		writeUint32(canonical, flags)
 		writeUint32(canonical, rights)
 	}
-	return sha256.Sum256(canonical.Bytes()), nil
+	return darwinACLObservation{
+		digest:    sha256.Sum256(canonical.Bytes()),
+		policyErr: policyErr,
+	}, nil
 }
 
-func validateDarwinACE(flags, rights uint32) error {
+func validateDarwinACEGrammar(flags, rights uint32) error {
 	kind := flags & 0xf
 	if (kind != darwinACEPermit && kind != darwinACEDeny) || flags&^darwinAllowedACEFlags != 0 {
 		return fail(CauseMalformed, "authority ACE flags refused")
@@ -618,6 +671,11 @@ func validateDarwinACE(flags, rights uint32) error {
 	if rights&^darwinAllowedACERights != 0 {
 		return fail(CauseMalformed, "authority ACE rights refused")
 	}
+	return nil
+}
+
+func validateDarwinACEPolicy(flags, rights uint32) error {
+	kind := flags & 0xf
 	if kind == darwinACEPermit && rights&darwinMutationRights != 0 {
 		return fail(CausePermission, "mutation-permitting authority ACE refused")
 	}
