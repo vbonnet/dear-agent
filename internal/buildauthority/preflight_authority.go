@@ -201,9 +201,12 @@ func (owner *ownedAuthorityDescriptor) closeInto(outcome *authorityUseOutcome) {
 	}
 }
 
-// preflightAuthorityPrimitives is the local-substitution seam for the live
-// go.env transaction. Every callback except close returns an already
-// operation-attributed, public-safe failure.
+// preflightAuthorityPrimitives is the local-substitution seam for the complete
+// preallocation authority bracket. The flat callbacks are A1's live go.env
+// mechanisms; brackets groups A2's root, null, tree, and nominal-role
+// mechanisms without exposing either vocabulary to the future runner. Every
+// callback except close returns an already operation-attributed, public-safe
+// failure.
 type preflightAuthorityPrimitives struct {
 	openRelativeNoFollow func(
 		context.Context,
@@ -240,6 +243,7 @@ type preflightAuthorityPrimitives struct {
 		context.Context,
 		[]byte,
 	) (Digest, *authorityPrimitiveFailure)
+	brackets preflightAuthorityBracketPrimitives
 }
 
 func (primitives preflightAuthorityPrimitives) valid() bool {
@@ -254,8 +258,9 @@ func (primitives preflightAuthorityPrimitives) valid() bool {
 }
 
 // preflightAuthorityRevalidator owns the complete physical-root-anchored
-// fresh-leaf transaction. Full retained-tree recapture belongs to the next
-// checkpoint and is deliberately absent from this type.
+// authority bracket: A1's fresh live go.env leaf and A2's physical root,
+// retained null, complete GOROOT tree/path, and three nominal executable roles.
+// Its caller sees only typed authority uses and their closed outcomes.
 type preflightAuthorityRevalidator struct {
 	primitives preflightAuthorityPrimitives
 }
@@ -268,7 +273,14 @@ func newPreflightAuthorityRevalidator() (
 	if failure != nil {
 		return nil, failure
 	}
-	return newPreflightAuthorityRevalidatorWith(primitives)
+	revalidator, failure := newPreflightAuthorityRevalidatorWith(primitives)
+	if failure != nil {
+		return nil, failure
+	}
+	if !primitives.brackets.valid() {
+		return nil, authorityFailure(OperationValidate, CauseInternalInvariant)
+	}
+	return revalidator, nil
 }
 
 func newPreflightAuthorityRevalidatorWith(
@@ -558,18 +570,68 @@ func (revalidator *preflightAuthorityRevalidator) observeDescriptor(
 	ctx context.Context,
 	descriptor *os.File,
 ) (authorityDescriptorObservation, *authorityPrimitiveFailure) {
-	snapshot, failure := revalidator.primitives.statDescriptor(ctx, descriptor)
-	if failure != nil {
-		return authorityDescriptorObservation{}, failure
-	}
-	mount, failure := revalidator.primitives.statFilesystem(ctx, descriptor)
+	snapshot, mount, failure := revalidator.probeDescriptorIdentityAndMount(ctx, descriptor)
 	if failure != nil {
 		return authorityDescriptorObservation{}, failure
 	}
 	if failure := revalidator.primitives.validateFilesystem(ctx, mount); failure != nil {
 		return authorityDescriptorObservation{}, failure
 	}
+	return revalidator.completeDescriptorObservation(ctx, descriptor, snapshot, mount)
+}
+
+// probeDescriptorObservation acquires and parses the complete descriptor
+// snapshot without applying static policy. Revalidation callers compare that
+// snapshot with its admitted claim before policy validation so drift remains a
+// compare failure rather than being relabeled by a wrapper.
+func (revalidator *preflightAuthorityRevalidator) probeDescriptorObservation(
+	ctx context.Context,
+	descriptor *os.File,
+) (authorityDescriptorComparisonObservation, *authorityPrimitiveFailure) {
+	snapshot, mount, failure := revalidator.probeDescriptorIdentityAndMount(ctx, descriptor)
+	if failure != nil {
+		return authorityDescriptorComparisonObservation{}, failure
+	}
+	rawACL, failure := revalidator.primitives.acquireRawACL(ctx, descriptor)
+	if failure != nil {
+		return authorityDescriptorComparisonObservation{}, failure
+	}
+	acl, failure := revalidator.primitives.brackets.parseRawACLForComparison(ctx, rawACL)
+	if failure != nil {
+		return authorityDescriptorComparisonObservation{}, failure
+	}
+	return authorityDescriptorComparisonObservation{
+		value: authorityDescriptorObservation{
+			snapshot:  snapshot,
+			mount:     mount,
+			aclDigest: acl.digest,
+		},
+		policyFailure: acl.policyFailure,
+	}, nil
+}
+
+func (revalidator *preflightAuthorityRevalidator) probeDescriptorIdentityAndMount(
+	ctx context.Context,
+	descriptor *os.File,
+) (fileSnapshot, mountSnapshot, *authorityPrimitiveFailure) {
+	snapshot, failure := revalidator.primitives.statDescriptor(ctx, descriptor)
+	if failure != nil {
+		return fileSnapshot{}, mountSnapshot{}, failure
+	}
+	mount, failure := revalidator.primitives.statFilesystem(ctx, descriptor)
+	if failure != nil {
+		return fileSnapshot{}, mountSnapshot{}, failure
+	}
 	snapshot.identity.Filesystem = mount.filesystem
+	return snapshot, mount, nil
+}
+
+func (revalidator *preflightAuthorityRevalidator) completeDescriptorObservation(
+	ctx context.Context,
+	descriptor *os.File,
+	snapshot fileSnapshot,
+	mount mountSnapshot,
+) (authorityDescriptorObservation, *authorityPrimitiveFailure) {
 	rawACL, failure := revalidator.primitives.acquireRawACL(ctx, descriptor)
 	if failure != nil {
 		return authorityDescriptorObservation{}, failure
