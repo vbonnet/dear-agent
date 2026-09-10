@@ -251,18 +251,12 @@ func (builder *sourceConstructionBuilder) retainConfig() bool {
 		return false
 	}
 
-	after, failure := builder.observeDescriptor(
+	failure = builder.reobserveDescriptorBeforePolicy(
 		descriptor,
-		sourceObservedRegular,
-		ownerEffectiveOnly,
-		true,
+		evidence,
 		maxSourceConfigBytes,
 	)
 	if failure != nil {
-		builder.outcome.addPrimitive(failure)
-		return false
-	}
-	if failure = compareSourceDescriptorEvidence(builder.ctx, evidence, after); failure != nil {
 		builder.outcome.addPrimitive(failure)
 		return false
 	}
@@ -296,20 +290,11 @@ func (builder *sourceConstructionBuilder) rebindConfig() bool {
 		return false
 	}
 
-	evidence, failure := builder.observeDescriptor(
+	failure := builder.reobserveDescriptorBeforePolicy(
 		comparison,
-		sourceObservedRegular,
-		ownerEffectiveOnly,
-		true,
+		builder.owner.config.evidence,
 		maxSourceConfigBytes,
 	)
-	if failure == nil {
-		failure = compareSourceDescriptorEvidence(
-			builder.ctx,
-			builder.owner.config.evidence,
-			evidence,
-		)
-	}
 	if failure != nil {
 		builder.outcome.addPrimitive(failure)
 	}
@@ -327,6 +312,262 @@ func (builder *sourceConstructionBuilder) retainObjects() bool {
 		"objects",
 		builder.owner.git.root.evidence,
 	)
+}
+
+func (builder *sourceConstructionBuilder) retainPackedRefs() bool {
+	if failure := builder.validatePackedRefsRequest(); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	kind, present, failure := builder.primitives.probeRelativeKind(
+		builder.ctx,
+		builder.owner.git.root.descriptor,
+		"packed-refs",
+		sourceInitialOptional,
+	)
+	if failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	if !present {
+		return builder.retainAbsentPackedRefs(kind, present)
+	}
+	if failure = requireInitialSourceKind(
+		builder.ctx,
+		kind,
+		present,
+		sourceObservedRegular,
+	); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	return builder.retainPresentPackedRefs(kind)
+}
+
+func (builder *sourceConstructionBuilder) retainAbsentPackedRefs(
+	kind sourceObservedKind,
+	present bool,
+) bool {
+	if failure := validateInitialPackedRefsAbsence(
+		builder.ctx,
+		kind,
+		present,
+	); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	kind, present, failure := builder.primitives.probeRelativeKind(
+		builder.ctx,
+		builder.owner.git.root.descriptor,
+		"packed-refs",
+		sourceRevalidateAbsent,
+	)
+	if failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	if failure = validateRevalidatedPackedRefsAbsence(
+		builder.ctx,
+		kind,
+		present,
+	); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	builder.owner.packedRefs = sourcePackedRefsSlot{state: sourcePackedRefsAbsent}
+	return builder.validatePackedRefsOwner()
+}
+
+func (builder *sourceConstructionBuilder) retainPresentPackedRefs(
+	kind sourceObservedKind,
+) bool {
+	retained := &retainedSourcePackedRefs{}
+	descriptor, descriptorFailure := builder.primitives.openRelativeNoFollow(
+		builder.ctx,
+		builder.owner.git.root.descriptor,
+		"packed-refs",
+		kind,
+		sourceInitialOptional,
+	)
+	if descriptor != nil {
+		retained.descriptor = descriptor
+		builder.owner.packedRefs = sourcePackedRefsSlot{
+			state: sourcePackedRefsRetained,
+			leaf:  retained,
+		}
+	}
+	if !builder.acceptDescriptorAcquisition(descriptor, descriptorFailure) {
+		return false
+	}
+
+	evidence, failure := builder.observeDescriptor(
+		descriptor,
+		sourceObservedRegular,
+		ownerEffectiveOnly,
+		true,
+		maxPackedRefsBytes,
+	)
+	if failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	if failure = validateInitialSourceChild(
+		builder.ctx,
+		builder.owner.git.root.evidence,
+		evidence,
+	); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	return builder.retainPackedRefsContent(evidence)
+}
+
+func (builder *sourceConstructionBuilder) retainPackedRefsContent(
+	evidence sourceDescriptorEvidence,
+) bool {
+	retained := builder.owner.packedRefs.leaf
+	if retained == nil || !retained.descriptor.validOpen() {
+		builder.failInvariant()
+		return false
+	}
+	descriptor := retained.descriptor
+	contentProved := true
+	content := make([]byte, int(evidence.snapshot.size))
+	if failure := builder.primitives.readExactForParse(
+		builder.ctx,
+		descriptor,
+		content,
+	); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		contentProved = false
+	}
+	var digest Digest
+	if contentProved {
+		var hashFailure *sourcePrimitiveFailure
+		digest, hashFailure = builder.primitives.hashBytes(builder.ctx, content)
+		if hashFailure != nil {
+			builder.outcome.addPrimitive(hashFailure)
+			contentProved = false
+		}
+	}
+	var claim packedRefsClaim
+	if contentProved {
+		var packedRefsFailure *sourcePrimitiveFailure
+		claim, packedRefsFailure = parseInitialSourcePackedRefs(
+			builder.ctx,
+			content,
+			builder.owner.config.claim.objectFormat,
+		)
+		if packedRefsFailure != nil {
+			builder.outcome.addPrimitive(packedRefsFailure)
+			contentProved = false
+		}
+	}
+
+	tailFailure := builder.reobserveDescriptorBeforePolicy(
+		descriptor,
+		evidence,
+		maxPackedRefsBytes,
+	)
+	tailProved := tailFailure == nil
+	if tailFailure != nil {
+		builder.outcome.addPrimitive(tailFailure)
+	}
+	preRebindProved := contentProved && tailProved
+	if !preRebindProved {
+		builder.closeFailedPackedRefs()
+	}
+	rebindProved := builder.rebindPackedRefs(evidence)
+	if !preRebindProved || !rebindProved {
+		return false
+	}
+	retained.evidence = evidence
+	retained.digest = digest
+	retained.claim = claim
+	return builder.validatePackedRefsOwner()
+}
+
+func (builder *sourceConstructionBuilder) rebindPackedRefs(
+	expected sourceDescriptorEvidence,
+) bool {
+	comparison, openFailure := builder.primitives.openRelativeNoFollow(
+		builder.ctx,
+		builder.owner.git.root.descriptor,
+		"packed-refs",
+		sourceObservedRegular,
+		sourceRevalidatePresent,
+	)
+	if comparison == nil {
+		if openFailure == nil {
+			openFailure = newSourcePrimitiveFailure(
+				OperationValidate,
+				CauseInternalInvariant,
+			)
+		}
+		builder.outcome.addPrimitive(openFailure)
+		return false
+	}
+	if openFailure != nil {
+		builder.outcome.addPrimitive(openFailure)
+		builder.closeTransientDescriptor(comparison)
+		return false
+	}
+
+	failure := builder.reobserveDescriptorBeforePolicy(
+		comparison,
+		expected,
+		maxPackedRefsBytes,
+	)
+	if failure != nil {
+		builder.outcome.addPrimitive(failure)
+	}
+	closeFailed := builder.closeTransientDescriptor(comparison)
+	return failure == nil && !closeFailed
+}
+
+func (builder *sourceConstructionBuilder) closeFailedPackedRefs() {
+	retained := builder.owner.packedRefs.leaf
+	if retained != nil {
+		builder.closeTransientDescriptor(retained.descriptor)
+		retained.descriptor = nil
+	}
+	builder.owner.packedRefs = sourcePackedRefsSlot{state: sourcePackedRefsUnresolved}
+}
+
+func (builder *sourceConstructionBuilder) validatePackedRefsRequest() *sourcePrimitiveFailure {
+	if builder == nil {
+		return newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if failure := sourceContextPrimitiveFailure(builder.ctx, OperationValidate); failure != nil {
+		return failure
+	}
+	var validationFailure *sourcePrimitiveFailure
+	if builder.primitives == nil || builder.owner == nil || !builder.owner.validInitialRetention() {
+		validationFailure = newSourcePrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		)
+	}
+	if failure := sourceContextPrimitiveFailure(builder.ctx, OperationValidate); failure != nil {
+		return failure
+	}
+	return validationFailure
+}
+
+func (builder *sourceConstructionBuilder) validatePackedRefsOwner() bool {
+	if failure := sourceContextPrimitiveFailure(builder.ctx, OperationValidate); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	if !builder.owner.validPackedRefsRetention() {
+		builder.failInvariant()
+		return false
+	}
+	if failure := sourceContextPrimitiveFailure(builder.ctx, OperationValidate); failure != nil {
+		builder.outcome.addPrimitive(failure)
+		return false
+	}
+	return true
 }
 
 func (builder *sourceConstructionBuilder) retainSourceDirectory(
@@ -461,6 +702,73 @@ func (builder *sourceConstructionBuilder) observeDescriptor(
 	)
 }
 
+// reobserveDescriptorBeforePolicy captures every comparison claim before it
+// reapplies admission policy. A retained object that changes mode, ACL, or
+// mount security is drift, not a newly attributed initial-policy refusal.
+func (builder *sourceConstructionBuilder) reobserveDescriptorBeforePolicy(
+	descriptor *ownedSourceDescriptor,
+	expected sourceDescriptorEvidence,
+	maximumBytes int64,
+) *sourcePrimitiveFailure {
+	if failure := validateSourceObservationRequest(
+		builder.ctx,
+		descriptor,
+		sourceObservedRegular,
+		maximumBytes,
+	); failure != nil {
+		return failure
+	}
+	snapshot, failure := builder.primitives.statDescriptor(builder.ctx, descriptor)
+	if failure != nil {
+		return failure
+	}
+	mount, failure := builder.primitives.statFilesystem(builder.ctx, descriptor)
+	if failure != nil {
+		return failure
+	}
+	rawACL, failure := builder.primitives.acquireRawACL(builder.ctx, descriptor)
+	if failure != nil {
+		return failure
+	}
+	acl, failure := builder.primitives.parseRawACL(builder.ctx, rawACL)
+	if failure != nil {
+		return failure
+	}
+	if !acl.valid() {
+		return newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	snapshot.identity.Filesystem = mount.filesystem
+	evidence := sourceDescriptorEvidence{
+		snapshot:  snapshot,
+		mount:     mount,
+		aclDigest: acl.digest,
+	}
+	if failure = compareSourceDescriptorEvidence(
+		builder.ctx,
+		expected,
+		evidence,
+	); failure != nil {
+		return failure
+	}
+	if failure = builder.primitives.validateFilesystem(builder.ctx, mount); failure != nil {
+		return failure
+	}
+	if failure = builder.primitives.validateACL(builder.ctx, acl); failure != nil {
+		return failure
+	}
+	_, failure = validateSourceDescriptorEvidence(
+		builder.ctx,
+		snapshot,
+		mount,
+		acl,
+		sourceObservedRegular,
+		ownerEffectiveOnly,
+		true,
+		maximumBytes,
+	)
+	return failure
+}
+
 func validateSourceObservationRequest(
 	ctx context.Context,
 	descriptor *ownedSourceDescriptor,
@@ -574,6 +882,86 @@ func parseInitialSourceConfig(
 		return sourceConfigClaim{}, failure
 	}
 	return claim, nil
+}
+
+func parseInitialSourcePackedRefs(
+	ctx context.Context,
+	content []byte,
+	format repositoryObjectFormat,
+) (packedRefsClaim, *sourcePrimitiveFailure) {
+	if failure := sourceContextPrimitiveFailure(ctx, OperationParse); failure != nil {
+		return packedRefsClaim{}, failure
+	}
+	parsed, err := parsePackedRefsSyntax(content, format)
+	if failure := sourceContextPrimitiveFailure(ctx, OperationParse); failure != nil {
+		return packedRefsClaim{}, failure
+	}
+	if failure := sourcePrimitiveFailureFromError(
+		OperationParse,
+		err,
+		CauseMalformed,
+	); failure != nil {
+		return packedRefsClaim{}, failure
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationValidate); failure != nil {
+		return packedRefsClaim{}, failure
+	}
+	claim, err := validatePackedRefsPolicy(parsed)
+	if failure := sourceContextPrimitiveFailure(ctx, OperationValidate); failure != nil {
+		return packedRefsClaim{}, failure
+	}
+	if failure := sourcePrimitiveFailureFromError(
+		OperationValidate,
+		err,
+		CauseUnsupported,
+	); failure != nil {
+		return packedRefsClaim{}, failure
+	}
+	return claim, nil
+}
+
+func validateInitialPackedRefsAbsence(
+	ctx context.Context,
+	kind sourceObservedKind,
+	present bool,
+) *sourcePrimitiveFailure {
+	if failure := sourceContextPrimitiveFailure(ctx, OperationValidate); failure != nil {
+		return failure
+	}
+	var validationFailure *sourcePrimitiveFailure
+	if present || kind != 0 {
+		validationFailure = newSourcePrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationValidate); failure != nil {
+		return failure
+	}
+	return validationFailure
+}
+
+func validateRevalidatedPackedRefsAbsence(
+	ctx context.Context,
+	kind sourceObservedKind,
+	present bool,
+) *sourcePrimitiveFailure {
+	if failure := sourceContextPrimitiveFailure(ctx, OperationCompare); failure != nil {
+		return failure
+	}
+	var comparisonFailure *sourcePrimitiveFailure
+	if present {
+		comparisonFailure = newSourcePrimitiveFailure(OperationCompare, CauseUnstable)
+	} else if kind != 0 {
+		comparisonFailure = newSourcePrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationCompare); failure != nil {
+		return failure
+	}
+	return comparisonFailure
 }
 
 func (evidence sourceDescriptorEvidence) pathClaim() authorityPathClaim {

@@ -402,6 +402,15 @@ func TestDarwinSourcePrimitivesDescriptorEvidenceAndBytes(t *testing.T) {
 	if failure != nil || digest != wantDigest {
 		t.Fatalf("source byte digest = %x / %+v, want %x", digest, failure, wantDigest)
 	}
+	hashContext := &sourceConstructionStepContext{cancelAt: 2}
+	canceledDigest, canceledFailure := primitives.hashBytes(hashContext, read)
+	if canceledDigest != (Digest{}) {
+		t.Fatalf("canceled source byte digest = %x, want zero", canceledDigest)
+	}
+	requireDarwinSourceFailure(t, canceledFailure, OperationHash, CauseCanceled)
+	if hashContext.samples != 2 {
+		t.Fatalf("canceled source hash context samples = %d, want 2", hashContext.samples)
+	}
 
 	for _, flags := range []uint32{0, unix.MNT_LOCAL | unix.MNT_IGNORE_OWNERSHIP} {
 		requireDarwinSourceFailure(

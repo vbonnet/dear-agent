@@ -140,6 +140,28 @@ func (owner *sourceConstructionOwner) validInitialObjects() bool {
 	return owner.objects != nil && owner.objects.root.validOpenDirectory()
 }
 
+func (owner *sourceConstructionOwner) validPackedRefsRetention() bool {
+	if owner == nil || owner.state != sourceConstructionActive || owner.closeFailure ||
+		!owner.validInitialRepository() || !owner.validInitialGit() ||
+		!owner.validInitialConfig() || !owner.validInitialObjects() {
+		return false
+	}
+	switch owner.packedRefs.state {
+	case sourcePackedRefsUnresolved:
+		return false
+	case sourcePackedRefsAbsent:
+		return owner.packedRefs.leaf == nil
+	case sourcePackedRefsRetained:
+		return owner.packedRefs.leaf != nil &&
+			owner.packedRefs.leaf.descriptor.validOpen() &&
+			owner.packedRefs.leaf.descriptor.kind == sourceObservedRegular &&
+			owner.packedRefs.leaf.evidence.snapshot.size >= 0 &&
+			owner.packedRefs.leaf.evidence.snapshot.size <= maxPackedRefsBytes
+	default:
+		return false
+	}
+}
+
 func (owner *sourceConstructionOwner) closeInto(outcome *sourceUseOutcome) {
 	primitives, failure := platformSourcePrimitives()
 	if failure != nil {

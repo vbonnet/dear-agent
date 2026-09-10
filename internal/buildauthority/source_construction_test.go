@@ -1,12 +1,14 @@
 package buildauthority
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -343,6 +345,930 @@ func TestSourceConstructionRetainedPackedRefsClosesFirst(t *testing.T) {
 	}
 }
 
+func TestSourceConstructionRetainedPackedRefsCloseFailureContinuesAndCaches(t *testing.T) {
+	primitives := newScriptedSourceConstructionPrimitives(
+		t,
+		[]byte(validSourceConstructionConfig),
+	)
+	primitives.packedRefsPresent = true
+	primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+	owner, acquisition := retainSourceConstructionWith(
+		context.Background(),
+		testSourceRepositoryLocator(),
+		primitives,
+	)
+	if owner == nil || !acquisition.proved() {
+		t.Fatalf("source construction = %+v / %+v", owner, acquisition)
+	}
+	stage := runSourceConstructionPackedRefsStage(context.Background(), owner, primitives)
+	if !stage.proved() || !owner.validPackedRefsRetention() {
+		t.Fatalf("successful packed-refs stage = %+v; owner %+v", stage, owner)
+	}
+
+	primitives.closeFailures["close-descriptor:packed-refs"] = true
+	start := len(primitives.events)
+	var first sourceUseOutcome
+	owner.closeIntoWith(primitives, &first)
+	if first.primary != nil {
+		t.Fatalf("retained packed-refs close primary = %+v", first.primary)
+	}
+	requireFailureRecord(
+		t,
+		first.descriptorClose,
+		PhaseClose,
+		OperationCloseNonRoot,
+		CauseDescriptorClose,
+	)
+	want := append(
+		[]string{"close-descriptor:packed-refs"},
+		sourceConstructionOwnerCloseEvents()...,
+	)
+	if got := primitives.events[start:]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed retained packed-refs close order = %q, want %q", got, want)
+	}
+	if owner.state != sourceConstructionClosed || !owner.closeFailure {
+		t.Fatalf("failed retained packed-refs close owner = %+v", owner)
+	}
+
+	closedAt := len(primitives.events)
+	var repeated sourceUseOutcome
+	owner.closeIntoWith(primitives, &repeated)
+	if repeated.primary != nil {
+		t.Fatalf("cached retained packed-refs close primary = %+v", repeated.primary)
+	}
+	requireFailureRecord(
+		t,
+		repeated.descriptorClose,
+		PhaseClose,
+		OperationCloseNonRoot,
+		CauseDescriptorClose,
+	)
+	if len(primitives.events) != closedAt {
+		t.Fatalf("cached retained packed-refs close touched handles: %q", primitives.events[closedAt:])
+	}
+	assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+}
+
+func TestSourceConstructionPackedRefsStageRetainsAbsentAndPresentStates(t *testing.T) {
+	sha1Content := []byte(
+		"# pack-refs with: peeled fully-peeled sorted \n" +
+			strings.Repeat("1", 40) + " refs/heads/main\n" +
+			strings.Repeat("2", 40) + " refs/tags/v1\n" +
+			"^" + strings.Repeat("a", 40) + "\n",
+	)
+	sha256Config := []byte("[core]\n\trepositoryformatversion = 1\n\tbare = false\n" +
+		"[extensions]\n\tobjectFormat = sha256\n\trefStorage = files\n")
+	sha256Content := []byte(strings.Repeat("b", 64) + " refs/heads/main\n")
+	for _, test := range []struct {
+		name    string
+		config  []byte
+		present bool
+		content []byte
+		format  repositoryObjectFormat
+	}{
+		{
+			name:   "absent",
+			config: []byte(validSourceConstructionConfig),
+		},
+		{
+			name:    "empty present",
+			config:  []byte(validSourceConstructionConfig),
+			present: true,
+			format:  objectFormatSHA1,
+		},
+		{
+			name:    "SHA-1 header and peeled row",
+			config:  []byte(validSourceConstructionConfig),
+			present: true,
+			content: sha1Content,
+			format:  objectFormatSHA1,
+		},
+		{
+			name:    "SHA-256",
+			config:  sha256Config,
+			present: true,
+			content: sha256Content,
+			format:  objectFormatSHA256,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(t, test.config)
+			primitives.packedRefsPresent = test.present
+			primitives.packedRefs = append([]byte(nil), test.content...)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() || !owner.validInitialRetention() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			start := len(primitives.events)
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			if !stage.proved() || !owner.validPackedRefsRetention() {
+				t.Fatalf("packed-refs stage = %+v; owner %+v", stage, owner)
+			}
+
+			if !test.present {
+				if owner.packedRefs.state != sourcePackedRefsAbsent || owner.packedRefs.leaf != nil {
+					t.Fatalf("absent packed-refs state = %+v", owner.packedRefs)
+				}
+				want := []string{
+					"probe:packed-refs:initial",
+					"probe:packed-refs:rebind-absent",
+				}
+				if got := primitives.events[start:]; !reflect.DeepEqual(got, want) {
+					t.Fatalf("absent packed-refs trace = %q, want %q", got, want)
+				}
+			} else {
+				leaf := owner.packedRefs.leaf
+				if owner.packedRefs.state != sourcePackedRefsRetained || leaf == nil ||
+					!leaf.descriptor.validOpen() || leaf.evidence.snapshot.size != int64(len(test.content)) ||
+					leaf.digest != Digest(sha256.Sum256(test.content)) {
+					t.Fatalf("retained packed-refs = %+v", owner.packedRefs)
+				}
+				wantClaim, err := parsePackedRefs(test.content, test.format)
+				if err != nil || !reflect.DeepEqual(leaf.claim, wantClaim) {
+					t.Fatalf("retained packed-refs claim = %+v, want %+v / %v", leaf.claim, wantClaim, err)
+				}
+				want := []string{"probe:packed-refs:initial", "open-descriptor:packed-refs"}
+				want = append(want, sourceConstructionObservationEvents("packed-refs-before")...)
+				want = append(want, "read:packed-refs", "hash:packed-refs")
+				want = append(want, sourceConstructionReobservationEvents("packed-refs-after")...)
+				want = append(want, "open-descriptor:packed-refs-rebind")
+				want = append(want, sourceConstructionReobservationEvents("packed-refs-rebind")...)
+				want = append(want, "close-descriptor:packed-refs-rebind")
+				if got := primitives.events[start:]; !reflect.DeepEqual(got, want) {
+					t.Fatalf("retained packed-refs trace =\n%q\nwant\n%q", got, want)
+				}
+			}
+
+			closeStart := len(primitives.events)
+			var closeOutcome sourceUseOutcome
+			owner.closeIntoWith(primitives, &closeOutcome)
+			if !closeOutcome.proved() {
+				t.Fatalf("packed-refs owner close = %+v", closeOutcome)
+			}
+			wantClose := sourceConstructionOwnerCloseEvents()
+			if test.present {
+				wantClose = append([]string{"close-descriptor:packed-refs"}, wantClose...)
+			}
+			if got := primitives.events[closeStart:]; !reflect.DeepEqual(got, wantClose) {
+				t.Fatalf("packed-refs close trace = %q, want %q", got, wantClose)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsParseAndPolicyAttribution(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		content   []byte
+		operation Operation
+		cause     CauseCode
+	}{
+		{
+			name:      "syntax",
+			content:   []byte(strings.Repeat("1", 40) + " refs/heads/main"),
+			operation: OperationParse,
+			cause:     CauseMalformed,
+		},
+		{
+			name:      "replacement policy",
+			content:   []byte(strings.Repeat("1", 40) + " refs/replace/target\n"),
+			operation: OperationValidate,
+			cause:     CauseUnsupported,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.packedRefsPresent = true
+			primitives.packedRefs = append([]byte(nil), test.content...)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(context.Background(), owner, primitives)
+			requireFailureRecord(t, stage.primary, PhaseSource, test.operation, test.cause)
+			if stage.descriptorClose != nil || owner.state != sourceConstructionClosed {
+				t.Fatalf("packed-refs refusal = %+v; owner %+v", stage, owner)
+			}
+			assertSourceConstructionEventSequence(t, primitives.events, []string{
+				"read:packed-refs",
+				"hash:packed-refs",
+				"stat:packed-refs-after",
+				"statfs:packed-refs-after",
+				"acquire-acl:packed-refs-after",
+				"parse-acl:packed-refs-after",
+				"validate-fs:packed-refs-after",
+				"validate-acl:packed-refs-after",
+				"close-descriptor:packed-refs",
+				"open-descriptor:packed-refs-rebind",
+				"stat:packed-refs-rebind",
+				"statfs:packed-refs-rebind",
+				"acquire-acl:packed-refs-rebind",
+				"parse-acl:packed-refs-rebind",
+				"validate-fs:packed-refs-rebind",
+				"validate-acl:packed-refs-rebind",
+				"close-descriptor:packed-refs-rebind",
+				"close-root:objects",
+			})
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+
+	t.Run("unknown object format is an invariant", func(t *testing.T) {
+		_, failure := parseInitialSourcePackedRefs(
+			context.Background(),
+			nil,
+			objectFormatUnknown,
+		)
+		requireFailureRecord(
+			t,
+			failure.record(),
+			PhaseSource,
+			OperationValidate,
+			CauseInternalInvariant,
+		)
+	})
+}
+
+func TestSourceConstructionPackedRefsParseAndPolicyPostSampleContext(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		content   string
+		cancelAt  int
+		operation Operation
+	}{
+		{
+			name:      "parse cancellation outranks syntax error",
+			content:   strings.Repeat("1", 40) + " refs/heads/main",
+			cancelAt:  2,
+			operation: OperationParse,
+		},
+		{
+			name:      "policy cancellation outranks policy error",
+			content:   strings.Repeat("1", 40) + " refs/replace/target\n",
+			cancelAt:  4,
+			operation: OperationValidate,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := &sourceConstructionStepContext{cancelAt: test.cancelAt}
+			_, failure := parseInitialSourcePackedRefs(
+				ctx,
+				[]byte(test.content),
+				objectFormatSHA1,
+			)
+			requireFailureRecord(
+				t,
+				failure.record(),
+				PhaseSource,
+				test.operation,
+				CauseCanceled,
+			)
+			if ctx.samples != test.cancelAt {
+				t.Fatalf("context samples = %d, want cancellation at %d", ctx.samples, test.cancelAt)
+			}
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsRejectsKindAndAbsenceDrift(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		results   map[string]scriptedSourceProbeResult
+		operation Operation
+		cause     CauseCode
+	}{
+		{
+			name: "present directory",
+			results: map[string]scriptedSourceProbeResult{
+				"probe:packed-refs:initial": {kind: sourceObservedDirectory, present: true},
+			},
+			operation: OperationValidate,
+			cause:     CauseUnsupported,
+		},
+		{
+			name: "malformed absent tuple",
+			results: map[string]scriptedSourceProbeResult{
+				"probe:packed-refs:initial": {kind: sourceObservedRegular},
+			},
+			operation: OperationValidate,
+			cause:     CauseInternalInvariant,
+		},
+		{
+			name: "appears during absence rebind",
+			results: map[string]scriptedSourceProbeResult{
+				"probe:packed-refs:rebind-absent": {kind: sourceObservedRegular, present: true},
+			},
+			operation: OperationCompare,
+			cause:     CauseUnstable,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			maps.Copy(primitives.probeResults, test.results)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			requireFailureRecord(t, stage.primary, PhaseSource, test.operation, test.cause)
+			if sourceConstructionEventPresent(primitives.events, "open-descriptor:packed-refs") {
+				t.Fatalf("packed-refs kind or absence refusal opened a leaf: %q", primitives.events)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsRejectsUnsafeLeafEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cause CauseCode
+		apply func(*scriptedSourceConstructionPrimitives)
+	}{
+		{
+			name:  "cross-device child",
+			cause: CauseUnsupported,
+			apply: func(primitives *scriptedSourceConstructionPrimitives) {
+				primitives.deviceOverrides["packed-refs"] = 19
+			},
+		},
+		{
+			name:  "cross-filesystem child",
+			cause: CauseUnsupported,
+			apply: func(primitives *scriptedSourceConstructionPrimitives) {
+				primitives.filesystemOverrides["packed-refs"] = [2]int32{19, 20}
+			},
+		},
+		{
+			name:  "hard linked leaf",
+			cause: CauseUnsupported,
+			apply: func(primitives *scriptedSourceConstructionPrimitives) {
+				primitives.linkCountOverrides["packed-refs"] = 2
+			},
+		},
+		{
+			name:  "oversized leaf",
+			cause: CauseLimit,
+			apply: func(primitives *scriptedSourceConstructionPrimitives) {
+				primitives.sizeOverrides["packed-refs"] = maxPackedRefsBytes + 1
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.packedRefsPresent = true
+			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			test.apply(primitives)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			requireFailureRecord(t, stage.primary, PhaseSource, OperationValidate, test.cause)
+			if sourceConstructionEventPresent(primitives.events, "read:packed-refs") {
+				t.Fatalf("unsafe packed-refs leaf was read: %q", primitives.events)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionReobservationComparesSecurityDriftBeforePolicy(t *testing.T) {
+	for _, target := range []string{
+		"config-after",
+		"config-rebind",
+		"packed-refs-after",
+		"packed-refs-rebind",
+	} {
+		for _, drift := range []string{"mode", "acl", "mount"} {
+			t.Run(target+"/"+drift, func(t *testing.T) {
+				primitives := newScriptedSourceConstructionPrimitives(
+					t,
+					[]byte(validSourceConstructionConfig),
+				)
+				switch target {
+				case "config-after":
+					primitives.configPostReadDrift = drift
+				case "config-rebind":
+					primitives.configRebindDrift = drift
+				case "packed-refs-after":
+					primitives.packedRefsPresent = true
+					primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+					primitives.packedRefsPostReadDrift = drift
+				case "packed-refs-rebind":
+					primitives.packedRefsPresent = true
+					primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+					primitives.packedRefsRebindDrift = drift
+				default:
+					t.Fatalf("unknown reobservation target %q", target)
+				}
+
+				owner, outcome := retainSourceConstructionWith(
+					context.Background(),
+					testSourceRepositoryLocator(),
+					primitives,
+				)
+				if strings.HasPrefix(target, "packed-refs-") {
+					if owner == nil || !outcome.proved() {
+						t.Fatalf("initial source construction = %+v / %+v", owner, outcome)
+					}
+					outcome = runSourceConstructionPackedRefsStage(
+						context.Background(),
+						owner,
+						primitives,
+					)
+				} else if owner != nil {
+					t.Fatalf("config %s drift returned source owner %+v", drift, owner)
+				}
+				requireFailureRecord(
+					t,
+					outcome.primary,
+					PhaseSource,
+					OperationCompare,
+					CauseUnstable,
+				)
+				assertSourceConstructionEventSequence(t, primitives.events, []string{
+					"stat:" + target,
+					"statfs:" + target,
+					"acquire-acl:" + target,
+					"parse-acl:" + target,
+				})
+				for _, forbidden := range []string{
+					"validate-fs:" + target,
+					"validate-acl:" + target,
+				} {
+					if sourceConstructionEventPresent(primitives.events, forbidden) {
+						t.Fatalf("%s drift reached policy event %q: %q", drift, forbidden, primitives.events)
+					}
+				}
+				assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+			})
+		}
+	}
+}
+
+func TestSourceConstructionReobservationRejectsInvalidParsedACL(t *testing.T) {
+	for _, target := range []string{
+		"config-after",
+		"config-rebind",
+		"packed-refs-after",
+		"packed-refs-rebind",
+	} {
+		t.Run(target, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.invalidACLEvent = "parse-acl:" + target
+			if strings.HasPrefix(target, "packed-refs-") {
+				primitives.packedRefsPresent = true
+				primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			}
+			owner, outcome := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if strings.HasPrefix(target, "packed-refs-") {
+				if owner == nil || !outcome.proved() {
+					t.Fatalf("initial source construction = %+v / %+v", owner, outcome)
+				}
+				outcome = runSourceConstructionPackedRefsStage(
+					context.Background(),
+					owner,
+					primitives,
+				)
+			} else if owner != nil {
+				t.Fatalf("invalid %s ACL returned source owner %+v", target, owner)
+			}
+			requireFailureRecord(
+				t,
+				outcome.primary,
+				PhaseSource,
+				OperationValidate,
+				CauseInternalInvariant,
+			)
+			if sourceConstructionEventPresent(primitives.events, "validate-fs:"+target) ||
+				sourceConstructionEventPresent(primitives.events, "validate-acl:"+target) {
+				t.Fatalf("invalid %s ACL reached policy validation: %q", target, primitives.events)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsInstallsOpenOwnersBeforeFailure(t *testing.T) {
+	for _, event := range []string{
+		"open-descriptor:packed-refs",
+		"open-descriptor:packed-refs-rebind",
+	} {
+		t.Run(event, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.packedRefsPresent = true
+			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			primitives.ownerFailureEvent = event
+			primitives.failure = newSourcePrimitiveFailure(OperationOpen, CauseUnstable)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			requireFailureRecord(
+				t,
+				stage.primary,
+				PhaseSource,
+				OperationOpen,
+				CauseUnstable,
+			)
+			closeEvent := "close-descriptor:packed-refs"
+			if event == "open-descriptor:packed-refs-rebind" {
+				closeEvent = "close-descriptor:packed-refs-rebind"
+			}
+			if got := countSourceConstructionEvent(primitives.events, closeEvent); got != 1 {
+				t.Fatalf("owner-plus-failure close %q count = %d; trace %q", closeEvent, got, primitives.events)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsRejectsNilOwnerWithoutFailure(t *testing.T) {
+	for _, event := range []string{
+		"open-descriptor:packed-refs",
+		"open-descriptor:packed-refs-rebind",
+	} {
+		t.Run(event, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.packedRefsPresent = true
+			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			primitives.nilOwnerEvent = event
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			requireFailureRecord(
+				t,
+				stage.primary,
+				PhaseSource,
+				OperationValidate,
+				CauseInternalInvariant,
+			)
+			if stage.descriptorClose != nil || owner.state != sourceConstructionClosed {
+				t.Fatalf("nil packed-refs owner refusal = %+v; owner %+v", stage, owner)
+			}
+			wantTail := sourceConstructionOwnerCloseEvents()
+			if event == "open-descriptor:packed-refs-rebind" {
+				wantTail = append([]string{"close-descriptor:packed-refs"}, wantTail...)
+			}
+			assertSourceConstructionEventSequence(t, primitives.events, append([]string{event}, wantTail...))
+			if got := countSourceConstructionEvent(
+				primitives.events,
+				"close-descriptor:packed-refs-rebind",
+			); got != 0 {
+				t.Fatalf("nil comparison owner close count = %d; trace %q", got, primitives.events)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsContentFailureRunsRequiredTail(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		event     string
+		operation Operation
+		cause     CauseCode
+	}{
+		{name: "read", event: "read:packed-refs", operation: OperationParse, cause: CauseUnstable},
+		{name: "hash", event: "hash:packed-refs", operation: OperationHash, cause: CauseUnstable},
+		{name: "hash canceled", event: "hash:packed-refs", operation: OperationHash, cause: CauseCanceled},
+		{
+			name:      "post-observation",
+			event:     "stat:packed-refs-after",
+			operation: OperationProbe,
+			cause:     CauseUnstable,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.packedRefsPresent = true
+			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			primitives.failureEvent = test.event
+			primitives.failure = newSourcePrimitiveFailure(test.operation, test.cause)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			requireFailureRecord(t, stage.primary, PhaseSource, test.operation, test.cause)
+			assertSourceConstructionEventSequence(t, primitives.events, []string{
+				"close-descriptor:packed-refs",
+				"open-descriptor:packed-refs-rebind",
+				"stat:packed-refs-rebind",
+				"statfs:packed-refs-rebind",
+				"acquire-acl:packed-refs-rebind",
+				"parse-acl:packed-refs-rebind",
+				"validate-fs:packed-refs-rebind",
+				"validate-acl:packed-refs-rebind",
+				"close-descriptor:packed-refs-rebind",
+				"close-root:objects",
+			})
+			if test.event == "read:packed-refs" &&
+				sourceConstructionEventPresent(primitives.events, "hash:packed-refs") {
+				t.Fatalf("read failure began packed-refs hashing: %q", primitives.events)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsPrimitiveFailuresRespectTailBoundary(t *testing.T) {
+	for _, event := range sourceConstructionPackedRefsPresentEvents() {
+		if strings.HasPrefix(event, "close-") {
+			continue
+		}
+		t.Run(strings.ReplaceAll(event, ":", "_"), func(t *testing.T) {
+			operation := sourceConstructionEventOperation(t, event)
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.packedRefsPresent = true
+			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			primitives.failureEvent = event
+			primitives.failure = newSourcePrimitiveFailure(operation, CauseUnstable)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			requireFailureRecord(t, stage.primary, PhaseSource, operation, CauseUnstable)
+			contentTail := event == "read:packed-refs" || event == "hash:packed-refs" ||
+				strings.Contains(event, "packed-refs-after")
+			if contentTail {
+				if !sourceConstructionEventPresent(
+					primitives.events,
+					"open-descriptor:packed-refs-rebind",
+				) {
+					t.Fatalf("content failure %q skipped packed-refs rebind: %q", event, primitives.events)
+				}
+			} else {
+				assertOnlySourceCloseTailAfter(t, primitives.events, event)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsFailureAndCloseComposition(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		primaryDrift string
+		closeEvent   string
+		primaryCause CauseCode
+	}{
+		{
+			name:         "content identity drift plus retained close failure",
+			primaryDrift: "identity",
+			closeEvent:   "close-descriptor:packed-refs",
+			primaryCause: CauseIdentity,
+		},
+		{
+			name:       "rebind close only",
+			closeEvent: "close-descriptor:packed-refs-rebind",
+		},
+		{
+			name:         "rebind security drift plus comparison close failure",
+			primaryDrift: "rebind-security",
+			closeEvent:   "close-descriptor:packed-refs-rebind",
+			primaryCause: CauseUnstable,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			primitives.packedRefsPresent = true
+			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			switch test.primaryDrift {
+			case "identity":
+				primitives.packedRefsPostReadDrift = "identity"
+			case "rebind-security":
+				primitives.packedRefsRebindDrift = "security"
+			case "":
+			default:
+				t.Fatalf("unknown test drift %q", test.primaryDrift)
+			}
+			primitives.closeFailures[test.closeEvent] = true
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			if test.primaryCause == "" {
+				if stage.primary != nil {
+					t.Fatalf("close-only packed-refs primary = %+v", stage.primary)
+				}
+			} else {
+				requireFailureRecord(
+					t,
+					stage.primary,
+					PhaseSource,
+					OperationCompare,
+					test.primaryCause,
+				)
+			}
+			requireFailureRecord(
+				t,
+				stage.descriptorClose,
+				PhaseClose,
+				OperationCloseNonRoot,
+				CauseDescriptorClose,
+			)
+			if got := countSourceConstructionEvent(primitives.events, test.closeEvent); got != 1 {
+				t.Fatalf("packed-refs close %q count = %d; trace %q", test.closeEvent, got, primitives.events)
+			}
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+}
+
+func TestSourceConstructionPackedRefsRequiresUnresolvedActiveOwner(t *testing.T) {
+	primitives := newScriptedSourceConstructionPrimitives(
+		t,
+		[]byte(validSourceConstructionConfig),
+	)
+	owner, initial := retainSourceConstructionWith(
+		context.Background(),
+		testSourceRepositoryLocator(),
+		primitives,
+	)
+	if owner == nil || !initial.proved() {
+		t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+	}
+	first := runSourceConstructionPackedRefsStage(context.Background(), owner, primitives)
+	if !first.proved() || owner.packedRefs.state != sourcePackedRefsAbsent {
+		t.Fatalf("first packed-refs stage = %+v; owner %+v", first, owner)
+	}
+	start := len(primitives.events)
+	second := runSourceConstructionPackedRefsStage(context.Background(), owner, primitives)
+	requireFailureRecord(
+		t,
+		second.primary,
+		PhaseSource,
+		OperationValidate,
+		CauseInternalInvariant,
+	)
+	if owner.state != sourceConstructionClosed {
+		t.Fatalf("repeated packed-refs stage left owner active: %+v", owner)
+	}
+	for _, event := range primitives.events[start:] {
+		if strings.HasPrefix(event, "probe:packed-refs") {
+			t.Fatalf("repeated packed-refs stage touched the leaf: %q", primitives.events[start:])
+		}
+	}
+	assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+}
+
+func TestSourceConstructionPackedRefsContextBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		ctx       func() context.Context
+		operation Operation
+		cause     CauseCode
+	}{
+		{
+			name: "canceled before stage",
+			ctx: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			operation: OperationValidate,
+			cause:     CauseCanceled,
+		},
+		{
+			name: "deadline before stage",
+			ctx: func() context.Context {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+				t.Cleanup(cancel)
+				return ctx
+			},
+			operation: OperationValidate,
+			cause:     CauseDeadline,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primitives := newScriptedSourceConstructionPrimitives(
+				t,
+				[]byte(validSourceConstructionConfig),
+			)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				testSourceRepositoryLocator(),
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(test.ctx(), owner, primitives)
+			requireFailureRecord(t, stage.primary, PhaseSource, test.operation, test.cause)
+			assertNoPackedRefsEvents(t, primitives.events)
+			assertSourceConstructionAcquiredOwnersClosed(t, primitives)
+		})
+	}
+
+}
+
 func TestSourceConstructionRejectsInvalidInputsBeforePrimitives(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -417,7 +1343,7 @@ func TestSourceConstructionCancellationAtPrimitiveBoundaries(t *testing.T) {
 	}{
 		{name: "after git probe", event: "probe:git", operation: OperationValidate},
 		{name: "after git ACL validation", event: "validate-acl:git", operation: OperationValidate},
-		{name: "after config hash", event: "hash:config", operation: OperationParse},
+		{name: "after config hash", event: "hash:config", operation: OperationHash},
 		{name: "after objects comparison", event: "compare:objects", operation: OperationValidate},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1693,15 +2619,15 @@ func (darwinSourcePrimitives) stash(value any) {
 		t.Fatal("Darwin source primitives fixture could not make parseRawACL variadic")
 	}
 	darwinPrimitivesSource = []byte(withVariadicDarwinParse)
-	withVariadicParseCall := strings.Replace(
-		string(acquireSource),
-		"builder.primitives.parseRawACL(builder.ctx, rawACL)",
-		"builder.primitives.parseRawACL(builder.ctx, rawACL...)",
-		1,
-	)
-	if withVariadicParseCall == string(acquireSource) {
-		t.Fatal("source construction fixture could not call variadic parseRawACL")
+	const parseRawACLCall = "builder.primitives.parseRawACL(builder.ctx, rawACL)"
+	if count := strings.Count(string(acquireSource), parseRawACLCall); count != 2 {
+		t.Fatalf("source construction parseRawACL call count = %d, want 2", count)
 	}
+	withVariadicParseCall := strings.ReplaceAll(
+		string(acquireSource),
+		parseRawACLCall,
+		"builder.primitives.parseRawACL(builder.ctx, rawACL...)",
+	)
 	acquireSource = []byte(withVariadicParseCall)
 	typedPackage := loadTypedSourceConstructionPackage(t, map[string][]byte{
 		constructionPath:     constructionSource,
@@ -1798,33 +2724,41 @@ func (*sourceConstructionStepContext) Value(any) any {
 type scriptedSourceConstructionPrimitives struct {
 	t *testing.T
 
-	locator                sourceRepositoryLocator
-	events                 []string
-	config                 []byte
-	failureEvent           string
-	ownerFailureEvent      string
-	cancelEvent            string
-	cancel                 context.CancelFunc
-	nilOwnerEvent          string
-	invalidACLEvent        string
-	failure                *sourcePrimitiveFailure
-	configPostReadDrift    string
-	configRebindDrift      string
-	closeFailures          map[string]bool
-	probeResults           map[string]scriptedSourceProbeResult
-	deviceOverrides        map[string]uint64
-	filesystemOverrides    map[string][2]int32
-	acquiredRoots          map[string]bool
-	acquiredDescriptors    map[string]bool
-	roots                  map[string]*ownedSourceRoot
-	rootNames              map[*ownedSourceRoot]string
-	descriptors            map[string]*ownedSourceDescriptor
-	descriptorNames        map[*ownedSourceDescriptor]string
-	observation            map[*ownedSourceDescriptor]string
-	configObservationCount int
-	lastFilesystem         string
-	lastMount              mountSnapshot
-	lastACL                string
+	locator                    sourceRepositoryLocator
+	events                     []string
+	config                     []byte
+	packedRefs                 []byte
+	packedRefsPresent          bool
+	failureEvent               string
+	ownerFailureEvent          string
+	cancelEvent                string
+	cancel                     context.CancelFunc
+	nilOwnerEvent              string
+	invalidACLEvent            string
+	failure                    *sourcePrimitiveFailure
+	configPostReadDrift        string
+	configRebindDrift          string
+	packedRefsPostReadDrift    string
+	packedRefsRebindDrift      string
+	closeFailures              map[string]bool
+	probeResults               map[string]scriptedSourceProbeResult
+	deviceOverrides            map[string]uint64
+	filesystemOverrides        map[string][2]int32
+	linkCountOverrides         map[string]uint64
+	sizeOverrides              map[string]int64
+	acquiredRoots              map[string]bool
+	acquiredDescriptors        map[string]bool
+	roots                      map[string]*ownedSourceRoot
+	rootNames                  map[*ownedSourceRoot]string
+	descriptors                map[string]*ownedSourceDescriptor
+	descriptorNames            map[*ownedSourceDescriptor]string
+	observation                map[*ownedSourceDescriptor]string
+	configObservationCount     int
+	packedRefsObservationCount int
+	lastFilesystem             string
+	lastMount                  mountSnapshot
+	lastACL                    string
+	lastRead                   string
 }
 
 func newScriptedSourceConstructionPrimitives(
@@ -1840,6 +2774,8 @@ func newScriptedSourceConstructionPrimitives(
 		probeResults:        make(map[string]scriptedSourceProbeResult),
 		deviceOverrides:     make(map[string]uint64),
 		filesystemOverrides: make(map[string][2]int32),
+		linkCountOverrides:  make(map[string]uint64),
+		sizeOverrides:       make(map[string]int64),
 		acquiredRoots:       make(map[string]bool),
 		acquiredDescriptors: make(map[string]bool),
 		roots:               make(map[string]*ownedSourceRoot),
@@ -1865,6 +2801,7 @@ func newScriptedSourceConstructionPrimitives(
 		{name: "config-rebind", kind: sourceObservedRegular},
 		{name: "objects", kind: sourceObservedDirectory},
 		{name: "packed-refs", kind: sourceObservedRegular},
+		{name: "packed-refs-rebind", kind: sourceObservedRegular},
 	} {
 		owner := &ownedSourceDescriptor{
 			file:  &os.File{},
@@ -1904,29 +2841,44 @@ func (primitives *scriptedSourceConstructionPrimitives) probeRelativeKind(
 	name string,
 	mode sourcePresenceMode,
 ) (sourceObservedKind, bool, *sourcePrimitiveFailure) {
-	if ctx == nil || mode != sourceInitialRequired {
+	if ctx == nil {
 		primitives.t.Fatalf("probe %q inputs = %+v / %d", name, ctx, mode)
 	}
 	parentName := primitives.descriptorName(parent)
 	var kind sourceObservedKind
-	switch {
-	case parentName == "repository" && name == ".git":
-		kind = sourceObservedDirectory
-	case parentName == "git" && name == "config":
-		kind = sourceObservedRegular
-	case parentName == "git" && name == "objects":
-		kind = sourceObservedDirectory
-	default:
-		primitives.t.Fatalf("unexpected source probe %s/%s", parentName, name)
-	}
+	present := true
 	event := "probe:" + strings.TrimPrefix(name, ".")
+	switch {
+	case parentName == "repository" && name == ".git" && mode == sourceInitialRequired:
+		kind = sourceObservedDirectory
+	case parentName == "git" && name == "config" && mode == sourceInitialRequired:
+		kind = sourceObservedRegular
+	case parentName == "git" && name == "objects" && mode == sourceInitialRequired:
+		kind = sourceObservedDirectory
+	case parentName == "git" && name == "packed-refs" && mode == sourceInitialOptional:
+		present = primitives.packedRefsPresent
+		if present {
+			kind = sourceObservedRegular
+		}
+		event = "probe:packed-refs:initial"
+	case parentName == "git" && name == "packed-refs" && mode == sourceRevalidatePresent:
+		kind = sourceObservedRegular
+		present = primitives.packedRefsPresent
+		event = "probe:packed-refs:rebind-present"
+	case parentName == "git" && name == "packed-refs" && mode == sourceRevalidateAbsent:
+		kind = 0
+		present = false
+		event = "probe:packed-refs:rebind-absent"
+	default:
+		primitives.t.Fatalf("unexpected source probe %s/%s mode=%d", parentName, name, mode)
+	}
 	if failure := primitives.record(event); failure != nil {
 		return 0, false, failure
 	}
 	if result, overridden := primitives.probeResults[event]; overridden {
 		return result.kind, result.present, nil
 	}
-	return kind, true, nil
+	return kind, present, nil
 }
 
 func (primitives *scriptedSourceConstructionPrimitives) openRelativeNoFollow(
@@ -1963,6 +2915,12 @@ func (primitives *scriptedSourceConstructionPrimitives) openRelativeNoFollow(
 	case parentName == "git" && name == "objects" &&
 		kind == sourceObservedDirectory && mode == sourceInitialRequired:
 		ownerName, event = "objects", "open-descriptor:objects"
+	case parentName == "git" && name == "packed-refs" &&
+		kind == sourceObservedRegular && mode == sourceInitialOptional:
+		ownerName, event = "packed-refs", "open-descriptor:packed-refs"
+	case parentName == "git" && name == "packed-refs" &&
+		kind == sourceObservedRegular && mode == sourceRevalidatePresent:
+		ownerName, event = "packed-refs-rebind", "open-descriptor:packed-refs-rebind"
 	default:
 		primitives.t.Fatalf(
 			"unexpected relative open parent=%s name=%q kind=%d mode=%d",
@@ -2013,6 +2971,14 @@ func (primitives *scriptedSourceConstructionPrimitives) statDescriptor(
 			observation = "config-after"
 		}
 	}
+	if name == "packed-refs" {
+		primitives.packedRefsObservationCount++
+		if primitives.packedRefsObservationCount == 1 {
+			observation = "packed-refs-before"
+		} else {
+			observation = "packed-refs-after"
+		}
+	}
 	primitives.observation[owner] = observation
 	if failure := primitives.record("stat:" + observation); failure != nil {
 		return fileSnapshot{}, failure
@@ -2024,6 +2990,9 @@ func (primitives *scriptedSourceConstructionPrimitives) statDescriptor(
 			snapshot.identity.Inode++
 		case "security":
 			snapshot.mtimeSec++
+		case "mode":
+			snapshot.identity.Mode |= 0o022
+		case "acl", "mount":
 		case "":
 		default:
 			primitives.t.Fatalf("unknown config drift %q", primitives.configPostReadDrift)
@@ -2035,9 +3004,40 @@ func (primitives *scriptedSourceConstructionPrimitives) statDescriptor(
 			snapshot.identity.Inode++
 		case "security":
 			snapshot.mtimeSec++
+		case "mode":
+			snapshot.identity.Mode |= 0o022
+		case "acl", "mount":
 		case "":
 		default:
 			primitives.t.Fatalf("unknown config rebind drift %q", primitives.configRebindDrift)
+		}
+	}
+	if observation == "packed-refs-after" {
+		switch primitives.packedRefsPostReadDrift {
+		case "identity":
+			snapshot.identity.Inode++
+		case "security":
+			snapshot.mtimeSec++
+		case "mode":
+			snapshot.identity.Mode |= 0o022
+		case "acl", "mount":
+		case "":
+		default:
+			primitives.t.Fatalf("unknown packed-refs drift %q", primitives.packedRefsPostReadDrift)
+		}
+	}
+	if observation == "packed-refs-rebind" {
+		switch primitives.packedRefsRebindDrift {
+		case "identity":
+			snapshot.identity.Inode++
+		case "security":
+			snapshot.mtimeSec++
+		case "mode":
+			snapshot.identity.Mode |= 0o022
+		case "acl", "mount":
+		case "":
+		default:
+			primitives.t.Fatalf("unknown packed-refs rebind drift %q", primitives.packedRefsRebindDrift)
 		}
 	}
 	return snapshot, nil
@@ -2060,6 +3060,9 @@ func (primitives *scriptedSourceConstructionPrimitives) statFilesystem(
 	if filesystem, overridden := primitives.filesystemOverrides[canonical]; overridden {
 		mount.filesystem = filesystem
 	}
+	if primitives.reobservationDrift(observation) == "mount" {
+		mount.flags++
+	}
 	primitives.lastMount = mount
 	return mount, nil
 }
@@ -2071,7 +3074,13 @@ func (primitives *scriptedSourceConstructionPrimitives) validateFilesystem(
 	if ctx == nil || mount != primitives.lastMount || primitives.lastFilesystem == "" {
 		primitives.t.Fatalf("filesystem validation inputs = %+v / %+v", ctx, mount)
 	}
-	return primitives.record("validate-fs:" + primitives.lastFilesystem)
+	if failure := primitives.record("validate-fs:" + primitives.lastFilesystem); failure != nil {
+		return failure
+	}
+	if primitives.reobservationDrift(primitives.lastFilesystem) == "mount" {
+		return newSourcePrimitiveFailure(OperationValidate, CauseUnsupported)
+	}
+	return nil
 }
 
 func (primitives *scriptedSourceConstructionPrimitives) acquireRawACL(
@@ -2106,10 +3115,17 @@ func (primitives *scriptedSourceConstructionPrimitives) parseRawACL(
 	canonical := observation
 	if strings.HasPrefix(observation, "config-") {
 		canonical = "config"
+	} else if strings.HasPrefix(observation, "packed-refs-") {
+		canonical = "packed-refs"
+	}
+	disposition := sourceACLAdmitted
+	if primitives.reobservationDrift(observation) == "acl" {
+		canonical = observation + "-mutation"
+		disposition = sourceACLMutationPermitting
 	}
 	return parsedSourceACL{
 		digest:      Digest(sha256.Sum256([]byte(canonical))),
-		disposition: sourceACLAdmitted,
+		disposition: disposition,
 	}, nil
 }
 
@@ -2121,7 +3137,30 @@ func (primitives *scriptedSourceConstructionPrimitives) validateACL(
 	if ctx == nil || (!acl.valid() && !invalidExpected) || primitives.lastACL == "" {
 		primitives.t.Fatalf("ACL validation inputs = %+v / %+v", ctx, acl)
 	}
-	return primitives.record("validate-acl:" + primitives.lastACL)
+	if failure := primitives.record("validate-acl:" + primitives.lastACL); failure != nil {
+		return failure
+	}
+	if acl.disposition == sourceACLMutationPermitting {
+		return newSourcePrimitiveFailure(OperationValidate, CausePermission)
+	}
+	return nil
+}
+
+func (primitives *scriptedSourceConstructionPrimitives) reobservationDrift(
+	observation string,
+) string {
+	switch observation {
+	case "config-after":
+		return primitives.configPostReadDrift
+	case "config-rebind":
+		return primitives.configRebindDrift
+	case "packed-refs-after":
+		return primitives.packedRefsPostReadDrift
+	case "packed-refs-rebind":
+		return primitives.packedRefsRebindDrift
+	default:
+		return ""
+	}
 }
 
 func (primitives *scriptedSourceConstructionPrimitives) readExactForParse(
@@ -2129,13 +3168,21 @@ func (primitives *scriptedSourceConstructionPrimitives) readExactForParse(
 	owner *ownedSourceDescriptor,
 	content []byte,
 ) *sourcePrimitiveFailure {
-	if ctx == nil || primitives.descriptorName(owner) != "config" || len(content) != len(primitives.config) {
-		primitives.t.Fatalf("config read inputs = %+v / %s / %d", ctx, primitives.descriptorName(owner), len(content))
+	name := primitives.descriptorName(owner)
+	want := primitives.config
+	if name == "packed-refs" {
+		want = primitives.packedRefs
+	} else if name != "config" {
+		primitives.t.Fatalf("unexpected source read descriptor %q", name)
 	}
-	if failure := primitives.record("read:config"); failure != nil {
+	if ctx == nil || len(content) != len(want) {
+		primitives.t.Fatalf("%s read inputs = %+v / %d", name, ctx, len(content))
+	}
+	primitives.lastRead = name
+	if failure := primitives.record("read:" + name); failure != nil {
 		return failure
 	}
-	copy(content, primitives.config)
+	copy(content, want)
 	return nil
 }
 
@@ -2143,13 +3190,24 @@ func (primitives *scriptedSourceConstructionPrimitives) hashBytes(
 	ctx context.Context,
 	content []byte,
 ) (Digest, *sourcePrimitiveFailure) {
-	if ctx == nil || !reflect.DeepEqual(content, primitives.config) {
-		primitives.t.Fatalf("config hash inputs = %+v / %q", ctx, content)
+	want := primitives.config
+	if primitives.lastRead == "packed-refs" {
+		want = primitives.packedRefs
 	}
-	if failure := primitives.record("hash:config"); failure != nil {
+	if ctx == nil || primitives.lastRead == "" || !bytes.Equal(content, want) {
+		primitives.t.Fatalf("%s hash inputs = %+v / %q", primitives.lastRead, ctx, content)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationHash); failure != nil {
 		return Digest{}, failure
 	}
-	return Digest(sha256.Sum256(content)), nil
+	if failure := primitives.record("hash:" + primitives.lastRead); failure != nil {
+		return Digest{}, failure
+	}
+	digest := Digest(sha256.Sum256(content))
+	if failure := sourceContextPrimitiveFailure(ctx, OperationHash); failure != nil {
+		return Digest{}, failure
+	}
+	return digest, nil
 }
 
 func (primitives *scriptedSourceConstructionPrimitives) compareRootAndDescriptor(
@@ -2275,8 +3333,11 @@ func (primitives *scriptedSourceConstructionPrimitives) observationName(
 
 func (primitives *scriptedSourceConstructionPrimitives) snapshot(name string) fileSnapshot {
 	canonical := name
-	if name == "config-rebind" {
+	switch name {
+	case "config-rebind":
 		canonical = "config"
+	case "packed-refs-rebind":
+		canonical = "packed-refs"
 	}
 	inodes := map[string]uint64{
 		"physical-root": 1,
@@ -2285,14 +3346,26 @@ func (primitives *scriptedSourceConstructionPrimitives) snapshot(name string) fi
 		"git":           3,
 		"config":        4,
 		"objects":       5,
+		"packed-refs":   7,
 	}
 	mode := uint32(platformModeDirectory | 0o700)
 	linkCount := uint64(2)
 	size := int64(0)
-	if canonical == "config" {
+	switch canonical {
+	case "config":
 		mode = platformModeRegular | 0o600
 		linkCount = 1
 		size = int64(len(primitives.config))
+	case "packed-refs":
+		mode = platformModeRegular | 0o600
+		linkCount = 1
+		size = int64(len(primitives.packedRefs))
+	}
+	if overridden, found := primitives.linkCountOverrides[canonical]; found {
+		linkCount = overridden
+	}
+	if overridden, found := primitives.sizeOverrides[canonical]; found {
+		size = overridden
 	}
 	device := uint64(7)
 	if overridden, found := primitives.deviceOverrides[canonical]; found {
@@ -2325,6 +3398,9 @@ func sourceConstructionObservationCanonicalName(observation string) string {
 	if strings.HasPrefix(observation, "config-") {
 		return "config"
 	}
+	if strings.HasPrefix(observation, "packed-refs-") {
+		return "packed-refs"
+	}
 	return observation
 }
 
@@ -2339,13 +3415,24 @@ func sourceConstructionAcquisitionEvents() []string {
 	events = append(events, "compare:git", "probe:config", "open-descriptor:config")
 	events = append(events, sourceConstructionObservationEvents("config-before")...)
 	events = append(events, "read:config", "hash:config")
-	events = append(events, sourceConstructionObservationEvents("config-after")...)
+	events = append(events, sourceConstructionReobservationEvents("config-after")...)
 	events = append(events, "open-descriptor:config-rebind")
-	events = append(events, sourceConstructionObservationEvents("config-rebind")...)
+	events = append(events, sourceConstructionReobservationEvents("config-rebind")...)
 	events = append(events, "close-descriptor:config-rebind", "probe:objects")
 	events = append(events, "open-root:objects", "open-descriptor:objects")
 	events = append(events, sourceConstructionObservationEvents("objects")...)
 	events = append(events, "compare:objects")
+	return events
+}
+
+func sourceConstructionPackedRefsPresentEvents() []string {
+	events := []string{"probe:packed-refs:initial", "open-descriptor:packed-refs"}
+	events = append(events, sourceConstructionObservationEvents("packed-refs-before")...)
+	events = append(events, "read:packed-refs", "hash:packed-refs")
+	events = append(events, sourceConstructionReobservationEvents("packed-refs-after")...)
+	events = append(events, "open-descriptor:packed-refs-rebind")
+	events = append(events, sourceConstructionReobservationEvents("packed-refs-rebind")...)
+	events = append(events, "close-descriptor:packed-refs-rebind")
 	return events
 }
 
@@ -2356,6 +3443,17 @@ func sourceConstructionObservationEvents(name string) []string {
 		"validate-fs:" + name,
 		"acquire-acl:" + name,
 		"parse-acl:" + name,
+		"validate-acl:" + name,
+	}
+}
+
+func sourceConstructionReobservationEvents(name string) []string {
+	return []string{
+		"stat:" + name,
+		"statfs:" + name,
+		"acquire-acl:" + name,
+		"parse-acl:" + name,
+		"validate-fs:" + name,
 		"validate-acl:" + name,
 	}
 }
@@ -2501,6 +3599,23 @@ func countSourceConstructionEvent(events []string, want string) int {
 	return count
 }
 
+func runSourceConstructionPackedRefsStage(
+	ctx context.Context,
+	owner *sourceConstructionOwner,
+	primitives sourcePrimitives,
+) sourceUseOutcome {
+	builder := &sourceConstructionBuilder{
+		ctx:        ctx,
+		primitives: primitives,
+		owner:      owner,
+	}
+	builder.retainPackedRefs()
+	if !builder.outcome.proved() {
+		builder.owner.closeIntoWith(primitives, &builder.outcome)
+	}
+	return builder.outcome
+}
+
 func loadTypedSourceConstructionPackage(
 	t *testing.T,
 	overlay map[string][]byte,
@@ -2545,6 +3660,9 @@ func sourceConstructionAllowedSensitiveParameters() map[string]map[int]map[strin
 			2: {"*ownedSourceDescriptor": true},
 		},
 		"(*sourceConstructionBuilder).observeDescriptor": {
+			0: {"*ownedSourceDescriptor": true},
+		},
+		"(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy": {
 			0: {"*ownedSourceDescriptor": true},
 		},
 		"validateSourceObservationRequest": {
@@ -2605,6 +3723,8 @@ func sourceConstructionAllowedAcquisitionSites() map[string]int {
 		"openRelativeNoFollow|(*sourceConstructionBuilder).retainRepositoryDescriptor|:=|next,nextFailure":               1,
 		"openRelativeNoFollow|(*sourceConstructionBuilder).retainConfig|:=|descriptor,descriptorFailure":                 1,
 		"openRelativeNoFollow|(*sourceConstructionBuilder).rebindConfig|:=|comparison,openFailure":                       1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).retainPresentPackedRefs|:=|descriptor,descriptorFailure":      1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).rebindPackedRefs|:=|comparison,openFailure":                   1,
 		"openChildRoot|(*sourceConstructionBuilder).retainSourceDirectory|:=|root,rootFailure":                           1,
 		"openRelativeNoFollow|(*sourceConstructionBuilder).retainSourceDirectory|:=|descriptor,descriptorFailure":        1,
 	}
