@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -256,6 +257,135 @@ func TestDarwinSourceConstructionRejectsMissingAndWrongKindEntries(t *testing.T)
 			requireFailureRecord(t, outcome.primary, PhaseSource, test.operation, test.cause)
 			if outcome.descriptorClose != nil {
 				t.Fatalf("invalid source fixture leaked a close failure: %+v", outcome.descriptorClose)
+			}
+		})
+	}
+}
+
+func TestDarwinSourceConstructionPackedRefsStage(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		present bool
+	}{
+		{name: "absent"},
+		{name: "present", present: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository, _ := writeDarwinSourceConstructionRepository(t)
+			content := []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
+			if test.present {
+				writeDarwinSourceConstructionFile(
+					t,
+					filepath.Join(repository, ".git", "packed-refs"),
+					content,
+				)
+			}
+			primitives := requireDarwinSourcePrimitives(t)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				sourceRepositoryLocator{path: repository, seal: validSourceRepositoryLocator},
+				primitives,
+			)
+			if owner == nil || !initial.proved() || !owner.validInitialRetention() {
+				t.Fatalf("initial Darwin source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			if !stage.proved() || !owner.validPackedRefsRetention() {
+				t.Fatalf("Darwin packed-refs stage = %+v; owner %+v", stage, owner)
+			}
+
+			var retainedDescriptor *os.File
+			if test.present {
+				leaf := owner.packedRefs.leaf
+				if owner.packedRefs.state != sourcePackedRefsRetained || leaf == nil ||
+					leaf.digest != Digest(sha256.Sum256(content)) || len(leaf.claim.records) != 1 ||
+					leaf.claim.records[0].name != "refs/heads/main" {
+					t.Fatalf("Darwin retained packed-refs = %+v", owner.packedRefs)
+				}
+				retainedDescriptor = leaf.descriptor.file
+				if _, err := retainedDescriptor.Stat(); err != nil {
+					t.Fatalf("Darwin retained packed-refs descriptor is not live: %v", err)
+				}
+			} else if owner.packedRefs.state != sourcePackedRefsAbsent ||
+				owner.packedRefs.leaf != nil {
+				t.Fatalf("Darwin absent packed-refs state = %+v", owner.packedRefs)
+			}
+
+			var closeOutcome sourceUseOutcome
+			owner.closeIntoWith(primitives, &closeOutcome)
+			if !closeOutcome.proved() {
+				t.Fatalf("Darwin packed-refs close = %+v", closeOutcome)
+			}
+			if retainedDescriptor != nil {
+				if _, err := retainedDescriptor.Stat(); !errors.Is(err, os.ErrClosed) {
+					t.Fatalf("Darwin packed-refs descriptor remained live: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDarwinSourceConstructionPackedRefsRejectsNonRegularEntries(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		arrange func(*testing.T, string)
+	}{
+		{
+			name: "directory",
+			arrange: func(t *testing.T, repository string) {
+				makeDarwinSourceConstructionDirectory(
+					t,
+					filepath.Join(repository, ".git", "packed-refs"),
+				)
+			},
+		},
+		{
+			name: "symlink",
+			arrange: func(t *testing.T, repository string) {
+				writeDarwinSourceConstructionFile(
+					t,
+					filepath.Join(repository, ".git", "actual-packed-refs"),
+					nil,
+				)
+				if err := os.Symlink(
+					"actual-packed-refs",
+					filepath.Join(repository, ".git", "packed-refs"),
+				); err != nil {
+					t.Fatalf("make packed-refs symlink: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository, _ := writeDarwinSourceConstructionRepository(t)
+			test.arrange(t, repository)
+			primitives := requireDarwinSourcePrimitives(t)
+			owner, initial := retainSourceConstructionWith(
+				context.Background(),
+				sourceRepositoryLocator{path: repository, seal: validSourceRepositoryLocator},
+				primitives,
+			)
+			if owner == nil || !initial.proved() {
+				t.Fatalf("initial Darwin source construction = %+v / %+v", owner, initial)
+			}
+			stage := runSourceConstructionPackedRefsStage(
+				context.Background(),
+				owner,
+				primitives,
+			)
+			requireFailureRecord(
+				t,
+				stage.primary,
+				PhaseSource,
+				OperationValidate,
+				CauseUnsupported,
+			)
+			if stage.descriptorClose != nil || owner.state != sourceConstructionClosed {
+				t.Fatalf("Darwin packed-refs refusal = %+v; owner %+v", stage, owner)
 			}
 		})
 	}
