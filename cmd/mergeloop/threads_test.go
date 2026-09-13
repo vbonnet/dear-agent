@@ -409,3 +409,49 @@ func TestBlockingFindingsInResolvedThreadsFailClosed(t *testing.T) {
 		}
 	})
 }
+
+// TestThreadsRemainingUnresolved pins the ce-lr7j review finding that
+// `mergeloop threads` printed "merge gate: PASS" for a PR safe-merge would
+// refuse. blockingFindingsIn is only the CUSTOM bot-finding gate; a thread that
+// is unresolved and not auto-resolvable (a human thread, or a bot thread whose
+// severity this code does not recognise) yields no finding, yet GitHub's
+// required_conversation_resolution — which safe-merge also enforces — still
+// blocks the merge. This mode is advertised as reporting whether the merge
+// would be refused, so a false PASS misdirects live verification.
+func TestThreadsRemainingUnresolved(t *testing.T) {
+	human := threadComment{author: "alice", body: "please rename this", typename: "User"}
+	threads := []reviewThread{
+		// Resolvable: bot, unresolved, recognised advisory. Goes away.
+		{id: "advisory", comments: []threadComment{botComment(tstCodexP2)}},
+		// Already resolved: nothing left to hold.
+		{id: "done", isResolved: true, comments: []threadComment{botComment(tstCodexP2)}},
+		// Unresolved human thread: never auto-resolved, still blocks the merge.
+		{id: "human", comments: []threadComment{human}},
+		// Unresolved bot thread of unrecognised severity: withheld, still blocks.
+		{id: "unknown", comments: []threadComment{botComment(tstUnparseable)}},
+	}
+
+	resolvable, _ := partitionResolvable(threads)
+	remaining := threadsRemainingUnresolved(threads, resolvable)
+
+	got := map[string]bool{}
+	for _, id := range remaining {
+		got[id] = true
+	}
+	for _, want := range []string{"human", "unknown"} {
+		if !got[want] {
+			t.Errorf("thread %q must be reported as still-unresolved; got %v", want, remaining)
+		}
+	}
+	for _, unwanted := range []string{"advisory", "done"} {
+		if got[unwanted] {
+			t.Errorf("thread %q must not be reported as still-unresolved; got %v", unwanted, remaining)
+		}
+	}
+
+	// The custom bot-finding gate alone sees nothing here, which is exactly why
+	// reporting only that gate as "merge gate: PASS" was wrong.
+	if f := blockingFindingsIn(threads); len(f) != 0 {
+		t.Fatalf("precondition: want no blocking bot findings, got %d", len(f))
+	}
+}

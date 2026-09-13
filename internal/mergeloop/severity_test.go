@@ -124,3 +124,59 @@ func TestClassifyCommentSeverityUnsupportedPriorityIsUnknown(t *testing.T) {
 		}
 	}
 }
+
+// TestClassifyCommentSeverityMismatchedBadgeIsUnknown pins the ce-lr7j review
+// finding that the badge regex constrained the alt-text priority and the URL
+// priority independently, then classified from the alt text alone. A malformed
+// or transitional badge such as `![P2 Badge](.../badge/P1-orange)` therefore
+// read as advisory while carrying a blocking marker, and because the resolver
+// and the independent merge gate share this classifier, BOTH protections
+// cleared it with the same wrong verdict. A disagreement is not a severity this
+// code understands, so it must fail closed to unknown.
+func TestClassifyCommentSeverityMismatchedBadgeIsUnknown(t *testing.T) {
+	mismatched := []struct{ alt, url string }{
+		{"P2", "P1"}, // advisory alt hiding a blocking URL: the dangerous direction
+		{"P1", "P2"},
+		{"P3", "P0"},
+		{"P0", "P3"},
+	}
+	for _, m := range mismatched {
+		body := "**<sub><sub>![" + m.alt + " Badge](https://img.shields.io/badge/" + m.url + "-orange?style=flat)</sub></sub>  Title**"
+		if got := ClassifyCommentSeverity(body); got != SeverityUnknown {
+			t.Errorf("ClassifyCommentSeverity(alt=%s url=%s) = %v, want %v (mismatched badge must fail closed)",
+				m.alt, m.url, got, SeverityUnknown)
+		}
+		if !ClassifyCommentSeverity(body).BlocksResolution() {
+			t.Errorf("alt=%s url=%s must block resolution", m.alt, m.url)
+		}
+	}
+}
+
+// TestClassifyCommentSeverityMismatchedGeminiBadgeIsUnknown is the Gemini half
+// of the same finding: the alt label and the priority in the SVG path were
+// matched independently, so `![medium](.../high-priority.svg)` classified as
+// advisory off the label alone.
+func TestClassifyCommentSeverityMismatchedGeminiBadgeIsUnknown(t *testing.T) {
+	mismatched := []struct{ alt, path string }{
+		{"medium", "high"}, // advisory label hiding a blocking path
+		{"low", "critical"},
+		{"high", "low"},
+	}
+	for _, m := range mismatched {
+		body := "![" + m.alt + "](https://www.gstatic.com/codereviewagent/" + m.path + "-priority.svg)\nFinding prose."
+		if got := ClassifyCommentSeverity(body); got != SeverityUnknown {
+			t.Errorf("ClassifyCommentSeverity(alt=%s path=%s) = %v, want %v (mismatched badge must fail closed)",
+				m.alt, m.path, got, SeverityUnknown)
+		}
+	}
+	// A well-formed Gemini badge is unaffected.
+	for label, want := range map[string]ThreadSeverity{
+		"critical": SeverityBlocking, "high": SeverityBlocking,
+		"medium": SeverityAdvisory, "low": SeverityAdvisory,
+	} {
+		body := "![" + label + "](https://www.gstatic.com/codereviewagent/" + label + "-priority.svg)"
+		if got := ClassifyCommentSeverity(body); got != want {
+			t.Errorf("ClassifyCommentSeverity(%s) = %v, want %v", label, got, want)
+		}
+	}
+}

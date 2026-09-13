@@ -267,7 +267,7 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 		res.Stalled++
 		d.Deps.Metrics.recordStall(ctx, pr.Number, cls.State)
 		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected",
-			Detail: fmt.Sprintf("no action since %s", rec.LastActionAt.Format(time.RFC3339))})
+			Detail: fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))})
 	}
 
 	switch cls.State {
@@ -305,13 +305,29 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	return cls.State
 }
 
+// stallSince is the instant the stall clock for this PR runs from: the last
+// action if the loop has ever acted, and otherwise when the PR was first seen.
+//
+// Falling back to FirstSeenAt matters because "never acted on" is the WORST
+// case, not an exempt one. Treating a zero LastActionAt as not-stalled let an
+// actionable PR the loop never touched escape detection entirely — including a
+// green PR whose merge safe-merge defers on every tick, which by design records
+// no action at all. A zero return means there is no honest clock to read.
+func stallSince(rec *PRRecord) time.Time {
+	if !rec.LastActionAt.IsZero() {
+		return rec.LastActionAt
+	}
+	return rec.FirstSeenAt
+}
+
 func (d *Driver) isStalled(st State, rec *PRRecord, now time.Time) bool {
-	if d.StallThreshold <= 0 || rec.LastActionAt.IsZero() {
+	since := stallSince(rec)
+	if d.StallThreshold <= 0 || since.IsZero() {
 		return false
 	}
 	switch st {
 	case StateBehind, StateConflicted, StateCIFailing, StateGreen:
-		return now.Sub(rec.LastActionAt) > d.StallThreshold
+		return now.Sub(since) > d.StallThreshold
 	case StateDraft, StateAbandoned, StateBlockedPolicy, StateAgentInFlight, StateCIPending:
 		return false
 	}
@@ -446,16 +462,30 @@ func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickRes
 		return
 	}
 	err := d.Deps.Merger.Merge(ctx, d.Repo, pr.Number)
-	d.Tracker.RecordAction(pr.Number, StateGreen, now)
 	if err != nil {
 		// "Not ready" (soak/bot/threads) is a wait, not a failure.
-		action := "merge_error"
 		if isNotReady(err) {
-			action = "merge_deferred"
+			// Deliberately NOT RecordAction. A deferral is the ABSENCE of
+			// progress: safe-merge's own gates still hold the merge, and the
+			// loop changed nothing. Recording it as an action refreshed
+			// LastActionAt on every tick and so permanently suppressed the
+			// stall detector.
+			//
+			// The live shape (ce-lr7j review): a bot leaves an unresolved
+			// thread whose badge this parser does not recognise. The resolver
+			// withholds it, blockingFindingsGate lets it through because
+			// GitHub's required_review_thread_resolution is still the live
+			// gate while the thread is unresolved, and safe-merge then refuses
+			// forever. Without this the PR sits green-but-unmergeable with no
+			// escalation and no telemetry — the exact silence this bead ends.
+			d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merge_deferred", Detail: err.Error()})
+			return
 		}
-		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: action, Detail: err.Error()})
+		d.Tracker.RecordAction(pr.Number, StateGreen, now)
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merge_error", Detail: err.Error()})
 		return
 	}
+	d.Tracker.RecordAction(pr.Number, StateGreen, now)
 	res.Merged++
 	d.Deps.Metrics.recordMerge(ctx, pr.Number, now.Sub(d.Tracker.Get(pr.Number, now).FirstSeenAt))
 	d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merged"})

@@ -68,13 +68,22 @@ func (s ThreadSeverity) BlocksResolution() bool {
 // through to SeverityUnknown, which withholds. Matching `\d+` and then
 // treating everything except P0/P1 as advisory would let an unrecognised
 // priority auto-resolve and clear the independent gate at the same time.
-var codexBadgePattern = regexp.MustCompile(`!\[P([0-3]) Badge\]\(https://img\.shields\.io/badge/P[0-3]-`)
+// Both priorities are captured so they can be required to AGREE. Matching the
+// label and the URL independently and then classifying from the label alone let
+// a malformed or transitional badge such as
+// `![P2 Badge](https://img.shields.io/badge/P1-orange?style=flat)` read as
+// advisory while carrying a blocking marker. The resolver and the independent
+// merge gate share this classifier, so a single wrong verdict cleared both.
+var codexBadgePattern = regexp.MustCompile(`!\[P([0-3]) Badge\]\(https://img\.shields\.io/badge/P([0-3])-`)
 
 // geminiBadgePattern matches the Gemini Code Assist severity badge. Real markup,
 // from PR #945:
 //
 //	![high](https://www.gstatic.com/codereviewagent/high-priority.svg)
-var geminiBadgePattern = regexp.MustCompile(`!\[(critical|high|medium|low)\]\(https://www\.gstatic\.com/codereviewagent/(?:critical|high|medium|low)-priority\.svg\)`)
+//
+// The label and the SVG path priority are both captured, and required to agree,
+// for the same reason as the Codex badge above.
+var geminiBadgePattern = regexp.MustCompile(`!\[(critical|high|medium|low)\]\(https://www\.gstatic\.com/codereviewagent/(critical|high|medium|low)-priority\.svg\)`)
 
 // ClassifyCommentSeverity reads one review comment body and returns its
 // severity. A body carrying no marker this code recognises returns
@@ -85,8 +94,16 @@ var geminiBadgePattern = regexp.MustCompile(`!\[(critical|high|medium|low)\]\(ht
 func ClassifyCommentSeverity(body string) ThreadSeverity {
 	worst := SeverityUnknown
 	seen := false
+	// mismatched records a badge whose label and URL disagree on the priority.
+	// That is not a marker this code understands, so it forces the verdict back
+	// to unknown rather than being classified from either half.
+	mismatched := false
 
 	for _, m := range codexBadgePattern.FindAllStringSubmatch(body, -1) {
+		if m[1] != m[2] {
+			mismatched = true
+			continue
+		}
 		seen = true
 		// P0 and P1 are correctness-class. P2 and below are advisory.
 		if m[1] == "0" || m[1] == "1" {
@@ -98,6 +115,10 @@ func ClassifyCommentSeverity(body string) ThreadSeverity {
 	}
 
 	for _, m := range geminiBadgePattern.FindAllStringSubmatch(body, -1) {
+		if m[1] != m[2] {
+			mismatched = true
+			continue
+		}
 		seen = true
 		switch m[1] {
 		case "critical", "high":
@@ -109,7 +130,10 @@ func ClassifyCommentSeverity(body string) ThreadSeverity {
 		}
 	}
 
-	if !seen {
+	// A recognised blocking marker has already returned above, so reaching here
+	// with a mismatch means the strongest thing seen was advisory or nothing.
+	// Withhold: an unreadable badge must never clear the gate.
+	if !seen || mismatched {
 		return SeverityUnknown
 	}
 	return worst

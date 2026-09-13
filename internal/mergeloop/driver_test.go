@@ -529,3 +529,165 @@ func TestGateRunsEvenWhenResolverErrors(t *testing.T) {
 		t.Errorf("gate calls = %v, want the gate to run despite the resolver error", thr.gateCalls)
 	}
 }
+
+// A PR that is BEHIND must not be rebased again until the CI run the previous
+// rebase started has had time to finish. Rebasing sooner discards that run and
+// restarts the wait, which is how the loop can tick forever and merge nothing.
+func TestRebaseCooldownLetsCISettle(t *testing.T) {
+	prs := []PR{{Number: 1, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}}
+	reb := &fakeRebaser{}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	deps := &Deps{Rebaser: reb, Clock: func() time.Time { return now }}
+	d, _ := newTestDriver(t, prs, deps)
+	d.RebaseCooldown = 30 * time.Minute
+
+	mustTick := func(label string) TickResult {
+		t.Helper()
+		res, err := d.Tick(context.Background())
+		if err != nil {
+			t.Fatalf("Tick (%s): %v", label, err)
+		}
+		return res
+	}
+
+	if res := mustTick("first"); res.Rebased != 1 {
+		t.Fatalf("first tick Rebased = %d, want 1", res.Rebased)
+	}
+
+	// A tick inside the cooldown window leaves the branch alone.
+	now = now.Add(10 * time.Minute)
+	res := mustTick("within cooldown")
+	if res.Rebased != 0 {
+		t.Errorf("tick within cooldown Rebased = %d, want 0", res.Rebased)
+	}
+	if res.Skipped != 1 {
+		t.Errorf("tick within cooldown Skipped = %d, want 1", res.Skipped)
+	}
+	if len(reb.calls) != 1 {
+		t.Errorf("rebaser calls = %v, want a single call from the first tick", reb.calls)
+	}
+
+	// Once the window elapses the PR is still BEHIND, so it is rebased again.
+	now = now.Add(21 * time.Minute)
+	if res := mustTick("after cooldown"); res.Rebased != 1 {
+		t.Errorf("tick after cooldown Rebased = %d, want 1", res.Rebased)
+	}
+	if len(reb.calls) != 2 {
+		t.Errorf("rebaser calls = %v, want two calls", reb.calls)
+	}
+}
+
+// The cooldown is opt-in: a zero value preserves the rebase-every-tick default.
+func TestRebaseCooldownZeroRebasesEveryTick(t *testing.T) {
+	prs := []PR{{Number: 1, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}}
+	reb := &fakeRebaser{}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	d, _ := newTestDriver(t, prs, &Deps{Rebaser: reb, Clock: func() time.Time { return now }})
+
+	for i := range 3 {
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("Tick %d: %v", i, err)
+		}
+		now = now.Add(time.Minute)
+	}
+	if len(reb.calls) != 3 {
+		t.Errorf("rebaser calls = %v, want three", reb.calls)
+	}
+}
+
+// Intermediate actions such as agent spawns update LastActionAt, but must not
+// delay or extend the rebase cooldown calculation, which is keyed on LastRebaseAt.
+func TestRebaseCooldownUnaffectedByAgentSpawn(t *testing.T) {
+	prs := []PR{{Number: 1, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}}
+	reb := &fakeRebaser{}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	deps := &Deps{Rebaser: reb, Clock: func() time.Time { return now }}
+	d, _ := newTestDriver(t, prs, deps)
+	d.RebaseCooldown = 30 * time.Minute
+
+	// First tick rebases the PR and records LastRebaseAt = 12:00.
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if len(reb.calls) != 1 {
+		t.Fatalf("rebaser calls = %d, want 1", len(reb.calls))
+	}
+
+	// 10 minutes later, an agent spawn occurs and updates LastActionAt.
+	agentSpawnTime := now.Add(10 * time.Minute)
+	d.Tracker.RecordAgentSpawn(1, "failure-sig", "session-1", agentSpawnTime)
+
+	// 31 minutes after the original rebase (but only 21 minutes after the agent spawn),
+	// the rebase cooldown has expired and another rebase is allowed.
+	now = now.Add(31 * time.Minute)
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("tick after cooldown: %v", err)
+	}
+	if res.Rebased != 1 {
+		t.Errorf("Rebased = %d, want 1", res.Rebased)
+	}
+	if len(reb.calls) != 2 {
+		t.Errorf("rebaser calls = %d, want 2", len(reb.calls))
+	}
+}
+
+// TestMergeDeferredDoesNotRefreshStallClock pins the ce-lr7j review finding
+// that a green PR safe-merge keeps refusing can never escalate.
+//
+// The shape: an allowlisted bot leaves an UNRESOLVED thread whose severity this
+// code does not recognise. The resolver withholds it (correctly — an unreadable
+// badge is never auto-resolved), and blockingFindingsGate deliberately lets it
+// through, because while the thread is still unresolved GitHub's own
+// required_review_thread_resolution is the live gate. safe-merge then refuses
+// the merge as not-ready on every tick. doMerge used to call RecordAction on
+// that path, refreshing LastActionAt each time, so the stall detector never
+// fired: the PR sat green-but-unmergeable forever with no durable escalation
+// and no telemetry, which is precisely the silence this bead exists to end.
+//
+// A deferral is the absence of progress. It must not count as an action.
+func TestMergeDeferredDoesNotRefreshStallClock(t *testing.T) {
+	prs := []PR{{Number: 7, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("unresolved review threads: %w", ErrNotReady)}
+	thr := &fakeThreadResolver{withheld: 1}
+	var evs []AuditEvent
+	deps := &Deps{
+		Merger: mg, Threads: thr,
+		Clock: func() time.Time { return now },
+		Audit: func(e AuditEvent) { evs = append(evs, e) },
+	}
+	d, tr := newTestDriver(t, prs, deps)
+	d.StallThreshold = time.Hour
+
+	// First tick: the merge is attempted and deferred.
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if !hasAction(evs, "merge_deferred") {
+		t.Fatalf("want a merge_deferred audit event, got %v", auditActions(evs))
+	}
+	firstAction := tr.Get(7, now).LastActionAt
+
+	// Keep ticking past the stall threshold. Every tick defers again.
+	for range 5 {
+		now = now.Add(20 * time.Minute)
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+	}
+	if len(mg.calls) < 2 {
+		t.Fatalf("merger calls = %v, want the loop to keep retrying", mg.calls)
+	}
+
+	// The stall clock must not have been pushed forward by the deferrals.
+	if got := tr.Get(7, now).LastActionAt; got.After(firstAction) {
+		t.Errorf("LastActionAt advanced from %s to %s: a deferred merge must not "+
+			"refresh the stall clock, or the PR can never be detected as stalled",
+			firstAction.Format(time.RFC3339), got.Format(time.RFC3339))
+	}
+	if !hasAction(evs, "stall_detected") {
+		t.Errorf("want stall_detected after %s of deferrals, got %v", d.StallThreshold, auditActions(evs))
+	}
+}

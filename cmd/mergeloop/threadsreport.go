@@ -69,15 +69,61 @@ func runThreadsReport(argv []string) error {
 			state, author, mergeloop.ThreadSeverityOf(t.bodies()), t.hasHumanComment(), t.id)
 	}
 
-	fmt.Printf("\nauto-resolve: %d resolvable, %d withheld (blocking or unrecognised severity)\n",
+	remaining := threadsRemainingUnresolved(threads, resolvable)
+
+	fmt.Printf("\nauto-resolve:      %d resolvable, %d withheld (blocking or unrecognised severity)\n",
 		len(resolvable), withheld)
+
+	// Two INDEPENDENT gates stand between this PR and a merge, and conflating
+	// them is what produced a false PASS. Report each on its own line.
 	if len(findings) == 0 {
-		fmt.Printf("merge gate:   PASS, no unaddressed blocking bot findings\n")
-		return nil
+		fmt.Printf("bot-finding gate:  PASS, no unaddressed blocking bot findings\n")
+	} else {
+		fmt.Printf("bot-finding gate:  REFUSE, %d unaddressed blocking bot finding(s)\n", len(findings))
+		for _, f := range findings {
+			fmt.Printf("  - %s/%s: %s\n", f.Author, f.Severity, f.Excerpt)
+		}
 	}
-	fmt.Printf("merge gate:   REFUSE, %d unaddressed blocking bot finding(s)\n", len(findings))
-	for _, f := range findings {
-		fmt.Printf("  - %s/%s: %s\n", f.Author, f.Severity, f.Excerpt)
+
+	// GitHub's required_conversation_resolution, which safe-merge also enforces.
+	if len(remaining) == 0 {
+		fmt.Printf("conversation gate: PASS, every thread is resolved or auto-resolvable\n")
+	} else {
+		fmt.Printf("conversation gate: REFUSE, %d thread(s) stay unresolved after auto-resolve\n", len(remaining))
+		for _, id := range remaining {
+			fmt.Printf("  - %s\n", id)
+		}
+	}
+
+	if len(findings) == 0 && len(remaining) == 0 {
+		fmt.Printf("merge gate:        PASS\n")
+	} else {
+		fmt.Printf("merge gate:        REFUSE\n")
 	}
 	return nil
+}
+
+// threadsRemainingUnresolved returns the IDs of threads that will still be
+// unresolved after the auto-resolve step runs, and so will still be held by
+// GitHub's required_conversation_resolution.
+//
+// This is deliberately separate from blockingFindingsIn, which is only the
+// custom bot-finding gate. A human thread, or a bot thread whose severity this
+// code does not recognise, yields no blocking FINDING but is still left open,
+// and safe-merge's mandatory unresolved-thread check refuses the merge on it.
+// Reporting the bot-finding gate alone as "merge gate: PASS" told an operator
+// the merge would proceed when it would not.
+func threadsRemainingUnresolved(threads []reviewThread, resolvable []botThread) []string {
+	willResolve := make(map[string]bool, len(resolvable))
+	for _, b := range resolvable {
+		willResolve[b.id] = true
+	}
+	var out []string
+	for _, t := range threads {
+		if t.isResolved || willResolve[t.id] {
+			continue
+		}
+		out = append(out, t.id)
+	}
+	return out
 }
