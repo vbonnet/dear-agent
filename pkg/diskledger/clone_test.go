@@ -69,7 +69,7 @@ func clone(t *testing.T, src, dst string) bool {
 func freeSpaceNoise(path string) (int64, error) {
 	const samples = 5
 	best := int64(-1)
-	for i := 0; i < samples; i++ {
+	for range samples {
 		a, err := FreeBytes(path)
 		if err != nil {
 			return 0, err
