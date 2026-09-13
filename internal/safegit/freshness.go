@@ -218,21 +218,32 @@ func compareLiveBaseToHead(ctx context.Context, repo, baseOID, headOID string) (
 	if err != nil {
 		return false, "", err
 	}
-	var result compareResult
-	if err := json.Unmarshal(out, &result); err != nil {
+	result, err := parseCompareResult(out, baseOID)
+	if err != nil {
 		return false, "", err
 	}
+	return interpretCompareResult(result, baseOID)
+}
+
+func parseCompareResult(out []byte, expectedBaseOID string) (compareResult, error) {
+	var result compareResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return compareResult{}, err
+	}
 	if result.Status == "" || result.BaseCommit.SHA == "" || result.MergeBaseCommit.SHA == "" {
-		return false, "", fmt.Errorf("compare response omitted status, base_commit.sha, or merge_base_commit.sha")
+		return compareResult{}, fmt.Errorf("compare response omitted status, base_commit.sha, or merge_base_commit.sha")
 	}
 	if !validGitOID(result.BaseCommit.SHA) || !validGitOID(result.MergeBaseCommit.SHA) {
-		return false, "", fmt.Errorf("compare response reported a non-canonical base_commit.sha or merge_base_commit.sha")
+		return compareResult{}, fmt.Errorf("compare response reported a non-canonical base_commit.sha or merge_base_commit.sha")
 	}
-	if result.BaseCommit.SHA != baseOID {
-		return false, "", fmt.Errorf("compare response resolved base_commit.sha=%s, want requested live base %s",
-			result.BaseCommit.SHA, baseOID)
+	if result.BaseCommit.SHA != expectedBaseOID {
+		return compareResult{}, fmt.Errorf("compare response resolved base_commit.sha=%s, want requested live base %s",
+			result.BaseCommit.SHA, expectedBaseOID)
 	}
+	return result, nil
+}
 
+func interpretCompareResult(result compareResult, baseOID string) (bool, string, error) {
 	containsBase := result.MergeBaseCommit.SHA == baseOID
 	switch result.Status {
 	case compareAhead, compareIdentical:
