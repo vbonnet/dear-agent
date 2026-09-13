@@ -31,7 +31,11 @@
     {
       "name": "otel-receiving",
       "type": "command",
-      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
+      "command": [
+        "~/go/bin/jaeger-health",
+        "--lookback",
+        "24h"
+      ],
       "window": "24h",
       "expect": "Jaeger alive and receiving traces within 24h"
     },
@@ -84,6 +88,20 @@
       ],
       "window": "24h",
       "expect": "all retrospectives within 7d declare valid guards or tracked deferrals"
+    },
+    {
+      "name": "sandbox-gc-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/sandbox-gc.out.log",
+      "window": "2h",
+      "expect": "a sandbox-gc tick within 2h (hourly job, 2 missed intervals). Proves the job runs, not that it reaps: a GC refusing to reap still ticks, and that is tracked separately on ce-uxju."
+    },
+    {
+      "name": "token-refresher-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/token-refresher-audit.jsonl",
+      "window": "1h",
+      "expect": "a token-refresher audit append within 1h. file_mtime, not json_timestamp: the audit log is JSONL and the json_timestamp probe decodes only the first value in the stream, which is the OLDEST record (2026-06-19 on this host) and would alarm forever. Proves the refresher runs and writes evidence, not that the refresh succeeded."
     }
   ]
 }
