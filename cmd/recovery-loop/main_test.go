@@ -313,3 +313,54 @@ func TestCLI_SecondFailure_EscalationNotification(t *testing.T) {
 		t.Fatalf("expected notify error on stderr: %s", stderr.String())
 	}
 }
+
+// RL-43: a deployed job config that predates PulseIsStructural must not lose
+// the property.
+//
+// deploy/manifest.yaml marks recovery-loop-jobs absent-only, so every host that
+// already has one keeps it: the flag would live in the repository and never
+// reach a running loop, and mergeloop would go on reading HEALTHY forever on
+// the strength of a loaded-only pulse. Safety properties the built-in registry
+// asserts are backfilled onto matching jobs rather than waiting for a
+// hand-edit.
+func TestResolveJobs_BackfillsStructuralPulseFromBuiltins(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "jobs.json")
+	// An old deployed config: correct in every way except that the field did
+	// not exist when it was written.
+	if err := os.WriteFile(cfg, []byte(`{"jobs":[
+	  {"name":"mergeloop","launchd_label":"com.dear-agent.mergeloop","pulse":"mergeloop-loaded"}
+	]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	jobs, err := resolveJobs(cfg, filepath.Join(dir, "does-not-exist.json"))
+	if err != nil {
+		t.Fatalf("resolveJobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("got %d jobs, want 1", len(jobs))
+	}
+	if !jobs[0].PulseIsStructural {
+		t.Error("mergeloop's loaded-only pulse was not marked structural, so a stale host config " +
+			"silently drops the guard that stops a failing job reading healthy")
+	}
+}
+
+// An explicit false in a newer config is an operator decision and is kept.
+func TestResolveJobs_DoesNotOverrideAnExplicitPulseKind(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "jobs.json")
+	if err := os.WriteFile(cfg, []byte(`{"jobs":[
+	  {"name":"mergeloop","launchd_label":"com.dear-agent.mergeloop","pulse":"mergeloop-tick"}
+	]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := resolveJobs(cfg, filepath.Join(dir, "does-not-exist.json"))
+	if err != nil {
+		t.Fatalf("resolveJobs: %v", err)
+	}
+	if jobs[0].PulseIsStructural {
+		t.Error("mergeloop-tick is the activity pulse; it must not inherit the loaded-only pulse's flag")
+	}
+}

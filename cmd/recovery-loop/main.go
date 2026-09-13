@@ -200,7 +200,31 @@ func resolveJobs(configPath, defaultConfig string) ([]recoveryloop.Job, error) {
 			j.InstallCmd[k] = recoveryloop.ExpandHome(arg)
 		}
 	}
+	backfillPulseKind(jobs)
 	return jobs, nil
+}
+
+// backfillPulseKind marks a job's pulse structural when the built-in registry
+// says that pulse is structural.
+//
+// deploy/manifest.yaml declares recovery-loop-jobs absent-only, so a host that
+// already has a job config keeps it forever. Without this, PulseIsStructural
+// would live in the repository and never reach a running loop, and mergeloop
+// would keep reading HEALTHY on the strength of a loaded-only pulse: the flag
+// would be a fix nobody received. The match is on the pulse name, so a config
+// that has since moved a job to its activity pulse is untouched.
+func backfillPulseKind(jobs []recoveryloop.Job) {
+	structural := make(map[string]bool)
+	for _, b := range recoveryloop.DefaultJobs() {
+		if b.Pulse != "" && b.PulseIsStructural {
+			structural[b.Pulse] = true
+		}
+	}
+	for i := range jobs {
+		if jobs[i].Pulse != "" && structural[jobs[i].Pulse] {
+			jobs[i].PulseIsStructural = true
+		}
+	}
 }
 
 func main() {
@@ -327,20 +351,40 @@ func processJob(
 		return
 	}
 
+	// The give-up decision comes first, so a dry run previews what a real tick
+	// would do. Reporting a planned remediation for a job past the threshold
+	// would describe an action the loop is specifically not going to take.
+	givenUp := opts.giveUpAfter > 0 && prev.ConsecutiveFailures >= opts.giveUpAfter
+
 	if opts.dryRun {
+		status := recoveryloop.StatusUnhealthy
+		planned := action
+		note := " (planned, dry-run)"
+		if givenUp {
+			status = recoveryloop.StatusFailed
+			planned = recoveryloop.ActionNone
+			note = fmt.Sprintf(" (suppressed: %d consecutive failures, dry-run)", prev.ConsecutiveFailures)
+		}
 		rep.Results = append(rep.Results, recoveryloop.Result{
-			Job:    job.Name,
-			Status: recoveryloop.StatusUnhealthy,
-			Action: action,
-			Reason: reason + " (planned, dry-run)",
+			Job:         job.Name,
+			Status:      status,
+			Action:      planned,
+			Attempt:     prev.ConsecutiveFailures,
+			HumanNeeded: givenUp,
+			Reason:      reason + note,
 		})
-		rep.Planned++
+		if givenUp {
+			rep.Failed++
+			rep.HumanNeeded++
+		} else {
+			rep.Planned++
+		}
 		return
 	}
 
 	// A job that has failed this many times will not be fixed by firing the
 	// same action again. Stay loud instead of thrashing.
-	if opts.giveUpAfter > 0 && prev.ConsecutiveFailures >= opts.giveUpAfter {
+	if givenUp {
 		recordGivenUp(job, action, reason, now, state, rep, opts, truth, prev, notifyFn, stderr)
 		return
 	}
@@ -857,9 +901,18 @@ func escalate(
 			absentFor = now.Sub(st.UnhealthySince)
 		}
 	}
+	// The reason carries the condition that actually failed to clear, which is
+	// often structural rather than a missing pulse. Stating "pulse absent"
+	// unconditionally sends whoever reads this to the wrong place.
+	condition := fmt.Sprintf("pulse %q absent for %s", pulse, absentFor.Round(time.Minute))
+	if job.Pulse != "" && truth.Present(job.Pulse) {
+		condition = fmt.Sprintf("pulse %q is present; the unresolved condition is structural", pulse)
+	} else if job.Pulse == "" {
+		condition = fmt.Sprintf("no pulse configured; unhealthy for %s", absentFor.Round(time.Minute))
+	}
 	body := fmt.Sprintf(
-		"recovery-loop could not restore %s. Pulse %q absent for %s. %d consecutive recoveries failed to clear it (last action %s). %s",
-		job.Name, pulse, absentFor.Round(time.Minute), attempts, action, reason)
+		"recovery-loop could not restore %s. %s. %d consecutive recoveries failed to clear it (last action %s). %s",
+		job.Name, condition, attempts, action, reason)
 
 	// Delivery, not intent, is what the rate limit measures. Stamping
 	// LastEscalated when no sink accepted the message would buy 24h of silence

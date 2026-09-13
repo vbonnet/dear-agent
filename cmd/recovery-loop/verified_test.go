@@ -270,11 +270,13 @@ func TestCLI_PulseReturns_VerifiedRecovered(t *testing.T) {
 	var o1, e1 bytes.Buffer
 	run(f.args("--verify-grace", "30m"), &o1, &e1, host1, nil)
 
-	// Tick 2: the pulse is back.
+	// Tick 2: the pulse is back, and the probe observed it AFTER tick 1's
+	// remediation. The evidence timestamp is what makes this a verification
+	// rather than a pending wait, so the fixture has to carry one (RL-39).
 	t1 := t0.Add(10 * time.Minute)
 	f.write(t, f.absHB, fmt.Sprintf(
-		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"present"}]}`,
-		t1.Format(time.RFC3339)))
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"present","evidence":%q}]}`,
+		t1.Format(time.RFC3339), t0.Add(5*time.Minute).Format(time.RFC3339)))
 	host2, calls2 := hostAt(t1, launchd)
 	var o2, e2 bytes.Buffer
 	code := run(f.args("--verify-grace", "30m"), &o2, &e2, host2, nil)
@@ -285,7 +287,13 @@ func TestCLI_PulseReturns_VerifiedRecovered(t *testing.T) {
 	if len(*calls2) != 0 {
 		t.Errorf("kept acting after the pulse returned: %v", *calls2)
 	}
+	if !strings.Contains(o2.String(), "recovered") {
+		t.Errorf("did not report a verified recovery, so this test was not exercising that path:\n%s", o2.String())
+	}
 	js := f.jobState(t, "absence-alarm")
+	if js.LastStatus != recoveryloop.StatusRecovered {
+		t.Errorf("last_status = %q, want recovered", js.LastStatus)
+	}
 	if js.ConsecutiveFailures != 0 {
 		t.Errorf("consecutive_failures = %d, want 0 after a verified recovery", js.ConsecutiveFailures)
 	}

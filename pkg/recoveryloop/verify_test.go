@@ -406,3 +406,37 @@ func TestPlanJob_LoadedOnlyPulseDoesNotOverrideRepeatedFailures(t *testing.T) {
 			action, status, reason)
 	}
 }
+
+// RL-43: a structural pulse must not verify a recovery either.
+//
+// PlanJob now refuses to let a loaded-only pulse override the exit status, but
+// verification took the pulse-present branch regardless, so a kickstart of a
+// mergeloop that immediately failed again verified as RECOVERED on the strength
+// of "the service is loaded". The flag has to mean the same thing on both
+// sides of the action.
+func TestVerifyRecovery_StructuralPulseDoesNotVerifyFailedExit(t *testing.T) {
+	host, _ := mockHostOps()
+	actionAt := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	job := Job{
+		Name:              "mergeloop",
+		LaunchdLabel:      "com.dear-agent.mergeloop",
+		Pulse:             "mergeloop-loaded",
+		PulseIsStructural: true,
+	}
+	// Loaded (so the structural pulse is present and fresh), but stopped with
+	// a failing exit: the condition that triggered the kickstart is unchanged.
+	launchd := map[string]LaunchdJobInfo{
+		"com.dear-agent.mergeloop": {Loaded: true, PID: 0, Status: 1},
+	}
+	truth := PulseTruth{"mergeloop-loaded": {
+		Known:    true,
+		Status:   absencealarm.StatusPresent,
+		Evidence: actionAt.Add(time.Minute),
+	}}
+
+	out := VerifyRecovery(job, ActionKickstart, truth, launchd, host, actionAt.Add(2*time.Minute), actionAt)
+	if out.Verified || out.Status == StatusRecovered {
+		t.Errorf("got verified=%v status=%q reason=%q; a loaded-only pulse cannot vouch for a run that failed again",
+			out.Verified, out.Status, out.Reason)
+	}
+}

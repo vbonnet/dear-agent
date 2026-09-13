@@ -187,8 +187,11 @@ func VerifyRecovery(
 		return failure
 	}
 
-	// Pulse re-probe: the positive event is the only proof the job is working.
-	if job.Pulse != "" {
+	// A structural pulse proves the service exists, which the structural
+	// checks above have already established. It cannot answer whether the
+	// work succeeded, so verification falls through to the exit-status check
+	// exactly as PlanJob does (RL-43).
+	if job.Pulse != "" && !job.PulseIsStructural {
 		switch {
 		case truth.Present(job.Pulse):
 			// The pulse is present, but presence observed BEFORE the action
