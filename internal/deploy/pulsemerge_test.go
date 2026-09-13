@@ -373,13 +373,11 @@ func TestMergeRequiredPulses_ConcurrentRunsDoNotLoseAdditions(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := MergeRequiredPulses(host, defaults, req); err != nil {
 				t.Errorf("concurrent merge: %v", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
