@@ -22,6 +22,24 @@
     <string>tick</string>
     <string>--repo</string>
     <string>vbonnet/dear-agent</string>
+    <!-- Backpressure ceiling, set explicitly rather than inherited.
+         DefaultCap is 50, which sat just above the live open-PR count (48 on
+         2026-09-13). A tick ABOVE the cap is skipped in full, so one ordinary
+         burst of new PRs would silence the loop at exactly the moment the
+         backlog most needed draining, and a silent loop looks identical to a
+         loop with nothing to do.
+
+         150 is chosen against the tick BUDGET, not picked for headroom alone.
+         ListOpen projects required checks per PR sequentially, measured at
+         roughly 3.4s per PR (2m43s for 48 PRs on 2026-09-13), so the 600s
+         StartInterval fits about 175 PRs. 150 keeps a full tick near 8.5
+         minutes while still standing three times clear of the live queue.
+         A much larger ceiling would not remove the silence, only change its
+         shape: instead of a skipped tick, one tick would run past its own
+         interval. Raising this further needs bounded or incremental check
+         projection first. -->
+    <string>--cap</string>
+    <string>150</string>
   </array>
 
   <key>EnvironmentVariables</key>
