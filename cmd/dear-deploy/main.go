@@ -66,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDeploy(cmd, rest, stdout, stderr)
 	case "build-install":
 		return runBuildInstall(rest, stdout, stderr)
+	case "merge-pulses":
+		return runMergePulses(rest, stdout, stderr)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -535,6 +537,8 @@ Usage:
   dear-deploy sync   [name...]     deploy artifacts that have drifted (idempotent)
   dear-deploy install [name...]    (re)install artifacts, even if unchanged
   dear-deploy build-install --pkg P   build a Go binary and atomically install it
+  dear-deploy merge-pulses         add newly required absence-alarm pulses to the
+                                   host config, keeping operator customization
 
 Each write is atomic (stage -> verify -> activate); a failed deploy leaves the
 previously-installed artifact untouched. There is no force/bypass flag.
@@ -554,3 +558,56 @@ Common flags:
 
 Exit codes: 0 ok/clean; 2 (status) drift or required artifact missing; 1 error.
 `
+
+// runMergePulses adds newly required absence-alarm pulses to the host config.
+//
+// The pulse config is absent-only, so no other deploy path will touch a host
+// that already has one. Without this step a pulse the recovery job registry
+// depends on can live in the repository for months while the running alarm
+// never emits it, and nothing reports the gap because every artifact is
+// "deployed".
+func runMergePulses(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("merge-pulses", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c commonFlags
+	c.register(fs)
+	if _, err := parseArgs(fs, args); err != nil {
+		return 1
+	}
+
+	root := c.repoRoot
+	if root == "" {
+		var err error
+		if root, err = gitToplevel(context.Background()); err != nil {
+			fmt.Fprintf(stderr, "dear-deploy: resolve repo root: %v\n", err)
+			return 1
+		}
+	}
+	home := c.home
+	if home == "" {
+		home = os.Getenv("HOME")
+	}
+	if home == "" {
+		fmt.Fprintln(stderr, "dear-deploy: HOME is unset; pass --home")
+		return 1
+	}
+
+	hostPath := filepath.Join(home, ".config", "dear-agent", "absence-alarm-pulses.json")
+	defaultsPath := filepath.Join(root, "deploy", "absence-alarm", "pulses.json")
+
+	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: merge pulses: %v\n", err)
+		return 1
+	}
+	if len(added) == 0 {
+		fmt.Fprintf(stdout, "absence-alarm pulses: already current (%s)\n", hostPath)
+		return 0
+	}
+	fmt.Fprintf(stdout, "absence-alarm pulses: added %d to %s\n", len(added), hostPath)
+	for _, n := range added {
+		fmt.Fprintf(stdout, "  + %s\n", n)
+	}
+	fmt.Fprintln(stdout, "Restart absence-alarm for these to take effect.")
+	return 0
+}

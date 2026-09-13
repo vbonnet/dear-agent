@@ -94,7 +94,7 @@
       "type": "file_mtime",
       "path": "~/.local/state/dear-agent/sandbox-gc.out.log",
       "window": "2h",
-      "expect": "a sandbox-gc tick within 2h (hourly job, 2 missed intervals). Proves the job runs, not that it reaps: a GC refusing to reap still ticks, and that is tracked separately on ce-uxju."
+      "expect": "a COMPLETED sandbox-gc run within 2h (hourly job, 2 missed intervals). The evidence is the stdout log, which agm writes only after the run finishes, so a GC that errors early (for example a failed live-session inventory) leaves this stale and the pulse alarms. That is deliberate: a GC that never completes is a real problem a human should hear about, and remediation that cannot fix it reaches the give-up threshold and escalates. It does NOT prove the GC reaped anything (ce-uxju), and it does not distinguish 'not invoked' from 'invoked and failed' (ce-820tx)."
     },
     {
       "name": "token-refresher-tick",
