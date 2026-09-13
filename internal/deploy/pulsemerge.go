@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"sort"
 )
 
 // MergeRequiredPulses adds to the host's absence-alarm pulse config any pulse
@@ -38,11 +38,7 @@ func MergeRequiredPulses(hostPath, defaultsPath string) ([]string, error) {
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("read host pulses %s: %w", hostPath, err)
 		}
-		// No host config yet: the defaults are the whole answer.
-		if err := writePulseDoc(hostPath, defaultsRaw); err != nil {
-			return nil, err
-		}
-		return pulseNames(defaults.Pulses), nil
+		return seedPulseConfig(hostPath, defaultsRaw, defaults)
 	}
 
 	var host pulseDoc
@@ -50,19 +46,34 @@ func MergeRequiredPulses(hostPath, defaultsPath string) ([]string, error) {
 		return nil, fmt.Errorf("parse host pulses %s (refusing to overwrite): %w", hostPath, err)
 	}
 
-	have := make(map[string]bool, len(host.Pulses))
-	for _, p := range host.Pulses {
-		have[pulseName(p)] = true
+	have := pulseNameSet(host.Pulses)
+
+	// "Missing from the host" is ambiguous on its own: it means either that
+	// this host predates the pulse or that an operator turned it off. The
+	// ledger records which defaults this host has already been offered, so a
+	// name that was offered and is now absent was removed deliberately and is
+	// left alone. Re-adding it on every sync would silently reactivate probes
+	// somebody switched off.
+	seen, err := loadPulseLedger(hostPath)
+	if err != nil {
+		return nil, err
 	}
 
 	var added []string
 	for _, p := range defaults.Pulses {
 		name := pulseName(p)
-		if name == "" || have[name] {
+		if name == "" || have[name] || seen[name] {
 			continue
 		}
 		host.Pulses = append(host.Pulses, p)
 		added = append(added, name)
+	}
+
+	// The ledger always advances to the current defaults, including on a
+	// no-op run: the first run after this code ships adopts whatever the host
+	// has now, and every removal after that is respected.
+	if err := savePulseLedger(hostPath, defaults.Pulses); err != nil {
+		return nil, err
 	}
 	if len(added) == 0 {
 		return nil, nil
@@ -92,6 +103,14 @@ func pulseName(p map[string]any) string {
 	return ""
 }
 
+func pulseNameSet(ps []map[string]any) map[string]bool {
+	set := make(map[string]bool, len(ps))
+	for _, p := range ps {
+		set[pulseName(p)] = true
+	}
+	return set
+}
+
 func pulseNames(ps []map[string]any) []string {
 	names := make([]string, 0, len(ps))
 	for _, p := range ps {
@@ -102,22 +121,80 @@ func pulseNames(ps []map[string]any) []string {
 	return names
 }
 
-// writePulseDoc stages and renames so a failed write leaves the previous
-// config in place, matching the atomicity every other deploy path guarantees.
+// writePulseDoc routes through the package's stage, verify, activate path so a
+// merged registry gets the same read-back hash check every other deployed
+// artifact does (internal/deploy SPEC DEP-01). A mangled staged write must not
+// be able to replace a working pulse registry with invalid JSON, which would
+// make absence-alarm reject every subsequent tick.
 func writePulseDoc(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("mkdir for %s: %w", path, err)
-	}
-	tmp := path + ".tmp"
-	//nolint:gosec // deploy/manifest.yaml declares this artifact mode 0644; it is
+	// deploy/manifest.yaml declares absence-alarm-pulses mode 0644: it is
 	// world-readable configuration, and narrowing it here would drift from the
 	// manifest the deploy status check compares against.
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("stage %s: %w", path, err)
+	return atomicWrite(path, data, 0o644, sha256hex(data))
+}
+
+// pulseLedgerPath is a sidecar next to the registry recording every default
+// pulse this host has been offered.
+func pulseLedgerPath(hostPath string) string {
+	return hostPath + ".offered"
+}
+
+// loadPulseLedger reads the set of default pulses already offered to this host.
+// A missing ledger is not an error: it means this host has never been merged,
+// and the first run adopts the current defaults.
+func loadPulseLedger(hostPath string) (map[string]bool, error) {
+	raw, err := os.ReadFile(pulseLedgerPath(hostPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]bool{}, nil
+		}
+		return nil, fmt.Errorf("read pulse ledger: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("activate %s: %w", path, err)
+	var names []string
+	//nolint:nilerr // A corrupt ledger degrades to "nothing offered yet", which
+	// can only re-offer a default. Propagating this would let an unreadable
+	// sidecar block a required pulse, which is the failure this file prevents.
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return map[string]bool{}, nil
 	}
-	return nil
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		seen[n] = true
+	}
+	return seen, nil
+}
+
+// savePulseLedger records the current default pulse names, unioned with what
+// was already offered so a pulse retired from the defaults is not forgotten
+// and then resurrected if it returns.
+func savePulseLedger(hostPath string, defaults []map[string]any) error {
+	seen, err := loadPulseLedger(hostPath)
+	if err != nil {
+		return err
+	}
+	for _, n := range pulseNames(defaults) {
+		seen[n] = true
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	raw, err := json.Marshal(names)
+	if err != nil {
+		return fmt.Errorf("encode pulse ledger: %w", err)
+	}
+	return atomicWrite(pulseLedgerPath(hostPath), raw, 0o644, sha256hex(raw))
+}
+
+// seedPulseConfig installs the defaults verbatim on a host that has no pulse
+// registry yet.
+func seedPulseConfig(hostPath string, defaultsRaw []byte, defaults pulseDoc) ([]string, error) {
+	if err := writePulseDoc(hostPath, defaultsRaw); err != nil {
+		return nil, err
+	}
+	if err := savePulseLedger(hostPath, defaults.Pulses); err != nil {
+		return nil, err
+	}
+	return pulseNames(defaults.Pulses), nil
 }

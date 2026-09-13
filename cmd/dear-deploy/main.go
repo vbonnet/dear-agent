@@ -399,6 +399,15 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 		formatDeploy(cmd, results, stdout)
 	}
 
+	// The pulse registry is absent-only, so Deploy reports it unchanged on
+	// every host that already has one and a newly required pulse never lands.
+	// This is the canonical publication path (the post-merge hook runs
+	// `dear-deploy sync`), so the merge belongs here rather than only on the
+	// manual launch-agent install target.
+	if namedIn(selected, "absence-alarm-pulses") {
+		mergePulsesDuringDeploy(opts, stdout, stderr)
+	}
+
 	if len(failures) > 0 {
 		fmt.Fprintf(stderr, "\n%s: %d artifact(s) failed: %s\n", cmd, len(failures), strings.Join(failures, ", "))
 		return 1
@@ -610,4 +619,36 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "Restart absence-alarm for these to take effect.")
 	return 0
+}
+
+// namedIn reports whether the selection includes the named artifact.
+func namedIn(selected []deploy.Artifact, name string) bool {
+	for _, a := range selected {
+		if a.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// mergePulsesDuringDeploy folds newly required pulses into the host registry
+// as part of a normal sync. It never fails the deploy: a host with a pulse
+// registry this cannot parse keeps the registry it has, and says so.
+func mergePulsesDuringDeploy(opts deploy.Options, stdout, stderr io.Writer) {
+	hostPath := filepath.Join(opts.Home, ".config", "dear-agent", "absence-alarm-pulses.json")
+	defaultsPath := filepath.Join(opts.RepoRoot, "deploy", "absence-alarm", "pulses.json")
+	if _, err := os.Stat(defaultsPath); err != nil {
+		return
+	}
+	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "  WARN      absence-alarm pulses not merged: %v\n", err)
+		return
+	}
+	for _, n := range added {
+		fmt.Fprintf(stdout, "  MERGED    absence-alarm pulse %s\n", n)
+	}
+	if len(added) > 0 {
+		fmt.Fprintln(stdout, "  Restart absence-alarm for the new pulses to take effect.")
+	}
 }
