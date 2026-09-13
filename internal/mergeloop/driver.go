@@ -333,7 +333,19 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 // report as stalled the instant it turned green. A zero return means there is
 // no honest clock to read.
 func stallSince(rec *PRRecord) time.Time {
-	if !rec.LastActionAt.IsZero() {
+	// The LATER of the two anchors wins, and that ordering is the whole point.
+	//
+	// Preferring LastActionAt outright meant a PR the loop HAD acted on, which
+	// then sat as a draft or behind slow CI past the threshold, was reported
+	// and durably escalated as stalled the instant it became actionable again,
+	// even though the fresh actionable clock had only just started. Clearing
+	// ActionableSinceAt on the non-actionable transition did not help, because
+	// the stale action anchor still outranked it.
+	//
+	// Taking the maximum is safe: ActionableSinceAt only advances when the PR
+	// ENTERS an actionable state, and LastActionAt only advances while it is
+	// already actionable, so neither can mask real inactivity.
+	if rec.LastActionAt.After(rec.ActionableSinceAt) {
 		return rec.LastActionAt
 	}
 	return rec.ActionableSinceAt

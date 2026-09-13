@@ -478,3 +478,35 @@ func TestVerifyPRIdentity(t *testing.T) {
 		t.Error("a mismatched identity must be an error")
 	}
 }
+
+// TestBlockingFindingsInHumanBeforeBotP1DoesNotAddressIt pins the ce-lr7j
+// review finding that a human comment addressed findings posted AFTER it.
+//
+// hasHumanComment asked only whether a person appears anywhere in the thread,
+// so a bot posting a P1 after an unrelated human remark made the whole thread
+// look engaged and the finding was dropped. Once such a thread is resolved,
+// GitHub's conversation gate cannot catch the omission either, so a green PR
+// merges over a blocking finding nobody read. Only a human comment that comes
+// after the finding can have addressed it.
+func TestBlockingFindingsInHumanBeforeBotP1DoesNotAddressIt(t *testing.T) {
+	human := threadComment{author: "alice", body: "unrelated remark", typename: "User"}
+
+	before := reviewThread{id: "human-first", isResolved: true,
+		comments: []threadComment{human, botComment(tstCodexP1)}}
+	if got := blockingFindingsIn([]reviewThread{before}); len(got) != 1 {
+		t.Errorf("a P1 posted AFTER a human comment must still block; got %d findings", len(got))
+	}
+
+	after := reviewThread{id: "human-last", isResolved: true,
+		comments: []threadComment{botComment(tstCodexP1), human}}
+	if got := blockingFindingsIn([]reviewThread{after}); len(got) != 0 {
+		t.Errorf("a human reply AFTER the P1 addresses it; got %d findings", len(got))
+	}
+
+	// A bot reply between the finding and the human does not break the pairing.
+	interleaved := reviewThread{id: "interleaved", isResolved: true,
+		comments: []threadComment{human, botComment(tstCodexP1), botComment(tstCodexP2), human}}
+	if got := blockingFindingsIn([]reviewThread{interleaved}); len(got) != 0 {
+		t.Errorf("a human reply after the P1 addresses it even with a bot comment between; got %d", len(got))
+	}
+}

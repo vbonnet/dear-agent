@@ -210,3 +210,29 @@ func TestClassifyCommentSeverityMixedSupportedAndUnsupportedIsUnknown(t *testing
 		t.Errorf("ClassifyCommentSeverity(plain P2) = %v, want %v", got, SeverityAdvisory)
 	}
 }
+
+// TestClassifyCommentSeverityForeignHostBadgeIsUnknown pins the ce-lr7j review
+// finding that the unread-marker counter validated the DESTINATION before it
+// recognised the badge, so an off-host badge stayed invisible.
+//
+// `![P1 Badge](https://example.invalid/p1.svg)` beside a valid P2 left
+// seen=true and unread==parsed, so the comment classified advisory and both the
+// resolver and the merge gate cleared it. Badge SYNTAX must be detected first;
+// only then does the host decide whether the marker could be read.
+func TestClassifyCommentSeverityForeignHostBadgeIsUnknown(t *testing.T) {
+	p2 := "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Advisory**"
+	foreign := []string{
+		"![P1 Badge](https://example.invalid/p1.svg)",
+		"![P0 Badge](https://evil.example.com/badge/P0-red)",
+		"![high](https://example.invalid/codereviewagent/high-priority.svg)",
+	}
+	for _, f := range foreign {
+		if got := ClassifyCommentSeverity(p2 + "\n\n" + f); got != SeverityUnknown {
+			t.Errorf("ClassifyCommentSeverity(P2 + %q) = %v, want %v (an off-host badge is still a "+
+				"badge this parser cannot vouch for)", f, got, SeverityUnknown)
+		}
+	}
+	if got := ClassifyCommentSeverity(p2); got != SeverityAdvisory {
+		t.Errorf("a lone canonical P2 must stay advisory, got %v", got)
+	}
+}

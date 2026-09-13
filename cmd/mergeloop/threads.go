@@ -237,7 +237,25 @@ func partitionResolvable(threads []reviewThread) ([]botThread, int) {
 func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 	var out []mergeloop.BlockingFinding
 	for _, t := range threads {
-		if len(t.comments) == 0 || t.hasHumanComment() {
+		if len(t.comments) == 0 {
+			continue
+		}
+		// A recognised blocking finding is judged on its own, BEFORE the
+		// thread-level human check below. Asking only whether a person appears
+		// anywhere in the thread let a bot post a P1 after an unrelated human
+		// remark and have the whole thread read as engaged; once such a thread
+		// was resolved, GitHub's conversation gate could not catch it either.
+		// Only a human comment that comes AFTER a finding can have addressed it.
+		if i, ok := unaddressedBlockingComment(t.comments); ok {
+			out = append(out, mergeloop.BlockingFinding{
+				ThreadID: t.id,
+				Author:   t.comments[i].author,
+				Severity: mergeloop.SeverityBlocking,
+				Excerpt:  excerptFinding(t.comments[i:]),
+			})
+			continue
+		}
+		if t.hasHumanComment() {
 			continue
 		}
 		sev := mergeloop.ThreadSeverityOf(t.bodies())
@@ -254,6 +272,7 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 			})
 			continue
 		}
+		// Blocking severities were already handled above, per comment.
 		if sev != mergeloop.SeverityBlocking {
 			// An UNRESOLVED thread of unknown severity is already held by
 			// GitHub's own conversation-resolution gate, so flagging it here
@@ -281,6 +300,38 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 		})
 	}
 	return out
+}
+
+// unaddressedBlockingComment returns the index of the first comment carrying a
+// recognised blocking severity that no human answered afterwards.
+//
+// "Afterwards" is the load-bearing word. A person can only have engaged with a
+// finding they could actually see, so a human comment that PRECEDES the finding
+// says nothing about it. Bot comments between the two are irrelevant: what
+// matters is whether any real person spoke after the finding was posted.
+func unaddressedBlockingComment(comments []threadComment) (int, bool) {
+	for i, c := range comments {
+		// Only an allowlisted BOT's comment is a finding this gate owns. A
+		// person quoting or writing P1-shaped text is ordinary human feedback,
+		// which GitHub's conversation-resolution gate already holds.
+		if !isKnownBotAuthor(c.author) {
+			continue
+		}
+		if mergeloop.ClassifyCommentSeverity(c.body) != mergeloop.SeverityBlocking {
+			continue
+		}
+		answered := false
+		for _, later := range comments[i+1:] {
+			if isHumanActor(later.typename, later.author) {
+				answered = true
+				break
+			}
+		}
+		if !answered {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // excerptFinding pulls a short human-readable title out of a bot finding so the

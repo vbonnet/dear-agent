@@ -88,15 +88,23 @@ var geminiBadgePattern = regexp.MustCompile(`!\[(critical|high|medium|low)\]\(ht
 // codexBadgeShape and geminiBadgeShape match the SHAPE of each bot's severity
 // badge without constraining the priority to a value this code understands.
 //
-// They exist because narrowing the real patterns to the supported priorities
-// made the parser blind to an unsupported marker instead of suspicious of it.
+// They deliberately match the SYNTAX and say nothing about the destination.
+// Validating the host first made an off-host badge such as
+// `![P1 Badge](https://example.invalid/p1.svg)` invisible to the unread
+// counter, so it could hide behind a valid badge in the same comment. A marker
+// shaped like a severity badge is one this code must be able to vouch for; if
+// it cannot, that is a reason to withhold, not to ignore it.
+//
+// They also exist because narrowing the real patterns to the supported
+// priorities made the parser blind to an unsupported priority rather than
+// suspicious of it.
 // A comment carrying a valid P2 badge AND an unsupported P6 badge matched only
 // the P2, so the comment classified as advisory and both the resolver and the
 // independent gate cleared it. Counting badge-shaped markers separately lets
 // the classifier notice that it failed to read one.
 var (
-	codexBadgeShape  = regexp.MustCompile(`!\[P\d+ Badge\]\(https://img\.shields\.io/badge/`)
-	geminiBadgeShape = regexp.MustCompile(`!\[[a-z]+\]\(https://www\.gstatic\.com/codereviewagent/[a-z]+-priority\.svg\)`)
+	codexBadgeShape  = regexp.MustCompile(`!\[P\d+ Badge\]\(`)
+	geminiBadgeShape = regexp.MustCompile(`!\[[^\]]*\]\([^)]*-priority\.svg\)`)
 )
 
 // ClassifyCommentSeverity reads one review comment body and returns its

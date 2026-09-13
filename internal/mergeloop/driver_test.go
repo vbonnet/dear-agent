@@ -780,3 +780,53 @@ func TestNoFalseStallAfterLongDraft(t *testing.T) {
 			"must start when the PR becomes actionable, got %v", auditActions(evs))
 	}
 }
+
+// TestNoFalseStallAfterDraftFollowingAnAction pins the ce-lr7j review finding
+// that clearing ActionableSinceAt alone did not stop false stalls.
+//
+// stallSince prefers LastActionAt, so a PR the loop HAD acted on, which then
+// sat as a draft past the threshold, was reported and durably escalated as
+// stalled the instant it became actionable again, even though the new
+// actionable clock had only just started. The stale action anchor must not
+// outrank the fresh actionable one.
+func TestNoFalseStallAfterDraftFollowingAnAction(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	behind := PR{Number: 11, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}
+	lister := &fakeLister{prs: []PR{behind}}
+	var evs []AuditEvent
+	d, tr := newTestDriver(t, nil, &Deps{
+		Lister: lister, Rebaser: &fakeRebaser{}, Merger: &fakeMerger{},
+		Clock: func() time.Time { return now },
+		Audit: func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+
+	// The loop acts on it once, recording LastActionAt.
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if tr.Get(11, now).LastActionAt.IsZero() {
+		t.Fatal("precondition: expected a recorded action from the rebase")
+	}
+
+	// It then becomes a draft and sits there well past the threshold.
+	lister.prs = []PR{{Number: 11, IsDraft: true, MergeStateStatus: "DRAFT", Mergeable: "MERGEABLE"}}
+	for range 4 {
+		now = now.Add(time.Hour)
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("draft tick: %v", err)
+		}
+	}
+
+	// Back to actionable. The loop has had no chance to act since, so this must
+	// not report or escalate a stall.
+	lister.prs = []PR{behind}
+	evs = nil
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("actionable tick: %v", err)
+	}
+	if hasAction(evs, "stall_detected") {
+		t.Errorf("stall reported on the first actionable tick after a long draft, using the "+
+			"stale pre-draft action anchor; got %v", auditActions(evs))
+	}
+}
