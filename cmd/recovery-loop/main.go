@@ -336,7 +336,12 @@ func processJob(
 		// would read as "the service is not loaded": a transient launchctl
 		// failure would convert every pending recovery into a counted failure
 		// and escalate. Not observed is not observed absent (RL-41).
-		if launchdErr != nil && job.LaunchdLabel != "" {
+		// Hold only when the verdict genuinely depends on the listing. A
+		// pulse-backed job whose grace window has expired with the pulse
+		// still absent has a conclusive answer from the heartbeat alone, and
+		// holding it would postpone a real failure indefinitely every time
+		// launchctl hiccups.
+		if launchdErr != nil && job.LaunchdLabel != "" && !pulseVerdictIsConclusive(job, truth, prev, now) {
 			holdPending(job, prev, launchdErr, state, rep)
 			return
 		}
@@ -933,11 +938,18 @@ func escalate(
 	// for an escalation nobody received: the false-green shape applied to the
 	// escalation path itself (RL-40).
 	var delivered bool
+	// The record's status is the pulse's real status. Stamping StatusAbsent on
+	// a structural failure whose pulse is present tells a machine consumer the
+	// opposite of what the reason text says.
+	pulseStatus := absencealarm.StatusAbsent
+	if job.Pulse != "" && truth.Present(job.Pulse) {
+		pulseStatus = absencealarm.StatusPresent
+	}
 	if err := absencealarm.AppendJournal(opts.absenceJournal, absencealarm.JournalRecord{
 		Time:   now,
 		Kind:   "recovery.human_needed",
 		Pulse:  pulse,
-		Status: absencealarm.StatusAbsent,
+		Status: pulseStatus,
 		Reason: body,
 		Misses: attempts,
 	}); err != nil {
@@ -1016,4 +1028,22 @@ func evidenceStampCLI(t time.Time) string {
 		return "at an unrecorded time"
 	}
 	return "at " + t.Format(time.RFC3339)
+}
+
+// pulseVerdictIsConclusive reports whether the pulse alone already settles an
+// open verification, so a missing launchd listing changes nothing.
+//
+// Only the negative direction qualifies. A returned pulse still needs the
+// structural re-check before it can verify a recovery (RL-39), but a pulse that
+// has not come back by its deadline is a failure whatever launchctl says.
+func pulseVerdictIsConclusive(
+	job recoveryloop.Job,
+	truth recoveryloop.PulseTruth,
+	prev recoveryloop.JobState,
+	now time.Time,
+) bool {
+	if job.Pulse == "" || job.PulseIsStructural {
+		return false
+	}
+	return truth.Alarming(job.Pulse) && now.After(prev.PendingDeadline)
 }

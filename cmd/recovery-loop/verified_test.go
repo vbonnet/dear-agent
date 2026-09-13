@@ -743,3 +743,39 @@ func TestCLI_StalePulseDoesNotClearAFailedJob(t *testing.T) {
 		t.Error("reset the failure count without observing anything new")
 	}
 }
+
+// A launchctl hiccup must not postpone a failure the heartbeat already settles.
+// For a pulse-backed job whose grace window expired with the pulse still
+// absent, the verdict does not depend on the listing at all, and holding it
+// every time launchctl stumbles would defer a real escalation indefinitely.
+func TestCLI_ExpiredAbsentPulseSettlesDespiteLaunchdError(t *testing.T) {
+	f := newFixture(t)
+	t0 := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	now := t0.Add(2 * time.Hour)
+	f.write(t, f.cfg, absenceAlarmJob)
+	f.write(t, f.absHB, fmt.Sprintf(
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"absent"}]}`,
+		now.Format(time.RFC3339)))
+	f.write(t, f.absState, `{"pulses":{"absence-alarm-heartbeat":{"since":"2026-09-03T08:00:00Z"}}}`)
+	f.write(t, f.state, fmt.Sprintf(
+		`{"jobs":{"absence-alarm":{"consecutive_failures":1,"pending_action":"kickstart",`+
+			`"pending_since":%q,"pending_deadline":%q}}}`,
+		t0.Format(time.RFC3339), t0.Add(30*time.Minute).Format(time.RFC3339)))
+
+	host, _ := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{})
+	host.LaunchdList = func(context.Context) (map[string]recoveryloop.LaunchdJobInfo, error) {
+		return nil, errors.New("launchctl: connection interrupted")
+	}
+
+	var stdout, stderr bytes.Buffer
+	run(f.args("--verify-grace", "30m"), &stdout, &stderr, host, nil)
+
+	js := f.jobState(t, "absence-alarm")
+	if js.LastStatus == recoveryloop.StatusPending {
+		t.Errorf("held a verdict the heartbeat already settled:\n%s", stdout.String())
+	}
+	if js.ConsecutiveFailures < 2 {
+		t.Errorf("consecutive_failures = %d; the expired grace window with an absent pulse is a failure",
+			js.ConsecutiveFailures)
+	}
+}
