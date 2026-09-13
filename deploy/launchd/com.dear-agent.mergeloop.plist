@@ -22,6 +22,14 @@
     <string>tick</string>
     <string>--repo</string>
     <string>vbonnet/dear-agent</string>
+    <!-- Backpressure ceiling, set explicitly rather than inherited.
+         DefaultCap is 50, which sat just above the live open-PR count (48 on
+         2026-09-13). A tick ABOVE the cap is skipped in full, so one ordinary
+         burst of new PRs would silence the loop at exactly the moment the
+         backlog most needed draining - and a silent loop looks identical to a
+         loop with nothing to do. Pin it well clear of the real count. -->
+    <string>--cap</string>
+    <string>500</string>
   </array>
 
   <key>EnvironmentVariables</key>
