@@ -104,10 +104,25 @@ the generic one.
 | Model | Identifier | Context | Rate (per Mtok) |
 | --- | --- | --- | --- |
 | GPT-6 Astra | `gpt-6-astra`, alias `astra` | 272K default / 872K max | $10 in, $50 out, $1.00 cache read |
+| Claude Opus 5 | `claude-opus-5` | 1M | $5 in, $25 out |
+
+These are wired in the sense that `internal/pricing.Lookup` and
+`pkg/costtrack.GetPricingOrDefault` both return a rate for them. The GPT-5.6
+identifiers below are deliberately not in that table, so they are listed
+separately rather than here: claiming cost coverage the tables do not provide
+is what makes a zero-valued cost report look like a cheap run.
+
+## Published but not wired
+
+| Model | Identifier | Context | Published rate (per Mtok) |
+| --- | --- | --- | --- |
 | GPT-5.6 Sol | `gpt-5.6-sol` | 272K | $4 in, $20 out |
 | GPT-5.6 Terra | `gpt-5.6-terra` | 272K | $2 in, $12 out |
 | GPT-5.6 Luna | `gpt-5.6-luna` | 272K | $0.20 in, $1.20 out |
-| Claude Opus 5 | `claude-opus-5` | 1M | $5 in, $25 out |
+
+Neither rate table contains these identifiers, so `Lookup` reports
+`UnknownModel` and `GetPricingOrDefault` returns zero for them today. Wiring
+them is the separate rate-card fix described under Known drift.
 
 Astra's rates above are the **standard** service tier in the **short-context**
 band. Two bands reprice it and neither is modelled in the single-rate tables:

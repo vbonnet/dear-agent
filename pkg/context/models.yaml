@@ -365,6 +365,24 @@ models:
     confidence: "MEDIUM"
     last_updated: "2026-09-09T00:00:00Z"
 
+  # Registry.GetModel only normalizes case and underscores, so it cannot reach
+  # the unqualified row above from the provider-qualified spelling Pi and the
+  # generated OpenCode config use; without this alias those callers silently
+  # fall back to the 200K `default` entry and mis-report context percentages
+  # and compaction thresholds.
+  - model_id: "openai/gpt-6-astra"
+    provider: "openai"
+    max_context_tokens: 272000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "codex provider model catalog (~/.codex/models_cache.json, 2026-09-09)"
+    notes: "Provider-qualified alias of gpt-6-astra; must stay in step with it."
+    confidence: "MEDIUM"
+    last_updated: "2026-09-09T00:00:00Z"
+
   - model_id: "gpt-5.5"
     provider: "openai"
     max_context_tokens: 200000
