@@ -246,6 +246,18 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		results = append(results, deploy.Status(a, opts))
 	}
 
+	// A required pulse that a sync would merge is real drift, even though the
+	// absent-only registry itself compares clean. Reporting OK here is how a
+	// missed migration stays invisible to a deployment audit.
+	pendingPulses := pendingPulseNames(selected, opts, stderr)
+	for _, n := range pendingPulses {
+		results = append(results, deploy.StatusResult{
+			Name:         pulseArtifactName + ":" + n,
+			State:        deploy.StateDrift,
+			DeployedPath: n,
+		})
+	}
+
 	if c.asJSON {
 		if rc := emitJSON(results, stdout, stderr); rc != 0 {
 			return rc
@@ -404,8 +416,15 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	// This is the canonical publication path (the post-merge hook runs
 	// `dear-deploy sync`), so the merge belongs here rather than only on the
 	// manual launch-agent install target.
-	if namedIn(selected, "absence-alarm-pulses") {
-		mergePulsesDuringDeploy(opts, stdout, stderr)
+	if a, ok := artifactNamed(selected, pulseArtifactName); ok {
+		if err := mergePulsesDuringDeploy(a, opts, c.asJSON, stdout, stderr); err != nil {
+			// A required pulse that did not land means the recovery loop is
+			// unwired for some job. Reporting a successful deploy over that is
+			// the failure this whole area exists to remove, so it joins the
+			// deploy's own failure list.
+			fmt.Fprintf(stderr, "  FAILED    %s pulse merge — %v\n", a.Name, err)
+			failures = append(failures, a.Name+" (pulse merge)")
+		}
 	}
 
 	if len(failures) > 0 {
@@ -423,6 +442,9 @@ func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, a
 	}
 	force := cmd == "install"
 	plans := make([]plan, 0, len(selected))
+	// An absent-only registry always reports "unchanged", so without this a
+	// preview would show nothing while a real sync merged required pulses.
+	pendingPulses := pendingPulseNames(selected, opts, stderr)
 	for _, a := range selected {
 		// Binaries are status-only — sync/install never copy them into place.
 		if a.IsBinary() {
@@ -451,6 +473,13 @@ func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, a
 		}
 		plans = append(plans, plan{Name: a.Name, DeployedPath: s.DeployedPath, WouldDo: would})
 	}
+	for _, n := range pendingPulses {
+		plans = append(plans, plan{
+			Name:         pulseArtifactName + ":" + n,
+			DeployedPath: n,
+			WouldDo:      "merge pulse",
+		})
+	}
 	if asJSON {
 		return emitJSON(plans, stdout, stderr)
 	}
@@ -460,6 +489,31 @@ func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, a
 	}
 	fmt.Fprintf(stdout, "\n[dry-run] nothing written.\n")
 	return 0
+}
+
+// pendingPulseNames reports the required pulses a real sync would merge.
+//
+// The registry is absent-only, so Status and dry-run both classify it OK on
+// any host that has one. A preview that cannot see a pending migration is a
+// preview that disagrees with the thing it previews, which is how a missed
+// migration stays invisible to deployment audits.
+func pendingPulseNames(selected []deploy.Artifact, opts deploy.Options, stderr io.Writer) []string {
+	a, ok := artifactNamed(selected, pulseArtifactName)
+	if !ok {
+		return nil
+	}
+	hostPath, defaultsPath := pulsePaths(a, opts)
+	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "  WARN      cannot resolve required pulses: %v\n", err)
+		return nil
+	}
+	pending, err := deploy.PendingPulseMerges(hostPath, defaultsPath, required)
+	if err != nil {
+		fmt.Fprintf(stderr, "  WARN      cannot compute pending pulse merges: %v\n", err)
+		return nil
+	}
+	return pending
 }
 
 func formatDeploy(cmd string, results []deploy.Result, w io.Writer) {
@@ -604,7 +658,12 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	hostPath := filepath.Join(home, ".config", "dear-agent", "absence-alarm-pulses.json")
 	defaultsPath := filepath.Join(root, "deploy", "absence-alarm", "pulses.json")
 
-	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath)
+	required, err := deploy.RequiredPulseNames(root)
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: resolve required pulses: %v\n", err)
+		return 1
+	}
+	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath, required)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: merge pulses: %v\n", err)
 		return 1
@@ -621,34 +680,63 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// namedIn reports whether the selection includes the named artifact.
-func namedIn(selected []deploy.Artifact, name string) bool {
+// pulseArtifactName is the manifest entry whose deployed copy is the host's
+// absence-alarm pulse registry.
+const pulseArtifactName = "absence-alarm-pulses"
+
+// artifactNamed returns the selected artifact with this name, if any.
+func artifactNamed(selected []deploy.Artifact, name string) (deploy.Artifact, bool) {
 	for _, a := range selected {
 		if a.Name == name {
-			return true
+			return a, true
 		}
 	}
-	return false
+	return deploy.Artifact{}, false
+}
+
+// pulsePaths derives the host registry and repository defaults from the
+// manifest entry rather than hard-coding them, so a --manifest override that
+// relocates either one is honoured instead of silently mutating the standard
+// host paths.
+func pulsePaths(a deploy.Artifact, opts deploy.Options) (hostPath, defaultsPath string) {
+	return a.DeployedPath(opts.Home), filepath.Join(opts.RepoRoot, a.Source)
 }
 
 // mergePulsesDuringDeploy folds newly required pulses into the host registry
 // as part of a normal sync. It never fails the deploy: a host with a pulse
 // registry this cannot parse keeps the registry it has, and says so.
-func mergePulsesDuringDeploy(opts deploy.Options, stdout, stderr io.Writer) {
-	hostPath := filepath.Join(opts.Home, ".config", "dear-agent", "absence-alarm-pulses.json")
-	defaultsPath := filepath.Join(opts.RepoRoot, "deploy", "absence-alarm", "pulses.json")
+func mergePulsesDuringDeploy(a deploy.Artifact, opts deploy.Options, asJSON bool, stdout, stderr io.Writer) error {
+	hostPath, defaultsPath := pulsePaths(a, opts)
+	//nolint:gosec // defaultsPath is derived from the manifest artifact's own
+	// Source field joined to the operator-supplied repo root, which is exactly
+	// the path every other artifact in this command is read from.
 	if _, err := os.Stat(defaultsPath); err != nil {
-		return
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
-	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath)
+	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
 	if err != nil {
-		fmt.Fprintf(stderr, "  WARN      absence-alarm pulses not merged: %v\n", err)
-		return
+		return err
+	}
+	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath, required)
+	if err != nil {
+		return err
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	// emitJSON has already written the documented structured document to
+	// stdout, so anything appended there would make it undecodable. In JSON
+	// mode the human-readable notice goes to stderr instead.
+	out := stdout
+	if asJSON {
+		out = stderr
 	}
 	for _, n := range added {
-		fmt.Fprintf(stdout, "  MERGED    absence-alarm pulse %s\n", n)
+		fmt.Fprintf(out, "  MERGED    absence-alarm pulse %s\n", n)
 	}
-	if len(added) > 0 {
-		fmt.Fprintln(stdout, "  Restart absence-alarm for the new pulses to take effect.")
-	}
+	fmt.Fprintln(out, "  Restart absence-alarm for the new pulses to take effect.")
+	return nil
 }

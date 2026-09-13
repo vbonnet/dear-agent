@@ -4,12 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+
+	"github.com/vbonnet/dear-agent/pkg/recoveryloop"
 )
 
 // MergeRequiredPulses adds to the host's absence-alarm pulse config any pulse
-// that the repository defaults define and the host is missing, and returns the
-// names it added.
+// that is REQUIRED, defined in the repository defaults, and missing from the
+// host, and returns the names it added.
+//
+// Required means named by a recovery job. That narrowing is the whole reason
+// this is safe to run unattended: a default probe an operator switched off
+// stays off, because nothing depends on it, while a pulse some job's health is
+// judged by cannot be silently absent. Without it, "missing from the host" on
+// a machine that predates this code is indistinguishable from "deliberately
+// removed", and every sync would reactivate probes somebody turned off.
 //
 // The deployed config is declared absent-only in the manifest: once a host has
 // one, neither `dear-deploy` nor `make install-absence-alarm-launchagent`
@@ -23,7 +33,7 @@ import (
 // supplies what is missing, it does not reassert defaults over local choices.
 // A host config that cannot be parsed is refused rather than replaced, because
 // overwriting it would discard configuration this code cannot read.
-func MergeRequiredPulses(hostPath, defaultsPath string) ([]string, error) {
+func MergeRequiredPulses(hostPath, defaultsPath string, required map[string]bool) ([]string, error) {
 	defaultsRaw, err := os.ReadFile(defaultsPath)
 	if err != nil {
 		return nil, fmt.Errorf("read pulse defaults %s: %w", defaultsPath, err)
@@ -61,21 +71,20 @@ func MergeRequiredPulses(hostPath, defaultsPath string) ([]string, error) {
 
 	var added []string
 	for _, p := range defaults.Pulses {
-		name := pulseName(p)
-		if name == "" || have[name] || seen[name] {
+		if !wantsPulse(pulseName(p), have, seen, required) {
 			continue
 		}
 		host.Pulses = append(host.Pulses, p)
-		added = append(added, name)
+		added = append(added, pulseName(p))
 	}
 
-	// The ledger always advances to the current defaults, including on a
-	// no-op run: the first run after this code ships adopts whatever the host
-	// has now, and every removal after that is respected.
-	if err := savePulseLedger(hostPath, defaults.Pulses); err != nil {
-		return nil, err
-	}
 	if len(added) == 0 {
+		// Nothing to install. The ledger still advances to the defaults this
+		// host already HAS, so that removing one later is recognised as a
+		// removal rather than as a host that predates the pulse.
+		if err := savePulseLedger(hostPath, defaultNamesPresent(defaults, have)); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 
@@ -84,6 +93,16 @@ func MergeRequiredPulses(hostPath, defaultsPath string) ([]string, error) {
 		return nil, fmt.Errorf("encode merged pulses: %w", err)
 	}
 	if err := writePulseDoc(hostPath, append(merged, '\n')); err != nil {
+		return nil, err
+	}
+	// The ledger advances only after the registry is live, and records only
+	// names now genuinely present in it. Recording an intent first would mean
+	// a crash between the two writes leaves those names permanently in `seen`
+	// while absent from the registry, so every later merge skips them and the
+	// recovery loop stays unwired: a durable false green written by a failed
+	// write.
+	present := defaultNamesPresent(defaults, pulseNameSet(host.Pulses))
+	if err := savePulseLedger(hostPath, present); err != nil {
 		return nil, err
 	}
 	return added, nil
@@ -167,12 +186,12 @@ func loadPulseLedger(hostPath string) (map[string]bool, error) {
 // savePulseLedger records the current default pulse names, unioned with what
 // was already offered so a pulse retired from the defaults is not forgotten
 // and then resurrected if it returns.
-func savePulseLedger(hostPath string, defaults []map[string]any) error {
+func savePulseLedger(hostPath string, offered []string) error {
 	seen, err := loadPulseLedger(hostPath)
 	if err != nil {
 		return err
 	}
-	for _, n := range pulseNames(defaults) {
+	for _, n := range offered {
 		seen[n] = true
 	}
 	names := make([]string, 0, len(seen))
@@ -193,8 +212,105 @@ func seedPulseConfig(hostPath string, defaultsRaw []byte, defaults pulseDoc) ([]
 	if err := writePulseDoc(hostPath, defaultsRaw); err != nil {
 		return nil, err
 	}
-	if err := savePulseLedger(hostPath, defaults.Pulses); err != nil {
+	names := pulseNames(defaults.Pulses)
+	if err := savePulseLedger(hostPath, names); err != nil {
 		return nil, err
 	}
-	return pulseNames(defaults.Pulses), nil
+	return names, nil
+}
+
+// RequiredPulseNames returns every pulse name a recovery job depends on.
+//
+// These are the only pulses this code will install unattended. A pulse nothing
+// judges a job by is the operator's business; a pulse some job's health is
+// judged by cannot be silently absent, because the recovery loop then has no
+// evidence either way about that job, forever.
+func RequiredPulseNames(repoRoot string) (map[string]bool, error) {
+	required := make(map[string]bool)
+	for _, j := range recoveryloop.DefaultJobs() {
+		if j.Pulse != "" {
+			required[j.Pulse] = true
+		}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "recovery-loop", "jobs.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return required, nil
+		}
+		return nil, fmt.Errorf("read recovery job registry: %w", err)
+	}
+	var doc struct {
+		Jobs []recoveryloop.Job `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse recovery job registry: %w", err)
+	}
+	for _, j := range doc.Jobs {
+		if j.Pulse != "" {
+			required[j.Pulse] = true
+		}
+	}
+	return required, nil
+}
+
+// PendingPulseMerges reports which required pulses a sync would add, without
+// writing anything, so `status` and `--dry-run` can surface a migration that
+// has not happened yet.
+func PendingPulseMerges(hostPath, defaultsPath string, required map[string]bool) ([]string, error) {
+	defaultsRaw, err := os.ReadFile(defaultsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read pulse defaults %s: %w", defaultsPath, err)
+	}
+	var defaults pulseDoc
+	if err := json.Unmarshal(defaultsRaw, &defaults); err != nil {
+		return nil, fmt.Errorf("parse pulse defaults %s: %w", defaultsPath, err)
+	}
+
+	hostRaw, err := os.ReadFile(hostPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return pulseNames(defaults.Pulses), nil
+		}
+		return nil, fmt.Errorf("read host pulses %s: %w", hostPath, err)
+	}
+	var host pulseDoc
+	if err := json.Unmarshal(hostRaw, &host); err != nil {
+		return nil, fmt.Errorf("parse host pulses %s: %w", hostPath, err)
+	}
+	have := pulseNameSet(host.Pulses)
+	seen, err := loadPulseLedger(hostPath)
+	if err != nil {
+		return nil, err
+	}
+	var pending []string
+	for _, p := range defaults.Pulses {
+		if n := pulseName(p); wantsPulse(n, have, seen, required) {
+			pending = append(pending, n)
+		}
+	}
+	return pending, nil
+}
+
+// defaultNamesPresent returns the default pulse names the host registry
+// currently contains. Only these are safe to record as offered: a name in the
+// ledger but absent from the registry would be skipped forever.
+// wantsPulse reports whether a default pulse should be installed on this host:
+// required by a recovery job, not already present, and never offered before
+// (an offered-then-absent pulse was removed deliberately).
+func wantsPulse(name string, have, seen, required map[string]bool) bool {
+	return name != "" && required[name] && !have[name] && !seen[name]
+}
+
+func defaultNamesPresent(defaults pulseDoc, have map[string]bool) []string {
+	var names []string
+	for _, p := range defaults.Pulses {
+		if n := pulseName(p); n != "" && have[n] {
+			names = append(names, n)
+		}
+	}
+	return names
 }

@@ -51,7 +51,7 @@ func TestMergeRequiredPulses_AddsMissingAndKeepsCustomisation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults)
+	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestMergeRequiredPulses_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults)
+	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestMergeRequiredPulses_Idempotent(t *testing.T) {
 		t.Errorf("added = %v on an already-current host, want none", added)
 	}
 	before, _ := os.ReadFile(host)
-	if _, err := MergeRequiredPulses(host, defaults); err != nil {
+	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	after, _ := os.ReadFile(host)
@@ -126,7 +126,7 @@ func TestMergeRequiredPulses_SeedsAbsentHostConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults)
+	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestMergeRequiredPulses_CorruptHostConfigRefuses(t *testing.T) {
 		`{"pulses":[{"name":"a","type":"file_mtime","path":"~/a","window":"1h"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := MergeRequiredPulses(host, defaults); err == nil {
+	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err == nil {
 		t.Fatal("a corrupt host config was accepted; it would have been overwritten")
 	}
 	raw, _ := os.ReadFile(host)
@@ -185,7 +185,7 @@ func TestMergeRequiredPulses_DoesNotResurrectRemovedPulses(t *testing.T) {
 	}
 
 	// First sync adopts the current defaults and records them.
-	if _, err := MergeRequiredPulses(host, defaults); err != nil {
+	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err != nil {
 		t.Fatalf("first merge: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestMergeRequiredPulses_DoesNotResurrectRemovedPulses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults)
+	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestMergeRequiredPulses_StillAddsGenuinelyNewDefaults(t *testing.T) {
 		`{"pulses":[{"name":"keep","type":"file_mtime","path":"~/a","window":"1h"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := MergeRequiredPulses(host, defaults); err != nil {
+	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err != nil {
 		t.Fatalf("first merge: %v", err)
 	}
 
@@ -232,11 +232,119 @@ func TestMergeRequiredPulses_StillAddsGenuinelyNewDefaults(t *testing.T) {
 	]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	added, err := MergeRequiredPulses(host, defaults)
+	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
 	if len(added) != 1 || added[0] != "brand-new" {
 		t.Errorf("added = %v, want [brand-new]", added)
+	}
+}
+
+// allRequired treats every pulse in the given defaults file as required, which
+// is what the pre-narrowing tests assume.
+func allRequired(defaultsPath string) map[string]bool {
+	raw, err := os.ReadFile(defaultsPath)
+	if err != nil {
+		return map[string]bool{}
+	}
+	var doc struct {
+		Pulses []struct {
+			Name string `json:"name"`
+		} `json:"pulses"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return map[string]bool{}
+	}
+	req := make(map[string]bool, len(doc.Pulses))
+	for _, p := range doc.Pulses {
+		req[p.Name] = true
+	}
+	return req
+}
+
+// A default pulse that no recovery job depends on is the operator's business.
+// Installing it unattended is what would resurrect probes removed before the
+// ledger existed, since on such a host "missing" and "removed" are the same
+// observation.
+func TestMergeRequiredPulses_LeavesUnrequiredDefaultsAlone(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	if err := os.WriteFile(host, []byte(
+		`{"pulses":[{"name":"needed","type":"file_mtime","path":"~/a","window":"1h"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaults, []byte(`{"pulses":[
+	  {"name":"needed","type":"file_mtime","path":"~/a","window":"1h"},
+	  {"name":"optional-probe","type":"file_mtime","path":"~/b","window":"1h"},
+	  {"name":"job-critical","type":"file_mtime","path":"~/c","window":"1h"}
+	]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	added, err := MergeRequiredPulses(host, defaults, map[string]bool{"needed": true, "job-critical": true})
+	if err != nil {
+		t.Fatalf("MergeRequiredPulses: %v", err)
+	}
+	if len(added) != 1 || added[0] != "job-critical" {
+		t.Errorf("added = %v, want [job-critical]", added)
+	}
+	for _, n := range readPulseNames(t, host) {
+		if n == "optional-probe" {
+			t.Error("installed a default no recovery job depends on")
+		}
+	}
+}
+
+// PendingPulseMerges must report exactly what a sync would do, and write nothing.
+func TestPendingPulseMerges_ReportsWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	if err := os.WriteFile(host, []byte(
+		`{"pulses":[{"name":"a","type":"file_mtime","path":"~/a","window":"1h"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaults, []byte(`{"pulses":[
+	  {"name":"a","type":"file_mtime","path":"~/a","window":"1h"},
+	  {"name":"b","type":"file_mtime","path":"~/b","window":"1h"}
+	]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := map[string]bool{"a": true, "b": true}
+
+	before, _ := os.ReadFile(host)
+	pending, err := PendingPulseMerges(host, defaults, req)
+	if err != nil {
+		t.Fatalf("PendingPulseMerges: %v", err)
+	}
+	if len(pending) != 1 || pending[0] != "b" {
+		t.Errorf("pending = %v, want [b]", pending)
+	}
+	after, _ := os.ReadFile(host)
+	if string(before) != string(after) {
+		t.Error("PendingPulseMerges wrote to the host registry")
+	}
+
+	added, err := MergeRequiredPulses(host, defaults, req)
+	if err != nil {
+		t.Fatalf("MergeRequiredPulses: %v", err)
+	}
+	if len(added) != len(pending) || added[0] != pending[0] {
+		t.Errorf("sync added %v but the preview said %v", added, pending)
+	}
+}
+
+// The real registries must agree: every pulse a recovery job names is required.
+func TestRequiredPulseNames_CoversDeployedRegistry(t *testing.T) {
+	req, err := RequiredPulseNames(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("RequiredPulseNames: %v", err)
+	}
+	for _, want := range []string{"sandbox-gc-tick", "token-refresher-tick", "absence-alarm-heartbeat"} {
+		if !req[want] {
+			t.Errorf("%q is named by a recovery job but not reported as required", want)
+		}
 	}
 }
