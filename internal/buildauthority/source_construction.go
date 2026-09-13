@@ -29,7 +29,8 @@ type retainedSourceRepository struct {
 }
 
 type retainedSourceGit struct {
-	root retainedSourceRoot
+	root           retainedSourceRoot
+	administration *sourceAdministrativeInventory
 }
 
 type retainedSourceObjects struct {
@@ -127,13 +128,14 @@ func (owner *sourceConstructionOwner) validInitialRepository() bool {
 }
 
 func (owner *sourceConstructionOwner) validInitialGit() bool {
-	return owner.git != nil && owner.git.root.validOpenDirectory()
+	return owner.git != nil && owner.git.root.validOpenDirectory() &&
+		owner.git.administration == nil
 }
 
 func (owner *sourceConstructionOwner) validInitialConfig() bool {
 	return owner.config != nil && owner.config.descriptor.validOpen() &&
 		owner.config.descriptor.kind == sourceObservedRegular &&
-		owner.config.claim.objectFormat != objectFormatUnknown
+		owner.config.claim.objectFormat.hexWidth() != 0
 }
 
 func (owner *sourceConstructionOwner) validInitialObjects() bool {
@@ -144,6 +146,43 @@ func (owner *sourceConstructionOwner) validPackedRefsRetention() bool {
 	if owner == nil || owner.state != sourceConstructionActive || owner.closeFailure ||
 		!owner.validInitialRepository() || !owner.validInitialGit() ||
 		!owner.validInitialConfig() || !owner.validInitialObjects() {
+		return false
+	}
+	switch owner.packedRefs.state {
+	case sourcePackedRefsUnresolved:
+		return false
+	case sourcePackedRefsAbsent:
+		return owner.packedRefs.leaf == nil
+	case sourcePackedRefsRetained:
+		return owner.packedRefs.leaf != nil &&
+			owner.packedRefs.leaf.descriptor.validOpen() &&
+			owner.packedRefs.leaf.descriptor.kind == sourceObservedRegular &&
+			owner.packedRefs.leaf.evidence.snapshot.size >= 0 &&
+			owner.packedRefs.leaf.evidence.snapshot.size <= maxPackedRefsBytes
+	default:
+		return false
+	}
+}
+
+func (owner *sourceConstructionOwner) validAdministrativeRetention() bool {
+	if owner == nil || owner.state != sourceConstructionActive || owner.closeFailure ||
+		!owner.validInitialRepository() || owner.git == nil ||
+		!owner.git.root.validOpenDirectory() || owner.git.administration == nil ||
+		!owner.validInitialConfig() || !owner.validInitialObjects() ||
+		!owner.validResolvedPackedRefs() {
+		return false
+	}
+	return owner.git.administration.valid(
+		owner.config.claim.objectFormat,
+		owner.packedRefs,
+		owner.git.root.evidence,
+		owner.config.evidence,
+		owner.objects.root.evidence,
+	)
+}
+
+func (owner *sourceConstructionOwner) validResolvedPackedRefs() bool {
+	if owner == nil {
 		return false
 	}
 	switch owner.packedRefs.state {

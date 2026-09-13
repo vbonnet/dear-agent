@@ -7,14 +7,91 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestInvalidateDarwinSourceFD(t *testing.T) {
+	t.Parallel()
+
+	if invalidateDarwinSourceFD(nil) {
+		t.Fatal("nil raw descriptor slot retired successfully")
+	}
+	invalid := -1
+	if invalidateDarwinSourceFD(&invalid) {
+		t.Fatal("invalid raw descriptor slot retired successfully")
+	}
+	if invalid != -1 {
+		t.Fatalf("invalid raw descriptor slot = %d, want -1", invalid)
+	}
+	moreInvalid := -2
+	if invalidateDarwinSourceFD(&moreInvalid) {
+		t.Fatal("raw descriptor slot below -1 retired successfully")
+	}
+	if moreInvalid != -2 {
+		t.Fatalf("raw descriptor slot below -1 = %d, want -2", moreInvalid)
+	}
+	zero := 0
+	if !invalidateDarwinSourceFD(&zero) {
+		t.Fatal("zero raw descriptor slot was not retired")
+	}
+	if zero != -1 {
+		t.Fatalf("retired zero raw descriptor slot = %d, want -1", zero)
+	}
+	valid := 17
+	if !invalidateDarwinSourceFD(&valid) {
+		t.Fatal("valid raw descriptor slot was not retired")
+	}
+	if valid != -1 {
+		t.Fatalf("retired raw descriptor slot = %d, want -1", valid)
+	}
+}
+
+func TestDarwinOpenFlagsExactMatrix(t *testing.T) {
+	t.Parallel()
+
+	common := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK
+	for _, test := range []struct {
+		name  string
+		kind  entryKind
+		extra int
+	}{
+		{name: "directory", kind: entryDirectory, extra: unix.O_DIRECTORY},
+		{name: "regular", kind: entryRegular},
+		{name: "symlink", kind: entrySymlink, extra: unix.O_SYMLINK},
+	} {
+		for _, noFollowAny := range []bool{false, true} {
+			name := test.name + "/follow"
+			want := common | test.extra
+			if noFollowAny {
+				name = test.name + "/no-follow-any"
+				want |= unix.O_NOFOLLOW_ANY
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				got, err := darwinOpenFlags(test.kind, noFollowAny)
+				if err != nil || got != want {
+					t.Fatalf("darwin open flags = %#x / %v, want %#x / nil", got, err, want)
+				}
+			})
+		}
+	}
+	for _, kind := range []entryKind{0, ^entryKind(0)} {
+		for _, noFollowAny := range []bool{false, true} {
+			flags, err := darwinOpenFlags(kind, noFollowAny)
+			if !errors.Is(err, fs.ErrInvalid) || flags != 0 {
+				t.Fatalf("invalid kind %d flags = %#x / %v, want 0 / fs.ErrInvalid", kind, flags, err)
+			}
+		}
+	}
+}
 
 func TestDarwinSourcePrimitivesProductionFactoryAndOwnedRoots(t *testing.T) {
 	primitives := requireDarwinSourcePrimitives(t)
@@ -87,6 +164,280 @@ func TestDarwinSourcePrimitivesProductionFactoryAndOwnedRoots(t *testing.T) {
 	}
 }
 
+func TestDarwinSourcePrimitivesOpenFreshRootDirectoryDescriptor(t *testing.T) {
+	primitives := requireDarwinSourcePrimitives(t)
+	base := physicalDarwinTempDir(t)
+	originalPath := filepath.Join(base, "retained")
+	movedPath := filepath.Join(base, "moved")
+	if err := os.Mkdir(originalPath, 0o700); err != nil {
+		t.Fatalf("make retained directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(originalPath, "original"), []byte("old"), 0o600); err != nil {
+		t.Fatalf("write retained entry: %v", err)
+	}
+	root, failure := primitives.openRepositoryRoot(
+		context.Background(),
+		sourceRepositoryLocator{path: originalPath, seal: validSourceRepositoryLocator},
+	)
+	if failure != nil || root == nil {
+		t.Fatalf("open retained root = %+v / %+v", root, failure)
+	}
+	t.Cleanup(func() { _ = primitives.closeRoot(root) })
+
+	if err := os.Rename(originalPath, movedPath); err != nil {
+		t.Fatalf("rename retained directory: %v", err)
+	}
+	if err := os.Mkdir(originalPath, 0o700); err != nil {
+		t.Fatalf("make pathname replacement: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(originalPath, "replacement"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("write pathname replacement: %v", err)
+	}
+
+	first, failure := primitives.openRootDirectoryDescriptor(context.Background(), root)
+	if failure != nil || first == nil || !first.validOpen() || first.kind != sourceObservedDirectory {
+		t.Fatalf("first root-directory descriptor = %+v / %+v", first, failure)
+	}
+	firstNames := readAllDarwinSourceDirectoryNames(t, primitives, first)
+	if failure := primitives.closeDescriptor(first); failure {
+		t.Fatal("close first root-directory descriptor failed")
+	}
+	if failure := primitives.closeDescriptor(first); failure {
+		t.Fatal("repeated first descriptor close did not cache success")
+	}
+
+	second, failure := primitives.openRootDirectoryDescriptor(context.Background(), root)
+	if failure != nil || second == nil || !second.validOpen() || second.kind != sourceObservedDirectory {
+		t.Fatalf("second root-directory descriptor = %+v / %+v", second, failure)
+	}
+	secondNames := readAllDarwinSourceDirectoryNames(t, primitives, second)
+	if failure := primitives.closeDescriptor(second); failure {
+		t.Fatal("close second root-directory descriptor failed")
+	}
+
+	for index, names := range [][]string{firstNames, secondNames} {
+		if len(names) != 1 || names[0] != "original" {
+			t.Fatalf("scan %d names = %q, want retained original only", index+1, names)
+		}
+	}
+	if !root.validOpen() {
+		t.Fatal("closing scan descriptors closed the borrowed root")
+	}
+}
+
+func TestDarwinSourcePrimitivesOpenRootDirectoryDescriptorContextOwnership(t *testing.T) {
+	primitives := requireDarwinSourcePrimitives(t)
+	path := physicalDarwinTempDir(t)
+	root, failure := primitives.openRepositoryRoot(
+		context.Background(),
+		sourceRepositoryLocator{path: path, seal: validSourceRepositoryLocator},
+	)
+	if failure != nil || root == nil {
+		t.Fatalf("open context-test root = %+v / %+v", root, failure)
+	}
+	t.Cleanup(func() { _ = primitives.closeRoot(root) })
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	owner, failure := primitives.openRootDirectoryDescriptor(canceled, root)
+	if owner != nil {
+		_ = primitives.closeDescriptor(owner)
+		t.Fatal("pre-canceled root-directory open returned an owner")
+	}
+	requireDarwinSourceFailure(t, failure, OperationOpen, CauseCanceled)
+
+	for _, test := range []struct {
+		name      string
+		cancelAt  int
+		operation Operation
+	}{
+		{name: "post-open", cancelAt: 2, operation: OperationOpen},
+		{name: "pre-probe", cancelAt: 3, operation: OperationProbe},
+		{name: "post-probe", cancelAt: 4, operation: OperationProbe},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := &darwinSourcePrimitiveStepContext{
+				cancelAt: test.cancelAt,
+				err:      context.Canceled,
+			}
+			owner, failure := primitives.openRootDirectoryDescriptor(ctx, root)
+			if owner == nil || !owner.validOpen() {
+				t.Fatalf("context failure did not retain descriptor owner: %+v", owner)
+			}
+			requireDarwinSourceFailure(t, failure, test.operation, CauseCanceled)
+			if closeFailure := primitives.closeDescriptor(owner); closeFailure {
+				t.Fatal("close retained failure owner failed")
+			}
+		})
+	}
+
+	for _, invalid := range []*ownedSourceRoot{nil, {}, {state: sourceHandleClosed}} {
+		owner, failure := primitives.openRootDirectoryDescriptor(context.Background(), invalid)
+		if owner != nil {
+			_ = primitives.closeDescriptor(owner)
+			t.Fatal("invalid root owner acquired a descriptor")
+		}
+		requireDarwinSourceFailure(t, failure, OperationValidate, CauseInternalInvariant)
+	}
+}
+
+func TestDarwinSourcePrimitivesReadDirectoryBatchContextAndOwnership(t *testing.T) {
+	primitives := requireDarwinSourcePrimitives(t)
+	directory := physicalDarwinTempDir(t)
+	if err := os.WriteFile(filepath.Join(directory, "first"), nil, 0o600); err != nil {
+		t.Fatalf("write directory entry: %v", err)
+	}
+	owner := newDarwinSourceTestDirectoryOwner(t, primitives, directory)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	names, done, failure := primitives.readDirectoryBatch(canceled, owner)
+	if names != nil || done {
+		t.Fatalf("pre-canceled batch = %q / done %v", names, done)
+	}
+	requireDarwinSourceFailure(t, failure, OperationWalk, CauseCanceled)
+	if !owner.validOpen() {
+		t.Fatal("pre-canceled read closed its borrowed descriptor")
+	}
+	if got := readAllDarwinSourceDirectoryNames(t, primitives, owner); len(got) != 1 || got[0] != "first" {
+		t.Fatalf("pre-canceled read advanced directory cursor: %q", got)
+	}
+
+	postOwner := newDarwinSourceTestDirectoryOwner(t, primitives, directory)
+	postContext := &darwinSourcePrimitiveStepContext{cancelAt: 2, err: context.Canceled}
+	names, done, failure = primitives.readDirectoryBatch(postContext, postOwner)
+	if names != nil || done {
+		t.Fatalf("post-read cancellation leaked batch = %q / done %v", names, done)
+	}
+	requireDarwinSourceFailure(t, failure, OperationWalk, CauseCanceled)
+	if !postOwner.validOpen() {
+		t.Fatal("post-read cancellation closed its borrowed descriptor")
+	}
+
+	for _, invalid := range []*ownedSourceDescriptor{
+		nil,
+		{},
+		{file: &os.File{}, kind: sourceObservedRegular, state: sourceHandleOpen},
+		{kind: sourceObservedDirectory, state: sourceHandleClosed},
+	} {
+		names, done, failure = primitives.readDirectoryBatch(context.Background(), invalid)
+		if names != nil || done {
+			t.Fatalf("invalid-owner batch = %q / done %v", names, done)
+		}
+		requireDarwinSourceFailure(t, failure, OperationValidate, CauseInternalInvariant)
+	}
+}
+
+func TestNormalizeDarwinSourceDirectoryBatchRawNamesAndBounds(t *testing.T) {
+	rawNames := []string{
+		"plain",
+		"name\\with-backslash",
+		"name\nwith-newline",
+		string([]byte{'r', 'a', 'w', '-', 0xff}),
+		strings.Repeat("x", maxPathComponentBytes),
+	}
+	entries := make([]os.DirEntry, len(rawNames))
+	for index, name := range rawNames {
+		entries[index] = nameOnlyDarwinSourceDirEntry{name: name}
+	}
+	names, done, failure := normalizeDarwinSourceDirectoryBatch(
+		context.Background(), entries, io.EOF,
+	)
+	if failure != nil || !done {
+		t.Fatalf("terminal raw-name batch = %q / %v / %+v", names, done, failure)
+	}
+	requireDarwinSourceNames(t, names, rawNames)
+
+	exact := make([]os.DirEntry, sourceDirectoryReadBatchSize)
+	for index := range exact {
+		exact[index] = nameOnlyDarwinSourceDirEntry{name: "entry"}
+	}
+	names, done, failure = normalizeDarwinSourceDirectoryBatch(context.Background(), exact, nil)
+	if failure != nil || done || len(names) != sourceDirectoryReadBatchSize {
+		t.Fatalf("exact batch = %d / done %v / %+v", len(names), done, failure)
+	}
+
+	tooMany := append(append([]os.DirEntry(nil), exact...), nameOnlyDarwinSourceDirEntry{name: "overflow"})
+	names, done, failure = normalizeDarwinSourceDirectoryBatch(context.Background(), tooMany, nil)
+	if names != nil || done {
+		t.Fatalf("over-limit batch leaked names = %d / done %v", len(names), done)
+	}
+	requireDarwinSourceFailure(t, failure, OperationWalk, CauseLimit)
+
+	names, done, failure = normalizeDarwinSourceDirectoryBatch(context.Background(), nil, nil)
+	if names != nil || done {
+		t.Fatalf("empty nonterminal batch = %q / done %v", names, done)
+	}
+	requireDarwinSourceFailure(t, failure, OperationWalk, CauseUnstable)
+
+	names, done, failure = normalizeDarwinSourceDirectoryBatch(context.Background(), nil, io.EOF)
+	if failure != nil || !done || len(names) != 0 {
+		t.Fatalf("empty terminal batch = %q / done %v / %+v", names, done, failure)
+	}
+}
+
+func TestNormalizeDarwinSourceDirectoryBatchFailuresWithholdNames(t *testing.T) {
+	partial := []os.DirEntry{nameOnlyDarwinSourceDirEntry{name: "partial"}}
+	for _, test := range []struct {
+		name  string
+		err   error
+		cause CauseCode
+	}{
+		{name: "permission", err: fs.ErrPermission, cause: CausePermission},
+		{name: "canceled", err: context.Canceled, cause: CauseCanceled},
+		{name: "deadline", err: context.DeadlineExceeded, cause: CauseDeadline},
+		{name: "unstable", err: errors.New("directory I/O failed"), cause: CauseUnstable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			names, done, failure := normalizeDarwinSourceDirectoryBatch(
+				context.Background(), partial, test.err,
+			)
+			if names != nil || done {
+				t.Fatalf("failed batch exposed partial names = %q / done %v", names, done)
+			}
+			requireDarwinSourceFailure(t, failure, OperationWalk, test.cause)
+		})
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	names, done, failure := normalizeDarwinSourceDirectoryBatch(canceled, partial, fs.ErrPermission)
+	if names != nil || done {
+		t.Fatalf("context-priority batch = %q / done %v", names, done)
+	}
+	requireDarwinSourceFailure(t, failure, OperationWalk, CauseCanceled)
+}
+
+func TestNormalizeDarwinSourceDirectoryBatchRejectsInvalidRecords(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		entry     os.DirEntry
+		operation Operation
+		cause     CauseCode
+	}{
+		{name: "nil entry", entry: nil, operation: OperationValidate, cause: CauseInternalInvariant},
+		{name: "empty name", entry: nameOnlyDarwinSourceDirEntry{name: ""}, operation: OperationWalk, cause: CauseUnstable},
+		{name: "dot name", entry: nameOnlyDarwinSourceDirEntry{name: "."}, operation: OperationWalk, cause: CauseUnstable},
+		{name: "dot-dot name", entry: nameOnlyDarwinSourceDirEntry{name: ".."}, operation: OperationWalk, cause: CauseUnstable},
+		{name: "slash name", entry: nameOnlyDarwinSourceDirEntry{name: "left/right"}, operation: OperationWalk, cause: CauseUnstable},
+		{name: "nul name", entry: nameOnlyDarwinSourceDirEntry{name: "left\x00right"}, operation: OperationWalk, cause: CauseUnstable},
+		{
+			name: "long name", entry: nameOnlyDarwinSourceDirEntry{name: strings.Repeat("x", maxPathComponentBytes+1)},
+			operation: OperationWalk, cause: CauseLimit,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			names, done, failure := normalizeDarwinSourceDirectoryBatch(
+				context.Background(), []os.DirEntry{test.entry}, io.EOF,
+			)
+			if names != nil || done {
+				t.Fatalf("invalid record exposed batch = %q / done %v", names, done)
+			}
+			requireDarwinSourceFailure(t, failure, test.operation, test.cause)
+		})
+	}
+}
+
 func TestDarwinSourcePrimitivesProbePresenceMatrix(t *testing.T) {
 	primitives := requireDarwinSourcePrimitives(t)
 	directory := physicalDarwinTempDir(t)
@@ -126,6 +477,7 @@ func TestDarwinSourcePrimitivesProbePresenceMatrix(t *testing.T) {
 			name: "initial-forbidden", mode: sourceInitialForbidden, wantKind: true,
 			operation: OperationValidate, cause: CauseUnsupported,
 		},
+		{name: "initial-walk-present", mode: sourceInitialWalkPresent, wantKind: true},
 		{name: "revalidate-present", mode: sourceRevalidatePresent, wantKind: true},
 		{
 			name: "revalidate-absent", mode: sourceRevalidateAbsent,
@@ -168,6 +520,10 @@ func TestDarwinSourcePrimitivesProbePresenceMatrix(t *testing.T) {
 		{name: "initial-required", mode: sourceInitialRequired, operation: OperationOpen, cause: CauseNotFound},
 		{name: "initial-optional", mode: sourceInitialOptional},
 		{name: "initial-forbidden", mode: sourceInitialForbidden},
+		{
+			name: "initial-walk-present", mode: sourceInitialWalkPresent,
+			operation: OperationProbe, cause: CauseUnstable,
+		},
 		{name: "revalidate-present", mode: sourceRevalidatePresent, operation: OperationCompare, cause: CauseUnstable},
 		{name: "revalidate-absent", mode: sourceRevalidateAbsent},
 	} {
@@ -214,6 +570,7 @@ func TestDarwinSourcePrimitivesOpenNoFollowKindsAndOwnership(t *testing.T) {
 		for _, mode := range []sourcePresenceMode{
 			sourceInitialRequired,
 			sourceInitialOptional,
+			sourceInitialWalkPresent,
 			sourceRevalidatePresent,
 		} {
 			t.Run(entry.name+"/"+sourcePresenceModeName(mode), func(t *testing.T) {
@@ -289,15 +646,15 @@ func TestDarwinSourcePrimitivesOpenNoFollowKindsAndOwnership(t *testing.T) {
 		})
 	}
 
-	ctx := &postCheckAuthorityContext{after: context.Canceled}
+	ctx := &darwinSourcePrimitiveStepContext{cancelAt: 2, err: context.Canceled}
 	owner, failure := primitives.openRelativeNoFollow(
 		ctx, parent, "regular", sourceObservedRegular, sourceInitialRequired,
 	)
 	if owner != nil {
 		defer primitives.closeDescriptor(owner)
 	}
-	if ctx.calls != 2 || owner == nil || !owner.validOpen() {
-		t.Fatalf("post-open cancellation = calls %d owner %+v failure %+v", ctx.calls, owner, failure)
+	if ctx.samples != 2 || owner == nil || !owner.validOpen() {
+		t.Fatalf("post-open cancellation = calls %d owner %+v failure %+v", ctx.samples, owner, failure)
 	}
 	requireDarwinSourceFailure(t, failure, OperationOpen, CauseCanceled)
 }
@@ -402,7 +759,7 @@ func TestDarwinSourcePrimitivesDescriptorEvidenceAndBytes(t *testing.T) {
 	if failure != nil || digest != wantDigest {
 		t.Fatalf("source byte digest = %x / %+v, want %x", digest, failure, wantDigest)
 	}
-	hashContext := &sourceConstructionStepContext{cancelAt: 2}
+	hashContext := &darwinSourcePrimitiveStepContext{cancelAt: 2, err: context.Canceled}
 	canceledDigest, canceledFailure := primitives.hashBytes(hashContext, read)
 	if canceledDigest != (Digest{}) {
 		t.Fatalf("canceled source byte digest = %x, want zero", canceledDigest)
@@ -657,6 +1014,10 @@ func TestDarwinSourcePrimitiveInputAndLookupAttributionIsClosed(t *testing.T) {
 			operation: OperationProbe, cause: CauseUnstable,
 		},
 		{
+			name: "walk-record disappearance", mode: sourceInitialWalkPresent, err: fs.ErrNotExist,
+			operation: OperationOpen, cause: CauseUnstable,
+		},
+		{
 			name: "revalidation disappearance", mode: sourceRevalidatePresent, err: fs.ErrNotExist,
 			operation: OperationCompare, cause: CauseUnstable,
 		},
@@ -691,6 +1052,7 @@ func TestDarwinSourcePrimitiveInputAndLookupAttributionIsClosed(t *testing.T) {
 		sourceInitialRequired,
 		sourceInitialOptional,
 		sourceInitialForbidden,
+		sourceInitialWalkPresent,
 		sourceRevalidatePresent,
 		sourceRevalidateAbsent,
 	} {
@@ -774,6 +1136,8 @@ func sourcePresenceModeName(mode sourcePresenceMode) string {
 		return "initial-optional"
 	case sourceInitialForbidden:
 		return "initial-forbidden"
+	case sourceInitialWalkPresent:
+		return "initial-walk-present"
 	case sourceRevalidatePresent:
 		return "revalidate-present"
 	case sourceRevalidateAbsent:
@@ -781,4 +1145,86 @@ func sourcePresenceModeName(mode sourcePresenceMode) string {
 	default:
 		return "invalid"
 	}
+}
+
+func readAllDarwinSourceDirectoryNames(
+	t *testing.T,
+	primitives sourcePrimitives,
+	owner *ownedSourceDescriptor,
+) []string {
+	t.Helper()
+	var all []string
+	for batch := range 1024 {
+		names, done, failure := primitives.readDirectoryBatch(context.Background(), owner)
+		if failure != nil {
+			t.Fatalf("read directory batch %d: %+v", batch, failure)
+		}
+		if !done && len(names) == 0 {
+			t.Fatalf("directory batch %d made no progress", batch)
+		}
+		all = append(all, names...)
+		if done {
+			return all
+		}
+	}
+	t.Fatal("directory read did not terminate")
+	return nil
+}
+
+func requireDarwinSourceNames(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("source names length = %d, want %d: %q", len(got), len(want), got)
+	}
+	for index := range want {
+		if !bytes.Equal([]byte(got[index]), []byte(want[index])) {
+			t.Fatalf("source name %d = %q, want %q", index, got[index], want[index])
+		}
+	}
+}
+
+type nameOnlyDarwinSourceDirEntry struct {
+	name string
+}
+
+func (entry nameOnlyDarwinSourceDirEntry) Name() string {
+	return entry.name
+}
+
+func (nameOnlyDarwinSourceDirEntry) IsDir() bool {
+	panic("source directory normalization called DirEntry.IsDir")
+}
+
+func (nameOnlyDarwinSourceDirEntry) Type() fs.FileMode {
+	panic("source directory normalization called DirEntry.Type")
+}
+
+func (nameOnlyDarwinSourceDirEntry) Info() (fs.FileInfo, error) {
+	panic("source directory normalization called DirEntry.Info")
+}
+
+type darwinSourcePrimitiveStepContext struct {
+	samples  int
+	cancelAt int
+	err      error
+}
+
+func (*darwinSourcePrimitiveStepContext) Deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (*darwinSourcePrimitiveStepContext) Done() <-chan struct{} {
+	return nil
+}
+
+func (ctx *darwinSourcePrimitiveStepContext) Err() error {
+	ctx.samples++
+	if ctx.samples >= ctx.cancelAt {
+		return ctx.err
+	}
+	return nil
+}
+
+func (*darwinSourcePrimitiveStepContext) Value(any) any {
+	return nil
 }
