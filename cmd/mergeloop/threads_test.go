@@ -645,3 +645,47 @@ func TestUnaddressedBlockingCommentUsesTimeNotPosition(t *testing.T) {
 		t.Error("without timestamps the gate cannot prove the reply came after the finding; it must refuse")
 	}
 }
+
+// TestThreadResolvabilityIsTheSingleRule pins the ce-lr7j review finding that
+// the auto-resolve decision was made once, when the thread list was read, and
+// then acted on later against a thread that may have changed.
+//
+// The dangerous case is a human replying in that window: the mutation would
+// silently close a person's newly posted disagreement, and the merge gate would
+// then see an addressed, already-resolved thread and let the merge through.
+// That is the MLC-05 violation this whole change exists to prevent.
+//
+// The fix is to re-read the thread and re-decide immediately before mutating,
+// so this predicate is the one rule both decisions use and they cannot drift.
+func TestThreadResolvabilityIsTheSingleRule(t *testing.T) {
+	advisory := reviewThread{id: "t", comments: []threadComment{botComment(tstCodexP2)}}
+	if got := threadResolvability(advisory); got != resolvabilityEligible {
+		t.Errorf("an unresolved advisory bot thread = %v, want eligible", got)
+	}
+
+	// A human replies in the window: no longer ours to touch.
+	humanJoined := advisory
+	humanJoined.comments = append(append([]threadComment{}, advisory.comments...),
+		humanReply("alice", "actually, please keep this open"))
+	if got := threadResolvability(humanJoined); got != resolvabilityNotOurs {
+		t.Errorf("a thread a person has joined = %v, want notOurs", got)
+	}
+
+	// The bot edits its advisory comment into a P1 in the window: withheld.
+	escalated := reviewThread{id: "t", comments: []threadComment{botComment(tstCodexP1)}}
+	if got := threadResolvability(escalated); got != resolvabilityWithheld {
+		t.Errorf("a thread that became blocking = %v, want withheld", got)
+	}
+
+	// Someone else resolved it, or it grew past one page: not ours either way.
+	already := advisory
+	already.isResolved = true
+	if got := threadResolvability(already); got != resolvabilityNotOurs {
+		t.Errorf("an already-resolved thread = %v, want notOurs", got)
+	}
+	long := advisory
+	long.truncated = true
+	if got := threadResolvability(long); got != resolvabilityNotOurs {
+		t.Errorf("a thread this code cannot read in full = %v, want notOurs", got)
+	}
+}

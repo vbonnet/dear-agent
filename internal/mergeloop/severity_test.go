@@ -236,3 +236,36 @@ func TestClassifyCommentSeverityForeignHostBadgeIsUnknown(t *testing.T) {
 		t.Errorf("a lone canonical P2 must stay advisory, got %v", got)
 	}
 }
+
+// TestClassifyCommentSeverityAltTextVariantBadgeIsUnknown pins the ce-lr7j
+// review finding that the badge-shape detector still keyed on the exact
+// "P<n> Badge" alt text.
+//
+// A future-format marker such as `![Priority P1](.../badge/P1-orange)` was not
+// counted as a badge at all, so it could hide behind a valid P2 in the same
+// comment and the whole comment classified advisory. The destination is the
+// part this code can actually validate, so the shape must be recognised from
+// the destination independently of how the alt text is spelled.
+func TestClassifyCommentSeverityAltTextVariantBadgeIsUnknown(t *testing.T) {
+	p2 := "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Advisory**"
+	for _, variant := range []string{
+		"![Priority P1](https://img.shields.io/badge/P1-orange)",
+		"![severity: P0](https://img.shields.io/badge/P0-red?style=flat)",
+		"![](https://img.shields.io/badge/P1-orange)",
+	} {
+		if got := ClassifyCommentSeverity(p2 + "\n\n" + variant); got != SeverityUnknown {
+			t.Errorf("ClassifyCommentSeverity(P2 + %q) = %v, want %v (a shields.io P badge is a "+
+				"badge however its alt text is spelled)", variant, got, SeverityUnknown)
+		}
+	}
+	// A well-formed badge must still be counted exactly ONCE. If the two shape
+	// patterns both matched it, unread would exceed parsed and every ordinary
+	// advisory comment would wrongly withhold.
+	if got := ClassifyCommentSeverity(p2); got != SeverityAdvisory {
+		t.Errorf("a lone canonical P2 must stay advisory, got %v (shape double-counting?)", got)
+	}
+	blocking := "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Blocking**"
+	if got := ClassifyCommentSeverity(blocking); got != SeverityBlocking {
+		t.Errorf("a lone canonical P1 must stay blocking, got %v", got)
+	}
+}

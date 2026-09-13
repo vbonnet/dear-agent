@@ -93,6 +93,21 @@ const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:Str
   }
 }`
 
+// threadByIDQuery re-reads ONE thread immediately before it is resolved. The
+// listing that chose it is a snapshot: a human can reply, or the bot can edit an
+// advisory comment into a finding, between the read and the mutation. Resolving
+// on a stale decision would silently close a person's newly posted disagreement,
+// which is the MLC-05 violation this whole change exists to prevent.
+const threadByIDQuery = `query($id:ID!){
+  node(id:$id){
+    ... on PullRequestReviewThread {
+      id
+      isResolved
+      comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login __typename } body createdAt lastEditedAt } }
+    }
+  }
+}`
+
 const threadResolveMutation = `mutation($threadId:ID!){
   resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
 }`
@@ -226,19 +241,46 @@ func partitionResolvable(threads []reviewThread) ([]botThread, int) {
 	var resolvable []botThread
 	withheld := 0
 	for _, t := range threads {
-		if t.isResolved || len(t.comments) == 0 || t.truncated {
-			continue
-		}
-		if !allCommentsFromKnownBots(t.logins()) {
-			continue // human thread: never touched, and never counted as withheld
-		}
-		if mergeloop.ThreadSeverityOf(t.bodies()).BlocksResolution() {
+		switch threadResolvability(t) {
+		case resolvabilityEligible:
+			resolvable = append(resolvable, botThread{id: t.id, author: t.comments[0].author})
+		case resolvabilityWithheld:
 			withheld++
-			continue
+		case resolvabilityNotOurs:
+			// Human thread, already resolved, empty, or unreadable: never
+			// touched, and never counted as withheld.
 		}
-		resolvable = append(resolvable, botThread{id: t.id, author: t.comments[0].author})
 	}
 	return resolvable, withheld
+}
+
+// resolvability is the verdict on whether one thread may be auto-resolved.
+type resolvability int
+
+const (
+	// resolvabilityNotOurs means this gate has no business touching the thread.
+	resolvabilityNotOurs resolvability = iota
+	// resolvabilityWithheld means it is a bot thread deliberately left open.
+	resolvabilityWithheld
+	// resolvabilityEligible means every comment is an allowlisted bot carrying
+	// a recognised advisory marker.
+	resolvabilityEligible
+)
+
+// threadResolvability is the single place the auto-resolve rule lives, so the
+// decision made when listing and the decision re-made immediately before the
+// mutation cannot drift apart.
+func threadResolvability(t reviewThread) resolvability {
+	if t.isResolved || len(t.comments) == 0 || t.truncated {
+		return resolvabilityNotOurs
+	}
+	if !allCommentsFromKnownBots(t.logins()) {
+		return resolvabilityNotOurs
+	}
+	if mergeloop.ThreadSeverityOf(t.bodies()).BlocksResolution() {
+		return resolvabilityWithheld
+	}
+	return resolvabilityEligible
 }
 
 // blockingFindingsIn returns every bot finding that must stop a merge.
@@ -450,6 +492,20 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 			out.Resolved++
 			continue
 		}
+		// Re-read and re-decide immediately before mutating. The listing above
+		// is a snapshot, and a thread that was eligible when it was taken may
+		// not be eligible now.
+		current, err := r.fetchThread(ctx, t.id)
+		if err != nil {
+			return out, fmt.Errorf("re-reading thread %s by %s before resolving: %w", t.id, t.author, err)
+		}
+		if v := threadResolvability(current); v != resolvabilityEligible {
+			// Someone engaged with it, or it changed into something this gate
+			// must not touch. Leave it open and record it as withheld so the
+			// decision is visible rather than silent.
+			out.Withheld++
+			continue
+		}
 		if err := r.resolveThread(ctx, t.id); err != nil {
 			return out, fmt.Errorf("resolving thread %s by %s: %w", t.id, t.author, err)
 		}
@@ -557,9 +613,73 @@ func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, 
 		if !rt.PageInfo.HasNextPage {
 			break
 		}
-		cursor = rt.PageInfo.EndCursor
+		// The cursor must actually ADVANCE. GitHub can report hasNextPage with
+		// an empty or repeated endCursor when the thread list changes underneath
+		// a paginated read, and this loop would then refetch the same page
+		// forever. The 30s timeout bounds each gh invocation, not the loop, so a
+		// daemon tick would stop processing every later PR without ever failing.
+		next := rt.PageInfo.EndCursor
+		if next == "" || next == cursor {
+			return nil, fmt.Errorf(
+				"listing review threads for PR #%d: pagination stalled (hasNextPage with cursor %q)", pr, next)
+		}
+		cursor = next
 	}
 	return out, nil
+}
+
+// fetchThread re-reads a single review thread by node ID.
+//
+// A truncated comment list is reported as such rather than silently trimmed:
+// threadResolvability refuses to auto-resolve a thread it cannot read in full,
+// so an over-long thread fails closed here exactly as it does in the listing.
+func (r *ghThreadResolver) fetchThread(ctx context.Context, threadID string) (reviewThread, error) {
+	raw, err := ghJSON(ctx, 30*time.Second, []string{
+		"api", "graphql", "-f", "id=" + threadID, "-f", "query=" + threadByIDQuery,
+	})
+	if err != nil {
+		return reviewThread{}, fmt.Errorf("re-reading review thread: %w", err)
+	}
+	var resp struct {
+		Data struct {
+			Node struct {
+				ID         string `json:"id"`
+				IsResolved bool   `json:"isResolved"`
+				Comments   struct {
+					PageInfo struct {
+						HasNextPage bool `json:"hasNextPage"`
+					} `json:"pageInfo"`
+					Nodes []struct {
+						Author struct {
+							Login    string `json:"login"`
+							Typename string `json:"__typename"`
+						} `json:"author"`
+						Body         string `json:"body"`
+						CreatedAt    string `json:"createdAt"`
+						LastEditedAt string `json:"lastEditedAt"`
+					} `json:"nodes"`
+				} `json:"comments"`
+			} `json:"node"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return reviewThread{}, fmt.Errorf("decoding review thread: %w", err)
+	}
+	n := resp.Data.Node
+	if n.ID != threadID {
+		return reviewThread{}, fmt.Errorf("re-read returned thread %q, want %q", n.ID, threadID)
+	}
+	t := reviewThread{id: n.ID, isResolved: n.IsResolved, truncated: n.Comments.PageInfo.HasNextPage}
+	for _, c := range n.Comments.Nodes {
+		t.comments = append(t.comments, threadComment{
+			author:       c.Author.Login,
+			body:         c.Body,
+			typename:     c.Author.Typename,
+			createdAt:    parseGraphQLTime(c.CreatedAt),
+			lastEditedAt: parseGraphQLTime(c.LastEditedAt),
+		})
+	}
+	return t, nil
 }
 
 // resolveThread resolves one review thread by its node ID.

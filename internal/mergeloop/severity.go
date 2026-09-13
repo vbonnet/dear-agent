@@ -103,7 +103,15 @@ var geminiBadgePattern = regexp.MustCompile(`!\[(critical|high|medium|low)\]\(ht
 // independent gate cleared it. Counting badge-shaped markers separately lets
 // the classifier notice that it failed to read one.
 var (
-	codexBadgeShape  = regexp.MustCompile(`!\[P\d+ Badge\]\(`)
+	// Ordered alternation, so a well-formed badge matches the FIRST branch and
+	// is counted exactly once. Branch one recognises the alt-text spelling
+	// whatever its destination (an off-host badge is still a badge this code
+	// cannot vouch for); branch two recognises a shields.io priority badge
+	// whatever its alt text is spelled, which is the part that can actually be
+	// validated. Keying only on the alt text let `![Priority P1](...)` go
+	// uncounted and hide behind a valid P2 in the same comment.
+	codexBadgeShape = regexp.MustCompile(
+		`!\[P\d+ Badge\]\([^)]*\)|!\[[^\]]*\]\(https://img\.shields\.io/badge/P\d+[^)]*\)`)
 	geminiBadgeShape = regexp.MustCompile(`!\[[^\]]*\]\([^)]*-priority\.svg\)`)
 )
 

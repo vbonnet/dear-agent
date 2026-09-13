@@ -233,7 +233,20 @@ func (d *Driver) Tick(ctx context.Context) (TickResult, error) {
 		res.Actions[st]++
 	}
 
-	d.Deps.Metrics.recordTick(ctx, res)
+	d.metrics().recordTick(ctx, res)
+	// A dry run persists NOTHING. The tick mutates its in-memory tracker
+	// exactly as a real one would, because that is how it computes what it
+	// WOULD do, but none of it reaches disk.
+	//
+	// This is the structural form of two review findings. Guarding
+	// recordEscalation left NoteActionable writing; guarding that left the
+	// merge path writing, and a dry run against the live repository still
+	// DELETED a tracker record, because the dry-run merger reports success and
+	// doMerge then calls RecordAction, recordMerge and Forget. Enumerating
+	// call sites kept missing one; withholding the save cannot.
+	if d.DryRun {
+		return res, nil
+	}
 	if err := d.Tracker.Save(); err != nil {
 		d.audit(AuditEvent{Action: "state_save_error", Detail: err.Error()})
 	}
@@ -277,15 +290,13 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	// would start a real stall timer on an actionable PR, or erase an existing
 	// one on a draft and delay a later escalation. A dry run must not move the
 	// clock it is only reporting on.
-	if !d.DryRun {
-		d.Tracker.NoteActionable(pr.Number, actionableState(cls.State), now)
-	}
+	d.Tracker.NoteActionable(pr.Number, actionableState(cls.State), now)
 
 	// Stall detection: an actionable PR untouched for longer than the
 	// threshold is the failure the Define rule forbids.
 	if d.isStalled(cls.State, rec, now) {
 		res.Stalled++
-		d.Deps.Metrics.recordStall(ctx, pr.Number, cls.State)
+		d.metrics().recordStall(ctx, pr.Number, cls.State)
 		detail := fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))
 		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected", Detail: detail})
 		// A stall must leave a DURABLE record, not only an audit line and a
@@ -335,6 +346,16 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 		return cls.State
 	}
 	return cls.State
+}
+
+// metrics returns the telemetry sink, or nil in a dry run. Metrics is nil-safe
+// on every method, so this one accessor makes an observational pass emit
+// nothing rather than requiring each call site to remember.
+func (d *Driver) metrics() *Metrics {
+	if d.DryRun {
+		return nil
+	}
+	return d.Deps.Metrics
 }
 
 // stallSince is the instant the stall clock for this PR runs from: the last
@@ -545,7 +566,7 @@ func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickRes
 	}
 	d.Tracker.RecordAction(pr.Number, StateGreen, now)
 	res.Merged++
-	d.Deps.Metrics.recordMerge(ctx, pr.Number, now.Sub(d.Tracker.Get(pr.Number, now).FirstSeenAt))
+	d.metrics().recordMerge(ctx, pr.Number, now.Sub(d.Tracker.Get(pr.Number, now).FirstSeenAt))
 	d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merged"})
 	d.Tracker.Forget(pr.Number)
 }
@@ -577,7 +598,7 @@ func (d *Driver) doSpawn(ctx context.Context, pr PR, kind AgentKind, failSig str
 	}
 	d.Tracker.RecordAgentSpawn(pr.Number, failSig, session, now)
 	res.AgentsSpawn++
-	d.Deps.Metrics.recordAgentSpawn(ctx, pr.Number, string(kind))
+	d.metrics().recordAgentSpawn(ctx, pr.Number, string(kind))
 	d.audit(AuditEvent{PR: pr.Number, Action: "agent_spawned",
 		Detail: fmt.Sprintf("kind=%s session=%s sig=%s", kind, session, failSig)})
 }
@@ -586,11 +607,8 @@ func (d *Driver) doSpawn(ctx context.Context, pr PR, kind AgentKind, failSig str
 // a dry run. Auditing and counting stay unconditional: a dry run is supposed to
 // show what the loop WOULD do, and hiding the refusal would defeat that.
 func (d *Driver) recordEscalation(ctx context.Context, pr int, reason, kind string, now time.Time) {
-	if d.DryRun {
-		return
-	}
 	d.Tracker.RecordEscalation(pr, reason, now)
-	d.Deps.Metrics.recordEscalation(ctx, pr, kind)
+	d.metrics().recordEscalation(ctx, pr, kind)
 }
 
 func (d *Driver) escalate(ctx context.Context, pr PR, cls Classification, now time.Time) {

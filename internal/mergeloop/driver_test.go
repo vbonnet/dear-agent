@@ -3,6 +3,7 @@ package mergeloop
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -900,7 +901,14 @@ func TestDryRunDoesNotPersistEscalations(t *testing.T) {
 		t.Fatalf("Tick: %v", err)
 	}
 
-	if got := tr.Get(3, now); !got.EscalatedAt.IsZero() || got.EscalationReason != "" {
+	// The invariant is about DURABLE state, not the in-memory tracker: a dry
+	// run computes what it would do by mutating its own copy, then persists
+	// none of it. Reload from disk to check what actually survived.
+	reloaded, err := LoadTracker("owner/repo", tr.path)
+	if err != nil {
+		t.Fatalf("reload tracker: %v", err)
+	}
+	if got := reloaded.Get(3, now); !got.EscalatedAt.IsZero() || got.EscalationReason != "" {
 		t.Errorf("dry run persisted an escalation: EscalatedAt=%v reason=%q",
 			got.EscalatedAt, got.EscalationReason)
 	}
@@ -948,7 +956,63 @@ func TestDryRunDoesNotMutateActionableClock(t *testing.T) {
 	if _, err := d.Tick(context.Background()); err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	if got := tr.Get(4, now).ActionableSinceAt; !got.IsZero() {
-		t.Errorf("dry run started the real stall clock: ActionableSinceAt = %v", got)
+	reloaded, err := LoadTracker("owner/repo", tr.path)
+	if err != nil {
+		t.Fatalf("reload tracker: %v", err)
+	}
+	if got := reloaded.Get(4, now).ActionableSinceAt; !got.IsZero() {
+		t.Errorf("dry run persisted a stall clock: ActionableSinceAt = %v", got)
+	}
+}
+
+// TestDryRunPersistsNothing is the general form of the two dry-run findings,
+// and it exists because guarding individual call sites kept missing one.
+//
+// Guarding recordEscalation left NoteActionable writing; guarding that left
+// the merge path writing. A dry-run tick against the live repository on
+// 2026-09-13 still DELETED a tracker record, because the dry-run merger
+// reports success and doMerge then calls RecordAction, recordMerge and Forget.
+//
+// The invariant is simpler than any list of call sites: a dry run persists
+// nothing. The tick may mutate its in-memory tracker freely, because that is
+// how it computes what it WOULD do, but none of it reaches disk.
+func TestDryRunPersistsNothing(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	tr, err := LoadTracker("owner/repo", statePath)
+	if err != nil {
+		t.Fatalf("LoadTracker: %v", err)
+	}
+	// Seed a record that a dry run must not destroy: a green PR the dry-run
+	// merger will report as merged, which is what triggers Forget.
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	tr.RecordAction(5, StateGreen, now)
+	if err := tr.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read seeded state: %v", err)
+	}
+
+	d := &Driver{
+		Repo: "owner/repo", Policy: NewPolicy(), Tracker: tr, Cap: 50, DryRun: true,
+		Deps: Deps{
+			Lister: &fakeLister{prs: []PR{{Number: 5, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+				Checks: []Check{reqCheck("ci", CheckPass)}}}},
+			Merger: &fakeMerger{}, // reports success, exactly like the dry-run merger
+			Clock:  func() time.Time { return now },
+			Audit:  func(AuditEvent) {},
+		},
+	}
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state after dry run: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("dry run changed persisted state.\nbefore: %s\nafter:  %s", before, after)
 	}
 }
