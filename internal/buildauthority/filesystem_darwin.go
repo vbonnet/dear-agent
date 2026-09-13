@@ -599,7 +599,7 @@ func parseDarwinFilesec(
 	deferPolicy bool,
 ) (darwinACLObservation, error) {
 	canonical := bytes.NewBuffer(make([]byte, 0, 8+len(darwinACLDomain)+1+len(attribute)))
-	writeLengthPrefixed(canonical, []byte(darwinACLDomain))
+	writeDarwinCanonicalLengthPrefixed(canonical, []byte(darwinACLDomain))
 	if len(attribute) == 0 {
 		canonical.WriteByte(0)
 		return darwinACLObservation{digest: sha256.Sum256(canonical.Bytes())}, nil
@@ -629,10 +629,10 @@ func parseDarwinFilesec(
 	}
 
 	canonical.WriteByte(1)
-	writeUint32(canonical, magic)
+	writeDarwinCanonicalUint32(canonical, magic)
 	canonical.Write(attribute[4:36])
-	writeUint32(canonical, entryCount)
-	writeUint32(canonical, aclFlags)
+	writeDarwinCanonicalUint32(canonical, entryCount)
+	writeDarwinCanonicalUint32(canonical, aclFlags)
 	if entryCount == darwinFilesecNoACL {
 		return darwinACLObservation{digest: sha256.Sum256(canonical.Bytes())}, nil
 	}
@@ -654,13 +654,33 @@ func parseDarwinFilesec(
 			}
 		}
 		canonical.Write(qualifier)
-		writeUint32(canonical, flags)
-		writeUint32(canonical, rights)
+		writeDarwinCanonicalUint32(canonical, flags)
+		writeDarwinCanonicalUint32(canonical, rights)
 	}
 	return darwinACLObservation{
 		digest:    sha256.Sum256(canonical.Bytes()),
 		policyErr: policyErr,
 	}, nil
+}
+
+// These concrete-buffer encoders keep source ACL parsing out of the generic
+// io.Writer boundary. The retained-source call closure can therefore prove
+// that canonicalization has no caller-supplied writer implementation.
+func writeDarwinCanonicalLengthPrefixed(canonical *bytes.Buffer, value []byte) {
+	writeDarwinCanonicalUint64(canonical, uint64(len(value)))
+	_, _ = canonical.Write(value)
+}
+
+func writeDarwinCanonicalUint32(canonical *bytes.Buffer, value uint32) {
+	var encoded [4]byte
+	binary.BigEndian.PutUint32(encoded[:], value)
+	_, _ = canonical.Write(encoded[:])
+}
+
+func writeDarwinCanonicalUint64(canonical *bytes.Buffer, value uint64) {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], value)
+	_, _ = canonical.Write(encoded[:])
 }
 
 func validateDarwinACEGrammar(flags, rights uint32) error {

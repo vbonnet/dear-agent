@@ -1929,10 +1929,10 @@ func classifyPathError(err error) CauseCode {
 }
 
 func contextCause(err error) CauseCode {
-	if errors.Is(err, context.DeadlineExceeded) {
+	if err == context.DeadlineExceeded { //nolint:errorlint // Context.Err returns these exact sentinels; wrapping is outside its contract.
 		return CauseDeadline
 	}
-	if errors.Is(err, context.Canceled) {
+	if err == context.Canceled { //nolint:errorlint // Context.Err returns these exact sentinels; wrapping is outside its contract.
 		return CauseCanceled
 	}
 	return CauseInternalInvariant

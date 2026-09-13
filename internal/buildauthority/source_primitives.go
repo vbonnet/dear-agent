@@ -142,6 +142,10 @@ const (
 	sourceInitialRequired sourcePresenceMode = iota + 1
 	sourceInitialOptional
 	sourceInitialForbidden
+	// sourceInitialWalkPresent is used only after a retained directory
+	// descriptor has yielded the name. Absence is therefore a lookup race,
+	// never the clean initial absence represented by sourceInitialRequired.
+	sourceInitialWalkPresent
 	sourceRevalidatePresent
 	sourceRevalidateAbsent
 )
@@ -199,6 +203,8 @@ const (
 	sourceHandleClosed
 )
 
+const sourceDirectoryReadBatchSize = 128
+
 type sourceACLDisposition uint8
 
 const (
@@ -252,14 +258,15 @@ func (owner *ownedSourceRoot) closeDirect() bool {
 	if owner.state == sourceHandleClosed {
 		return owner.closeFailure
 	}
-	root := owner.root
-	owner.root = nil
-	invalid := owner.state != sourceHandleOpen || root == nil
+	invalid := owner.state != sourceHandleOpen
 	owner.state = sourceHandleClosed
 	owner.closeFailure = invalid
-	if root != nil && root.Close() != nil {
+	if owner.root == nil {
+		owner.closeFailure = true
+	} else if owner.root.Close() != nil {
 		owner.closeFailure = true
 	}
+	owner.root = nil
 	return owner.closeFailure
 }
 
@@ -270,14 +277,15 @@ func (owner *ownedSourceDescriptor) closeDirect() bool {
 	if owner.state == sourceHandleClosed {
 		return owner.closeFailure
 	}
-	descriptor := owner.file
-	owner.file = nil
-	invalid := owner.state != sourceHandleOpen || descriptor == nil
+	invalid := owner.state != sourceHandleOpen
 	owner.state = sourceHandleClosed
 	owner.closeFailure = invalid
-	if descriptor != nil && descriptor.Close() != nil {
+	if owner.file == nil {
+		owner.closeFailure = true
+	} else if owner.file.Close() != nil {
 		owner.closeFailure = true
 	}
+	owner.file = nil
 	return owner.closeFailure
 }
 
@@ -307,6 +315,14 @@ type sourcePrimitives interface {
 		*ownedSourceRoot,
 		string,
 	) (*ownedSourceRoot, *sourcePrimitiveFailure)
+	openRootDirectoryDescriptor(
+		context.Context,
+		*ownedSourceRoot,
+	) (*ownedSourceDescriptor, *sourcePrimitiveFailure)
+	readDirectoryBatch(
+		context.Context,
+		*ownedSourceDescriptor,
+	) ([]string, bool, *sourcePrimitiveFailure)
 	statDescriptor(
 		context.Context,
 		*ownedSourceDescriptor,

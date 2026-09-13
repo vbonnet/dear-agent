@@ -23,6 +23,16 @@ type darwinSourcePrimitives struct{}
 
 var _ sourcePrimitives = darwinSourcePrimitives{}
 
+// invalidateDarwinSourceFD retires the raw integer slot immediately after an
+// os.File assumes responsibility for closing the descriptor.
+func invalidateDarwinSourceFD(fd *int) bool {
+	if fd == nil || *fd < 0 {
+		return false
+	}
+	*fd = -1
+	return true
+}
+
 func platformSourcePrimitives() (sourcePrimitives, *sourcePrimitiveFailure) {
 	return darwinSourcePrimitives{}, nil
 }
@@ -39,11 +49,18 @@ func (darwinSourcePrimitives) openRepositoryRoot(
 	if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 		return nil, failure
 	}
-	root, err := os.OpenRoot(locator.path)
+	owner := &ownedSourceRoot{state: sourceHandleOpen}
+	var err error
+	owner.root, err = os.OpenRoot(locator.path)
 	if err != nil {
+		if owner.root != nil {
+			return owner, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+		}
 		return nil, classifyDarwinSourceOpenFailure(ctx, sourceInitialRequired, err)
 	}
-	owner := &ownedSourceRoot{root: root, state: sourceHandleOpen}
+	if owner.root == nil {
+		return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
 	if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 		return owner, failure
 	}
@@ -56,11 +73,13 @@ func (darwinSourcePrimitives) openPhysicalRootDescriptor(
 	if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 		return nil, failure
 	}
-	flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK |
-		unix.O_DIRECTORY | unix.O_NOFOLLOW_ANY
+	flags, flagsErr := darwinOpenFlags(entryDirectory, true)
+	if flagsErr != nil {
+		return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
 	for {
 		fd, err := unix.Open(physicalRootPath, flags, 0)
-		if errors.Is(err, unix.EINTR) {
+		if err == unix.EINTR {
 			if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 				return nil, failure
 			}
@@ -69,18 +88,20 @@ func (darwinSourcePrimitives) openPhysicalRootDescriptor(
 		if err != nil {
 			return nil, classifyDarwinSourceOpenFailure(ctx, sourceInitialRequired, err)
 		}
-		file := os.NewFile(uintptr(fd), physicalRootPath)
-		if file == nil {
+		owner := &ownedSourceDescriptor{
+			file:  os.NewFile(uintptr(fd), physicalRootPath),
+			kind:  sourceObservedDirectory,
+			state: sourceHandleOpen,
+		}
+		if owner.file == nil {
 			closeErr := unix.Close(fd)
 			if closeErr != nil {
 				return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
 			}
 			return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
 		}
-		owner := &ownedSourceDescriptor{
-			file:  file,
-			kind:  sourceObservedDirectory,
-			state: sourceHandleOpen,
+		if !invalidateDarwinSourceFD(&fd) {
+			return owner, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
 		}
 		if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 			return owner, failure
@@ -106,7 +127,7 @@ func (darwinSourcePrimitives) probeRelativeKind(
 		var stat unix.Stat_t
 		err := unix.Fstatat(int(parent.file.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
 		runtime.KeepAlive(parent.file)
-		if errors.Is(err, unix.EINTR) {
+		if err == unix.EINTR {
 			continue
 		}
 		if err != nil {
@@ -152,6 +173,7 @@ func (darwinSourcePrimitives) openRelativeNoFollow(
 	return openDarwinSourceRelativeDescriptor(ctx, parent, name, kind, openKind, mode, flags)
 }
 
+//nolint:gocyclo // Keep the linear raw-FD ownership and validation state machine visibly contiguous.
 func openDarwinSourceRelativeDescriptor(
 	ctx context.Context,
 	parent *ownedSourceDescriptor,
@@ -161,41 +183,51 @@ func openDarwinSourceRelativeDescriptor(
 	mode sourcePresenceMode,
 	flags int,
 ) (*ownedSourceDescriptor, *sourcePrimitiveFailure) {
+	if !validDarwinSourceName(name) {
+		return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
 	for {
 		if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 			return nil, failure
 		}
 		fd, openErr := unix.Openat(int(parent.file.Fd()), name, flags, 0)
 		runtime.KeepAlive(parent.file)
-		if errors.Is(openErr, unix.EINTR) {
+		if openErr == unix.EINTR {
 			continue
 		}
 		if openErr != nil {
 			return nil, classifyDarwinSourceOpenFailure(ctx, mode, openErr)
 		}
-		file := os.NewFile(uintptr(fd), name)
-		if file == nil {
+		owner := &ownedSourceDescriptor{
+			file:  os.NewFile(uintptr(fd), name),
+			kind:  kind,
+			state: sourceHandleOpen,
+		}
+		if owner.file == nil {
 			closeErr := unix.Close(fd)
 			if closeErr != nil {
 				return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
 			}
 			return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
 		}
-		owner := &ownedSourceDescriptor{file: file, kind: kind, state: sourceHandleOpen}
+		if !invalidateDarwinSourceFD(&fd) {
+			return owner, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+		}
 		if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 			return owner, failure
 		}
 		if failure := sourceContextPrimitiveFailure(ctx, OperationProbe); failure != nil {
 			return owner, failure
 		}
-		kindErr := requireDescriptorKind(int(file.Fd()), openKind)
-		runtime.KeepAlive(file)
+		kindErr := requireDescriptorKind(int(owner.file.Fd()), openKind)
+		runtime.KeepAlive(owner.file)
 		if failure := sourceContextPrimitiveFailure(ctx, OperationProbe); failure != nil {
 			return owner, failure
 		}
 		if kindErr != nil {
-			if errors.Is(kindErr, errAuthorityKindMismatch) ||
-				errors.Is(kindErr, errUnsupportedAuthorityEntry) {
+			//nolint:errorlint // requireDescriptorKind returns these exact private sentinels.
+			if kindErr == errAuthorityKindMismatch ||
+				kindErr == errUnsupportedAuthorityEntry {
 				operation := OperationOpen
 				if mode == sourceRevalidatePresent {
 					operation = OperationCompare
@@ -219,16 +251,122 @@ func (darwinSourcePrimitives) openChildRoot(
 	if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 		return nil, failure
 	}
-	root, err := parent.root.OpenRoot(name)
+	owner := &ownedSourceRoot{state: sourceHandleOpen}
+	var err error
+	owner.root, err = parent.root.OpenRoot(name)
 	runtime.KeepAlive(parent.root)
 	if err != nil {
+		if owner.root != nil {
+			return owner, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+		}
 		return nil, classifyDarwinSourceOpenFailure(ctx, sourceInitialRequired, err)
 	}
-	owner := &ownedSourceRoot{root: root, state: sourceHandleOpen}
+	if owner.root == nil {
+		return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
 	if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
 		return owner, failure
 	}
 	return owner, nil
+}
+
+func (darwinSourcePrimitives) openRootDirectoryDescriptor(
+	ctx context.Context,
+	root *ownedSourceRoot,
+) (*ownedSourceDescriptor, *sourcePrimitiveFailure) {
+	if !root.validOpen() {
+		return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
+		return nil, failure
+	}
+	owner := &ownedSourceDescriptor{
+		kind:  sourceObservedDirectory,
+		state: sourceHandleOpen,
+	}
+	var err error
+	owner.file, err = root.root.Open(".")
+	runtime.KeepAlive(root.root)
+	if err != nil {
+		if owner.file != nil {
+			return owner, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+		}
+		return nil, classifyDarwinSourceOpenFailure(ctx, sourceInitialRequired, err)
+	}
+	if owner.file == nil {
+		return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationOpen); failure != nil {
+		return owner, failure
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationProbe); failure != nil {
+		return owner, failure
+	}
+	kindErr := requireDescriptorKind(int(owner.file.Fd()), entryDirectory)
+	runtime.KeepAlive(owner.file)
+	if failure := sourceContextPrimitiveFailure(ctx, OperationProbe); failure != nil {
+		return owner, failure
+	}
+	if kindErr != nil {
+		//nolint:errorlint // requireDescriptorKind returns these exact private sentinels.
+		if kindErr == errAuthorityKindMismatch ||
+			kindErr == errUnsupportedAuthorityEntry {
+			return owner, newSourcePrimitiveFailure(OperationOpen, CauseIdentity)
+		}
+		return owner, newSourcePrimitiveFailure(OperationProbe, darwinSourceIOCause(kindErr))
+	}
+	return owner, nil
+}
+
+func (darwinSourcePrimitives) readDirectoryBatch(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+) ([]string, bool, *sourcePrimitiveFailure) {
+	if !owner.validOpen() || owner.kind != sourceObservedDirectory {
+		return nil, false, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationWalk); failure != nil {
+		return nil, false, failure
+	}
+	entries, err := owner.file.ReadDir(sourceDirectoryReadBatchSize)
+	runtime.KeepAlive(owner.file)
+	return normalizeDarwinSourceDirectoryBatch(ctx, entries, err)
+}
+
+func normalizeDarwinSourceDirectoryBatch(
+	ctx context.Context,
+	entries []os.DirEntry,
+	err error,
+) ([]string, bool, *sourcePrimitiveFailure) {
+	if failure := sourceContextPrimitiveFailure(ctx, OperationWalk); failure != nil {
+		return nil, false, failure
+	}
+	done := err == io.EOF //nolint:errorlint // os.File.ReadDir returns io.EOF directly for this terminal batch contract.
+	if err != nil && !done {
+		return nil, false, classifyDarwinSourceWalkFailure(ctx, err)
+	}
+	if len(entries) > sourceDirectoryReadBatchSize {
+		return nil, false, newSourcePrimitiveFailure(OperationWalk, CauseLimit)
+	}
+	if len(entries) == 0 && !done {
+		return nil, false, newSourcePrimitiveFailure(OperationWalk, CauseUnstable)
+	}
+
+	names := make([]string, len(entries))
+	for index, entry := range entries {
+		if entry == nil {
+			return nil, false, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+		}
+		name := entry.Name()
+		if !validDarwinSourceName(name) {
+			return nil, false, newSourcePrimitiveFailure(OperationWalk, CauseUnstable)
+		}
+		if len(name) > maxPathComponentBytes {
+			return nil, false, newSourcePrimitiveFailure(OperationWalk, CauseLimit)
+		}
+		names[index] = name
+	}
+	return names, done, nil
 }
 
 func (darwinSourcePrimitives) statDescriptor(
@@ -335,7 +473,7 @@ func (darwinSourcePrimitives) acquireRawACL(
 		}
 		err := darwinFgetattrlist(int(owner.file.Fd()), &attributes, buffer)
 		runtime.KeepAlive(owner.file)
-		if errors.Is(err, unix.EINTR) {
+		if err == unix.EINTR { //nolint:errorlint // darwinFgetattrlist returns the raw syscall sentinel without wrapping.
 			continue
 		}
 		if err != nil {
@@ -414,7 +552,7 @@ func (darwinSourcePrimitives) readExactForParse(
 	if failure := sourceContextPrimitiveFailure(ctx, OperationParse); failure != nil {
 		return failure
 	}
-	if read == len(content) && (err == nil || errors.Is(err, io.EOF)) {
+	if read == len(content) && (err == nil || err == io.EOF) {
 		return nil
 	}
 	if errors.Is(err, fs.ErrPermission) {
@@ -514,6 +652,8 @@ func classifyDarwinSourcePresenceFailure(
 			return 0, false, newSourcePrimitiveFailure(OperationOpen, CauseNotFound)
 		case sourceInitialOptional, sourceInitialForbidden, sourceRevalidateAbsent:
 			return 0, false, nil
+		case sourceInitialWalkPresent:
+			return 0, false, newSourcePrimitiveFailure(OperationProbe, CauseUnstable)
 		case sourceRevalidatePresent:
 			return 0, false, newSourcePrimitiveFailure(OperationCompare, CauseUnstable)
 		}
@@ -539,6 +679,9 @@ func classifyDarwinSourceOpenFailure(
 		if mode == sourceInitialRequired {
 			return newSourcePrimitiveFailure(OperationOpen, CauseNotFound)
 		}
+		if mode == sourceInitialWalkPresent {
+			return newSourcePrimitiveFailure(OperationOpen, CauseUnstable)
+		}
 		if mode == sourceInitialOptional {
 			return newSourcePrimitiveFailure(OperationProbe, CauseUnstable)
 		}
@@ -554,6 +697,28 @@ func classifyDarwinSourceOpenFailure(
 		return newSourcePrimitiveFailure(OperationOpen, CauseIdentity)
 	}
 	return newSourcePrimitiveFailure(OperationOpen, darwinSourceIOCause(err))
+}
+
+func classifyDarwinSourceWalkFailure(
+	ctx context.Context,
+	err error,
+) *sourcePrimitiveFailure {
+	if failure := sourceContextPrimitiveFailure(ctx, OperationWalk); failure != nil {
+		return failure
+	}
+	if err == nil {
+		return newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if errors.Is(err, context.Canceled) {
+		return newSourcePrimitiveFailure(OperationWalk, CauseCanceled)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return newSourcePrimitiveFailure(OperationWalk, CauseDeadline)
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return newSourcePrimitiveFailure(OperationWalk, CausePermission)
+	}
+	return newSourcePrimitiveFailure(OperationWalk, CauseUnstable)
 }
 
 func darwinSourceIOCause(err error) CauseCode {

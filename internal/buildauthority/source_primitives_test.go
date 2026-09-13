@@ -309,6 +309,7 @@ func TestSourceRepositoryLocatorAndPresenceValidity(t *testing.T) {
 		sourceInitialRequired,
 		sourceInitialOptional,
 		sourceInitialForbidden,
+		sourceInitialWalkPresent,
 		sourceRevalidatePresent,
 		sourceRevalidateAbsent,
 	} {

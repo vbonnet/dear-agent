@@ -710,63 +710,14 @@ func (builder *sourceConstructionBuilder) reobserveDescriptorBeforePolicy(
 	expected sourceDescriptorEvidence,
 	maximumBytes int64,
 ) *sourcePrimitiveFailure {
-	if failure := validateSourceObservationRequest(
-		builder.ctx,
+	return builder.reobserveSourceDescriptorBeforePolicy(
 		descriptor,
-		sourceObservedRegular,
-		maximumBytes,
-	); failure != nil {
-		return failure
-	}
-	snapshot, failure := builder.primitives.statDescriptor(builder.ctx, descriptor)
-	if failure != nil {
-		return failure
-	}
-	mount, failure := builder.primitives.statFilesystem(builder.ctx, descriptor)
-	if failure != nil {
-		return failure
-	}
-	rawACL, failure := builder.primitives.acquireRawACL(builder.ctx, descriptor)
-	if failure != nil {
-		return failure
-	}
-	acl, failure := builder.primitives.parseRawACL(builder.ctx, rawACL)
-	if failure != nil {
-		return failure
-	}
-	if !acl.valid() {
-		return newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
-	}
-	snapshot.identity.Filesystem = mount.filesystem
-	evidence := sourceDescriptorEvidence{
-		snapshot:  snapshot,
-		mount:     mount,
-		aclDigest: acl.digest,
-	}
-	if failure = compareSourceDescriptorEvidence(
-		builder.ctx,
 		expected,
-		evidence,
-	); failure != nil {
-		return failure
-	}
-	if failure = builder.primitives.validateFilesystem(builder.ctx, mount); failure != nil {
-		return failure
-	}
-	if failure = builder.primitives.validateACL(builder.ctx, acl); failure != nil {
-		return failure
-	}
-	_, failure = validateSourceDescriptorEvidence(
-		builder.ctx,
-		snapshot,
-		mount,
-		acl,
 		sourceObservedRegular,
 		ownerEffectiveOnly,
 		true,
 		maximumBytes,
 	)
-	return failure
 }
 
 func validateSourceObservationRequest(
