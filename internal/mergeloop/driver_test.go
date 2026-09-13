@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -864,5 +865,65 @@ func TestStallCountsTowardTickSummary(t *testing.T) {
 	if last.Escalated == 0 {
 		t.Error("TickResult.Escalated = 0 on a tick that durably escalated a stalled PR; " +
 			"the summary must not hide the escalation it just recorded")
+	}
+}
+
+// TestDryRunDoesNotPersistEscalations pins the ce-lr7j review finding that
+// `mergeloop tick --dry-run` wrote durable state.
+//
+// This is not hypothetical. A dry-run tick against the live repository on
+// 2026-09-13 persisted seven escalations to the tracker, because the refusal
+// paths call RecordEscalation and Tick then saves the record. An operator who
+// asked for classification only inherited escalations that never happened, and
+// the real escalation metric was emitted alongside them.
+//
+// Dry run means observe. It may audit and it may count, but it must not write
+// durable state or emit telemetry that claims a human escalation occurred.
+func TestDryRunDoesNotPersistEscalations(t *testing.T) {
+	prs := []PR{{Number: 3, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	thr := &fakeThreadResolver{blocking: []BlockingFinding{{
+		ThreadID: "t1", Author: "chatgpt-codex-connector",
+		Severity: SeverityBlocking, Excerpt: "something blocking",
+	}}}
+	var evs []AuditEvent
+	d, tr := newTestDriver(t, prs, &Deps{
+		Merger: &fakeMerger{}, Threads: thr,
+		Clock: func() time.Time { return now },
+		Audit: func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.DryRun = true
+
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if got := tr.Get(3, now); !got.EscalatedAt.IsZero() || got.EscalationReason != "" {
+		t.Errorf("dry run persisted an escalation: EscalatedAt=%v reason=%q",
+			got.EscalatedAt, got.EscalationReason)
+	}
+	// The refusal must still be observable: that is the point of a dry run.
+	if res.Escalated == 0 {
+		t.Error("dry run should still COUNT the refusal it would have escalated")
+	}
+	if !hasAction(evs, "merge_blocked_findings") {
+		t.Errorf("dry run should still audit the refusal, got %v", auditActions(evs))
+	}
+}
+
+// TestDescribeFindingsNamesTheThread pins the ce-lr7j review finding that a
+// durable escalation identified neither the finding nor its thread: the
+// excerpt for an unknown-severity finding was always "(no excerpt)", and the
+// description omitted the thread ID, leaving an operator with a refusal and no
+// way to find what caused it.
+func TestDescribeFindingsNamesTheThread(t *testing.T) {
+	got := describeFindings([]BlockingFinding{{
+		ThreadID: "PRRT_abc123", Author: "chatgpt-codex-connector",
+		Severity: SeverityUnknown, Excerpt: "(no excerpt)",
+	}})
+	if !strings.Contains(got, "PRRT_abc123") {
+		t.Errorf("describeFindings() = %q, want it to name the thread so the refusal is actionable", got)
 	}
 }

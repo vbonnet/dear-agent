@@ -347,10 +347,13 @@ func unaddressedBotComment(comments []threadComment, want mergeloop.ThreadSeveri
 // excerptFinding pulls a short human-readable title out of a bot finding so the
 // audit record says what is blocking rather than just that something is.
 func excerptFinding(comments []threadComment) string {
+	// Every caller passes the slice STARTING at the finding it selected, so the
+	// text to quote is in these comments regardless of how they classify.
+	// Filtering to SeverityBlocking here meant the resolved-unknown path, which
+	// exists precisely for findings this parser cannot classify, always
+	// excerpted as "(no excerpt)": the durable escalation described nothing and
+	// gave an operator no way to act on the refusal.
 	for _, c := range comments {
-		if mergeloop.ClassifyCommentSeverity(c.body) != mergeloop.SeverityBlocking {
-			continue
-		}
 		// Codex puts the finding title in bold after the badge; Gemini starts
 		// its prose on the line after. Take the first non-empty line with the
 		// markdown noise stripped.

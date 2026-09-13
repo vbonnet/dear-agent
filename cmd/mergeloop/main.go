@@ -130,6 +130,7 @@ func run(argv []string) error {
 		Tracker:        tracker,
 		Deps:           deps,
 		Cap:            opts.cap,
+		DryRun:         opts.dryRun,
 		StallThreshold: opts.stallThreshold,
 		RebaseCooldown: opts.rebaseCooldown,
 	}

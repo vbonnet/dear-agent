@@ -159,6 +159,14 @@ type Driver struct {
 	// The cooldown must therefore exceed the slowest required check. Zero
 	// disables it and restores the previous rebase-every-tick behaviour.
 	RebaseCooldown time.Duration
+
+	// DryRun means classify and report, writing nothing durable. The refusal
+	// paths still audit and still count, because observing what WOULD happen is
+	// the entire point, but they must not persist an escalation or emit the
+	// escalation metric: a dry run against the live repository on 2026-09-13
+	// wrote seven escalations an operator never asked for, and the next real
+	// tick would have inherited them.
+	DryRun bool
 }
 
 // TickResult summarizes one pass.
@@ -278,9 +286,8 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 		// deferred PR detectable; persisting the escalation here is what makes
 		// it actionable by a human. Without this the PR stays unmergeable
 		// indefinitely with EscalationReason empty and no escalation metric.
-		d.Tracker.RecordEscalation(pr.Number,
-			fmt.Sprintf("stalled in %s: %s", cls.State, detail), now)
-		d.Deps.Metrics.recordEscalation(ctx, pr.Number, "stalled")
+		d.recordEscalation(ctx, pr.Number,
+			fmt.Sprintf("stalled in %s: %s", cls.State, detail), "stalled", now)
 		// Count it in the tick summary too. The tracker and the metric alone
 		// left printSummary reporting escalated=0 for a tick that had just
 		// durably escalated a PR, hiding the new remediation path from the
@@ -483,7 +490,7 @@ func (d *Driver) blockingFindingsGate(ctx context.Context, pr PR) (bool, gateRef
 func describeFindings(findings []BlockingFinding) string {
 	parts := make([]string, 0, len(findings))
 	for _, f := range findings {
-		parts = append(parts, fmt.Sprintf("%s/%s: %s", f.Author, f.Severity, f.Excerpt))
+		parts = append(parts, fmt.Sprintf("%s/%s [%s]: %s", f.Author, f.Severity, f.ThreadID, f.Excerpt))
 	}
 	return fmt.Sprintf("%d unaddressed bot finding(s) block this merge: %s",
 		len(findings), strings.Join(parts, "; "))
@@ -501,8 +508,7 @@ func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickRes
 		// only trace would be a repeated audit line nobody reads. A blocked
 		// finding is a durable escalation, so it is recorded as one and the
 		// stall clock keeps running.
-		d.Tracker.RecordEscalation(pr.Number, refusal.reason, now)
-		d.Deps.Metrics.recordEscalation(ctx, pr.Number, refusal.kind)
+		d.recordEscalation(ctx, pr.Number, refusal.reason, refusal.kind, now)
 		res.Escalated++
 		return
 	}
@@ -554,9 +560,8 @@ func (d *Driver) doSpawn(ctx context.Context, pr PR, kind AgentKind, failSig str
 	if err != nil {
 		if isSpawnUnavailable(err) {
 			// Defer-don't-block: record a handoff, escalate, keep going.
-			d.Tracker.RecordEscalation(pr.Number, "agent substrate unavailable: "+err.Error(), now)
+			d.recordEscalation(ctx, pr.Number, "agent substrate unavailable: "+err.Error(), "spawn_unavailable", now)
 			res.Escalated++
-			d.Deps.Metrics.recordEscalation(ctx, pr.Number, "spawn_unavailable")
 			d.audit(AuditEvent{PR: pr.Number, Action: "spawn_deferred", Detail: err.Error()})
 			return
 		}
@@ -570,9 +575,19 @@ func (d *Driver) doSpawn(ctx context.Context, pr PR, kind AgentKind, failSig str
 		Detail: fmt.Sprintf("kind=%s session=%s sig=%s", kind, session, failSig)})
 }
 
+// recordEscalation persists an escalation and emits its metric, unless this is
+// a dry run. Auditing and counting stay unconditional: a dry run is supposed to
+// show what the loop WOULD do, and hiding the refusal would defeat that.
+func (d *Driver) recordEscalation(ctx context.Context, pr int, reason, kind string, now time.Time) {
+	if d.DryRun {
+		return
+	}
+	d.Tracker.RecordEscalation(pr, reason, now)
+	d.Deps.Metrics.recordEscalation(ctx, pr, kind)
+}
+
 func (d *Driver) escalate(ctx context.Context, pr PR, cls Classification, now time.Time) {
-	d.Tracker.RecordEscalation(pr.Number, cls.Reason, now)
-	d.Deps.Metrics.recordEscalation(ctx, pr.Number, string(cls.State))
+	d.recordEscalation(ctx, pr.Number, cls.Reason, string(cls.State), now)
 	d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "escalated", Detail: cls.Reason})
 }
 

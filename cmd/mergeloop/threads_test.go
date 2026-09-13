@@ -564,3 +564,23 @@ func TestBlockingFindingsInResolvedUnknownAfterHumanStillRefuses(t *testing.T) {
 		t.Errorf("a human reply after the unknown finding addresses it; got %d findings", len(got))
 	}
 }
+
+// TestExcerptFindingReadsUnknownSeverityComments pins the ce-lr7j review
+// finding that an unknown-severity finding always excerpted as "(no excerpt)".
+//
+// excerptFinding skipped every comment that did not classify as
+// SeverityBlocking, but the resolved-unknown path exists precisely for
+// findings this parser cannot classify. The durable escalation therefore
+// described nothing.
+func TestExcerptFindingReadsUnknownSeverityComments(t *testing.T) {
+	unreadable := botComment("**<sub><sub>![P7 Badge](https://img.shields.io/badge/P7-orange?style=flat)</sub></sub>  " +
+		"Withhold merges when the ledger cannot be read**\n\nDetail follows.")
+	got := excerptFinding([]threadComment{unreadable})
+	if got == "(no excerpt)" {
+		t.Error("excerptFinding() = (no excerpt) for an unknown-severity finding; the escalation " +
+			"must say what is blocking, not merely that something is")
+	}
+	if !strings.Contains(got, "Withhold merges") {
+		t.Errorf("excerptFinding() = %q, want the finding title", got)
+	}
+}
