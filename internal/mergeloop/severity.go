@@ -112,7 +112,12 @@ var (
 	// uncounted and hide behind a valid P2 in the same comment.
 	codexBadgeShape = regexp.MustCompile(
 		`!\[P\d+ Badge\]\([^)]*\)|!\[[^\]]*\]\(https://img\.shields\.io/badge/P\d+[^)]*\)`)
-	geminiBadgeShape = regexp.MustCompile(`!\[[^\]]*\]\([^)]*-priority\.svg\)`)
+	// The suffix is deliberately tolerant: a query string or fragment after
+	// ".svg" is still a priority badge, and anchoring on ")" meant
+	// `high-priority.svg?v=2` was counted by neither the strict parser nor this
+	// shape, so it could hide behind a badge the parser CAN read. The strict
+	// parser stays narrow on purpose; the shape counter is what must be liberal.
+	geminiBadgeShape = regexp.MustCompile(`!\[[^\]]*\]\([^)]*-priority\.svg[^)]*\)`)
 )
 
 // ClassifyCommentSeverity reads one review comment body and returns its

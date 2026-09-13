@@ -269,3 +269,43 @@ func TestClassifyCommentSeverityAltTextVariantBadgeIsUnknown(t *testing.T) {
 		t.Errorf("a lone canonical P1 must stay blocking, got %v", got)
 	}
 }
+
+// TestClassifyCommentSeverityQuerySuffixedBadgeIsUnknown pins the ce-lr7j
+// review finding that a URL query suffix hid a badge from the shape counter.
+//
+// Both the strict Gemini parser and the shape detector required ")" immediately
+// after ".svg", so `![high](.../high-priority.svg?v=2)` was counted by neither.
+// unread then equalled parsed and a comment carrying that high marker alongside
+// a valid medium badge classified advisory, clearing both the resolver and the
+// merge gate.
+//
+// The strict parser is deliberately left narrow: a transitional URL form is not
+// something this code can vouch for. The SHAPE counter is what must be liberal,
+// so the marker is seen, fails to parse, and withholds.
+func TestClassifyCommentSeverityQuerySuffixedBadgeIsUnknown(t *testing.T) {
+	medium := "![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg)"
+	for _, variant := range []string{
+		"![high](https://www.gstatic.com/codereviewagent/high-priority.svg?v=2)",
+		"![critical](https://www.gstatic.com/codereviewagent/critical-priority.svg#frag)",
+	} {
+		if got := ClassifyCommentSeverity(medium + "\n\n" + variant); got != SeverityUnknown {
+			t.Errorf("ClassifyCommentSeverity(medium + %q) = %v, want %v (a badge the parser cannot "+
+				"read must not hide behind one it can)", variant, got, SeverityUnknown)
+		}
+	}
+	// Well-formed badges are still counted exactly once and classify normally.
+	if got := ClassifyCommentSeverity(medium); got != SeverityAdvisory {
+		t.Errorf("a lone canonical medium badge = %v, want advisory (shape double-counting?)", got)
+	}
+	high := "![high](https://www.gstatic.com/codereviewagent/high-priority.svg)"
+	if got := ClassifyCommentSeverity(high); got != SeverityBlocking {
+		t.Errorf("a lone canonical high badge = %v, want blocking", got)
+	}
+	// A shields.io query suffix is the ORDINARY Codex form, not a transitional
+	// one: the strict pattern already reads it, so it must keep classifying
+	// normally rather than being swept up as unreadable.
+	shields := "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat&logo=x)</sub></sub>  T**"
+	if got := ClassifyCommentSeverity(shields); got != SeverityBlocking {
+		t.Errorf("a shields.io badge with query parameters = %v, want blocking", got)
+	}
+}
