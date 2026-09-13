@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
@@ -147,12 +148,23 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
-	state, err := workflow.ParseRunStateFilterValues(r.URL.Query()["state"])
+	// Parse the raw query explicitly. URL.Query() DISCARDS pairs it cannot
+	// parse and reports no error, so a malformed query such as
+	// "?state=running;state=typo" yielded an empty slice, which reads as the
+	// any-state filter: the request answered 200 with every run instead of
+	// being refused. A validation gate a typo can silently switch off is not a
+	// gate.
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_query", err)
+		return
+	}
+	state, err := workflow.ParseRunStateFilterValues(query["state"])
 	if err != nil {
 		s.writeError(w, r, http.StatusBadRequest, "invalid_state", err)
 		return
 	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 50, 500)
+	limit := parseLimit(query.Get("limit"), 50, 500)
 	runs, err := workflow.List(r.Context(), s.RunsDB, workflow.ListOptions{State: state, Limit: limit})
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "list_runs", err)

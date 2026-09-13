@@ -29,6 +29,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -148,7 +149,18 @@ func (s *Server) handleList(w http.ResponseWriter, req *http.Request) {
 	// Parse the filter here rather than passing raw text through: an unknown
 	// spelling is a bad request, and reporting it as an internal failure
 	// would blame the server for the caller's typo.
-	stateFilter, err := workflow.ParseRunStateFilterValues(req.URL.Query()["state"])
+	//
+	// Parse the RAW query, not URL.Query(), which discards pairs it cannot
+	// parse without reporting an error. A malformed query such as
+	// "?state=running;state=typo" otherwise yields an empty slice, which reads
+	// as the any-state filter, so the very validation this route added is
+	// silently switched off by a typo.
+	query, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	stateFilter, err := workflow.ParseRunStateFilterValues(query["state"])
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
