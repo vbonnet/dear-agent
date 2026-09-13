@@ -5,10 +5,11 @@
      present at this revision. cmd/recovery-loop/SPEC.owner delegates here.
 
      Domain (pkg/recoveryloop/*_test.go):
-       RL-01 through RL-10, RL-18 through RL-29, RL-33.
+       RL-01 through RL-10, RL-18 through RL-29, RL-33, RL-39.
 
      CLI (cmd/recovery-loop/*_test.go):
-       RL-11 through RL-17, RL-30 through RL-32, RL-34 through RL-38. -->
+       RL-11 through RL-17, RL-30 through RL-32, RL-34 through RL-38,
+       RL-40, RL-41. -->
 
 **Status:** Production-ready
 **Scope:** Host critical job self-healing loop and escalation engine
@@ -42,7 +43,7 @@ no action that changed anything: success was measured as "`launchctl kickstart`
 exited 0", the pulse condition was never re-read, and the consecutive failure
 count was reset on every one of those ticks, which made the RL-09 escalation
 unreachable. Two of the three jobs were healthy the whole time and were being
-restarted because they exit non-zero to signal an alarm. RL-23 through RL-38
+restarted because they exit non-zero to signal an alarm. RL-23 through RL-41
 close that gap: pulse truth is read from a source that can clear, only an
 explicit present reading counts as evidence, planning may not claim recovery,
 and a recovery counts only once the condition is observed to have gone away.
@@ -129,13 +130,19 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-37** When a job's consecutive failure count has reached the give-up threshold and that job was escalated within the re-escalation interval, the system shall continue to report the job while not appending a further escalation record.
 
+**RL-39** When verifying a recovery action, the system shall treat a pulse as proof that the action worked only when the pulse was observed after the action ran, and the system shall classify an action confirmed only by earlier evidence as PENDING VERIFICATION.
+
+**RL-40** When no escalation sink accepts a human-needed alert, the system shall not advance the re-escalation timestamp, so the next tick attempts delivery again.
+
+**RL-41** When the post-action launchd listing cannot be obtained, the system shall classify the recovery as PENDING VERIFICATION rather than verifying it against the pre-action snapshot.
+
 **RL-38** When the system runs in dry-run mode, the system shall not write state, journal records, escalation records, or notifications on any code path, including the settlement of a verification opened by an earlier tick.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Package tests: `pkg/recoveryloop/loop_test.go` (RL-01..RL-10, RL-18..RL-22)
-- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29, RL-32, RL-33)
+- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29, RL-32, RL-33, RL-39)
 - CLI tests: `cmd/recovery-loop/main_test.go` (RL-11..RL-17)
-- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30, RL-31, RL-32, RL-34..RL-38)
+- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30, RL-31, RL-32, RL-34..RL-38, RL-40, RL-41)
 

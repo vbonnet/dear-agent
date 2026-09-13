@@ -336,10 +336,18 @@ func processJob(
 	freshLaunchd, listErr := host.LaunchdList(verifyCtx)
 	cancelVerify()
 	if listErr != nil {
+		// Falling back to the pre-action snapshot would feed VerifyRecovery
+		// the very defect that triggered the action and score the remediation
+		// a failure without ever observing the current host. A transient
+		// listing failure means structural truth is unavailable, which is
+		// pending, not failed.
 		fmt.Fprintf(stderr, "recovery-loop: re-list launchd for verification: %v\n", listErr)
-		freshLaunchd = launchdJobs
+		recordPending(job, action, fmt.Sprintf(
+			"%s ran; launchd could not be re-observed to verify it (%v)", action, listErr),
+			now, state, rep, opts, prev, stderr)
+		return
 	}
-	outcome := recoveryloop.VerifyRecovery(job, action, truth, freshLaunchd, host, now)
+	outcome := recoveryloop.VerifyRecovery(job, action, truth, freshLaunchd, host, now, now)
 
 	switch {
 	case outcome.Verified:
@@ -370,7 +378,7 @@ func settlePending(
 	notifyFn notifier,
 	stderr io.Writer,
 ) {
-	outcome := recoveryloop.VerifyRecovery(job, prev.PendingAction, truth, launchdJobs, host, now)
+	outcome := recoveryloop.VerifyRecovery(job, prev.PendingAction, truth, launchdJobs, host, now, prev.PendingSince)
 	switch {
 	case outcome.Verified:
 		recordVerified(job, prev.PendingAction, outcome.Reason, now, state, rep, opts, stderr)
@@ -785,6 +793,11 @@ func escalate(
 		"recovery-loop could not restore %s. Pulse %q absent for %s. %d consecutive recoveries failed to clear it (last action %s). %s",
 		job.Name, pulse, absentFor.Round(time.Minute), attempts, action, reason)
 
+	// Delivery, not intent, is what the rate limit measures. Stamping
+	// LastEscalated when no sink accepted the message would buy 24h of silence
+	// for an escalation nobody received: the false-green shape applied to the
+	// escalation path itself (RL-40).
+	var delivered bool
 	if err := absencealarm.AppendJournal(opts.absenceJournal, absencealarm.JournalRecord{
 		Time:   now,
 		Kind:   "recovery.human_needed",
@@ -794,22 +807,30 @@ func escalate(
 		Misses: attempts,
 	}); err != nil {
 		fmt.Fprintf(stderr, "recovery-loop: append absence escalation: %v\n", err)
+	} else {
+		delivered = true
+	}
+
+	if notifyFn != nil {
+		notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
+		title := fmt.Sprintf("HUMAN NEEDED: %s not recovered", job.Name)
+		if err := notifyFn(notifyCtx, title, body); err != nil {
+			fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
+		} else {
+			delivered = true
+		}
+		cancel()
 	}
 
 	st := state.Jobs[job.Name]
-	st.LastEscalated = now
 	st.HumanNeeded = true
+	if delivered {
+		st.LastEscalated = now
+	} else {
+		fmt.Fprintf(stderr,
+			"recovery-loop: no escalation sink accepted the %s alert; will retry next tick\n", job.Name)
+	}
 	state.Jobs[job.Name] = st
-
-	if notifyFn == nil {
-		return
-	}
-	notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
-	defer cancel()
-	title := fmt.Sprintf("HUMAN NEEDED: %s not recovered", job.Name)
-	if err := notifyFn(notifyCtx, title, body); err != nil {
-		fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
-	}
 }
 
 func emitReport(stdout, stderr io.Writer, rep recoveryloop.Heartbeat, jsonOut bool) {

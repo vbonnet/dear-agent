@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -558,5 +559,97 @@ func TestCLI_PendingAttemptNumberedFromOne(t *testing.T) {
 	}
 	if got := fmt.Sprint(rec["attempt"]); got != "1" {
 		t.Errorf("first pending attempt journalled as %q, want \"1\": %s", got, first)
+	}
+}
+
+// RL-40: the escalation rate limit must track delivery, not intent.
+//
+// recordGivenUp suppresses a repeat escalation for 24h based on LastEscalated.
+// Stamping that timestamp when neither sink accepted the escalation means a
+// failed delivery buys silence for a day: the operator is never told, and the
+// loop believes they were. That is the false-green shape applied to the
+// escalation path itself.
+func TestCLI_FailedEscalationDoesNotStartTheRateLimit(t *testing.T) {
+	f := newFixture(t)
+	now := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	f.write(t, f.cfg, absenceAlarmJob)
+	f.write(t, f.absHB, fmt.Sprintf(
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"absent"}]}`,
+		now.Format(time.RFC3339)))
+	f.write(t, f.absState, `{"pulses":{"absence-alarm-heartbeat":{"since":"2026-09-03T08:00:00Z"}}}`)
+	f.write(t, f.state, `{"jobs":{"absence-alarm":{"consecutive_failures":5,"human_needed":true}}}`)
+
+	// Both sinks refuse: the journal path cannot be created because a regular
+	// file sits where its parent directory would go, and the notifier errors.
+	blocker := filepath.Join(f.dir, "blocked")
+	f.write(t, blocker, "not a directory")
+	args := append(f.args("--give-up-after", "5"), "--absence-journal", filepath.Join(blocker, "absence.jsonl"))
+	failing := func(context.Context, string, string) error { return errors.New("no notification daemon") }
+
+	var stdout, stderr bytes.Buffer
+	run(args, &stdout, &stderr, mustHost(now), failing)
+
+	js := f.jobState(t, "absence-alarm")
+	if !js.LastEscalated.IsZero() {
+		t.Errorf("LastEscalated = %s after both sinks failed; a failed delivery must not "+
+			"suppress the next attempt for 24h", js.LastEscalated)
+	}
+	if !js.HumanNeeded {
+		t.Error("job stopped reporting human_needed after a failed escalation")
+	}
+}
+
+// mustHost returns a host fixture for a loaded, alarm-exiting absence-alarm.
+func mustHost(now time.Time) recoveryloop.HostOps {
+	h, _ := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{
+		"com.dear-agent.absence-alarm": {Loaded: true, PID: 0, Status: 1},
+	})
+	return h
+}
+
+// RL-41: a post-action launchd listing that cannot be obtained is missing
+// evidence, not negative evidence.
+//
+// Falling back to the pre-action snapshot hands VerifyRecovery the very defect
+// that triggered the action, so a transient listing failure would score the
+// remediation a failure and count toward escalation without the current host
+// ever being observed.
+func TestCLI_FailedPostActionListingIsPendingNotFailed(t *testing.T) {
+	f := newFixture(t)
+	now := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	f.write(t, f.cfg, `{"jobs":[{"name":"absence-alarm","launchd_label":"com.dear-agent.absence-alarm",`+
+		`"plist_path":"/tmp/com.dear-agent.absence-alarm.plist","pulse":"absence-alarm-heartbeat"}]}`)
+	f.write(t, f.absHB, fmt.Sprintf(
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"absent"}]}`,
+		now.Format(time.RFC3339)))
+
+	// The job is unloaded, so the pre-action snapshot says "not loaded". The
+	// bootstrap succeeds; the verification listing then fails.
+	host, _ := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{})
+	var listCalls int
+	host.LaunchdList = func(context.Context) (map[string]recoveryloop.LaunchdJobInfo, error) {
+		listCalls++
+		if listCalls == 1 {
+			return map[string]recoveryloop.LaunchdJobInfo{}, nil
+		}
+		return nil, errors.New("launchctl: connection interrupted")
+	}
+
+	var stdout, stderr bytes.Buffer
+	run(f.args(), &stdout, &stderr, host, nil)
+
+	if listCalls < 2 {
+		t.Fatalf("expected a post-action re-list, got %d listing calls", listCalls)
+	}
+	js := f.jobState(t, "absence-alarm")
+	if js.LastStatus == recoveryloop.StatusFailed {
+		t.Errorf("scored a failure from the pre-action snapshot after the re-list failed:\n%s", stdout.String())
+	}
+	if js.ConsecutiveFailures != 0 {
+		t.Errorf("consecutive_failures = %d; an unobservable host must not count against the job",
+			js.ConsecutiveFailures)
+	}
+	if js.LastStatus != recoveryloop.StatusPending {
+		t.Errorf("last_status = %q, want pending", js.LastStatus)
 	}
 }

@@ -33,6 +33,10 @@ type PulseFact struct {
 	Status absencealarm.Status
 	// Since is when the current alarm began, zero when not alarming.
 	Since time.Time
+	// Evidence is when the probe observed this pulse. It is what makes a
+	// present reading usable as post-action proof: a pulse seen before a
+	// remediation ran says nothing about whether the remediation worked.
+	Evidence time.Time
 }
 
 // PulseTruth maps a pulse name to its current fact.
@@ -63,6 +67,12 @@ func (pt PulseTruth) AbsentFor(name string, now time.Time) time.Duration {
 	}
 	return now.Sub(f.Since)
 }
+
+// heartbeatSkewTolerance is how far ahead of local time a heartbeat may be
+// dated before it is refused. It absorbs ordinary clock jitter between the
+// writer and this reader without accepting a heartbeat from a clock that
+// genuinely jumped.
+const heartbeatSkewTolerance = 2 * time.Minute
 
 // absenceHeartbeat mirrors the fields of absencealarm.Heartbeat that the
 // recovery loop consumes.
@@ -101,6 +111,13 @@ func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge 
 		if hb.TickTime.IsZero() {
 			return PulseTruth{}, fmt.Errorf("absence heartbeat %s has no tick_time: pulse truth unavailable", heartbeatPath)
 		}
+		if hb.TickTime.After(now.Add(heartbeatSkewTolerance)) {
+			// A negative age passes any "older than maxAge" test, so a clock
+			// that jumped forward would let this heartbeat's last present
+			// readings suppress remediation until wall time caught up.
+			return PulseTruth{}, fmt.Errorf("absence heartbeat %s is dated %s in the future: pulse truth unavailable",
+				heartbeatPath, hb.TickTime.Sub(now).Round(time.Second))
+		}
 		if now.Sub(hb.TickTime) > maxAge {
 			return PulseTruth{}, fmt.Errorf("absence heartbeat %s is %s old (max %s): pulse truth unavailable",
 				heartbeatPath, now.Sub(hb.TickTime).Round(time.Second), maxAge)
@@ -111,7 +128,7 @@ func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge 
 		if res.Name == "" {
 			continue
 		}
-		truth[res.Name] = PulseFact{Known: true, Status: res.Status}
+		truth[res.Name] = PulseFact{Known: true, Status: res.Status, Evidence: res.Evidence}
 	}
 
 	// Date each standing alarm from the absence-alarm dedup state, which
@@ -164,6 +181,7 @@ func VerifyRecovery(
 	launchdJobs map[string]LaunchdJobInfo,
 	host HostOps,
 	now time.Time,
+	actionAt time.Time,
 ) VerifyOutcome {
 	// Structural re-probe: these clear immediately or not at all.
 	if job.BinaryPath != "" && !host.FileExists(job.BinaryPath) {
@@ -192,6 +210,21 @@ func VerifyRecovery(
 	if job.Pulse != "" {
 		switch {
 		case truth.Present(job.Pulse):
+			// The pulse is present, but presence observed BEFORE the action
+			// cannot be proof that the action worked. Pulse truth is read once
+			// per tick, so the reading in hand usually predates the
+			// remediation; the answer arrives on a later tick, from a later
+			// heartbeat. Without this, a job unloaded minutes ago still has a
+			// fresh file-mtime pulse, and a bootstrap that succeeds
+			// structurally while the job never runs would be scored a
+			// verified recovery (RL-39).
+			if ev := truth[job.Pulse].Evidence; !actionAt.IsZero() && !ev.After(actionAt) {
+				return VerifyOutcome{
+					Status: StatusPending,
+					Reason: fmt.Sprintf("pulse %q was last observed %s, before %s ran: awaiting fresh evidence",
+						job.Pulse, evidenceStamp(ev), action),
+				}
+			}
 			return VerifyOutcome{
 				Verified: true,
 				Status:   StatusRecovered,
@@ -219,4 +252,12 @@ func VerifyRecovery(
 		Status:   StatusRecovered,
 		Reason:   fmt.Sprintf("verified: structural checks pass after %s", action),
 	}
+}
+
+// evidenceStamp renders a probe observation time for an operator-facing reason.
+func evidenceStamp(t time.Time) string {
+	if t.IsZero() {
+		return "at an unrecorded time"
+	}
+	return "at " + t.Format(time.RFC3339)
 }

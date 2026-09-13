@@ -103,7 +103,7 @@ func TestVerifyRecovery_StillAbsentIsNotRecovered(t *testing.T) {
 	// The structural condition cleared (job is loaded) but the pulse has not.
 	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusAbsent}}
 
-	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now())
+	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now(), time.Time{})
 	if outcome.Verified {
 		t.Fatal("VerifyRecovery reported success while the pulse is still absent")
 	}
@@ -125,7 +125,7 @@ func TestVerifyRecovery_PulseReturnedIsRecovered(t *testing.T) {
 	}
 	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusPresent}}
 
-	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now())
+	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now(), time.Time{})
 	if !outcome.Verified || outcome.Status != StatusRecovered {
 		t.Errorf("got verified=%v status=%q; want verified recovered", outcome.Verified, outcome.Status)
 	}
@@ -143,7 +143,7 @@ func TestVerifyRecovery_StillUnloadedIsImmediateFailure(t *testing.T) {
 	}
 	truth := PulseTruth{"mergeloop-tick": {Known: true, Status: absencealarm.StatusAbsent}}
 
-	outcome := VerifyRecovery(job, ActionBootstrap, truth, map[string]LaunchdJobInfo{}, host, host.Now())
+	outcome := VerifyRecovery(job, ActionBootstrap, truth, map[string]LaunchdJobInfo{}, host, host.Now(), time.Time{})
 	if outcome.Verified {
 		t.Fatal("VerifyRecovery reported success while the launchd job is still unloaded")
 	}
@@ -164,7 +164,7 @@ func TestVerifyRecovery_UnknownPulseIsNotRecovered(t *testing.T) {
 	launchd := map[string]LaunchdJobInfo{
 		"com.dear-agent.token-refresher": {Label: "com.dear-agent.token-refresher", PID: 0, Status: 0, Loaded: true},
 	}
-	outcome := VerifyRecovery(job, ActionKickstart, PulseTruth{}, launchd, host, host.Now())
+	outcome := VerifyRecovery(job, ActionKickstart, PulseTruth{}, launchd, host, host.Now(), time.Time{})
 	if outcome.Verified {
 		t.Fatal("VerifyRecovery claimed success for a pulse it never observed")
 	}
@@ -223,7 +223,7 @@ func TestVerifyRecovery_SnoozedPulseDoesNotVerify(t *testing.T) {
 	}
 	truth := PulseTruth{"sandbox-gc-tick": {Known: true, Status: absencealarm.StatusSnoozed}}
 
-	out := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now())
+	out := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now(), time.Time{})
 	if out.Verified || out.Status == StatusRecovered {
 		t.Errorf("got verified=%v status=%q; a snoozed pulse is not an observation of recovery", out.Verified, out.Status)
 	}
@@ -262,5 +262,81 @@ func TestLoadPulseTruth_CorruptAlarmStateYieldsError(t *testing.T) {
 	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
 	if _, err := LoadPulseTruth(hb, st, now, time.Hour); err == nil {
 		t.Fatal("a corrupt alarm state was accepted silently")
+	}
+}
+
+// RL-39: a pulse observed BEFORE the action ran cannot prove the action worked.
+//
+// Pulse truth is read once at the start of a tick. Passing that pre-action fact
+// to VerifyRecovery lets a structural fix be confirmed by evidence that predates
+// it: a job unloaded minutes ago still has a fresh file-mtime pulse, so a
+// bootstrap that succeeds structurally but never actually runs the job would
+// reset the failure count as a verified recovery. Post-action proof has to
+// post-date the action.
+func TestVerifyRecovery_PreActionPulseIsNotPostActionProof(t *testing.T) {
+	host, _ := mockHostOps()
+	actionAt := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	job := Job{Name: "disk-watchdog", LaunchdLabel: "com.dear-agent.disk-watchdog", Pulse: "disk-watchdog-tick"}
+	launchd := map[string]LaunchdJobInfo{
+		"com.dear-agent.disk-watchdog": {Loaded: true, Status: 0},
+	}
+	// Present, but observed five minutes before the remediation ran.
+	truth := PulseTruth{"disk-watchdog-tick": {
+		Known:    true,
+		Status:   absencealarm.StatusPresent,
+		Evidence: actionAt.Add(-5 * time.Minute),
+	}}
+
+	out := VerifyRecovery(job, ActionBootstrap, truth, launchd, host, actionAt, actionAt)
+	if out.Verified || out.Status == StatusRecovered {
+		t.Errorf("got verified=%v status=%q reason=%q; a pulse from before the action does not prove the action worked",
+			out.Verified, out.Status, out.Reason)
+	}
+	if out.Status != StatusPending {
+		t.Errorf("status = %q, want pending: the answer is not in yet", out.Status)
+	}
+}
+
+// RL-39: once the pulse is observed after the action, that is real proof.
+func TestVerifyRecovery_PostActionPulseVerifies(t *testing.T) {
+	host, _ := mockHostOps()
+	actionAt := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	later := actionAt.Add(20 * time.Minute)
+	job := Job{Name: "disk-watchdog", LaunchdLabel: "com.dear-agent.disk-watchdog", Pulse: "disk-watchdog-tick"}
+	launchd := map[string]LaunchdJobInfo{
+		"com.dear-agent.disk-watchdog": {Loaded: true, Status: 0},
+	}
+	truth := PulseTruth{"disk-watchdog-tick": {
+		Known:    true,
+		Status:   absencealarm.StatusPresent,
+		Evidence: actionAt.Add(10 * time.Minute),
+	}}
+
+	out := VerifyRecovery(job, ActionBootstrap, truth, launchd, host, later, actionAt)
+	if !out.Verified || out.Status != StatusRecovered {
+		t.Errorf("got verified=%v status=%q reason=%q; a pulse observed after the action is proof it worked",
+			out.Verified, out.Status, out.Reason)
+	}
+}
+
+// RL-32: a heartbeat dated in the future is evidence of a broken clock, not
+// fresh evidence. now.Sub(tick) is negative for a future tick, so an age-only
+// check accepts it however far ahead it is, and its last "present" results then
+// suppress remediation until wall time catches up.
+func TestLoadPulseTruth_FutureTickTimeIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	hb := filepath.Join(dir, "absence-alarm.heartbeat.json")
+	writeFile(t, hb, `{"tick_time":"2026-09-20T08:00:00Z",
+	  "results":[{"name":"disk-watchdog-tick","status":"present"}]}`)
+	st := filepath.Join(dir, "absence-alarm-state.json")
+	writeFile(t, st, `{"pulses": {}}`)
+
+	now := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	truth, err := LoadPulseTruth(hb, st, now, time.Hour)
+	if err == nil {
+		t.Fatal("a heartbeat dated a week in the future was accepted")
+	}
+	if truth.Present("disk-watchdog-tick") {
+		t.Error("facts were returned from a future-dated heartbeat")
 	}
 }
