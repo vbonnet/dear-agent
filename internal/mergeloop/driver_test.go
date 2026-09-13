@@ -830,3 +830,39 @@ func TestNoFalseStallAfterDraftFollowingAnAction(t *testing.T) {
 			"stale pre-draft action anchor; got %v", auditActions(evs))
 	}
 }
+
+// TestStallCountsTowardTickSummary pins the ce-lr7j review finding that the
+// durable stall escalation was invisible in the tick summary.
+//
+// The stall branch persisted an escalation and emitted the escalation metric
+// but never incremented res.Escalated, so printSummary reported escalated=0 for
+// a tick that had durably escalated a PR. That hides the very remediation path
+// the escalation was added to create from the operator reading the summary.
+func TestStallCountsTowardTickSummary(t *testing.T) {
+	prs := []PR{{Number: 7, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("unresolved review threads: %w", ErrNotReady)}
+	d, _ := newTestDriver(t, prs, &Deps{
+		Merger: mg, Threads: &fakeThreadResolver{withheld: 1},
+		Clock: func() time.Time { return now },
+	})
+	d.StallThreshold = time.Hour
+
+	var last TickResult
+	for range 6 {
+		res, err := d.Tick(context.Background())
+		if err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		last = res
+		now = now.Add(20 * time.Minute)
+	}
+	if last.Stalled == 0 {
+		t.Fatalf("precondition: expected a stalled PR, got %+v", last)
+	}
+	if last.Escalated == 0 {
+		t.Error("TickResult.Escalated = 0 on a tick that durably escalated a stalled PR; " +
+			"the summary must not hide the escalation it just recorded")
+	}
+}

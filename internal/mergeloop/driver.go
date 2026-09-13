@@ -281,6 +281,11 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 		d.Tracker.RecordEscalation(pr.Number,
 			fmt.Sprintf("stalled in %s: %s", cls.State, detail), now)
 		d.Deps.Metrics.recordEscalation(ctx, pr.Number, "stalled")
+		// Count it in the tick summary too. The tracker and the metric alone
+		// left printSummary reporting escalated=0 for a tick that had just
+		// durably escalated a PR, hiding the new remediation path from the
+		// operator reading the one line the command actually prints.
+		res.Escalated++
 	}
 
 	switch cls.State {

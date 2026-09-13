@@ -510,3 +510,57 @@ func TestBlockingFindingsInHumanBeforeBotP1DoesNotAddressIt(t *testing.T) {
 		t.Errorf("a human reply after the P1 addresses it even with a bot comment between; got %d", len(got))
 	}
 }
+
+// TestBlockingFindingsInResolvedTruncatedRefusesDespiteVisibleHuman pins the
+// ce-lr7j review finding that the thread-level human shortcut was ordered
+// BEFORE the truncation safeguard.
+//
+// A resolved thread with more comments than one page, whose visible first page
+// happens to contain a human, took the shortcut and never reached the
+// fail-closed truncation branch. A blocking bot finding could sit in the unseen
+// page while GitHub's conversation gate, already satisfied by the resolution,
+// protected nothing. Partial-page engagement is not evidence about the part
+// nobody read.
+func TestBlockingFindingsInResolvedTruncatedRefusesDespiteVisibleHuman(t *testing.T) {
+	human := threadComment{author: "alice", body: "looks fine to me", typename: "User"}
+	thread := reviewThread{
+		id: "resolved-truncated", isResolved: true, truncated: true,
+		comments: []threadComment{botComment(tstCodexP2), human},
+	}
+	if got := blockingFindingsIn([]reviewThread{thread}); len(got) != 1 {
+		t.Errorf("a resolved TRUNCATED thread must refuse even with a human on the visible page; got %d", len(got))
+	}
+	// An unresolved truncated thread is still held by GitHub, so it stays out.
+	unresolved := thread
+	unresolved.isResolved = false
+	if got := blockingFindingsIn([]reviewThread{unresolved}); len(got) != 0 {
+		t.Errorf("an UNRESOLVED truncated thread is held by GitHub's gate; got %d findings", len(got))
+	}
+}
+
+// TestBlockingFindingsInResolvedUnknownAfterHumanStillRefuses pins the ce-lr7j
+// review finding that the per-comment ordering fix covered only RECOGNISED
+// blocking markers.
+//
+// unaddressedBlockingComment ignores unknown severities, so a resolved thread
+// carrying an earlier human comment followed by a bot finding this parser
+// cannot read took the blanket shortcut and never reached the resolved-unknown
+// safeguard. An unreadable finding nobody answered is exactly the case that
+// must fail closed.
+func TestBlockingFindingsInResolvedUnknownAfterHumanStillRefuses(t *testing.T) {
+	human := threadComment{author: "alice", body: "unrelated remark", typename: "User"}
+	unreadable := botComment("**<sub><sub>![P7 Badge](https://img.shields.io/badge/P7-orange?style=flat)</sub></sub>  Future format**")
+
+	afterHuman := reviewThread{id: "resolved-unknown", isResolved: true,
+		comments: []threadComment{human, unreadable}}
+	if got := blockingFindingsIn([]reviewThread{afterHuman}); len(got) != 1 {
+		t.Errorf("a resolved unknown-severity bot finding posted AFTER a human must refuse; got %d", len(got))
+	}
+
+	// A human reply AFTER the unreadable finding does address it.
+	answered := reviewThread{id: "answered-unknown", isResolved: true,
+		comments: []threadComment{unreadable, human}}
+	if got := blockingFindingsIn([]reviewThread{answered}); len(got) != 0 {
+		t.Errorf("a human reply after the unknown finding addresses it; got %d findings", len(got))
+	}
+}

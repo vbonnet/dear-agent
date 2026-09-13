@@ -240,12 +240,13 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 		if len(t.comments) == 0 {
 			continue
 		}
-		// A recognised blocking finding is judged on its own, BEFORE the
-		// thread-level human check below. Asking only whether a person appears
-		// anywhere in the thread let a bot post a P1 after an unrelated human
-		// remark and have the whole thread read as engaged; once such a thread
-		// was resolved, GitHub's conversation gate could not catch it either.
-		// Only a human comment that comes AFTER a finding can have addressed it.
+		// Every path below judges engagement PER COMMENT. There is deliberately
+		// no thread-level "a human appears somewhere, skip it" shortcut: that
+		// shortcut was ordered ahead of the fail-closed branches, so a human on
+		// the visible page could carry a resolved thread past the truncation
+		// refusal and past the unknown-severity refusal alike.
+
+		// A recognised blocking bot finding that no person answered afterwards.
 		if i, ok := unaddressedBlockingComment(t.comments); ok {
 			out = append(out, mergeloop.BlockingFinding{
 				ThreadID: t.id,
@@ -255,15 +256,20 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 			})
 			continue
 		}
-		if t.hasHumanComment() {
+
+		// Beyond this point only RESOLVED threads can produce a finding. While
+		// a thread is unresolved GitHub's own conversation-resolution gate
+		// still holds the merge, so flagging ordinary bot prose here too would
+		// deadlock every PR. Once resolved, GitHub holds nothing and this gate
+		// is the last reader.
+		if !t.isResolved {
 			continue
 		}
-		sev := mergeloop.ThreadSeverityOf(t.bodies())
-		// A truncated thread cannot be classified honestly: a blocking marker
-		// may sit past the first page of comments. While the thread is still
-		// unresolved GitHub holds the merge, but once it is resolved this gate
-		// is the only reader left, so an unreadable resolved thread refuses.
-		if t.isResolved && t.truncated {
+
+		// A resolved thread this gate cannot read in full refuses outright. A
+		// blocking marker may sit past the first page, and engagement visible
+		// on the page says nothing about the part nobody fetched.
+		if t.truncated {
 			out = append(out, mergeloop.BlockingFinding{
 				ThreadID: t.id,
 				Author:   t.comments[0].author,
@@ -272,32 +278,18 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 			})
 			continue
 		}
-		// Blocking severities were already handled above, per comment.
-		if sev != mergeloop.SeverityBlocking {
-			// An UNRESOLVED thread of unknown severity is already held by
-			// GitHub's own conversation-resolution gate, so flagging it here
-			// too would deadlock every PR carrying ordinary bot prose.
-			//
-			// A RESOLVED one is the opposite case: GitHub has nothing left to
-			// hold, so this gate is the last reader. That is exactly the shape
-			// the old severity-blind resolver created, and a future badge
-			// format this parser has never seen lands here too. Refuse.
-			if t.isResolved && sev == mergeloop.SeverityUnknown {
-				out = append(out, mergeloop.BlockingFinding{
-					ThreadID: t.id,
-					Author:   t.comments[0].author,
-					Severity: sev,
-					Excerpt:  excerptFinding(t.comments),
-				})
-			}
-			continue
+
+		// A resolved bot finding whose severity this parser does not recognise,
+		// and which no person answered afterwards. A future badge format lands
+		// here, as does the shape the old severity-blind resolver created.
+		if i, ok := unaddressedUnknownBotComment(t.comments); ok {
+			out = append(out, mergeloop.BlockingFinding{
+				ThreadID: t.id,
+				Author:   t.comments[i].author,
+				Severity: mergeloop.SeverityUnknown,
+				Excerpt:  excerptFinding(t.comments[i:]),
+			})
 		}
-		out = append(out, mergeloop.BlockingFinding{
-			ThreadID: t.id,
-			Author:   t.comments[0].author,
-			Severity: sev,
-			Excerpt:  excerptFinding(t.comments),
-		})
 	}
 	return out
 }
@@ -310,14 +302,32 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 // says nothing about it. Bot comments between the two are irrelevant: what
 // matters is whether any real person spoke after the finding was posted.
 func unaddressedBlockingComment(comments []threadComment) (int, bool) {
+	return unaddressedBotComment(comments, mergeloop.SeverityBlocking)
+}
+
+// unaddressedUnknownBotComment is the same test for a bot finding whose
+// severity this parser cannot read. It is applied only to RESOLVED threads,
+// where GitHub's conversation gate no longer holds the merge.
+func unaddressedUnknownBotComment(comments []threadComment) (int, bool) {
+	return unaddressedBotComment(comments, mergeloop.SeverityUnknown)
+}
+
+// unaddressedBotComment returns the index of the first allowlisted-bot comment
+// at the given severity that no human answered afterwards.
+//
+// "Afterwards" is the load-bearing word. A person can only have engaged with a
+// finding they could actually see, so a human comment that PRECEDES the finding
+// says nothing about it. Bot comments between the two are irrelevant.
+//
+// Only an allowlisted BOT's comment is a finding this gate owns. A person
+// writing or quoting badge-shaped text is ordinary human feedback, which
+// GitHub's conversation-resolution gate already holds.
+func unaddressedBotComment(comments []threadComment, want mergeloop.ThreadSeverity) (int, bool) {
 	for i, c := range comments {
-		// Only an allowlisted BOT's comment is a finding this gate owns. A
-		// person quoting or writing P1-shaped text is ordinary human feedback,
-		// which GitHub's conversation-resolution gate already holds.
 		if !isKnownBotAuthor(c.author) {
 			continue
 		}
-		if mergeloop.ClassifyCommentSeverity(c.body) != mergeloop.SeverityBlocking {
+		if mergeloop.ClassifyCommentSeverity(c.body) != want {
 			continue
 		}
 		answered := false
