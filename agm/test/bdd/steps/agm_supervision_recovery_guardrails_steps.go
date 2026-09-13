@@ -53,6 +53,24 @@ func RegisterAGMSupervisionRecoveryGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^required-check policy should use the shared layered owner$`, requiredCheckPolicyShouldUseTheSharedLayeredOwner)
 	ctx.Step(`^check-run reads should consume every provider page$`, checkRunReadsShouldConsumeEveryProviderPage)
 	ctx.Step(`^policy failures should prevent trigger calls$`, policyFailuresShouldPreventTriggerCalls)
+	ctx.Step(`^unreadable check runs should remain indeterminate$`, unreadableCheckRunsShouldRemainIndeterminate)
+	ctx.Step(`^no-check recovery scans pull requests across bases$`, noCheckRecoveryScansPullRequestsAcrossBases)
+	ctx.Step(`^each non-draft pull request should use its actual base policy$`, eachNonDraftPullRequestShouldUseItsActualBasePolicy)
+	ctx.Step(`^branch selection should be an optional verified filter$`, branchSelectionShouldBeAnOptionalVerifiedFilter)
+	ctx.Step(`^every non-draft base policy should preflight before check-run reads$`, everyNonDraftBasePolicyShouldPreflightBeforeCheckRunReads)
+	ctx.Step(`^policy preflight should use one total deadline$`, policyPreflightShouldUseOneTotalDeadline)
+	ctx.Step(`^draft pull requests should require no policy or check-run reads$`, draftPullRequestsShouldRequireNoPolicyOrCheckRunReads)
+	ctx.Step(`^pull request listings should require known draft state$`, pullRequestListingsShouldRequireKnownDraftState)
+	ctx.Step(`^pull request listings should honor a positive operator limit$`, pullRequestListingsShouldHonorAPositiveOperatorLimit)
+	ctx.Step(`^draft output should distinguish listed from eligible pull requests$`, draftOutputShouldDistinguishListedFromEligiblePullRequests)
+	ctx.Step(`^scan output should report the explicit base filter$`, scanOutputShouldReportTheExplicitBaseFilter)
+	ctx.Step(`^stuck evidence should report the actual pull request base$`, stuckEvidenceShouldReportTheActualPullRequestBase)
+	ctx.Step(`^retrigger should revalidate current pull request identity$`, retriggerShouldRevalidateCurrentPullRequestIdentity)
+	ctx.Step(`^stale or forked retriggers should stop before mutation$`, staleOrForkedRetriggersShouldStopBeforeMutation)
+	ctx.Step(`^retrigger should recheck whether CI already appeared$`, retriggerShouldRecheckWhetherCIAlreadyAppeared)
+	ctx.Step(`^caller cancellation should stop later trigger calls$`, callerCancellationShouldStopLaterTriggerCalls)
+	ctx.Step(`^retrigger dry-run should validate without mutation$`, retriggerDryRunShouldValidateWithoutMutation)
+	ctx.Step(`^trigger documentation should preserve snapshot boundaries$`, triggerDocumentationShouldPreserveSnapshotBoundaries)
 }
 
 func noCheckRecoveryCanMutateAPullRequestBranch() error {
@@ -66,6 +84,23 @@ func noCheckRecoveryCanMutateAPullRequestBranch() error {
 	return nil
 }
 
+func noCheckRecoveryScansPullRequestsAcrossBases() error {
+	spec, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "internal", "nochecks", "SPEC.md"))
+	if err != nil {
+		return fmt.Errorf("read no-check recovery SPEC: %w", err)
+	}
+	for _, requirement := range []string{
+		"**NCK-09**", "**NCK-10**", "**NCK-11**",
+		"**NCK-12**", "**NCK-13**", "**NCK-14**", "**NCK-15**", "**NCK-16**",
+		"**NCK-17**", "**NCK-18**", "**NCK-19**", "**NCK-20**", "**NCK-21**", "**NCK-22**", "**NCK-23**",
+	} {
+		if !strings.Contains(string(spec), requirement) {
+			return fmt.Errorf("no-check recovery SPEC does not contain %s", requirement)
+		}
+	}
+	return nil
+}
+
 func agmValidatesNoCheckProviderCompleteness(ctx context.Context) error {
 	state, err := getNoChecksProviderCompletenessState(ctx)
 	if err != nil {
@@ -74,7 +109,7 @@ func agmValidatesNoCheckProviderCompleteness(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "-v", "-count=1", "-timeout=90s",
-		"-run", `^Test(RequiredCheckNamesForBranch|FetchRequiredChecks|CheckRunNamesForRef|RunPRScanNoChecksPolicyErrorStopsBeforeTrigger).*$`,
+		"-run", `^Test(GHJSONContext|RequiredCheckNamesForBranch|FetchRequiredChecks|ResolveRequiredChecksByBase|ListOpenPRs|CheckRunNamesForRef|Scan_|RunPRScanNoChecks|PRScanNoChecksBranchFlag|PRScanNoChecksHelp|NoChecksScanResultJSON|PrintNoChecksScanText|ValidateRetriggerSnapshot|RetriggerCI).*$`,
 		"./internal/safegit", "./agm/internal/nochecks", "./agm/cmd/agm")
 	cmd.Dir = packageSpecBDDRepoRoot()
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
@@ -123,11 +158,179 @@ func checkRunReadsShouldConsumeEveryProviderPage(ctx context.Context) error {
 	)
 }
 
+func unreadableCheckRunsShouldRemainIndeterminate(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestRunPRScanNoChecksReadErrorRemainsIndeterminate",
+		"TestRunPRScanNoChecksJSONReadErrorRemainsStructuredAndIndeterminate",
+	)
+}
+
 func policyFailuresShouldPreventTriggerCalls(ctx context.Context) error {
 	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
 		return err
 	}
 	return requireNoChecksTestOutput(ctx, "TestRunPRScanNoChecksPolicyErrorStopsBeforeTrigger")
+}
+
+func eachNonDraftPullRequestShouldUseItsActualBasePolicy(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestListOpenPRsCarriesBaseAndOmitsEmptyFilter",
+		"TestResolveRequiredChecksByBaseFetchesSortedDistinctBasesOnce",
+		"TestScan_UsesEachPullRequestBasePolicy",
+	)
+}
+
+func branchSelectionShouldBeAnOptionalVerifiedFilter(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestListOpenPRsAppliesAndVerifiesExplicitBaseFilter",
+		"TestListOpenPRsRejectsRowOutsideExplicitBaseFilter",
+		"TestPRScanNoChecksBranchFlagIsOptionalFilter",
+	)
+}
+
+func everyNonDraftBasePolicyShouldPreflightBeforeCheckRunReads(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestResolveRequiredChecksByBaseValidatesEveryCandidateBeforeFetching",
+		"TestResolveRequiredChecksByBaseRejectsMissingNonDraftBaseWithoutFetching",
+		"TestResolveRequiredChecksByBaseLaterFailureReturnsUnusableOwner",
+		"TestScan_RejectsUninitializedOrMissingBasePolicyBeforeRunReads",
+		"TestRunPRScanNoChecksSecondBasePolicyErrorStopsBeforeTrigger",
+	)
+}
+
+func draftPullRequestsShouldRequireNoPolicyOrCheckRunReads(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestResolveRequiredChecksByBaseIgnoresDraftWithMissingBase",
+		"TestResolveRequiredChecksByBaseIgnoresDraftBaseAlongsideCandidate",
+		"TestScan_DraftsExcluded",
+	)
+}
+
+func pullRequestListingsShouldRequireKnownDraftState(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx, "TestListOpenPRsRejectsUnknownDraftState")
+}
+
+func pullRequestListingsShouldHonorAPositiveOperatorLimit(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestListOpenPRsCarriesBaseAndOmitsEmptyFilter",
+		"TestRunPRScanNoChecksRejectsNonPositiveLimitBeforeProviderCalls",
+	)
+}
+
+func policyPreflightShouldUseOneTotalDeadline(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestResolveRequiredChecksByBaseSharesOneDeadlineAcrossBases",
+		"TestFetchRequiredChecksByBaseWithinOwnsOneTotalDeadline",
+		"TestResolveRequiredChecksByBaseStopsBeforeNextFetchAfterCancellation",
+	)
+}
+
+func draftOutputShouldDistinguishListedFromEligiblePullRequests(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx, "TestRunPRScanNoChecksDraftOnlyReportsListedNotScanned")
+}
+
+func scanOutputShouldReportTheExplicitBaseFilter(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx, "TestNoChecksScanResultJSONCarriesExplicitBaseEvidence")
+}
+
+func stuckEvidenceShouldReportTheActualPullRequestBase(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestNoChecksScanResultJSONCarriesExplicitBaseEvidence",
+		"TestPrintNoChecksScanTextCarriesBaseEvidence",
+	)
+}
+
+func retriggerShouldRevalidateCurrentPullRequestIdentity(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestValidateRetriggerSnapshot",
+		"TestRetriggerCIValidSnapshotPreservesMutationOrder",
+	)
+}
+
+func staleOrForkedRetriggersShouldStopBeforeMutation(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestRetriggerCIDriftStopsBeforeCommitOrRefCalls",
+		"TestRetriggerCIPreflightReadFailuresStopBeforeMutation",
+		"TestRunPRScanNoChecksDryRunRevalidatesAndContinuesAfterDrift",
+	)
+}
+
+func retriggerShouldRecheckWhetherCIAlreadyAppeared(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestScan_CapturesAnIsolatedCloneOfTheClassifyingPolicy",
+		"TestRetriggerCISelfHealedChecksStopBeforeMutation",
+		"TestRunPRScanNoChecksSelfHealedCandidateSucceedsWithoutMutation",
+	)
+}
+
+func callerCancellationShouldStopLaterTriggerCalls(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestGHJSONContextReturnsPreCanceledCallerBeforeExecutableLookup",
+		"TestRetriggerCICallerCancellationStopsProviderSequence",
+		"TestRunPRScanNoChecksCancellationStopsLaterRetriggers",
+	)
+}
+
+func retriggerDryRunShouldValidateWithoutMutation(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx,
+		"TestRetriggerCIDryRunRevalidatesWithoutMutation",
+		"TestRunPRScanNoChecksRejectsDryRunWithoutTriggerBeforeProviderCalls",
+	)
+}
+
+func triggerDocumentationShouldPreserveSnapshotBoundaries(ctx context.Context) error {
+	if err := requireNoChecksProviderCompletenessBehavior(ctx); err != nil {
+		return err
+	}
+	return requireNoChecksTestOutput(ctx, "TestPRScanNoChecksHelpDescribesSnapshotBoundary")
 }
 
 func requireNoChecksProviderCompletenessBehavior(ctx context.Context) error {

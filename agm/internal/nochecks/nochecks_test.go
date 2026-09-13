@@ -87,9 +87,9 @@ func TestNeedsRetrigger(t *testing.T) {
 
 func TestScan_FlagsStuckPRsSortedByNumber(t *testing.T) {
 	prs := []PR{
-		{Number: 582, Title: "stuck b", HeadRefName: "feat/b", HeadSHA: "bbb"},
-		{Number: 579, Title: "stuck a", HeadRefName: "feat/a", HeadSHA: "aaa"},
-		{Number: 600, Title: "healthy", HeadRefName: "feat/c", HeadSHA: "ccc"},
+		{Number: 582, Title: "stuck b", BaseRefName: "main", HeadRefName: "feat/b", HeadSHA: "bbb"},
+		{Number: 579, Title: "stuck a", BaseRefName: "main", HeadRefName: "feat/a", HeadSHA: "aaa"},
+		{Number: 600, Title: "healthy", BaseRefName: "main", HeadRefName: "feat/c", HeadSHA: "ccc"},
 	}
 	runsOf := func(sha string) ([]CheckRun, error) {
 		if sha == "ccc" {
@@ -97,9 +97,14 @@ func TestScan_FlagsStuckPRsSortedByNumber(t *testing.T) {
 		}
 		return nil, nil // aaa, bbb have no runs → stuck
 	}
-	required := map[string]bool{"Build & Test (ubuntu-latest)": true}
+	required := RequiredChecksByBase{byBase: map[string]map[string]bool{
+		"main": {"Build & Test (ubuntu-latest)": true},
+	}}
 
-	stuck, readErrs := Scan(prs, required, runsOf)
+	stuck, readErrs, err := Scan(prs, required, runsOf)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
 	if len(readErrs) != 0 {
 		t.Fatalf("unexpected read errors: %v", readErrs)
 	}
@@ -111,8 +116,8 @@ func TestScan_FlagsStuckPRsSortedByNumber(t *testing.T) {
 
 func TestScan_ReadErrorNeverFlagsAndIsReported(t *testing.T) {
 	prs := []PR{
-		{Number: 1, HeadSHA: "boom"},
-		{Number: 2, HeadSHA: "ok"},
+		{Number: 1, BaseRefName: "main", HeadSHA: "boom"},
+		{Number: 2, BaseRefName: "main", HeadSHA: "ok"},
 	}
 	runsOf := func(sha string) ([]CheckRun, error) {
 		if sha == "boom" {
@@ -121,7 +126,11 @@ func TestScan_ReadErrorNeverFlagsAndIsReported(t *testing.T) {
 		return nil, nil // #2 genuinely has no runs → stuck
 	}
 
-	stuck, readErrs := Scan(prs, nil, runsOf)
+	policies := RequiredChecksByBase{byBase: map[string]map[string]bool{"main": {}}}
+	stuck, readErrs, err := Scan(prs, policies, runsOf)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
 	if len(stuck) != 1 || stuck[0].Number != 2 {
 		t.Fatalf("expected only #2 flagged, got %+v", stuck)
 	}
@@ -138,9 +147,123 @@ func TestScan_ReadErrorNeverFlagsAndIsReported(t *testing.T) {
 
 func TestScan_DraftsExcluded(t *testing.T) {
 	prs := []PR{{Number: 9, IsDraft: true, HeadSHA: "x"}}
-	stuck, _ := Scan(prs, nil, func(string) ([]CheckRun, error) { return nil, nil })
+	runCalls := 0
+	stuck, _, err := Scan(prs, RequiredChecksByBase{byBase: map[string]map[string]bool{}}, func(string) ([]CheckRun, error) {
+		runCalls++
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
 	if len(stuck) != 0 {
 		t.Errorf("draft PR should not be flagged, got %+v", stuck)
+	}
+	if runCalls != 0 {
+		t.Fatalf("draft caused %d check-run read(s), want zero", runCalls)
+	}
+}
+
+func TestScan_UsesEachPullRequestBasePolicy(t *testing.T) {
+	prs := []PR{
+		{Number: 20, BaseRefName: "main", HeadRefName: "feature/main", HeadSHA: "main-sha"},
+		{Number: 10, BaseRefName: "stack-base", HeadRefName: "feature/stack", HeadSHA: "stack-sha"},
+	}
+	policies := RequiredChecksByBase{byBase: map[string]map[string]bool{
+		"main":       {"Main Required": true},
+		"stack-base": {"Stack Required": true},
+	}}
+	runsOf := func(string) ([]CheckRun, error) {
+		return []CheckRun{{Name: "Stack Required"}}, nil
+	}
+
+	stuck, readErrs, err := Scan(prs, policies, runsOf)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(readErrs) != 0 {
+		t.Fatalf("unexpected read errors: %v", readErrs)
+	}
+	if len(stuck) != 1 || stuck[0].Number != 20 || stuck[0].BaseRefName != "main" {
+		t.Fatalf("stuck = %+v, want only main-based PR #20", stuck)
+	}
+}
+
+func TestScan_CapturesAnIsolatedCloneOfTheClassifyingPolicy(t *testing.T) {
+	policy := map[string]bool{"Build": true}
+	policies := RequiredChecksByBase{byBase: map[string]map[string]bool{"main": policy}}
+
+	stuck, readErrs, err := Scan(
+		[]PR{{Number: 7, BaseRefName: "main", HeadSHA: "abc123"}},
+		policies,
+		func(string) ([]CheckRun, error) { return nil, nil },
+	)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(readErrs) != 0 || len(stuck) != 1 {
+		t.Fatalf("Scan() = stuck %#v, read errors %v; want one candidate", stuck, readErrs)
+	}
+	if !stuck[0].requiredChecks["Build"] || len(stuck[0].requiredChecks) != 1 {
+		t.Fatalf("captured policy = %#v, want Build only", stuck[0].requiredChecks)
+	}
+
+	delete(policy, "Build")
+	policy["Mutated owner"] = true
+	if !stuck[0].requiredChecks["Build"] || stuck[0].requiredChecks["Mutated owner"] {
+		t.Fatalf("captured policy changed through owner alias: %#v", stuck[0].requiredChecks)
+	}
+
+	stuck[0].requiredChecks["Candidate only"] = true
+	if policy["Candidate only"] {
+		t.Fatalf("owner policy changed through candidate alias: %#v", policy)
+	}
+}
+
+func TestScan_RejectsUninitializedOrMissingBasePolicyBeforeRunReads(t *testing.T) {
+	cases := []struct {
+		name     string
+		pr       PR
+		policies RequiredChecksByBase
+	}{
+		{name: "zero value", pr: PR{Number: 1, BaseRefName: "main", HeadSHA: "abc"}},
+		{
+			name:     "missing policy for PR base",
+			pr:       PR{Number: 1, BaseRefName: "main", HeadSHA: "abc"},
+			policies: RequiredChecksByBase{byBase: map[string]map[string]bool{"other": {}}},
+		},
+		{
+			name:     "nil inner policy",
+			pr:       PR{Number: 1, BaseRefName: "main", HeadSHA: "abc"},
+			policies: RequiredChecksByBase{byBase: map[string]map[string]bool{"main": nil}},
+		},
+		{
+			name:     "missing PR base identity",
+			pr:       PR{Number: 1, HeadSHA: "abc"},
+			policies: RequiredChecksByBase{byBase: map[string]map[string]bool{}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runCalls := 0
+			stuck, readErrs, err := Scan(
+				[]PR{tc.pr},
+				tc.policies,
+				func(string) ([]CheckRun, error) {
+					runCalls++
+					return nil, nil
+				},
+			)
+			if err == nil {
+				t.Fatal("Scan() succeeded with incomplete policy owner")
+			}
+			if stuck != nil || readErrs != nil {
+				t.Fatalf("Scan() returned partial results: stuck=%v readErrs=%v", stuck, readErrs)
+			}
+			if runCalls != 0 {
+				t.Fatalf("incomplete policy owner caused %d check-run read(s), want zero", runCalls)
+			}
+		})
 	}
 }
 
