@@ -516,7 +516,7 @@ func pendingPulseNames(selected []deploy.Artifact, opts deploy.Options, stderr i
 		return nil, nil
 	}
 	hostPath, defaultsPath := pulsePaths(a, opts)
-	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
+	required, err := requiredPulsesFor(selected, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
 		return nil, err
@@ -647,7 +647,15 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var c commonFlags
 	c.register(fs)
-	if _, err := parseArgs(fs, args); err != nil {
+	positional, err := parseArgs(fs, args)
+	if err != nil {
+		return 1
+	}
+	if len(positional) > 0 {
+		// Silently ignoring names would let `merge-pulses some-other-artifact`
+		// look like it did something targeted when it always acts on the pulse
+		// registry alone.
+		fmt.Fprintf(stderr, "dear-deploy: merge-pulses takes no artifact names (got %v)\n", positional)
 		return 1
 	}
 
@@ -665,7 +673,7 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	}
 	hostPath, defaultsPath := pulsePaths(a, opts)
 
-	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
+	required, err := requiredPulsesFor(selected, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: resolve required pulses: %v\n", err)
 		return 1
@@ -732,7 +740,7 @@ func mergePulsesDuringDeploy(a deploy.Artifact, opts deploy.Options, asJSON bool
 		}
 		return err
 	}
-	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
+	required, err := requiredPulsesFor([]deploy.Artifact{a}, opts)
 	if err != nil {
 		return err
 	}
@@ -755,4 +763,17 @@ func mergePulsesDuringDeploy(a deploy.Artifact, opts deploy.Options, asJSON bool
 	}
 	fmt.Fprintln(out, "  Restart absence-alarm for the new pulses to take effect.")
 	return nil
+}
+
+// jobsArtifactName is the manifest entry holding the recovery job registry.
+const jobsArtifactName = "recovery-loop-jobs"
+
+// requiredPulsesFor resolves the job registry through the manifest when it is
+// available, so a --manifest override that relocates or customises the registry
+// decides which pulses are required, rather than a hard-coded repository path.
+func requiredPulsesFor(selected []deploy.Artifact, opts deploy.Options) (map[string]bool, error) {
+	if a, ok := artifactNamed(selected, jobsArtifactName); ok {
+		return deploy.RequiredPulseNamesFrom(filepath.Join(opts.RepoRoot, a.Source))
+	}
+	return deploy.RequiredPulseNames(opts.RepoRoot)
 }

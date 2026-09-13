@@ -239,6 +239,13 @@ func seedPulseConfig(hostPath string, defaultsRaw []byte, defaults pulseDoc) ([]
 // judged by cannot be silently absent, because the recovery loop then has no
 // evidence either way about that job, forever.
 func RequiredPulseNames(repoRoot string) (map[string]bool, error) {
+	return RequiredPulseNamesFrom(filepath.Join(repoRoot, "deploy", "recovery-loop", "jobs.json"))
+}
+
+// RequiredPulseNamesFrom reads the job registry at an explicit path, so a
+// --manifest override that relocates or customises it is honoured instead of
+// this code consulting a registry the caller never selected.
+func RequiredPulseNamesFrom(jobsPath string) (map[string]bool, error) {
 	required := make(map[string]bool)
 	for _, j := range recoveryloop.DefaultJobs() {
 		if j.Pulse != "" {
@@ -246,7 +253,7 @@ func RequiredPulseNames(repoRoot string) (map[string]bool, error) {
 		}
 	}
 
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "recovery-loop", "jobs.json"))
+	raw, err := os.ReadFile(jobsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return required, nil
@@ -345,8 +352,15 @@ func lockPulseRegistry(hostPath string) (func(), error) {
 		return nil, fmt.Errorf("lock pulse registry %s: %w", path, err)
 	}
 	return func() {
-		// Closing the descriptor releases the flock.
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		_ = f.Close()
+		// Closing the descriptor releases the flock. The lock file carries no
+		// data, but a close error still means the descriptor state is not what
+		// this code believes, so it is reported rather than dropped (CodeQL:
+		// writable handle closed without error handling).
+		if unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); unlockErr != nil {
+			fmt.Fprintf(os.Stderr, "deploy: unlock pulse registry %s: %v\n", path, unlockErr)
+		}
+		if closeErr := f.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "deploy: close pulse lock %s: %v\n", path, closeErr)
+		}
 	}, nil
 }
