@@ -97,6 +97,16 @@ var DefaultSensitiveGlobs = []string{
 	// Agent control surfaces: the machinery that decides what an agent may
 	// merge, push, or be told about.
 	"**/mergeloop/**",
+
+	// The launchd templates that CONFIGURE those control surfaces. These are
+	// not covered by the globs above: "**/mergeloop/**" needs a path segment
+	// named mergeloop, and the template is
+	// deploy/launchd/com.dear-agent.mergeloop.plist, where the name appears
+	// only inside the filename. Without this entry a PR touching only that
+	// file classified green, so the loop could autonomously merge a change to
+	// the backpressure cap that decides how much work it accepts, to its own
+	// schedule, or to the arguments it runs with.
+	"deploy/launchd/**",
 	"**/safegit/**",
 	"**/fsguard/**",
 	"cmd/safe-merge/**",
