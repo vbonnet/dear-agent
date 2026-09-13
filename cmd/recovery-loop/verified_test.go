@@ -704,3 +704,42 @@ func TestCLI_DryRunWithPlannedWorkIsNotOK(t *testing.T) {
 		t.Errorf("dry-run reported a planned remediation and Status: OK in the same report:\n%s", out)
 	}
 }
+
+// RL-39 on the clearing path: a failed attempt must not become a recovery just
+// because a long-window pulse from before the action is still inside its
+// freshness window.
+//
+// The pending path rejects pre-action evidence and eventually counts a deadline
+// failure. On the next tick PlanJob sees that same unchanged pulse, returns
+// HEALTHY, and this path would record RECOVERED and clear the counter, so the
+// failure it just recorded evaporates without anything new being observed.
+func TestCLI_StalePulseDoesNotClearAFailedJob(t *testing.T) {
+	f := newFixture(t)
+	t0 := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	f.write(t, f.cfg, absenceAlarmJob)
+	// A failed attempt at 08:00, already counted.
+	f.write(t, f.state, fmt.Sprintf(
+		`{"jobs":{"absence-alarm":{"consecutive_failures":2,"human_needed":true,`+
+			`"last_attempt_time":%q,"last_action":"kickstart","last_status":"failed"}}}`,
+		t0.Format(time.RFC3339)))
+
+	// A later tick. The pulse is "present", but it was observed BEFORE the
+	// remediation and has simply not aged out of its window yet.
+	t1 := t0.Add(20 * time.Minute)
+	f.write(t, f.absHB, fmt.Sprintf(
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"present","evidence":%q}]}`,
+		t1.Format(time.RFC3339), t0.Add(-30*time.Minute).Format(time.RFC3339)))
+
+	host, _ := hostAt(t1, map[string]recoveryloop.LaunchdJobInfo{
+		"com.dear-agent.absence-alarm": {Loaded: true, PID: 0, Status: 0},
+	})
+	var stdout, stderr bytes.Buffer
+	run(f.args(), &stdout, &stderr, host, nil)
+
+	if strings.Contains(stdout.String(), "recovered") {
+		t.Errorf("cleared a failed job using a pulse observed before its last action:\n%s", stdout.String())
+	}
+	if js := f.jobState(t, "absence-alarm"); js.ConsecutiveFailures == 0 {
+		t.Error("reset the failure count without observing anything new")
+	}
+}

@@ -582,8 +582,20 @@ func recordClear(
 	}
 
 	// A job that was failing and is now observed healthy has genuinely
-	// recovered.
+	// recovered, but only if the observation is newer than the attempt that
+	// failed. A long-window pulse from before the last action can still be
+	// inside its freshness window, and clearing on that would let the failure
+	// just recorded evaporate without anything new being seen (RL-39).
 	if status == recoveryloop.StatusHealthy && prev.ConsecutiveFailures > 0 {
+		if job.Pulse != "" && !prev.LastAttemptTime.IsZero() {
+			if ev := truth[job.Pulse].Evidence; !ev.After(prev.LastAttemptTime) {
+				recordUnverifiable(job, fmt.Sprintf(
+					"%s, but pulse %q was last observed %s, before the %s that failed",
+					reason, job.Pulse, evidenceStampCLI(ev), prev.LastAction),
+					now, state, rep, prev)
+				return
+			}
+		}
 		recordVerified(job, prev.LastAction, "condition cleared: "+reason, prev.ConsecutiveFailures, now, state, rep, opts, stderr)
 		return
 	}
@@ -995,4 +1007,13 @@ func emitReport(stdout, stderr io.Writer, rep recoveryloop.Heartbeat, jsonOut bo
 	default:
 		fmt.Fprintf(stdout, "Status: OK (no unresolved recovery failures)\n")
 	}
+}
+
+// evidenceStampCLI renders a probe observation time for an operator-facing
+// reason string.
+func evidenceStampCLI(t time.Time) string {
+	if t.IsZero() {
+		return "at an unrecorded time"
+	}
+	return "at " + t.Format(time.RFC3339)
 }
