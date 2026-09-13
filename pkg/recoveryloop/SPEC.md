@@ -107,7 +107,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-23** The system shall read current pulse truth from the absence-alarm heartbeat, which reports presence as well as absence, and the system shall not derive pulse health from the append-only escalation journal alone.
 
-**RL-24** When a job's pulse is present, the system shall classify the job as HEALTHY regardless of its last launchd exit status.
+**RL-24** When a job's ACTIVITY pulse is present, the system shall classify the job as HEALTHY regardless of its last launchd exit status. A pulse that only proves the service is loaded is not an activity pulse and is governed by RL-43 and RL-45 instead.
 
 **RL-25** When planning a recovery action, the system shall classify the job as UNHEALTHY and the system shall not classify any job as RECOVERED before an action has been executed and verified.
 

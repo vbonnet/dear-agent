@@ -202,6 +202,16 @@ func VerifyRecovery(
 			// fresh file-mtime pulse, and a bootstrap that succeeds
 			// structurally while the job never runs would be scored a
 			// verified recovery (RL-39).
+			// Evidence dated in the future is a broken clock or a touched
+			// file, not proof: it beats any actionAt automatically, which is
+			// exactly the comparison this guard exists to make meaningful.
+			if ev := truth[job.Pulse].Evidence; ev.After(now.Add(heartbeatSkewTolerance)) {
+				return VerifyOutcome{
+					Status: StatusPending,
+					Reason: fmt.Sprintf("pulse %q carries evidence dated %s in the future: not usable as proof",
+						job.Pulse, ev.Sub(now).Round(time.Second)),
+				}
+			}
 			if ev := truth[job.Pulse].Evidence; !actionAt.IsZero() && !ev.After(actionAt) {
 				return VerifyOutcome{
 					Status: StatusPending,

@@ -59,7 +59,7 @@ func recordClear(
 	unverifiable := status == recoveryloop.StatusHealthy &&
 		job.Pulse != "" && !truth.Present(job.Pulse)
 	if unverifiable {
-		recordUnverifiable(job, reason, now, state, rep, prev)
+		recordUnverifiable(job, reason, state, rep, prev)
 		return
 	}
 
@@ -74,7 +74,7 @@ func recordClear(
 				recordUnverifiable(job, fmt.Sprintf(
 					"%s, but pulse %q was last observed %s, before the %s that failed",
 					reason, job.Pulse, evidenceStampCLI(ev), prev.LastAction),
-					now, state, rep, prev)
+					state, rep, prev)
 				return
 			}
 		}
@@ -114,13 +114,15 @@ func recordClear(
 func recordUnverifiable(
 	job recoveryloop.Job,
 	reason string,
-	now time.Time,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	prev recoveryloop.JobState,
 ) {
 	st := prev
-	st.LastAttemptTime = now
+	// LastAttemptTime is the boundary a later tick compares pulse evidence
+	// against. Advancing it here would move the goalposts on every tick that
+	// simply could not see anything, so an outage would never accumulate a
+	// comparable observation. Nothing was attempted, so nothing is stamped.
 	st.LastStatus = recoveryloop.StatusPending
 	state.Jobs[job.Name] = st
 	rep.Results = append(rep.Results, recoveryloop.Result{
@@ -273,9 +275,12 @@ func recordGivenUp(
 	state.Jobs[job.Name] = st
 
 	rep.Results = append(rep.Results, recoveryloop.Result{
-		Job:         job.Name,
-		Status:      recoveryloop.StatusFailed,
-		Action:      recoveryloop.ActionNone,
+		Job:    job.Name,
+		Status: recoveryloop.StatusFailed,
+		// The action reported is the one that last actually ran. ActionNone
+		// reads as "nothing was ever tried", which is the opposite of what a
+		// give-up means and hides what to investigate.
+		Action:      prev.LastAction,
 		Attempt:     prev.ConsecutiveFailures,
 		HumanNeeded: true,
 		Reason:      full,
