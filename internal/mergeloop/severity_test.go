@@ -180,3 +180,33 @@ func TestClassifyCommentSeverityMismatchedGeminiBadgeIsUnknown(t *testing.T) {
 		}
 	}
 }
+
+// TestClassifyCommentSeverityMixedSupportedAndUnsupportedIsUnknown pins the
+// ce-lr7j review finding that restricting the badge pattern to P0-P3 made the
+// parser blind to an unsupported marker rather than suspicious of it. A comment
+// carrying a valid P2 badge AND an unsupported P6 badge matched only the P2, so
+// `seen` stayed true and the whole comment classified as advisory: the resolver
+// auto-resolved the thread and the independent gate repeated the same verdict.
+// A badge-shaped marker this code cannot read must poison the verdict even when
+// a readable marker sits beside it.
+func TestClassifyCommentSeverityMixedSupportedAndUnsupportedIsUnknown(t *testing.T) {
+	p2 := "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Advisory**"
+	for _, bad := range []string{"P6", "P4", "P9", "P12"} {
+		body := p2 + "\n\n**<sub><sub>![" + bad + " Badge](https://img.shields.io/badge/" + bad +
+			"-orange?style=flat)</sub></sub>  Unreadable**"
+		if got := ClassifyCommentSeverity(body); got != SeverityUnknown {
+			t.Errorf("ClassifyCommentSeverity(P2 + %s) = %v, want %v (an unreadable badge beside a "+
+				"readable one must still withhold)", bad, got, SeverityUnknown)
+		}
+	}
+	// A Gemini badge with an unreadable label alongside a valid one behaves the same.
+	body := "![low](https://www.gstatic.com/codereviewagent/low-priority.svg)\n" +
+		"![urgent](https://www.gstatic.com/codereviewagent/urgent-priority.svg)"
+	if got := ClassifyCommentSeverity(body); got != SeverityUnknown {
+		t.Errorf("ClassifyCommentSeverity(low + urgent) = %v, want %v", got, SeverityUnknown)
+	}
+	// A comment carrying only supported markers is unaffected.
+	if got := ClassifyCommentSeverity(p2); got != SeverityAdvisory {
+		t.Errorf("ClassifyCommentSeverity(plain P2) = %v, want %v", got, SeverityAdvisory)
+	}
+}

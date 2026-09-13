@@ -261,13 +261,26 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 
 	cls := d.Policy.Classify(pr, rec.AgentAttempts, agentActive)
 
+	// Start (or stop) the stall clock BEFORE evaluating it, so a PR that has
+	// only just become actionable is measured from now rather than from
+	// whenever it was first seen as a draft.
+	d.Tracker.NoteActionable(pr.Number, actionableState(cls.State), now)
+
 	// Stall detection: an actionable PR untouched for longer than the
 	// threshold is the failure the Define rule forbids.
 	if d.isStalled(cls.State, rec, now) {
 		res.Stalled++
 		d.Deps.Metrics.recordStall(ctx, pr.Number, cls.State)
-		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected",
-			Detail: fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))})
+		detail := fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))
+		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected", Detail: detail})
+		// A stall must leave a DURABLE record, not only an audit line and a
+		// counter. Letting the stall clock run is what makes a permanently
+		// deferred PR detectable; persisting the escalation here is what makes
+		// it actionable by a human. Without this the PR stays unmergeable
+		// indefinitely with EscalationReason empty and no escalation metric.
+		d.Tracker.RecordEscalation(pr.Number,
+			fmt.Sprintf("stalled in %s: %s", cls.State, detail), now)
+		d.Deps.Metrics.recordEscalation(ctx, pr.Number, "stalled")
 	}
 
 	switch cls.State {
@@ -306,18 +319,36 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 }
 
 // stallSince is the instant the stall clock for this PR runs from: the last
-// action if the loop has ever acted, and otherwise when the PR was first seen.
+// action if the loop has ever acted, and otherwise when the PR last became
+// ACTIONABLE.
 //
-// Falling back to FirstSeenAt matters because "never acted on" is the WORST
-// case, not an exempt one. Treating a zero LastActionAt as not-stalled let an
-// actionable PR the loop never touched escape detection entirely — including a
-// green PR whose merge safe-merge defers on every tick, which by design records
-// no action at all. A zero return means there is no honest clock to read.
+// A fallback matters because "never acted on" is the WORST case, not an exempt
+// one. Treating a zero LastActionAt as not-stalled let an actionable PR the
+// loop never touched escape detection entirely, including a green PR whose
+// merge safe-merge defers on every tick, which by design records no action.
+//
+// The fallback is the actionable anchor and NOT FirstSeenAt, because time the
+// loop was not allowed to act must not be counted against it. A PR that sat as
+// a draft, or behind slow CI, for longer than the threshold would otherwise
+// report as stalled the instant it turned green. A zero return means there is
+// no honest clock to read.
 func stallSince(rec *PRRecord) time.Time {
 	if !rec.LastActionAt.IsZero() {
 		return rec.LastActionAt
 	}
-	return rec.FirstSeenAt
+	return rec.ActionableSinceAt
+}
+
+// actionableState reports whether the loop can currently do something about a
+// PR in this state. It is the same set isStalled measures.
+func actionableState(st State) bool {
+	switch st {
+	case StateBehind, StateConflicted, StateCIFailing, StateGreen:
+		return true
+	case StateDraft, StateAbandoned, StateBlockedPolicy, StateAgentInFlight, StateCIPending:
+		return false
+	}
+	return false
 }
 
 func (d *Driver) isStalled(st State, rec *PRRecord, now time.Time) bool {
@@ -325,13 +356,10 @@ func (d *Driver) isStalled(st State, rec *PRRecord, now time.Time) bool {
 	if d.StallThreshold <= 0 || since.IsZero() {
 		return false
 	}
-	switch st {
-	case StateBehind, StateConflicted, StateCIFailing, StateGreen:
-		return now.Sub(since) > d.StallThreshold
-	case StateDraft, StateAbandoned, StateBlockedPolicy, StateAgentInFlight, StateCIPending:
+	if !actionableState(st) {
 		return false
 	}
-	return false
+	return now.Sub(since) > d.StallThreshold
 }
 
 // rebaseCoolingDown reports whether this PR was rebased recently enough that

@@ -80,6 +80,7 @@ type ghThreadResolver struct{ dryRun bool }
 const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$pr){
+      number
       reviewThreads(first:100,after:$after){
         pageInfo{ hasNextPage endCursor }
         nodes{
@@ -168,6 +169,25 @@ func isHumanActor(typename, login string) bool {
 		return false
 	}
 	return !isKnownBotAuthor(login)
+}
+
+// verifyPRIdentity confirms the GraphQL response actually describes the pull
+// request that was asked for.
+//
+// GitHub's pullRequest(number:) field is nullable. A number that does not exist
+// returns null, which unmarshals into a zero-valued response and looks exactly
+// like a real PR with no review threads. Without this check `mergeloop threads`
+// reported zero threads and PASS for every gate on a mistyped target, which is
+// the worst possible answer to "would this merge be refused".
+func verifyPRIdentity(got, want int, owner, name string) error {
+	if got == want {
+		return nil
+	}
+	if got == 0 {
+		return fmt.Errorf("pull request #%d not found in %s/%s", want, owner, name)
+	}
+	return fmt.Errorf("asked for pull request #%d in %s/%s but the API described #%d",
+		want, owner, name, got)
 }
 
 // partitionResolvable splits fetched threads into the ones the loop may
@@ -361,6 +381,11 @@ func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, 
 			Data struct {
 				Repository struct {
 					PullRequest struct {
+						// Number is fetched purely as an identity probe:
+						// pullRequest(number:) is nullable, so a PR that does
+						// not exist decodes to the zero value and is otherwise
+						// indistinguishable from a real PR with no threads.
+						Number        int `json:"number"`
 						ReviewThreads struct {
 							PageInfo struct {
 								HasNextPage bool   `json:"hasNextPage"`
@@ -389,6 +414,9 @@ func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, 
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil {
 			return nil, fmt.Errorf("parsing review threads: %w", err)
+		}
+		if err := verifyPRIdentity(resp.Data.Repository.PullRequest.Number, pr, owner, name); err != nil {
+			return nil, err
 		}
 		rt := resp.Data.Repository.PullRequest.ReviewThreads
 		for _, n := range rt.Nodes {

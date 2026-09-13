@@ -85,6 +85,20 @@ var codexBadgePattern = regexp.MustCompile(`!\[P([0-3]) Badge\]\(https://img\.sh
 // for the same reason as the Codex badge above.
 var geminiBadgePattern = regexp.MustCompile(`!\[(critical|high|medium|low)\]\(https://www\.gstatic\.com/codereviewagent/(critical|high|medium|low)-priority\.svg\)`)
 
+// codexBadgeShape and geminiBadgeShape match the SHAPE of each bot's severity
+// badge without constraining the priority to a value this code understands.
+//
+// They exist because narrowing the real patterns to the supported priorities
+// made the parser blind to an unsupported marker instead of suspicious of it.
+// A comment carrying a valid P2 badge AND an unsupported P6 badge matched only
+// the P2, so the comment classified as advisory and both the resolver and the
+// independent gate cleared it. Counting badge-shaped markers separately lets
+// the classifier notice that it failed to read one.
+var (
+	codexBadgeShape  = regexp.MustCompile(`!\[P\d+ Badge\]\(https://img\.shields\.io/badge/`)
+	geminiBadgeShape = regexp.MustCompile(`!\[[a-z]+\]\(https://www\.gstatic\.com/codereviewagent/[a-z]+-priority\.svg\)`)
+)
+
 // ClassifyCommentSeverity reads one review comment body and returns its
 // severity. A body carrying no marker this code recognises returns
 // SeverityUnknown, which blocks resolution.
@@ -130,10 +144,18 @@ func ClassifyCommentSeverity(body string) ThreadSeverity {
 		}
 	}
 
+	// Every badge-shaped marker must have been READ, not merely skipped. A
+	// priority outside the supported range, or a label this code does not know,
+	// still looks like a severity badge; if more of them are present than were
+	// parsed, the comment carries a marker this parser cannot interpret.
+	unread := len(codexBadgeShape.FindAllString(body, -1)) + len(geminiBadgeShape.FindAllString(body, -1))
+	parsed := len(codexBadgePattern.FindAllString(body, -1)) + len(geminiBadgePattern.FindAllString(body, -1))
+
 	// A recognised blocking marker has already returned above, so reaching here
-	// with a mismatch means the strongest thing seen was advisory or nothing.
-	// Withhold: an unreadable badge must never clear the gate.
-	if !seen || mismatched {
+	// with a mismatch or an unread badge means the strongest thing seen was
+	// advisory or nothing. Withhold: an unreadable badge must never clear the
+	// gate, and it must not be rescued by a readable badge sitting beside it.
+	if !seen || mismatched || unread > parsed {
 		return SeverityUnknown
 	}
 	return worst

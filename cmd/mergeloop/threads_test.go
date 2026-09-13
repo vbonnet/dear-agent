@@ -455,3 +455,26 @@ func TestThreadsRemainingUnresolved(t *testing.T) {
 		t.Fatalf("precondition: want no blocking bot findings, got %d", len(f))
 	}
 }
+
+// TestVerifyPRIdentity pins the ce-lr7j review finding that a mistyped --pr was
+// falsely certified as passing.
+//
+// GitHub's `pullRequest(number:)` field is nullable. A number that does not
+// exist returns null, which unmarshals into the zero-valued response and looks
+// exactly like a real PR with no review threads. `mergeloop threads` then
+// printed zero threads and PASS for both gates and the overall verdict, which
+// is the worst possible answer to "would this merge be refused".
+func TestVerifyPRIdentity(t *testing.T) {
+	if err := verifyPRIdentity(0, 1429, "vbonnet", "dear-agent"); err == nil {
+		t.Error("a null pullRequest (number 0) must be an error, not an empty thread list")
+	} else if !strings.Contains(err.Error(), "1429") {
+		t.Errorf("error should name the requested PR, got %q", err)
+	}
+	if err := verifyPRIdentity(1429, 1429, "vbonnet", "dear-agent"); err != nil {
+		t.Errorf("a matching identity must pass, got %v", err)
+	}
+	// A response for some other PR is also not the PR that was asked for.
+	if err := verifyPRIdentity(1430, 1429, "vbonnet", "dear-agent"); err == nil {
+		t.Error("a mismatched identity must be an error")
+	}
+}
