@@ -283,7 +283,7 @@ func processJob(
 	// while a verification is still open. Settling first would escalate over
 	// an outage an operator has explicitly acknowledged (RL-05, RL-22).
 	if sn, snoozed := recoveryloop.IsJobSnoozed(job, snoozes, now); snoozed {
-		recordSnoozed(job, sn, now, state, rep, prev)
+		recordSnoozed(job, sn, state, rep, prev)
 		return
 	}
 
@@ -423,7 +423,6 @@ func settlePending(
 func recordSnoozed(
 	job recoveryloop.Job,
 	sn absencealarm.Snooze,
-	now time.Time,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	prev recoveryloop.JobState,

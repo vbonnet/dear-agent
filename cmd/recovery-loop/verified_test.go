@@ -552,7 +552,7 @@ func TestCLI_PendingAttemptNumberedFromOne(t *testing.T) {
 		t.Fatalf("read recovery journal: %v", err)
 	}
 	var rec map[string]any
-	first := strings.SplitN(strings.TrimSpace(string(raw)), "\n", 2)[0]
+	first, _, _ := strings.Cut(strings.TrimSpace(string(raw)), "\n")
 	if err := json.Unmarshal([]byte(first), &rec); err != nil {
 		t.Fatalf("parse journal record %q: %v", first, err)
 	}
