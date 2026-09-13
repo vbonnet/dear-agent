@@ -77,7 +77,8 @@ had roughly 70 GiB free.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/disk_ledger_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Feature: `agm/test/bdd/features/disk_ledger_guardrails.feature`
+- Test consequence: the feature enforces that both disk-ledger packages keep co-located SPEC coverage; a package that drops its SPEC fails the scenario.
 - Package tests: `pkg/diskledger/measure_test.go`, `ledger_test.go`, `budget_test.go`
 - Command tests: `cmd/disk-ledger/main_test.go`
 - Consumer: `agm/internal/gclog` (DL-01 through DL-03 back `Entry.BytesReclaimed`)

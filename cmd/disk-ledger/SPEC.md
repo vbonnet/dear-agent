@@ -26,7 +26,7 @@ the shared roots were never scanned and reclaiming nothing read as healthy.
 
 **CMD-DISK-LEDGER-07** If arguments are invalid, then the system shall exit 3 and shall not print a report.
 
-**CMD-DISK-LEDGER-08** If the reclaim log is absent or unreadable, then the system shall treat bytes reclaimed as zero rather than assuming reclaim succeeded.
+**CMD-DISK-LEDGER-08** The system shall read reclaim evidence only through the library contract DL-25, so an absent or unreadable reclaim log is interpreted by exactly one owner.
 
 **CMD-DISK-LEDGER-09** When the json flag is given, the system shall emit the roots, the health verdict, the leaks, and the exit code as JSON.
 
@@ -34,11 +34,12 @@ the shared roots were never scanned and reclaiming nothing read as healthy.
 
 **CMD-DISK-LEDGER-11** If the heartbeat cannot be written, then the system shall report that to stderr and shall not change the health verdict.
 
-**CMD-DISK-LEDGER-12** The system shall not delete anything, because remediation belongs to the existing reapers and a defect in a detector must not destroy data.
+**CMD-DISK-LEDGER-12** The system shall perform no removal of its own and shall invoke no reaper, so the detector contract owned by DL-26 holds end to end.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/disk_ledger_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Feature: `agm/test/bdd/features/disk_ledger_guardrails.feature`
+- Test consequence: the feature enforces that both disk-ledger packages keep co-located SPEC coverage; a package that drops its SPEC fails the scenario.
 - Command tests: `cmd/disk-ledger/main_test.go`
 - Library spec: `pkg/diskledger/SPEC.md`
 - Schedule: `deploy/launchd/com.dear-agent.disk-ledger.plist`
