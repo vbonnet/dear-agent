@@ -346,49 +346,42 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	}
 }
 
-func TestGitHubAPIMergesRemainPolicyVisible(t *testing.T) {
-	commands := []string{
-		"gh api -X PUT repos/owner/repo/pulls/1/merge",
-		`gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
-		`gh api graphql -f query='mutation { enablePullRequestAutoMerge(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
-	}
+func assertShellInstructionRule(t *testing.T, want string, commands ...string) {
+	t.Helper()
 	for _, command := range commands {
-		violations := evaluateSegment("AGENTS.md", segment{Kind: segmentShell, Text: command})
-		if len(violations) != 1 || violations[0].Rule != "raw-gh-merge" {
-			t.Errorf("%q violations = %v, want raw-gh-merge", command, violations)
+		got := evaluateSegment("AGENTS.md", segment{Kind: segmentShell, Text: command})
+		matched := want == "" && len(got) == 0 || want != "" && len(got) == 1 && got[0].Rule == want
+		if !matched {
+			t.Errorf("%q violations = %v, want rule %q", command, got, want)
 		}
-	}
-	if violations := evaluateSegment("AGENTS.md", segment{Kind: segmentShell, Text: "gh api repos/owner/repo/pulls/1/merge"}); len(violations) != 0 {
-		t.Errorf("read-only merge-status request violations = %v, want none", violations)
 	}
 }
 
-func TestGitHubAPIPRLifecycleRemainsPolicyVisible(t *testing.T) {
-	commands := []string{
-		"gh api -X POST repos/owner/repo/pulls -f title=test -f head=feature -f base=main",
-		"gh api repos/owner/repo/pulls -f title=test -f head=feature -f base=main",
-		"gh api -XPATCH repos/owner/repo/pulls/1 -f=state=closed",
-		"gh api --method=PATCH repos/owner/repo/pulls/1 --raw-field=state=open",
-		"gh api -X PATCH repos/owner/repo/pulls/$PR -f state=closed",
-		`gh api graphql -f query='mutation { createPullRequest(input:{repositoryId:"R_id"}) { pullRequest { id } } }'`,
-		`gh api graphql -f query='mutation { closePullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
-		`gh api graphql -f query='mutation { reopenPullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
-	}
-	for _, command := range commands {
-		violations := evaluateSegment("AGENTS.md", segment{Kind: segmentShell, Text: command})
-		if len(violations) != 1 || violations[0].Rule != "raw-gh-pr-lifecycle" {
-			t.Errorf("%q violations = %v, want raw-gh-pr-lifecycle", command, violations)
-		}
-	}
+func TestGitHubAPIMergesRemainPolicyVisible(t *testing.T) {
+	assertShellInstructionRule(t, "raw-gh-merge",
+		"gh api -X PUT repos/owner/repo/pulls/1/merge", "gh api -X PUT repos/owner/repo/pulls/1/merge-async",
+		"gh api -XPUT 'repos/owner/repo/pulls/1/merge?sha=expected'", "gh api -iXPUT 'https://api.github.com/repos/owner/repo/pulls/1/merge-async#request'",
+		"gh --hostname github.example api -X PUT repos/owner/repo/pulls/1/merge", "gh api --hostname github.example -X PUT repos/owner/repo/pulls/1/merge",
+		"gh api -X PUT repos/owner/repo/pulls/1/staging/../merge", `gh api -X "$METHOD" repos/owner/repo/pulls/1/merge`,
+		`gh api -iX${METHOD} repos/owner/repo/pulls/1/merge-async`, `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
+		`gh api graphql -f query='mutation { enablePullRequestAutoMerge(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`, `gh api graphql -f query='mutation { enqueuePullRequest(input:{pullRequestId:"PR_id"}) { mergeQueueEntry { id } } }'`,
+		`gh api graphql -f query='mutation { dequeuePullRequest(input:{pullRequestId:"PR_id"}) { mergeQueueEntry { id } } }'`, "gh api graphql --input mutation.json", "gh api graphql --input=-",
+		"gh api graphql -F query=@mutation.graphql", "gh api graphql -fquery=@-", "gh api 'https://api.github.com/graphql?operation=Merge' --input -",
+		"gh api https://github.example/api/graphql --input mutation.json")
+	assertShellInstructionRule(t, "",
+		"gh api repos/owner/repo/pulls/1/merge", "gh api -X GET repos/owner/repo/pulls/1/merge -f sha=expected",
+		"gh api repos/owner/repo/pulls/1/merge-async/01234567-89ab-cdef-0123-456789abcdef", "gh api -X PUT repos/owner/repo/issues/1/merge",
+		`gh api -X "$METHOD" repos/owner/repo/issues/1`, "gh api repos/owner/repo/contents/graphql --input payload.json",
+		"gh api https://api.github.com/repos/owner/repo/contents/graphql --input payload.json")
+}
 
-	for _, command := range []string{
-		"gh api repos/owner/repo/pulls",
-		"gh api -X PATCH repos/owner/repo/pulls/1 -f title=updated",
-	} {
-		if violations := evaluateSegment("AGENTS.md", segment{Kind: segmentShell, Text: command}); len(violations) != 0 {
-			t.Errorf("%q violations = %v, want none", command, violations)
-		}
-	}
+func TestGitHubAPIPRLifecycleRemainsPolicyVisible(t *testing.T) {
+	assertShellInstructionRule(t, "raw-gh-pr-lifecycle",
+		"gh api -X POST repos/owner/repo/pulls -f title=test -f head=feature -f base=main", "gh api repos/owner/repo/pulls -f title=test -f head=feature -f base=main",
+		"gh api -XPATCH repos/owner/repo/pulls/1 -f=state=closed", "gh api --method=PATCH repos/owner/repo/pulls/1 --raw-field=state=open",
+		"gh api -X PATCH repos/owner/repo/pulls/$PR -f state=closed", `gh api graphql -f query='mutation { createPullRequest(input:{repositoryId:"R_id"}) { pullRequest { id } } }'`,
+		`gh api graphql -f query='mutation { closePullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`, `gh api graphql -f query='mutation { reopenPullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`)
+	assertShellInstructionRule(t, "", "gh api repos/owner/repo/pulls", "gh api -X PATCH repos/owner/repo/pulls/1 -f title=updated")
 }
 
 func TestExecLaunchedCommandsRemainPolicyVisible(t *testing.T) {
@@ -488,20 +481,9 @@ func TestGitGlobalOptionsRemainPolicyVisible(t *testing.T) {
 }
 
 func TestGitHubGlobalOptionsRemainPolicyVisible(t *testing.T) {
-	segments := []segment{
-		{Kind: segmentShell, Text: "gh -R owner/repo pr merge 123"},
-		{Kind: segmentShell, Text: "gh --repo=owner/repo pr create --title test"},
-	}
-	var rules []string
-	for _, segment := range segments {
-		for _, violation := range evaluateSegment("AGENTS.md", segment) {
-			rules = append(rules, violation.Rule)
-		}
-	}
-	sort.Strings(rules)
-	if !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-gh-pr-lifecycle"}) {
-		t.Fatalf("GitHub global-option rules = %v", rules)
-	}
+	assertShellInstructionRule(t, "raw-gh-merge", "gh -R owner/repo pr merge 123", "gh pr --repo owner/repo merge 123", "gh --hostname github.example pr merge 123")
+	assertShellInstructionRule(t, "raw-gh-pr-lifecycle", "gh --repo=owner/repo pr create --title test")
+	assertShellInstructionRule(t, "", "gh -R owner/repo pr view 123", "gh pr --repo owner/repo view 123")
 }
 
 func TestInlinePRLifecycleGuidanceRemainsPolicyVisible(t *testing.T) {

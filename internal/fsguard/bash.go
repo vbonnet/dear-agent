@@ -1,6 +1,8 @@
 package fsguard
 
 import (
+	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -786,33 +788,167 @@ const ghMergeBlocked = "You're trying to merge a PR directly with gh. " +
 	"It blocks on all required CI checks, unresolved review threads, soak time ≥5 min, " +
 	"and the Gemini bot review — the raw gh call bypasses all of these."
 
-// ghAPIFlagTakesValue reports whether a gh api flag consumes the following
-// token as its value, so the value is not mistaken for the endpoint path.
-// Boolean flags (--paginate / -p, --silent, --include, etc.) are NOT listed
-// here — they stand alone and must not consume the next token.
-// Note: --preview takes a name value and IS listed here.
-func ghAPIFlagTakesValue(flag string) bool {
-	switch flag {
-	case "-X", "--method",
-		"-H", "--header",
-		"-q", "--jq",
-		"-F", "--field",
-		"-f", "--raw-field",
-		"--input",
-		"--template", "-t",
-		"--preview":
-		return true
-	}
-	return false
+type ghAPIInvocation struct {
+	endpoint            string
+	method              string
+	dynamicMethod       bool
+	externalGraphQLBody bool
 }
 
-// checkGh blocks direct PR merge operations via the gh CLI, directing agents
-// to the safe-merge atomic wrapper. It catches three bypass vectors:
-//
-//  1. gh pr merge ...        — the direct merge subcommand.
-//  2. gh api repos/.../pulls/.../merge — REST PUT merge endpoint.
-//  3. gh api graphql with mergePullRequest/enablePullRequestAutoMerge mutations.
+// parseGHAPIInvocation follows gh api option semantics, including clusters
+// such as -iXPUT, where -i is boolean and -X consumes the remainder.
+func parseGHAPIInvocation(args []string) ghAPIInvocation {
+	invocation := ghAPIInvocation{method: "GET"}
+	method := ""
+	hasFields := false
+	parseOptions := true
+	for i := 0; i < len(args); i++ {
+		arg := strings.Trim(args[i], `"'`)
+		if parseOptions && arg == "--" {
+			parseOptions = false
+			continue
+		}
+		if !parseOptions || !strings.HasPrefix(arg, "-") || arg == "-" {
+			if invocation.endpoint == "" {
+				invocation.endpoint = arg
+			}
+			continue
+		}
+
+		name, value, consumeNext, ok := parseGHAPIOption(arg)
+		if !ok {
+			continue
+		}
+		if consumeNext && i+1 < len(args) {
+			i++
+			value = strings.Trim(args[i], `"'`)
+		}
+		switch name {
+		case "-X", "--method":
+			method = value
+			invocation.dynamicMethod = visiblyDynamicGHAPIValue(value)
+		case "-F", "--field", "-f", "--raw-field":
+			hasFields = true
+			if externalGraphQLQuerySource(value) {
+				invocation.externalGraphQLBody = true
+			}
+		case "--input":
+			invocation.externalGraphQLBody = true
+		}
+	}
+	if method != "" {
+		invocation.method = strings.ToUpper(method)
+	} else if hasFields {
+		invocation.method = "POST"
+	}
+	return invocation
+}
+
+func parseGHAPIOption(arg string) (name, value string, consumeNext, ok bool) {
+	if strings.HasPrefix(arg, "--") {
+		name, value, inline := strings.Cut(arg, "=")
+		switch name {
+		case "--cache", "--field", "--header", "--hostname", "--input", "--jq",
+			"--method", "--preview", "--raw-field", "--template":
+		default:
+			return "", "", false, false
+		}
+		return name, value, !inline, true
+	}
+
+	cluster := strings.TrimPrefix(arg, "-")
+	for i := 0; i < len(cluster); i++ {
+		name = "-" + string(cluster[i])
+		if !strings.ContainsRune("FHXfpqt", rune(cluster[i])) {
+			continue
+		}
+		remainder := cluster[i+1:]
+		if strings.HasPrefix(remainder, "=") {
+			return name, strings.TrimPrefix(remainder, "="), false, true
+		}
+		return name, remainder, remainder == "", true
+	}
+	return "", "", false, false
+}
+
+func externalGraphQLQuerySource(field string) bool {
+	name, value, ok := strings.Cut(field, "=")
+	if !ok || name != "query" {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "@") || strings.HasPrefix(value, "$") ||
+		strings.HasPrefix(value, "`") || strings.HasPrefix(value, "<(")
+}
+
+func visiblyDynamicGHAPIValue(value string) bool {
+	return strings.Contains(value, "$") || strings.Contains(value, "`") || strings.Contains(value, "<(")
+}
+
+func normalizedGHAPIPath(endpoint string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(strings.Trim(endpoint, `"'`)))
+	if err != nil {
+		return "", false
+	}
+	return strings.Trim(path.Clean("/"+strings.TrimPrefix(parsed.Path, "/")), "/"), true
+}
+
+func isGHAPIPullMergeEndpoint(endpoint string) bool {
+	apiPath, ok := normalizedGHAPIPath(endpoint)
+	if !ok || apiPath == "" {
+		return false
+	}
+	parts := strings.Split(apiPath, "/")
+	if len(parts) < 6 {
+		return false
+	}
+	parts = parts[len(parts)-6:]
+	return parts[0] == "repos" && parts[1] != "" && parts[2] != "" &&
+		parts[3] == "pulls" && parts[4] != "" &&
+		(parts[5] == "merge" || parts[5] == "merge-async")
+}
+
+func isGHAPIGraphQLEndpoint(endpoint string) bool {
+	apiPath, ok := normalizedGHAPIPath(endpoint)
+	if !ok || apiPath == "" {
+		return false
+	}
+	return apiPath == "graphql" || apiPath == "api/graphql"
+}
+
+func normalizeGHGuardArgs(args []string) []string {
+	args = stripGHGuardOptions(args)
+	if len(args) == 0 || args[0] != "pr" {
+		return args
+	}
+	prArgs := stripGHGuardOptions(args[1:])
+	return append([]string{"pr"}, prArgs...)
+}
+
+func stripGHGuardOptions(args []string) []string {
+	for len(args) > 0 {
+		arg := args[0]
+		switch {
+		case arg == "-R" || arg == "--repo" || arg == "--hostname":
+			if len(args) < 2 {
+				return nil
+			}
+			args = args[2:]
+		case strings.HasPrefix(arg, "-R") && arg != "-R",
+			strings.HasPrefix(arg, "--repo="),
+			strings.HasPrefix(arg, "--hostname="):
+			args = args[1:]
+		default:
+			return args
+		}
+	}
+	return args
+}
+
+// checkGh blocks raw CLI, REST, and GraphQL PR merge operations and directs
+// agents to the safe-merge atomic wrapper.
 func checkGh(args []string) (allowed bool, message string) {
+	args = normalizeGHGuardArgs(args)
 	if len(args) == 0 {
 		return true, ""
 	}
@@ -826,31 +962,22 @@ func checkGh(args []string) (allowed bool, message string) {
 		return true, ""
 	}
 
-	// Walk args after "api", skipping flags and their values, to find
-	// the endpoint path or "graphql" verb.
-	apiPath := ""
-	rest := args[1:]
-	for i := 0; i < len(rest); i++ {
-		a := rest[i]
-		if strings.HasPrefix(a, "-") {
-			if ghAPIFlagTakesValue(a) {
-				i++ // skip the flag's value token
-			}
-			continue
-		}
-		apiPath = a
-		break
-	}
+	invocation := parseGHAPIInvocation(args[1:])
 
-	// gh api repos/<owner>/<repo>/pulls/<number>/merge
-	if strings.HasSuffix(apiPath, "/merge") {
+	// gh api repos/<owner>/<repo>/pulls/<number>/merge[-async]
+	if isGHAPIPullMergeEndpoint(invocation.endpoint) &&
+		(invocation.method == "PUT" || invocation.dynamicMethod) {
 		return false, ghMergeBlocked
 	}
 
 	// gh api graphql with a merge mutation anywhere in the argument list.
-	if apiPath == "graphql" {
+	if isGHAPIGraphQLEndpoint(invocation.endpoint) {
 		full := strings.Join(args, " ")
-		if strings.Contains(full, "mergePullRequest") || strings.Contains(full, "enablePullRequestAutoMerge") {
+		if invocation.externalGraphQLBody ||
+			strings.Contains(full, "mergePullRequest") ||
+			strings.Contains(full, "enablePullRequestAutoMerge") ||
+			strings.Contains(full, "enqueuePullRequest") ||
+			strings.Contains(full, "dequeuePullRequest") {
 			return false, ghMergeBlocked
 		}
 	}

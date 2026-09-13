@@ -1,6 +1,7 @@
 package instructionlint
 
 import (
+	"net/url"
 	"path"
 	"regexp"
 	"slices"
@@ -168,21 +169,145 @@ func rawGHMergeFields(fields []string) bool {
 	if !commandHasPrefix(fields, "gh", "api") {
 		return false
 	}
-	apiArgs := stripLauncherOptions(fields[2:], map[string]bool{
-		"-X": true, "--method": true, "-H": true, "--header": true,
-		"-q": true, "--jq": true, "-F": true, "--field": true,
-		"-f": true, "--raw-field": true, "--input": true,
-		"--template": true, "-t": true, "--preview": true,
-	})
-	if len(apiArgs) == 0 {
+	invocation := parseGHAPIInvocation(fields[2:])
+	if invocation.endpoint == "" {
 		return false
 	}
-	if strings.HasSuffix(strings.TrimSuffix(apiArgs[0], "/"), "/merge") {
-		return ghAPIMethod(fields[2:]) == "PUT"
+	if isGHAPIPullMergeEndpoint(invocation.endpoint) {
+		return invocation.method == "PUT" || invocation.dynamicMethod
 	}
-	return apiArgs[0] == "graphql" &&
-		(strings.Contains(strings.Join(fields, " "), "mergePullRequest") ||
-			strings.Contains(strings.Join(fields, " "), "enablePullRequestAutoMerge"))
+	return isGHAPIGraphQLEndpoint(invocation.endpoint) &&
+		(invocation.externalGraphQLBody ||
+			strings.Contains(strings.Join(fields, " "), "mergePullRequest") ||
+			strings.Contains(strings.Join(fields, " "), "enablePullRequestAutoMerge") ||
+			strings.Contains(strings.Join(fields, " "), "enqueuePullRequest") ||
+			strings.Contains(strings.Join(fields, " "), "dequeuePullRequest"))
+}
+
+type ghAPIInvocation struct {
+	endpoint            string
+	method              string
+	dynamicMethod       bool
+	externalGraphQLBody bool
+}
+
+func parseGHAPIInvocation(fields []string) ghAPIInvocation {
+	invocation := ghAPIInvocation{method: "GET"}
+	method := ""
+	hasFields := false
+	parseOptions := true
+	for i := 0; i < len(fields); i++ {
+		field := strings.Trim(fields[i], `"'`)
+		if parseOptions && field == "--" {
+			parseOptions = false
+			continue
+		}
+		if !parseOptions || !strings.HasPrefix(field, "-") || field == "-" {
+			if invocation.endpoint == "" {
+				invocation.endpoint = field
+			}
+			continue
+		}
+
+		name, value, consumeNext, ok := parseGHAPIOption(field)
+		if !ok {
+			continue
+		}
+		if consumeNext && i+1 < len(fields) {
+			i++
+			value = strings.Trim(fields[i], `"'`)
+		}
+		switch name {
+		case "-X", "--method":
+			method = value
+			invocation.dynamicMethod = visiblyDynamicGHAPIValue(value)
+		case "-F", "--field", "-f", "--raw-field":
+			hasFields = true
+			if externalGraphQLQuerySource(value) {
+				invocation.externalGraphQLBody = true
+			}
+		case "--input":
+			invocation.externalGraphQLBody = true
+		}
+	}
+	if method != "" {
+		invocation.method = strings.ToUpper(method)
+	} else if hasFields {
+		invocation.method = "POST"
+	}
+	return invocation
+}
+
+func parseGHAPIOption(field string) (name, value string, consumeNext, ok bool) {
+	if strings.HasPrefix(field, "--") {
+		name, value, inline := strings.Cut(field, "=")
+		switch name {
+		case "--cache", "--field", "--header", "--hostname", "--input", "--jq",
+			"--method", "--preview", "--raw-field", "--template":
+		default:
+			return "", "", false, false
+		}
+		return name, value, !inline, true
+	}
+
+	cluster := strings.TrimPrefix(field, "-")
+	for i := 0; i < len(cluster); i++ {
+		name = "-" + string(cluster[i])
+		if !strings.ContainsRune("FHXfpqt", rune(cluster[i])) {
+			continue
+		}
+		remainder := cluster[i+1:]
+		if strings.HasPrefix(remainder, "=") {
+			return name, strings.TrimPrefix(remainder, "="), false, true
+		}
+		return name, remainder, remainder == "", true
+	}
+	return "", "", false, false
+}
+
+func externalGraphQLQuerySource(field string) bool {
+	name, value, ok := strings.Cut(field, "=")
+	if !ok || name != "query" {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "@") || strings.HasPrefix(value, "$") ||
+		strings.HasPrefix(value, "`") || strings.HasPrefix(value, "<(")
+}
+
+func visiblyDynamicGHAPIValue(value string) bool {
+	return strings.Contains(value, "$") || strings.Contains(value, "`") || strings.Contains(value, "<(")
+}
+
+func normalizedGHAPIPath(endpoint string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(strings.Trim(endpoint, `"'`)))
+	if err != nil {
+		return "", false
+	}
+	return strings.Trim(path.Clean("/"+strings.TrimPrefix(parsed.Path, "/")), "/"), true
+}
+
+func isGHAPIPullMergeEndpoint(endpoint string) bool {
+	apiPath, ok := normalizedGHAPIPath(endpoint)
+	if !ok || apiPath == "" {
+		return false
+	}
+	parts := strings.Split(apiPath, "/")
+	if len(parts) < 6 {
+		return false
+	}
+	parts = parts[len(parts)-6:]
+	return parts[0] == "repos" && parts[1] != "" && parts[2] != "" &&
+		parts[3] == "pulls" && parts[4] != "" &&
+		(parts[5] == "merge" || parts[5] == "merge-async")
+}
+
+func isGHAPIGraphQLEndpoint(endpoint string) bool {
+	apiPath, ok := normalizedGHAPIPath(endpoint)
+	if !ok || apiPath == "" {
+		return false
+	}
+	return apiPath == "graphql" || apiPath == "api/graphql"
 }
 
 func rawGHPRLifecycle(text string) bool {
@@ -231,34 +356,7 @@ func rawGHAPIPRLifecycle(apiFields []string) bool {
 }
 
 func ghAPIMethod(fields []string) string {
-	method := ""
-	hasFields := false
-	for i := 0; i < len(fields); i++ {
-		field := strings.Trim(fields[i], `"'`)
-		if strings.HasPrefix(field, "-X") && field != "-X" {
-			method = strings.TrimPrefix(field, "-X")
-			continue
-		}
-		name, value, inline := strings.Cut(field, "=")
-		switch name {
-		case "-X", "--method":
-			if inline {
-				method = value
-			} else if i+1 < len(fields) {
-				i++
-				method = strings.Trim(fields[i], `"'`)
-			}
-		case "-f", "--raw-field", "-F", "--field":
-			hasFields = true
-		}
-	}
-	if method != "" {
-		return strings.ToUpper(method)
-	}
-	if hasFields {
-		return "POST"
-	}
-	return "GET"
+	return parseGHAPIInvocation(fields).method
 }
 
 func ghAPIHasLifecycleState(fields []string) bool {
@@ -504,6 +602,12 @@ func normalizeGHCommand(fields []string) []string {
 	args := stripLauncherOptions(fields[1:], map[string]bool{
 		"-R": true, "--hostname": true, "--repo": true,
 	})
+	if len(args) > 0 && args[0] == "pr" {
+		prArgs := stripLauncherOptions(args[1:], map[string]bool{
+			"-R": true, "--hostname": true, "--repo": true,
+		})
+		args = append([]string{"pr"}, prArgs...)
+	}
 	return append([]string{"gh"}, args...)
 }
 

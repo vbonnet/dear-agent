@@ -354,10 +354,21 @@ func TestCheckGh(t *testing.T) {
 		{"pr merge blocked", "gh pr merge 42 --squash", false, "safe-merge"},
 		{"pr merge no number blocked", "gh pr merge", false, "safe-merge"},
 		{"pr merge HEAD blocked", "gh pr merge HEAD --squash --delete-branch", false, "safe-merge"},
+		{"pr merge root repo option blocked", "gh -R owner/repo pr merge 42", false, "safe-merge"},
+		{"pr merge command repo option blocked", "gh pr --repo owner/repo merge 42", false, "safe-merge"},
+		{"pr merge root hostname option blocked", "gh --hostname github.example pr merge 42", false, "safe-merge"},
 
 		// gh api REST merge endpoint.
 		{"api REST merge blocked", "gh api repos/owner/repo/pulls/42/merge --method PUT", false, "safe-merge"},
-		{"api REST merge trailing blocked", "gh api -X PUT repos/owner/repo/pulls/1/merge", false, "safe-merge"},
+		{"api REST merge leading option blocked", "gh api -X PUT repos/owner/repo/pulls/1/merge", false, "safe-merge"},
+		{"api REST async merge blocked", "gh api -X PUT repos/owner/repo/pulls/42/merge-async", false, "safe-merge"},
+		{"api REST merge query blocked", "gh api -XPUT 'repos/owner/repo/pulls/42/merge?sha=expected'", false, "safe-merge"},
+		{"api REST async merge full URL fragment blocked", "gh api -iXPUT 'https://api.github.com/repos/owner/repo/pulls/42/merge-async#request'", false, "safe-merge"},
+		{"api REST merge root hostname blocked", "gh --hostname github.example api -X PUT repos/owner/repo/pulls/42/merge", false, "safe-merge"},
+		{"api REST merge command hostname blocked", "gh api --hostname github.example -X PUT repos/owner/repo/pulls/42/merge", false, "safe-merge"},
+		{"api REST merge dot segments blocked", "gh api -X PUT repos/owner/repo/pulls/42/staging/../merge", false, "safe-merge"},
+		{"api REST merge dynamic method blocked", `gh api -X "$METHOD" repos/owner/repo/pulls/42/merge`, false, "safe-merge"},
+		{"api REST merge compact dynamic method blocked", `gh api -iX${METHOD} repos/owner/repo/pulls/42/merge-async`, false, "safe-merge"},
 
 		// gh api graphql merge mutations.
 		{"graphql mergePullRequest blocked",
@@ -366,11 +377,24 @@ func TestCheckGh(t *testing.T) {
 		{"graphql enableAutoMerge blocked",
 			`gh api graphql -f query='mutation { enablePullRequestAutoMerge(input:{pullRequestId:"x"}){pullRequest{state}}}'`,
 			false, "safe-merge"},
+		{"graphql enqueuePullRequest blocked",
+			`gh api graphql -f query='mutation { enqueuePullRequest(input:{pullRequestId:"x"}){mergeQueueEntry{id}}}'`,
+			false, "safe-merge"},
+		{"graphql dequeuePullRequest blocked",
+			`gh api graphql -f query='mutation { dequeuePullRequest(input:{pullRequestId:"x"}){mergeQueueEntry{id}}}'`,
+			false, "safe-merge"},
+		{"graphql input file blocked", "gh api graphql --input mutation.json", false, "safe-merge"},
+		{"graphql inline input stdin blocked", "gh api graphql --input=-", false, "safe-merge"},
+		{"graphql typed query file blocked", "gh api graphql -F query=@mutation.graphql", false, "safe-merge"},
+		{"graphql compact raw query stdin blocked", "gh api graphql -fquery=@-", false, "safe-merge"},
+		{"graphql full URL external input blocked", "gh api 'https://api.github.com/graphql?operation=Merge' --input -", false, "safe-merge"},
+		{"graphql GHE full URL external input blocked", "gh api https://github.example/api/graphql --input mutation.json", false, "safe-merge"},
 
 		// Bypass vectors: boolean flags must NOT consume the next token as their value.
-		// --paginate / -p are boolean; treating them as value-taking lets the endpoint slip past.
-		{"paginate boolean bypass blocked", "gh api --paginate repos/owner/repo/pulls/42/merge", false, "safe-merge"},
-		{"-p boolean bypass blocked", "gh api -p repos/owner/repo/pulls/42/merge", false, "safe-merge"},
+		// --paginate / -i are boolean; treating them as value-taking lets the endpoint slip past.
+		{"paginate boolean bypass blocked", "gh api --paginate repos/owner/repo/pulls/42/merge -X PUT", false, "safe-merge"},
+		{"include boolean bypass blocked", "gh api -i repos/owner/repo/pulls/42/merge -X PUT", false, "safe-merge"},
+		{"preview value before endpoint blocked", "gh api -p corsair repos/owner/repo/pulls/42/merge -X PUT", false, "safe-merge"},
 
 		// gh commands that are allowed.
 		{"pr list allowed", "gh pr list --state open", true, ""},
@@ -378,7 +402,16 @@ func TestCheckGh(t *testing.T) {
 		{"pr checks allowed", "gh pr checks 42 --watch", true, ""},
 		{"pr create allowed", "gh pr create --title x --body y", true, ""},
 		{"api GET pulls allowed", "gh api repos/owner/repo/pulls/42", true, ""},
+		{"api merge GET allowed", "gh api repos/owner/repo/pulls/42/merge", true, ""},
+		{"api merge explicit GET with fields allowed", "gh api -X GET repos/owner/repo/pulls/42/merge -f sha=expected", true, ""},
+		{"api async result GET allowed", "gh api repos/owner/repo/pulls/42/merge-async/01234567-89ab-cdef-0123-456789abcdef", true, ""},
+		{"api non-pull merge suffix allowed", "gh api -X PUT repos/owner/repo/issues/42/merge", true, ""},
+		{"api dynamic method non-merge allowed", `gh api -X "$METHOD" repos/owner/repo/issues/42`, true, ""},
 		{"api graphql no mutation allowed", "gh api graphql -f query='{ viewer { login } }'", true, ""},
+		{"api REST graphql suffix input allowed", "gh api repos/owner/repo/contents/graphql --input payload.json", true, ""},
+		{"api REST full URL graphql suffix input allowed", "gh api https://api.github.com/repos/owner/repo/contents/graphql --input payload.json", true, ""},
+		{"pr view root repo option allowed", "gh -R owner/repo pr view 42", true, ""},
+		{"pr view command repo option allowed", "gh pr --repo owner/repo view 42", true, ""},
 		{"run list allowed", "gh run list", true, ""},
 
 		// Shell wrappers around gh pr merge are also caught.
