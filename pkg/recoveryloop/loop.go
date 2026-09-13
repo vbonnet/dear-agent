@@ -54,6 +54,18 @@ type Job struct {
 	BinaryPath   string   `json:"binary_path,omitempty"`
 	InstallCmd   []string `json:"install_cmd,omitempty"`
 	Pulse        string   `json:"pulse,omitempty"`
+	// PulseIsStructural marks a pulse that only proves the service exists,
+	// such as a launchd_loaded probe, rather than that its scheduled work is
+	// succeeding.
+	//
+	// RL-24 lets a present pulse outrank the exit-status heuristic, which is
+	// right for an activity pulse: a job writing its tick is alive whatever
+	// its exit code means. It is wrong for a structural one. The deployed
+	// config wires mergeloop to `mergeloop-loaded`, so without this flag a
+	// mergeloop that is loaded and fails every single run reads HEALTHY
+	// forever, because "the service is loaded" is answering a question nobody
+	// asked (RL-43).
+	PulseIsStructural bool `json:"pulse_is_structural,omitempty"`
 }
 
 // Config is the configuration document for recovery-loop.
@@ -100,7 +112,12 @@ func DefaultJobs() []Job {
 			PlistPath:    "~/Library/LaunchAgents/com.dear-agent.mergeloop.plist",
 			BinaryPath:   "~/go/bin/mergeloop",
 			InstallCmd:   []string{"go", "install", "./cmd/mergeloop"},
-			Pulse:        "mergeloop-loaded",
+			// mergeloop-loaded is a launchd_loaded probe: it proves the
+			// service exists, not that its scheduled runs succeed
+			// (mergeloop-tick is the activity pulse). Without this flag a
+			// loaded mergeloop that fails every run reads HEALTHY forever.
+			Pulse:             "mergeloop-loaded",
+			PulseIsStructural: true,
 		},
 		{
 			Name:         "disk-watchdog",
@@ -331,7 +348,7 @@ func PlanJob(
 		// absent -- so treating a non-zero exit as a wedge restarts a healthy
 		// monitor every tick precisely when it is doing its job. Only fall
 		// through to the exit-status heuristic when no pulse vouches for it.
-		if job.Pulse != "" && truth.Present(job.Pulse) {
+		if job.Pulse != "" && !job.PulseIsStructural && truth.Present(job.Pulse) {
 			return ActionNone, StatusHealthy, fmt.Sprintf("pulse %q is present", job.Pulse)
 		}
 		// RL-04 (continued): non-zero exit when not running and no pulse

@@ -183,27 +183,8 @@ func VerifyRecovery(
 	now time.Time,
 	actionAt time.Time,
 ) VerifyOutcome {
-	// Structural re-probe: these clear immediately or not at all.
-	if job.BinaryPath != "" && !host.FileExists(job.BinaryPath) {
-		return VerifyOutcome{
-			Status: StatusFailed,
-			Reason: fmt.Sprintf("after %s, binary %s still does not exist", action, job.BinaryPath),
-		}
-	}
-	if job.LaunchdLabel != "" {
-		info, loaded := launchdJobs[job.LaunchdLabel]
-		if !loaded {
-			return VerifyOutcome{
-				Status: StatusFailed,
-				Reason: fmt.Sprintf("after %s, launchd job %s is still not loaded", action, job.LaunchdLabel),
-			}
-		}
-		if info.Status == 78 || info.Status == -9 {
-			return VerifyOutcome{
-				Status: StatusFailed,
-				Reason: fmt.Sprintf("after %s, launchd job %s still reports status %d", action, job.LaunchdLabel, info.Status),
-			}
-		}
+	if failure, bad := verifyStructure(job, action, launchdJobs, host); bad {
+		return failure
 	}
 
 	// Pulse re-probe: the positive event is the only proof the job is working.
@@ -246,12 +227,59 @@ func VerifyRecovery(
 	}
 
 	// No pulse configured: the structural checks above are all the evidence
-	// that exists, and they passed.
+	// that exists. They must include the condition that actually triggered the
+	// action. PlanJob kickstarts a stopped job whose last run exited nonzero,
+	// so "loaded, and not 78/-9" is a different question: a process that exits
+	// 1 again immediately would verify as recovered and reset the counter, and
+	// the next tick would repeat the same false recovery forever (RL-42).
+	if job.LaunchdLabel != "" {
+		if info, ok := launchdJobs[job.LaunchdLabel]; ok && info.PID == 0 && info.Status != 0 {
+			return VerifyOutcome{
+				Status: StatusFailed,
+				Reason: fmt.Sprintf("after %s, launchd job %s is still not running and last exited %d",
+					action, job.LaunchdLabel, info.Status),
+			}
+		}
+	}
 	return VerifyOutcome{
 		Verified: true,
 		Status:   StatusRecovered,
 		Reason:   fmt.Sprintf("verified: structural checks pass after %s", action),
 	}
+}
+
+// verifyStructure re-probes the conditions that are observable immediately.
+// A structural condition that survived the action is a definite failure, so
+// the second return reports whether the outcome is conclusive.
+func verifyStructure(
+	job Job,
+	action ActionType,
+	launchdJobs map[string]LaunchdJobInfo,
+	host HostOps,
+) (VerifyOutcome, bool) {
+	if job.BinaryPath != "" && !host.FileExists(job.BinaryPath) {
+		return VerifyOutcome{
+			Status: StatusFailed,
+			Reason: fmt.Sprintf("after %s, binary %s still does not exist", action, job.BinaryPath),
+		}, true
+	}
+	if job.LaunchdLabel == "" {
+		return VerifyOutcome{}, false
+	}
+	info, loaded := launchdJobs[job.LaunchdLabel]
+	if !loaded {
+		return VerifyOutcome{
+			Status: StatusFailed,
+			Reason: fmt.Sprintf("after %s, launchd job %s is still not loaded", action, job.LaunchdLabel),
+		}, true
+	}
+	if info.Status == 78 || info.Status == -9 {
+		return VerifyOutcome{
+			Status: StatusFailed,
+			Reason: fmt.Sprintf("after %s, launchd job %s still reports status %d", action, job.LaunchdLabel, info.Status),
+		}, true
+	}
+	return VerifyOutcome{}, false
 }
 
 // evidenceStamp renders a probe observation time for an operator-facing reason.

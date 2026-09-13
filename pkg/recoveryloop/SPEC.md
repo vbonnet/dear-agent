@@ -5,11 +5,11 @@
      present at this revision. cmd/recovery-loop/SPEC.owner delegates here.
 
      Domain (pkg/recoveryloop/*_test.go):
-       RL-01 through RL-10, RL-18 through RL-29, RL-33, RL-39.
+       RL-01 through RL-10, RL-18 through RL-29, RL-33, RL-39, RL-42, RL-43.
 
      CLI (cmd/recovery-loop/*_test.go):
        RL-11 through RL-17, RL-30 through RL-32, RL-34 through RL-38,
-       RL-40, RL-41. -->
+       RL-40, RL-41, RL-44. -->
 
 **Status:** Production-ready
 **Scope:** Host critical job self-healing loop and escalation engine
@@ -17,9 +17,14 @@
 ## Purpose
 
 `cmd/recovery-loop` is the M2 mechanism of the absence-blindness architecture
-(ce-23lf7, ce-a1uqr): a host-level launchd tick that consumes the absence-alarm
-escalation journal plus a registry of critical jobs and attempts self-healing
-recovery instead of only alarming.
+(ce-23lf7, ce-a1uqr): a host-level launchd tick that reads pulse truth from the
+absence-alarm heartbeat plus a registry of critical jobs, attempts self-healing
+recovery instead of only alarming, and verifies that the condition cleared
+before recording a recovery.
+
+The absence-alarm escalation journal is an output of this mechanism, not an
+input: it receives `recovery.human_needed` records. It is append-only and
+records absences alone, so it cannot express that a pulse came back (RL-23).
 
 Prior to this mechanism, every alerting path terminated in a notification banner,
 an escalation log, or a human-needed journal line. Dead or wedged processes
@@ -43,7 +48,7 @@ no action that changed anything: success was measured as "`launchctl kickstart`
 exited 0", the pulse condition was never re-read, and the consecutive failure
 count was reset on every one of those ticks, which made the RL-09 escalation
 unreachable. Two of the three jobs were healthy the whole time and were being
-restarted because they exit non-zero to signal an alarm. RL-23 through RL-41
+restarted because they exit non-zero to signal an alarm. RL-23 through RL-44
 close that gap: pulse truth is read from a source that can clear, only an
 explicit present reading counts as evidence, planning may not claim recovery,
 and a recovery counts only once the condition is observed to have gone away.
@@ -136,13 +141,19 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-41** When the post-action launchd listing cannot be obtained, the system shall classify the recovery as PENDING VERIFICATION rather than verifying it against the pre-action snapshot.
 
+**RL-42** When a job declares no pulse and its recovery was triggered by a stopped service with a nonzero exit status, the system shall require that condition to have cleared before classifying the recovery as RECOVERED.
+
+**RL-43** When a job's pulse only proves its service is loaded rather than that its scheduled work succeeds, the system shall not let that pulse override the exit-status evaluation.
+
+**RL-44** When a dry run plans one or more remediations, the system shall report that action is needed rather than summarising the tick as OK.
+
 **RL-38** When the system runs in dry-run mode, the system shall not write state, journal records, escalation records, or notifications on any code path, including the settlement of a verification opened by an earlier tick.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Package tests: `pkg/recoveryloop/loop_test.go` (RL-01..RL-10, RL-18..RL-22)
-- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29, RL-32, RL-33, RL-39)
+- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29, RL-32, RL-33, RL-39, RL-42, RL-43)
 - CLI tests: `cmd/recovery-loop/main_test.go` (RL-11..RL-17)
-- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30, RL-31, RL-32, RL-34..RL-38, RL-40, RL-41)
+- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30, RL-31, RL-32, RL-34..RL-38, RL-40, RL-41, RL-44)
 

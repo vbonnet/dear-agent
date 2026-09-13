@@ -1,9 +1,16 @@
 // Command recovery-loop self-heals dead or wedged fleet background jobs (ce-a1uqr).
 //
-// It consumes the absence-alarm journal, evaluates critical launchd services
-// and binaries against a declarative registry, enforces expiring snooze policies,
-// executes bounded remediation actions (reinstall, bootstrap, kickstart),
-// tracks consecutive failure escalation, and journals every recovery attempt.
+// It reads pulse truth from the absence-alarm HEARTBEAT, which reports presence
+// as well as absence, evaluates critical launchd services and binaries against a
+// declarative registry, enforces expiring snooze policies, executes bounded
+// remediation actions (reinstall, bootstrap, kickstart), VERIFIES that the
+// condition actually cleared before calling anything recovered, tracks
+// consecutive failures to clear, and journals every attempt.
+//
+// The absence-alarm escalation journal is an OUTPUT only: human-needed records
+// are appended to it. It is append-only and records absences alone, so a pulse
+// that recovered leaves no trace in it; reading it as current state was the
+// defect that let this loop report success for 1243 consecutive ticks.
 //
 // Usage:
 //
@@ -140,6 +147,14 @@ func parseFlags(args []string, stderr io.Writer) (*options, int) {
 		fmt.Fprintf(stderr, "recovery-loop: --timeout must be positive\n")
 		return nil, 2
 	}
+	if opts.maxHBAge <= 0 {
+		// A nonpositive value skipped every heartbeat freshness check,
+		// including the missing and future tick_time cases, so a heartbeat
+		// from any point in history stayed authoritative. This flag has no
+		// documented disable value; it must be a real limit.
+		fmt.Fprintf(stderr, "recovery-loop: --max-heartbeat-age must be positive\n")
+		return nil, 2
+	}
 	if opts.verifyGrace <= 0 {
 		fmt.Fprintf(stderr, "recovery-loop: --verify-grace must be positive\n")
 		return nil, 2
@@ -227,9 +242,9 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	}
 
 	ctx := context.Background()
-	launchdJobs, listErr := host.LaunchdList(ctx)
-	if listErr != nil {
-		fmt.Fprintf(stderr, "recovery-loop: launchd list: %v\n", listErr)
+	launchdJobs, launchdErr := host.LaunchdList(ctx)
+	if launchdErr != nil {
+		fmt.Fprintf(stderr, "recovery-loop: launchd list: %v\n", launchdErr)
 	}
 
 	rep := recoveryloop.Heartbeat{
@@ -237,7 +252,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	}
 
 	for _, job := range jobs {
-		processJob(ctx, job, opts, &state, &rep, snoozes, truth, launchdJobs, host, notifyFn, now, stderr)
+		processJob(ctx, job, opts, &state, &rep, snoozes, truth, launchdJobs, launchdErr, host, notifyFn, now, stderr)
 	}
 
 	if !opts.dryRun {
@@ -272,6 +287,7 @@ func processJob(
 	snoozes map[string]absencealarm.Snooze,
 	truth recoveryloop.PulseTruth,
 	launchdJobs map[string]recoveryloop.LaunchdJobInfo,
+	launchdErr error,
 	host recoveryloop.HostOps,
 	notifyFn notifier,
 	now time.Time,
@@ -292,6 +308,14 @@ func processJob(
 	// reports that the grace window is still open. In every case this job is
 	// done for this tick and firing another action would only reset the clock.
 	if !prev.PendingDeadline.IsZero() {
+		// A listing that failed leaves an empty map, which VerifyRecovery
+		// would read as "the service is not loaded": a transient launchctl
+		// failure would convert every pending recovery into a counted failure
+		// and escalate. Not observed is not observed absent (RL-41).
+		if launchdErr != nil && job.LaunchdLabel != "" {
+			holdPending(job, prev, launchdErr, state, rep)
+			return
+		}
 		settlePending(job, opts, state, rep, truth, launchdJobs, host, prev, now, notifyFn, stderr)
 		return
 	}
@@ -321,6 +345,13 @@ func processJob(
 		return
 	}
 
+	// The boundary that post-action evidence must beat is when the action
+	// actually ran, not when the tick started. `now` was captured before
+	// LoadPulseTruth, and absence-alarm runs on the same 10-minute schedule as
+	// this loop, so a heartbeat published between the two would make
+	// pre-action evidence look post-action and verify a recovery that had not
+	// happened (RL-39).
+	actionAt := host.Now()
 	actionCtx, cancel := context.WithTimeout(ctx, opts.timeout)
 	execErr := recoveryloop.ExecuteRecovery(actionCtx, job, action, host)
 	cancel()
@@ -344,16 +375,16 @@ func processJob(
 		fmt.Fprintf(stderr, "recovery-loop: re-list launchd for verification: %v\n", listErr)
 		recordPending(job, action, fmt.Sprintf(
 			"%s ran; launchd could not be re-observed to verify it (%v)", action, listErr),
-			now, state, rep, opts, prev, stderr)
+			now, actionAt, state, rep, opts, prev, stderr)
 		return
 	}
-	outcome := recoveryloop.VerifyRecovery(job, action, truth, freshLaunchd, host, now, now)
+	outcome := recoveryloop.VerifyRecovery(job, action, truth, freshLaunchd, host, now, actionAt)
 
 	switch {
 	case outcome.Verified:
-		recordVerified(job, action, outcome.Reason, now, state, rep, opts, stderr)
+		recordVerified(job, action, outcome.Reason, prev.ConsecutiveFailures+1, now, state, rep, opts, stderr)
 	case outcome.Status == recoveryloop.StatusPending:
-		recordPending(job, action, outcome.Reason, now, state, rep, opts, prev, stderr)
+		recordPending(job, action, outcome.Reason, now, actionAt, state, rep, opts, prev, stderr)
 	default:
 		recordFailure(job, action, outcome.Reason, errors.New(outcome.Reason), now, state, rep, opts, truth, notifyFn, stderr)
 	}
@@ -381,7 +412,7 @@ func settlePending(
 	outcome := recoveryloop.VerifyRecovery(job, prev.PendingAction, truth, launchdJobs, host, now, prev.PendingSince)
 	switch {
 	case outcome.Verified:
-		recordVerified(job, prev.PendingAction, outcome.Reason, now, state, rep, opts, stderr)
+		recordVerified(job, prev.PendingAction, outcome.Reason, prev.ConsecutiveFailures+1, now, state, rep, opts, stderr)
 		return
 	case outcome.Status == recoveryloop.StatusFailed:
 		// A structural condition came back or never cleared: that is
@@ -414,6 +445,34 @@ func settlePending(
 		HumanNeeded: prev.HumanNeeded,
 		Reason: fmt.Sprintf("awaiting pulse %q until %s",
 			job.Pulse, prev.PendingDeadline.Format(time.RFC3339)),
+	})
+	rep.Pending++
+	if prev.HumanNeeded {
+		rep.HumanNeeded++
+	}
+}
+
+// holdPending leaves an open verification open because the host could not be
+// observed this tick. It judges nothing and counts nothing: the deadline and
+// failure count are carried forward untouched.
+func holdPending(
+	job recoveryloop.Job,
+	prev recoveryloop.JobState,
+	cause error,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+) {
+	st := prev
+	st.LastStatus = recoveryloop.StatusPending
+	state.Jobs[job.Name] = st
+	rep.Results = append(rep.Results, recoveryloop.Result{
+		Job:         job.Name,
+		Status:      recoveryloop.StatusPending,
+		Action:      prev.PendingAction,
+		Attempt:     prev.ConsecutiveFailures,
+		HumanNeeded: prev.HumanNeeded,
+		Reason: fmt.Sprintf("holding verification of %s: launchd state unavailable this tick (%v)",
+			prev.PendingAction, cause),
 	})
 	rep.Pending++
 	if prev.HumanNeeded {
@@ -479,7 +538,7 @@ func recordClear(
 	// A job that was failing and is now observed healthy has genuinely
 	// recovered.
 	if status == recoveryloop.StatusHealthy && prev.ConsecutiveFailures > 0 {
-		recordVerified(job, prev.LastAction, "condition cleared: "+reason, now, state, rep, opts, stderr)
+		recordVerified(job, prev.LastAction, "condition cleared: "+reason, prev.ConsecutiveFailures, now, state, rep, opts, stderr)
 		return
 	}
 	if status == recoveryloop.StatusHealthy {
@@ -545,12 +604,16 @@ func recordVerified(
 	job recoveryloop.Job,
 	action recoveryloop.ActionType,
 	reason string,
+	attempt int,
 	now time.Time,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	opts *options,
 	stderr io.Writer,
 ) {
+	if attempt < 1 {
+		attempt = 1
+	}
 	state.Jobs[job.Name] = recoveryloop.JobState{
 		ConsecutiveFailures: 0,
 		LastAttemptTime:     now,
@@ -559,10 +622,11 @@ func recordVerified(
 		HumanNeeded:         false,
 	}
 	rep.Results = append(rep.Results, recoveryloop.Result{
-		Job:    job.Name,
-		Status: recoveryloop.StatusRecovered,
-		Action: action,
-		Reason: reason,
+		Job:     job.Name,
+		Status:  recoveryloop.StatusRecovered,
+		Action:  action,
+		Attempt: attempt,
+		Reason:  reason,
 	})
 	rep.Recovered++
 	appendJournal(opts, stderr, recoveryloop.JournalRecord{
@@ -571,7 +635,7 @@ func recordVerified(
 		Job:         job.Name,
 		Action:      action,
 		Status:      recoveryloop.StatusRecovered,
-		Attempt:     1,
+		Attempt:     attempt,
 		HumanNeeded: false,
 		Reason:      reason,
 	})
@@ -585,12 +649,16 @@ func recordPending(
 	action recoveryloop.ActionType,
 	reason string,
 	now time.Time,
+	actionAt time.Time,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	opts *options,
 	prev recoveryloop.JobState,
 	stderr io.Writer,
 ) {
+	if actionAt.IsZero() {
+		actionAt = now
+	}
 	unhealthySince := prev.UnhealthySince
 	if unhealthySince.IsZero() {
 		unhealthySince = now
@@ -602,8 +670,8 @@ func recordPending(
 		LastStatus:          recoveryloop.StatusPending,
 		HumanNeeded:         prev.HumanNeeded,
 		PendingAction:       action,
-		PendingSince:        now,
-		PendingDeadline:     now.Add(opts.verifyGrace),
+		PendingSince:        actionAt,
+		PendingDeadline:     actionAt.Add(opts.verifyGrace),
 		UnhealthySince:      unhealthySince,
 		LastEscalated:       prev.LastEscalated,
 	}
@@ -862,6 +930,11 @@ func emitReport(stdout, stderr io.Writer, rep recoveryloop.Heartbeat, jsonOut bo
 	switch {
 	case rep.Failed > 0 || rep.HumanNeeded > 0:
 		fmt.Fprintf(stdout, "Status: ALARM (%d recovery failure(s), %d human needed)\n", rep.Failed, rep.HumanNeeded)
+	case rep.Planned > 0:
+		// A dry run that just listed work to do is not a clean bill of health.
+		// Reporting OK underneath a planned remediation is the same report
+		// contradicting itself, which is what operators use dry-run to avoid.
+		fmt.Fprintf(stdout, "Status: ACTION NEEDED (%d remediation(s) planned, none executed)\n", rep.Planned)
 	case rep.Pending > 0:
 		fmt.Fprintf(stdout, "Status: PENDING (%d remediation(s) awaiting verification)\n", rep.Pending)
 	default:

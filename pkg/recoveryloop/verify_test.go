@@ -340,3 +340,69 @@ func TestLoadPulseTruth_FutureTickTimeIsRefused(t *testing.T) {
 		t.Error("facts were returned from a future-dated heartbeat")
 	}
 }
+
+// RL-42: for a job with no pulse, the condition that triggered the action is
+// the nonzero exit itself, so that is what has to clear.
+//
+// PlanJob kickstarts a stopped job whose last exit was nonzero. Verifying only
+// "loaded, and not 78/-9" means a process that immediately exits 1 again
+// verifies as RECOVERED and resets the failure count, and the next tick repeats
+// the same false recovery forever. Structural verification has to re-check the
+// structural condition that was acted on, not a different one.
+func TestVerifyRecovery_PulselessJobMustClearItsExitStatus(t *testing.T) {
+	host, _ := mockHostOps()
+	job := Job{Name: "audit-remotes", LaunchdLabel: "com.dear-agent.audit-remotes"}
+	// Kickstarted, and it exited 1 again straight away.
+	launchd := map[string]LaunchdJobInfo{
+		"com.dear-agent.audit-remotes": {Loaded: true, PID: 0, Status: 1},
+	}
+
+	out := VerifyRecovery(job, ActionKickstart, PulseTruth{}, launchd, host, host.Now(), time.Time{})
+	if out.Verified || out.Status == StatusRecovered {
+		t.Errorf("got verified=%v status=%q reason=%q; the job is stopped and still exiting 1, which is the condition that triggered the kickstart",
+			out.Verified, out.Status, out.Reason)
+	}
+}
+
+// RL-42: the same job running again is a real recovery.
+func TestVerifyRecovery_PulselessJobRunningVerifies(t *testing.T) {
+	host, _ := mockHostOps()
+	job := Job{Name: "audit-remotes", LaunchdLabel: "com.dear-agent.audit-remotes"}
+	launchd := map[string]LaunchdJobInfo{
+		"com.dear-agent.audit-remotes": {Loaded: true, PID: 4321, Status: 0},
+	}
+
+	out := VerifyRecovery(job, ActionKickstart, PulseTruth{}, launchd, host, host.Now(), time.Time{})
+	if !out.Verified {
+		t.Errorf("got verified=false reason=%q; a running job with a clean exit status has recovered", out.Reason)
+	}
+}
+
+// RL-43: a pulse that only proves a service is loaded must not vouch for the
+// work that service is supposed to be doing.
+//
+// The deployed config wires mergeloop to `mergeloop-loaded`, a launchd_loaded
+// probe, while `mergeloop-tick` is the activity pulse. Treating a structural
+// pulse as proof of life lets a loaded mergeloop whose every scheduled run
+// exits 1 read HEALTHY forever, because the present pulse outranks the exit
+// status heuristic that would otherwise kickstart it.
+func TestPlanJob_LoadedOnlyPulseDoesNotOverrideRepeatedFailures(t *testing.T) {
+	host, _ := mockHostOps()
+	job := Job{
+		Name:              "mergeloop",
+		LaunchdLabel:      "com.dear-agent.mergeloop",
+		Pulse:             "mergeloop-loaded",
+		PulseIsStructural: true,
+	}
+	launchd := map[string]LaunchdJobInfo{
+		// Loaded, not running, and its last run exited 1.
+		"com.dear-agent.mergeloop": {Loaded: true, PID: 0, Status: 1},
+	}
+	truth := PulseTruth{"mergeloop-loaded": {Known: true, Status: absencealarm.StatusPresent}}
+
+	action, status, reason := PlanJob(job, nil, truth, launchd, host, host.Now())
+	if action == ActionNone || status == StatusHealthy {
+		t.Errorf("got action=%q status=%q reason=%q; a loaded-only pulse says the service exists, not that its runs succeed",
+			action, status, reason)
+	}
+}

@@ -653,3 +653,46 @@ func TestCLI_FailedPostActionListingIsPendingNotFailed(t *testing.T) {
 		t.Errorf("last_status = %q, want pending", js.LastStatus)
 	}
 }
+
+// RL-32: the freshness limit must be a real limit. A nonpositive value skipped
+// every heartbeat check, including the missing and future tick_time cases, so
+// evidence from any point in history stayed authoritative.
+func TestCLI_NonPositiveMaxHeartbeatAgeRejected(t *testing.T) {
+	f := newFixture(t)
+	now := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	f.write(t, f.cfg, absenceAlarmJob)
+	for _, v := range []string{"0", "-1h"} {
+		var stdout, stderr bytes.Buffer
+		code := run(f.args("--max-heartbeat-age", v), &stdout, &stderr, mustHost(now), nil)
+		if code != 2 {
+			t.Errorf("--max-heartbeat-age=%s exited %d, want 2 (usage error)", v, code)
+		}
+		if !strings.Contains(stderr.String(), "max-heartbeat-age") {
+			t.Errorf("--max-heartbeat-age=%s gave no usage message: %s", v, stderr.String())
+		}
+	}
+}
+
+// RL-44: a dry run that plans remediation must not summarise as OK. The same
+// report saying "action bootstrap" and "Status: OK" is a report contradicting
+// itself, which is exactly what dry-run exists to prevent.
+func TestCLI_DryRunWithPlannedWorkIsNotOK(t *testing.T) {
+	f := newFixture(t)
+	now := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
+	f.write(t, f.cfg, absenceAlarmJob)
+	f.write(t, f.absHB, fmt.Sprintf(
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"absent"}]}`,
+		now.Format(time.RFC3339)))
+
+	host, _ := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{})
+	var stdout, stderr bytes.Buffer
+	run(f.args("--dry-run"), &stdout, &stderr, host, nil)
+
+	out := stdout.String()
+	if !strings.Contains(out, "planned, dry-run") {
+		t.Fatalf("expected a planned remediation in the report:\n%s", out)
+	}
+	if strings.Contains(out, "Status: OK") {
+		t.Errorf("dry-run reported a planned remediation and Status: OK in the same report:\n%s", out)
+	}
+}
