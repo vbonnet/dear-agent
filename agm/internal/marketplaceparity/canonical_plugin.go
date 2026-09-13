@@ -76,7 +76,13 @@ func validateNeutralCanonicalExclusion(root string, neutral map[string]PluginEnt
 		if err != nil {
 			return fmt.Errorf("inspect neutral marketplace plugin %q source %q: %w", plugin.Name, plugin.Source, err)
 		}
-		if os.SameFile(sourceInfo, canonicalInfo) {
+		// Identity is not only the package ROOT. A source pointing INTO the
+		// canonical package, such as ./spec-governance/skills/write-spec, is
+		// not SameFile as the root but still projects Claude-only material:
+		// that directory carries a SKILL.md, so validatePlugin would accept it
+		// and the neutral catalogue would advertise a subtree of the package it
+		// is forbidden to advertise.
+		if os.SameFile(sourceInfo, canonicalInfo) || pathWithinCanonical(canonicalSource, resolvedSource) {
 			return fmt.Errorf(
 				"neutral marketplace must not advertise Claude-only plugin identity through resolved source %q on plugin %q",
 				plugin.Source,
@@ -85,6 +91,21 @@ func validateNeutralCanonicalExclusion(root string, neutral map[string]PluginEnt
 		}
 	}
 	return nil
+}
+
+// pathWithinCanonical reports whether resolved is the canonical package or any
+// path beneath it. Both arguments are already symlink-resolved, so this is a
+// pure lexical containment test on real paths.
+func pathWithinCanonical(canonical, resolved string) bool {
+	relative, err := filepath.Rel(canonical, resolved)
+	if err != nil {
+		// Different volumes, or otherwise unrelatable: not contained.
+		return false
+	}
+	if relative == "." {
+		return true
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 var allowedCanonicalDirectories = map[string]bool{
@@ -259,6 +280,18 @@ func validateCanonicalManifestFile(entries map[string]anchoredTreeEntry, plugin 
 	if !ok || manifest.Directory {
 		return fmt.Errorf("plugin manifest must be a regular file")
 	}
+	// Apply the MANIFEST limit, not the tree limit. The anchored tree is read
+	// under maxCanonicalFileBytes (1 MiB) because it carries licences and skill
+	// bodies, but readJSONWithin caps any plugin.json at maxManifestBytes
+	// (256 KiB). Decoding the captured bytes without re-applying that cap let
+	// this path accept a manifest every other reader in the package refuses,
+	// which is precisely the divergence this package exists to prevent.
+	if int64(len(manifest.Data)) > maxManifestBytes {
+		return fmt.Errorf(
+			"skill-capable plugin %q manifest is %d bytes, over the %d-byte manifest limit",
+			plugin.Name, len(manifest.Data), maxManifestBytes,
+		)
+	}
 	var decoded claudePluginManifest
 	if err := decodeJSONData(".claude-plugin/plugin.json", manifest.Data, &decoded); err != nil {
 		return fmt.Errorf("skill-capable plugin %q manifest: %w", plugin.Name, err)
@@ -365,6 +398,17 @@ func loadCanonicalSkillExports(entries map[string]anchoredTreeEntry, skillFiles 
 		name, err := readSkillNameFromData(entryPath, entry.Data)
 		if err != nil {
 			return nil, fmt.Errorf("canonical exported skill %q: %w", entryPath, err)
+		}
+		// The declared name must match the directory that holds it. Checking
+		// only the SET of names lets two skills swap their frontmatter and
+		// still satisfy every inventory check, because each path stays where it
+		// was and the sorted names still read exactly the required pair. Claude
+		// would then expose each workflow under the other's name.
+		if directory := path.Base(path.Dir(entryPath)); name != directory {
+			return nil, fmt.Errorf(
+				"canonical exported skill %q declares name %q but lives in directory %q; the declared name must match its directory",
+				entryPath, name, directory,
+			)
 		}
 		exported = append(exported, exportedSkill{
 			Name:          name,

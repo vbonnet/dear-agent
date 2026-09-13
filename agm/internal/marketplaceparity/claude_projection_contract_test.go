@@ -795,3 +795,101 @@ func projectionTestFieldName(field string) string {
 	}
 	return field
 }
+
+// TestNeutralCatalogRejectsClaudeOnlyDescendantSource pins the review finding
+// that the Claude-only identity check compared only the package ROOT.
+//
+// os.SameFile is false for a neutral plugin whose source points INTO the
+// canonical package, such as ./spec-governance/skills/write-spec. Because that
+// directory contains a SKILL.md, validatePlugin then accepted it, so the
+// neutral catalogue could advertise a projection of the supposedly Claude-only
+// package by naming a subtree instead of the root.
+func TestNeutralCatalogRejectsClaudeOnlyDescendantSource(t *testing.T) {
+	for _, source := range []string{
+		"./spec-governance/skills/write-spec",
+		"./spec-governance/skills/audit-specs",
+		"./spec-governance/skills",
+	} {
+		t.Run(source, func(t *testing.T) {
+			fixture := newProjectionTestFixture(t)
+			shadow := `{"name":"shadow","source":"` + source + `","description":"Shadow","version":"0.1.0"}`
+			projectionTestReplace(t, fixture.neutralPath, "\n  ],\n  \"harnesses\"", ",\n    "+shadow+"\n  ],\n  \"harnesses\"")
+			projectionTestReplace(t, fixture.claudePath, "\n  ]\n}\n", ",\n    "+shadow+"\n  ]\n}\n")
+			for _, operation := range []struct {
+				name     string
+				validate func(string) error
+			}{
+				{name: "ValidateCatalog", validate: ValidateCatalog},
+				{name: "ValidateClaudeMarketplaceMirror", validate: ValidateClaudeMarketplaceMirror},
+			} {
+				err := operation.validate(fixture.root)
+				if err == nil || !strings.Contains(err.Error(), "must not advertise Claude-only plugin identity") {
+					t.Fatalf("%s() error = %v, want Claude-only identity rejection for a descendant source",
+						operation.name, err)
+				}
+			}
+		})
+	}
+}
+
+// TestCanonicalSkillNameMustMatchItsDirectory pins the review finding that
+// nothing tied a skill's declared name to the directory holding it.
+//
+// If the two canonical SKILL.md files swap their frontmatter names, every
+// existing check still passes: each path is still in the required directory
+// inventory, and the sorted export names still read exactly {audit-specs,
+// write-spec}. Validation therefore succeeded while Claude exposed each
+// workflow under the other's name, which is the one thing this package exists
+// to make impossible.
+//
+// The assertion is on ValidateClaudeMarketplaceMirror rather than
+// ValidateCatalog on purpose: the neutral catalogue deliberately excludes the
+// Claude-only spec-governance package, so the neutral validator never reads
+// these files and is not the gate that should have caught this.
+func TestCanonicalSkillNameMustMatchItsDirectory(t *testing.T) {
+	fixture := newProjectionTestFixture(t)
+	auditPath := filepath.Join(fixture.root, "spec-governance", "skills", "audit-specs", "SKILL.md")
+	writePath := filepath.Join(fixture.root, "spec-governance", "skills", "write-spec", "SKILL.md")
+
+	// Swap the declared names, leaving every path exactly where it was.
+	projectionTestWriteFile(t, auditPath, projectionTestSkill("write-spec"))
+	projectionTestWriteFile(t, writePath, projectionTestSkill("audit-specs"))
+
+	err := ValidateClaudeMarketplaceMirror(fixture.root)
+	if err == nil {
+		t.Fatal("ValidateClaudeMarketplaceMirror() = nil, want rejection: the skills declare each other's names")
+	}
+	if !strings.Contains(err.Error(), "must match its directory") {
+		t.Errorf("error = %v, want it to name the directory mismatch", err)
+	}
+}
+
+// TestCanonicalManifestHonoursManifestSizeLimit pins the review finding that
+// the canonical snapshot accepted manifests the shared reader rejects.
+//
+// readJSONWithin caps a plugin.json at maxManifestBytes (256 KiB). The
+// canonical path instead reads the whole package tree under
+// maxCanonicalFileBytes (1 MiB) and decodes the captured bytes directly, so a
+// manifest between those two limits was admitted here and refused everywhere
+// else. Two readers disagreeing about what is a valid manifest is exactly the
+// divergence this package exists to prevent.
+//
+// The padding is whitespace, so the manifest stays byte-for-byte equivalent in
+// meaning and only its size changes.
+func TestCanonicalManifestHonoursManifestSizeLimit(t *testing.T) {
+	fixture := newProjectionTestFixture(t)
+	manifestPath := filepath.Join(fixture.root, "spec-governance", ".claude-plugin", "plugin.json")
+
+	// Comfortably over maxManifestBytes (256 KiB) and under
+	// maxCanonicalFileBytes (1 MiB), which is the window the finding names.
+	padded := projectionTestManifest + "\n" + strings.Repeat(" ", 400<<10) + "\n"
+	projectionTestWriteFile(t, manifestPath, padded)
+	if int64(len(padded)) <= 256<<10 || int64(len(padded)) >= 1<<20 {
+		t.Fatalf("fixture padding %d bytes is outside the window under test", len(padded))
+	}
+
+	if err := ValidateClaudeMarketplaceMirror(fixture.root); err == nil {
+		t.Error("ValidateClaudeMarketplaceMirror() = nil, want the canonical manifest to be " +
+			"refused for exceeding the manifest size limit")
+	}
+}
