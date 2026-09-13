@@ -361,7 +361,7 @@ because they touch shared infrastructure or governance).
 
 Bead IDs below are from this repo's canonical Beads database
 (`~/beads/context-engine/.beads`); look one up with `bd --db
-~/beads/context-engine/.beads show <id>`. None of these beads alone makes an engram
+~/beads/context-engine/.beads --dolt-auto-commit on show <id>`. None of these beads alone makes an engram
 fire end to end; each is a small, independently testable piece of the larger SPEC-level
 work in items 4 through 8, and their acceptance criteria are scoped to what they
 individually prove, not to the full pipeline being reachable.
