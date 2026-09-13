@@ -4,6 +4,7 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 - Feature: `agm/test/bdd/features/workflow_package_guardrails.feature`
+- Test consequence: Deterministic unit tests in `pkg/workflow/run_state_test.go` prove WFLOW-13's closed vocabulary, empty-filter exception, and pre-query rejection against closed storage; the typed query boundary needs no additional Gherkin scenario.
 
 <!-- Last audited at: 2026-08-27 -->
 
@@ -39,6 +40,8 @@ execution, resume, review, and cost controls.
 **WFLOW-11** When cancellation stops a resumed run, the system shall retain the original run identity, preserve completed nodes, and record only uncompleted nodes as skipped.
 
 **WFLOW-12** When an existing SQLite run resumes, the system shall atomically reopen the run and record an explicit prior-state-to-running transition before notifying observational sinks or hooks.
+
+**WFLOW-13** When a caller lists workflow runs with a state filter, the system shall accept only the empty any-state filter or exactly one of `pending`, `running`, `awaiting_hitl`, `succeeded`, `failed`, or `cancelled`, and shall reject every other value, and any repeated filter, before querying storage. This is the single owner of the run-state filter contract; transport adapters map its rejection onto their own error vocabulary rather than restating the domain.
 
 ## Permission contract
 
