@@ -53,9 +53,20 @@ const (
 	// loudly escalated instead of being restarted every tick forever; the
 	// live incident ran 555 consecutive no-op kickstarts on one job.
 	defaultGiveUpAfter = 5
-	// maxHeartbeatAge is how stale the absence-alarm heartbeat may be before
-	// its pulse truth is refused. Stale evidence must not confirm a recovery.
-	maxHeartbeatAge = 2 * time.Hour
+	// defaultMaxHeartbeatAge is how stale the absence-alarm heartbeat may be
+	// before its pulse truth is refused. Stale evidence must not confirm a
+	// recovery.
+	//
+	// It is deliberately just over the deployed absence-alarm-heartbeat pulse
+	// window (30m), not a round couple of hours: the heartbeat is how a
+	// stopped monitor is detected, so a threshold far beyond that window lets
+	// the monitor's own last "present" self-report vouch for it long after it
+	// died. The slack covers one missed tick and no more.
+	defaultMaxHeartbeatAge = 45 * time.Minute
+	// reEscalateInterval bounds how often one standing, given-up outage may
+	// re-alarm. A sink that receives the same record every tick forever stops
+	// being read, which is the failure mode this whole change exists to fix.
+	reEscalateInterval = 24 * time.Hour
 )
 
 // notifier delivers an escalation message to the operator (RL-09, RL-17).
@@ -91,6 +102,7 @@ type options struct {
 	verifyGrace    time.Duration
 	escalateAfter  int
 	giveUpAfter    int
+	maxHBAge       time.Duration
 }
 
 func parseFlags(args []string, stderr io.Writer) (*options, int) {
@@ -111,6 +123,7 @@ func parseFlags(args []string, stderr io.Writer) (*options, int) {
 	fs.DurationVar(&opts.verifyGrace, "verify-grace", defaultVerifyGrace, "how long a pulse has to return before a remediation counts as failed")
 	fs.IntVar(&opts.escalateAfter, "escalate-after", defaultEscalateAfter, "consecutive unverified recoveries before escalating to a human")
 	fs.IntVar(&opts.giveUpAfter, "give-up-after", defaultGiveUpAfter, "stop retrying a job after this many consecutive failures (0 = never stop)")
+	fs.DurationVar(&opts.maxHBAge, "max-heartbeat-age", defaultMaxHeartbeatAge, "refuse absence-alarm pulse truth older than this")
 	fs.StringVar(&opts.heartbeatPath, "heartbeat", filepath.Join(home, ".local", "state", "dear-agent", "recovery-loop.heartbeat.json"), "self-liveness heartbeat file")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "plan and report recovery actions without executing or writing state")
 	fs.BoolVar(&opts.jsonOut, "json", false, "emit report as JSON on stdout")
@@ -208,7 +221,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	// that reports presence as well as absence. The escalation journal is
 	// append-only and records absences only, so a pulse that recovered would
 	// stay "alarming" in it forever.
-	truth, err := recoveryloop.LoadPulseTruth(opts.absenceHB, opts.absenceState, now, maxHeartbeatAge)
+	truth, err := recoveryloop.LoadPulseTruth(opts.absenceHB, opts.absenceState, now, opts.maxHBAge)
 	if err != nil {
 		fmt.Fprintf(stderr, "recovery-loop: load pulse truth: %v\n", err)
 	}
@@ -266,19 +279,27 @@ func processJob(
 ) {
 	prev := state.Jobs[job.Name]
 
+	// A snooze silences a job wherever it sits in the lifecycle, including
+	// while a verification is still open. Settling first would escalate over
+	// an outage an operator has explicitly acknowledged (RL-05, RL-22).
+	if sn, snoozed := recoveryloop.IsJobSnoozed(job, snoozes, now); snoozed {
+		recordSnoozed(job, sn, now, state, rep, prev)
+		return
+	}
+
 	// A verification left open by an earlier tick is always conclusive: it
 	// either confirms the pulse returned, converts to a counted failure, or
 	// reports that the grace window is still open. In every case this job is
 	// done for this tick and firing another action would only reset the clock.
 	if !prev.PendingDeadline.IsZero() {
-		settlePending(job, opts, state, rep, truth, prev, now, notifyFn, stderr)
+		settlePending(job, opts, state, rep, truth, launchdJobs, host, prev, now, notifyFn, stderr)
 		return
 	}
 
 	action, plannedStatus, reason := recoveryloop.PlanJob(job, snoozes, truth, launchdJobs, host, now)
 
 	if action == recoveryloop.ActionNone {
-		recordClear(job, plannedStatus, reason, now, state, rep, opts, prev, stderr)
+		recordClear(job, plannedStatus, reason, now, state, rep, opts, prev, truth, stderr)
 		return
 	}
 
@@ -311,7 +332,9 @@ func processJob(
 
 	// The command exited zero. That is not recovery. Re-observe the host and
 	// let the condition itself say whether it cleared.
-	freshLaunchd, listErr := host.LaunchdList(ctx)
+	verifyCtx, cancelVerify := context.WithTimeout(ctx, opts.timeout)
+	freshLaunchd, listErr := host.LaunchdList(verifyCtx)
+	cancelVerify()
 	if listErr != nil {
 		fmt.Fprintf(stderr, "recovery-loop: re-list launchd for verification: %v\n", listErr)
 		freshLaunchd = launchdJobs
@@ -320,7 +343,7 @@ func processJob(
 
 	switch {
 	case outcome.Verified:
-		recordVerified(job, action, outcome.Reason, now, state, rep, opts.journalPath, stderr)
+		recordVerified(job, action, outcome.Reason, now, state, rep, opts, stderr)
 	case outcome.Status == recoveryloop.StatusPending:
 		recordPending(job, action, outcome.Reason, now, state, rep, opts, prev, stderr)
 	default:
@@ -329,22 +352,37 @@ func processJob(
 }
 
 // settlePending resolves a verification left open by an earlier tick.
+//
+// It re-runs the full verification rather than reading pulse truth alone. A
+// file-mtime pulse can look present while the service that writes it has since
+// been unloaded or started failing to launch, and declaring recovery from the
+// pulse alone would call that job fixed.
 func settlePending(
 	job recoveryloop.Job,
 	opts *options,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	truth recoveryloop.PulseTruth,
+	launchdJobs map[string]recoveryloop.LaunchdJobInfo,
+	host recoveryloop.HostOps,
 	prev recoveryloop.JobState,
 	now time.Time,
 	notifyFn notifier,
 	stderr io.Writer,
 ) {
-	if job.Pulse != "" && truth.Present(job.Pulse) {
-		recordVerified(job, prev.PendingAction, fmt.Sprintf("verified: pulse %q returned after %s",
-			job.Pulse, prev.PendingAction), now, state, rep, opts.journalPath, stderr)
+	outcome := recoveryloop.VerifyRecovery(job, prev.PendingAction, truth, launchdJobs, host, now)
+	switch {
+	case outcome.Verified:
+		recordVerified(job, prev.PendingAction, outcome.Reason, now, state, rep, opts, stderr)
+		return
+	case outcome.Status == recoveryloop.StatusFailed:
+		// A structural condition came back or never cleared: that is
+		// observable now, so there is nothing left to wait for.
+		recordFailure(job, prev.PendingAction, outcome.Reason, errors.New(outcome.Reason),
+			now, state, rep, opts, truth, notifyFn, stderr)
 		return
 	}
+
 	if now.After(prev.PendingDeadline) {
 		absentFor := truth.AbsentFor(job.Pulse, now)
 		reason := fmt.Sprintf("pulse %q did not return within %s of %s",
@@ -361,14 +399,48 @@ func settlePending(
 	st.LastStatus = recoveryloop.StatusPending
 	state.Jobs[job.Name] = st
 	rep.Results = append(rep.Results, recoveryloop.Result{
-		Job:     job.Name,
-		Status:  recoveryloop.StatusPending,
-		Action:  prev.PendingAction,
-		Attempt: prev.ConsecutiveFailures,
+		Job:         job.Name,
+		Status:      recoveryloop.StatusPending,
+		Action:      prev.PendingAction,
+		Attempt:     prev.ConsecutiveFailures,
+		HumanNeeded: prev.HumanNeeded,
 		Reason: fmt.Sprintf("awaiting pulse %q until %s",
 			job.Pulse, prev.PendingDeadline.Format(time.RFC3339)),
 	})
 	rep.Pending++
+	if prev.HumanNeeded {
+		rep.HumanNeeded++
+	}
+}
+
+// recordSnoozed reports a job an operator has explicitly silenced.
+//
+// It clears any open verification: while a job is snoozed nobody is judging
+// the outcome of its last remediation, and holding a deadline that lapses
+// under the snooze would convert into a counted failure the moment it lifts.
+// The failure count itself is preserved -- a snooze hides a condition, it does
+// not fix one.
+func recordSnoozed(
+	job recoveryloop.Job,
+	sn absencealarm.Snooze,
+	now time.Time,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+	prev recoveryloop.JobState,
+) {
+	st := prev
+	st.LastStatus = recoveryloop.StatusSnoozed
+	st.PendingAction = ""
+	st.PendingSince = time.Time{}
+	st.PendingDeadline = time.Time{}
+	state.Jobs[job.Name] = st
+	rep.Results = append(rep.Results, recoveryloop.Result{
+		Job:    job.Name,
+		Status: recoveryloop.StatusSnoozed,
+		Action: recoveryloop.ActionNone,
+		Reason: fmt.Sprintf("snoozed until %s: %s", sn.Until.Format(time.RFC3339), sn.Reason),
+	})
+	rep.Snoozed++
 }
 
 // recordClear handles a job that needs no action.
@@ -381,11 +453,26 @@ func recordClear(
 	rep *recoveryloop.Heartbeat,
 	opts *options,
 	prev recoveryloop.JobState,
+	truth recoveryloop.PulseTruth,
 	stderr io.Writer,
 ) {
-	// A job that was failing and is now healthy has genuinely recovered.
+	// PlanJob reports HEALTHY on the structural checks alone when no pulse
+	// truth is available -- a stale or missing absence-alarm heartbeat, or a
+	// pulse nothing is configured to emit. For a job that declares a pulse,
+	// that is "could not check", not health, and converting it into a cleared
+	// condition is the original defect wearing a different hat: a recovery
+	// announced without observing the thing that was broken.
+	unverifiable := status == recoveryloop.StatusHealthy &&
+		job.Pulse != "" && !truth.Present(job.Pulse)
+	if unverifiable {
+		recordUnverifiable(job, reason, now, state, rep, prev)
+		return
+	}
+
+	// A job that was failing and is now observed healthy has genuinely
+	// recovered.
 	if status == recoveryloop.StatusHealthy && prev.ConsecutiveFailures > 0 {
-		recordVerified(job, prev.LastAction, "condition cleared: "+reason, now, state, rep, opts.journalPath, stderr)
+		recordVerified(job, prev.LastAction, "condition cleared: "+reason, now, state, rep, opts, stderr)
 		return
 	}
 	if status == recoveryloop.StatusHealthy {
@@ -412,6 +499,39 @@ func recordClear(
 	}
 }
 
+// recordUnverifiable reports a job whose health could not be observed.
+//
+// It takes no action -- there is no evidence anything is wrong, and restarting
+// jobs because the monitor went quiet would turn one outage into many -- but it
+// refuses to call the job healthy or to reset a standing failure count. Silence
+// is not an all-clear.
+func recordUnverifiable(
+	job recoveryloop.Job,
+	reason string,
+	now time.Time,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+	prev recoveryloop.JobState,
+) {
+	st := prev
+	st.LastAttemptTime = now
+	st.LastStatus = recoveryloop.StatusPending
+	state.Jobs[job.Name] = st
+	rep.Results = append(rep.Results, recoveryloop.Result{
+		Job:         job.Name,
+		Status:      recoveryloop.StatusPending,
+		Action:      recoveryloop.ActionNone,
+		Attempt:     prev.ConsecutiveFailures,
+		HumanNeeded: prev.HumanNeeded,
+		Reason: fmt.Sprintf("%s, but pulse %q was not observed: health unverifiable",
+			reason, job.Pulse),
+	})
+	rep.Pending++
+	if prev.HumanNeeded {
+		rep.HumanNeeded++
+	}
+}
+
 // recordVerified records a recovery that was observed to have cleared the
 // condition. This is the only path that may write StatusRecovered.
 func recordVerified(
@@ -421,7 +541,7 @@ func recordVerified(
 	now time.Time,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
-	journalPath string,
+	opts *options,
 	stderr io.Writer,
 ) {
 	state.Jobs[job.Name] = recoveryloop.JobState{
@@ -438,7 +558,7 @@ func recordVerified(
 		Reason: reason,
 	})
 	rep.Recovered++
-	if err := recoveryloop.AppendJournal(journalPath, recoveryloop.JournalRecord{
+	appendJournal(opts, stderr, recoveryloop.JournalRecord{
 		Time:        now,
 		Kind:        "recovery.verified",
 		Job:         job.Name,
@@ -447,9 +567,7 @@ func recordVerified(
 		Attempt:     1,
 		HumanNeeded: false,
 		Reason:      reason,
-	}); err != nil {
-		fmt.Fprintf(stderr, "recovery-loop: append journal: %v\n", err)
-	}
+	})
 }
 
 // recordPending records that a remediation ran and its outcome is not yet
@@ -482,25 +600,35 @@ func recordPending(
 		UnhealthySince:      unhealthySince,
 		LastEscalated:       prev.LastEscalated,
 	}
+	// The attempt ordinal counts this attempt, so it starts at one. Reporting
+	// the pre-action counter makes the first remediation read as "attempt 0".
+	attempt := prev.ConsecutiveFailures + 1
 	rep.Results = append(rep.Results, recoveryloop.Result{
 		Job:     job.Name,
 		Status:  recoveryloop.StatusPending,
 		Action:  action,
-		Attempt: prev.ConsecutiveFailures,
-		Reason:  reason,
+		Attempt: attempt,
+		// A job that already crossed the escalation threshold stays visible
+		// as needing a human while the next remediation is in flight.
+		// Dropping the flag here made the process exit 0, and the fleet read
+		// green, in the middle of an unresolved outage.
+		HumanNeeded: prev.HumanNeeded,
+		Reason:      reason,
 	})
 	rep.Pending++
-	if err := recoveryloop.AppendJournal(opts.journalPath, recoveryloop.JournalRecord{
-		Time:    now,
-		Kind:    "recovery.pending",
-		Job:     job.Name,
-		Action:  action,
-		Status:  recoveryloop.StatusPending,
-		Attempt: prev.ConsecutiveFailures,
-		Reason:  reason,
-	}); err != nil {
-		fmt.Fprintf(stderr, "recovery-loop: append journal: %v\n", err)
+	if prev.HumanNeeded {
+		rep.HumanNeeded++
 	}
+	appendJournal(opts, stderr, recoveryloop.JournalRecord{
+		Time:        now,
+		Kind:        "recovery.pending",
+		Job:         job.Name,
+		Action:      action,
+		Status:      recoveryloop.StatusPending,
+		Attempt:     attempt,
+		HumanNeeded: prev.HumanNeeded,
+		Reason:      reason,
+	})
 }
 
 // recordGivenUp records a job whose remediation is suppressed because repeated
@@ -539,7 +667,13 @@ func recordGivenUp(
 	})
 	rep.Failed++
 	rep.HumanNeeded++
-	escalate(job, action, prev.ConsecutiveFailures, full, now, state, opts, truth, notifyFn, stderr)
+	// The report above is emitted every tick, so the outage stays visible.
+	// The durable escalation is rate-limited: appending an identical record
+	// to the human-facing sink every ten minutes forever is how that sink
+	// stops being read, which is the failure this change exists to fix.
+	if prev.LastEscalated.IsZero() || !now.Before(prev.LastEscalated.Add(reEscalateInterval)) {
+		escalate(job, action, prev.ConsecutiveFailures, full, now, state, opts, truth, notifyFn, stderr)
+	}
 }
 
 func recordFailure(
@@ -588,7 +722,7 @@ func recordFailure(
 		escalate(job, action, attempts, reason, now, state, opts, truth, notifyFn, stderr)
 	}
 
-	if err := recoveryloop.AppendJournal(opts.journalPath, recoveryloop.JournalRecord{
+	appendJournal(opts, stderr, recoveryloop.JournalRecord{
 		Time:        now,
 		Kind:        "recovery.attempt",
 		Job:         job.Name,
@@ -598,7 +732,19 @@ func recordFailure(
 		HumanNeeded: humanNeeded,
 		Reason:      reason,
 		Error:       execErr.Error(),
-	}); err != nil {
+	})
+}
+
+// appendJournal is the one place recovery journal records are written.
+//
+// Routing every append through it keeps --dry-run honest: a dry run reports
+// what this tick would do and leaves no trace, including on the paths that
+// settle work an earlier tick left open (RL-11).
+func appendJournal(opts *options, stderr io.Writer, rec recoveryloop.JournalRecord) {
+	if opts.dryRun {
+		return
+	}
+	if err := recoveryloop.AppendJournal(opts.journalPath, rec); err != nil {
 		fmt.Fprintf(stderr, "recovery-loop: append journal: %v\n", err)
 	}
 }
@@ -623,6 +769,9 @@ func escalate(
 	notifyFn notifier,
 	stderr io.Writer,
 ) {
+	if opts.dryRun {
+		return
+	}
 	pulse := job.Pulse
 	if pulse == "" {
 		pulse = job.Name

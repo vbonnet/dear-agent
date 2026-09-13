@@ -22,8 +22,15 @@ type PulseFact struct {
 	// unknown pulse is never proof of health (the absence-alarm AA-05 rule:
 	// "could not check" is not health).
 	Known bool
-	// Alarming reports whether the pulse was absent or undetermined.
-	Alarming bool
+	// Status is the status the evidence source reported, verbatim.
+	//
+	// It is stored rather than pre-reduced to a boolean because presence and
+	// absence are not complements. "snoozed" is neither: it suppresses an
+	// alarm without observing anything. Collapsing the status into a single
+	// "alarming" flag and reading presence as its negation is how a suppressed
+	// alarm, or any status a future absence-alarm emits that this binary does
+	// not recognise, would become positive proof of life.
+	Status absencealarm.Status
 	// Since is when the current alarm began, zero when not alarming.
 	Since time.Time
 }
@@ -33,21 +40,25 @@ type PulseTruth map[string]PulseFact
 
 // Alarming reports whether the named pulse is currently alarming.
 func (pt PulseTruth) Alarming(name string) bool {
-	return pt[name].Alarming
+	return pt[name].Status.Alarming()
 }
 
 // Present reports whether the named pulse was positively observed alive.
-// An unobserved pulse is not present: absence of evidence is not evidence.
+//
+// Only an explicit "present" qualifies. An unobserved pulse is not present
+// (absence of evidence is not evidence), and neither is a snoozed or
+// unrecognised one: the question a verification asks is "was this pulse seen",
+// and only one status answers yes.
 func (pt PulseTruth) Present(name string) bool {
 	f := pt[name]
-	return f.Known && !f.Alarming
+	return f.Known && f.Status == absencealarm.StatusPresent
 }
 
 // AbsentFor reports how long the named pulse has been alarming. It returns 0
 // when the pulse is healthy or when the alarm start time is unknown.
 func (pt PulseTruth) AbsentFor(name string, now time.Time) time.Duration {
 	f := pt[name]
-	if !f.Alarming || f.Since.IsZero() || !now.After(f.Since) {
+	if !f.Status.Alarming() || f.Since.IsZero() || !now.After(f.Since) {
 		return 0
 	}
 	return now.Sub(f.Since)
@@ -82,22 +93,34 @@ func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge 
 	if err := json.Unmarshal(raw, &hb); err != nil {
 		return truth, fmt.Errorf("parse absence heartbeat %s: %w", heartbeatPath, err)
 	}
-	if maxAge > 0 && !hb.TickTime.IsZero() && now.Sub(hb.TickTime) > maxAge {
-		return truth, fmt.Errorf("absence heartbeat %s is %s old (max %s): pulse truth unavailable",
-			heartbeatPath, now.Sub(hb.TickTime).Round(time.Second), maxAge)
+	if maxAge > 0 {
+		// An undated heartbeat is evidence of unknown age, which is exactly
+		// what the age check exists to reject. Treating a missing or
+		// unparseable tick_time as "fresh" would let a truncated or corrupt
+		// file confirm recoveries forever (RL-32).
+		if hb.TickTime.IsZero() {
+			return PulseTruth{}, fmt.Errorf("absence heartbeat %s has no tick_time: pulse truth unavailable", heartbeatPath)
+		}
+		if now.Sub(hb.TickTime) > maxAge {
+			return PulseTruth{}, fmt.Errorf("absence heartbeat %s is %s old (max %s): pulse truth unavailable",
+				heartbeatPath, now.Sub(hb.TickTime).Round(time.Second), maxAge)
+		}
 	}
 
 	for _, res := range hb.Results {
 		if res.Name == "" {
 			continue
 		}
-		truth[res.Name] = PulseFact{Known: true, Alarming: res.Status.Alarming()}
+		truth[res.Name] = PulseFact{Known: true, Status: res.Status}
 	}
 
 	// Date each standing alarm from the absence-alarm dedup state, which
 	// records when the alarm began. Failure here costs only the duration in
 	// the escalation text, never the alarming/present decision.
 	st, stErr := absencealarm.LoadAlarmState(alarmStatePath)
+	if stErr != nil {
+		return truth, fmt.Errorf("read absence alarm state %s: %w", alarmStatePath, stErr)
+	}
 	for name, alarm := range st.Pulses {
 		f, ok := truth[name]
 		if !ok {
@@ -105,9 +128,6 @@ func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge 
 		}
 		f.Since = alarm.Since
 		truth[name] = f
-	}
-	if stErr != nil {
-		return truth, fmt.Errorf("read absence alarm state %s: %w", alarmStatePath, stErr)
 	}
 	return truth, nil
 }

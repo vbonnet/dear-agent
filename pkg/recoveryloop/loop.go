@@ -267,46 +267,6 @@ func DefaultHostOps() HostOps {
 	}
 }
 
-// LoadAbsenceAlarms reads the absence-alarm journal and returns pulses that are alarming.
-//
-// Deprecated: use LoadPulseTruth. The escalation journal is append-only and
-// records absences only, so a pulse that recovers leaves no record and this
-// map is monotonic: once a pulse appears it can never clear. Driving
-// remediation from it restarts jobs that came back long ago. It is retained
-// only as a fallback for hosts with no absence-alarm heartbeat yet.
-func LoadAbsenceAlarms(journalPath string) (map[string]bool, error) {
-	alarming := make(map[string]bool)
-	f, err := os.Open(journalPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return alarming, nil
-		}
-		return nil, fmt.Errorf("open absence journal %s: %w", journalPath, err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var rec absencealarm.JournalRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue
-		}
-		// Only genuine pulse alarms count. Records this loop writes back to
-		// the journal for escalation must not be re-read as fresh alarms.
-		if rec.Kind != "absence.alarm" {
-			continue
-		}
-		if rec.Status == absencealarm.StatusAbsent || rec.Status == absencealarm.StatusUndetermined {
-			alarming[rec.Pulse] = true
-		}
-	}
-	return alarming, scanner.Err()
-}
-
 // IsJobSnoozed checks if a job is covered by an active, unexpired snooze (RL-05, RL-22).
 func IsJobSnoozed(job Job, snoozes map[string]absencealarm.Snooze, now time.Time) (absencealarm.Snooze, bool) {
 	candidates := []string{job.Name, job.Pulse, job.LaunchdLabel}

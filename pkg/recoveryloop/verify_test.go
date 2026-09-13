@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/absencealarm"
 )
 
 // RL-23: a pulse that is present in the latest absence-alarm heartbeat must be
@@ -54,7 +56,7 @@ func TestPlanJob_PresentPulseOverridesNonZeroExit(t *testing.T) {
 		// documented "alarms are present" exit code.
 		"com.dear-agent.absence-alarm": {Label: "com.dear-agent.absence-alarm", PID: 0, Status: 1, Loaded: true},
 	}
-	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Alarming: false}}
+	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusPresent}}
 
 	action, status, reason := PlanJob(job, nil, truth, launchd, host, host.Now())
 	if action != ActionNone || status != StatusHealthy {
@@ -72,7 +74,7 @@ func TestPlanJob_NeverClaimsRecovered(t *testing.T) {
 		PlistPath:    "/tmp/mergeloop.plist",
 		Pulse:        "mergeloop-tick",
 	}
-	truth := PulseTruth{"mergeloop-tick": {Known: true, Alarming: true}}
+	truth := PulseTruth{"mergeloop-tick": {Known: true, Status: absencealarm.StatusAbsent}}
 
 	action, status, _ := PlanJob(job, nil, truth, map[string]LaunchdJobInfo{}, host, host.Now())
 	if action != ActionBootstrap {
@@ -99,7 +101,7 @@ func TestVerifyRecovery_StillAbsentIsNotRecovered(t *testing.T) {
 		"com.dear-agent.absence-alarm": {Label: "com.dear-agent.absence-alarm", PID: 0, Status: 1, Loaded: true},
 	}
 	// The structural condition cleared (job is loaded) but the pulse has not.
-	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Alarming: true}}
+	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusAbsent}}
 
 	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now())
 	if outcome.Verified {
@@ -121,7 +123,7 @@ func TestVerifyRecovery_PulseReturnedIsRecovered(t *testing.T) {
 	launchd := map[string]LaunchdJobInfo{
 		"com.dear-agent.absence-alarm": {Label: "com.dear-agent.absence-alarm", PID: 0, Status: 0, Loaded: true},
 	}
-	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Alarming: false}}
+	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusPresent}}
 
 	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now())
 	if !outcome.Verified || outcome.Status != StatusRecovered {
@@ -139,7 +141,7 @@ func TestVerifyRecovery_StillUnloadedIsImmediateFailure(t *testing.T) {
 		PlistPath:    "/tmp/mergeloop.plist",
 		Pulse:        "mergeloop-tick",
 	}
-	truth := PulseTruth{"mergeloop-tick": {Known: true, Alarming: true}}
+	truth := PulseTruth{"mergeloop-tick": {Known: true, Status: absencealarm.StatusAbsent}}
 
 	outcome := VerifyRecovery(job, ActionBootstrap, truth, map[string]LaunchdJobInfo{}, host, host.Now())
 	if outcome.Verified {
@@ -172,5 +174,93 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// RL-24/RL-29: only an explicitly present pulse is proof of life.
+//
+// Status.Alarming() is false for "absent" and "undetermined" only, so deriving
+// presence as "not alarming" silently promoted "snoozed" and any status this
+// binary does not recognise into positive evidence of health. That is the same
+// false-green defect this branch exists to remove, one layer down: a snooze
+// suppresses an alarm, it does not observe a pulse.
+func TestLoadPulseTruth_NonPresentStatusIsNotProofOfLife(t *testing.T) {
+	dir := t.TempDir()
+	hb := filepath.Join(dir, "absence-alarm.heartbeat.json")
+	writeFile(t, hb, `{
+	  "tick_time": "2026-09-09T08:00:00Z",
+	  "results": [
+	    {"name": "snoozed-pulse", "status": "snoozed"},
+	    {"name": "future-pulse", "status": "degraded"},
+	    {"name": "live-pulse", "status": "present"}
+	  ]
+	}`)
+	st := filepath.Join(dir, "absence-alarm-state.json")
+	writeFile(t, st, `{"pulses": {}}`)
+
+	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
+	truth, err := LoadPulseTruth(hb, st, now, time.Hour)
+	if err != nil {
+		t.Fatalf("LoadPulseTruth: %v", err)
+	}
+	if truth.Present("snoozed-pulse") {
+		t.Error("a snoozed pulse was read as present: a snooze suppresses an alarm, it does not observe a pulse")
+	}
+	if truth.Present("future-pulse") {
+		t.Error("an unrecognised status was read as present: an undecodable status is not evidence of health")
+	}
+	if !truth.Present("live-pulse") {
+		t.Error("an explicitly present pulse was not read as present")
+	}
+}
+
+// RL-29: a job whose pulse is only snoozed must not verify as recovered.
+func TestVerifyRecovery_SnoozedPulseDoesNotVerify(t *testing.T) {
+	host, _ := mockHostOps()
+	job := Job{Name: "sandbox-gc", LaunchdLabel: "com.dear-agent.sandbox-gc", Pulse: "sandbox-gc-tick"}
+	launchd := map[string]LaunchdJobInfo{
+		"com.dear-agent.sandbox-gc": {Label: "com.dear-agent.sandbox-gc", Loaded: true, Status: 0},
+	}
+	truth := PulseTruth{"sandbox-gc-tick": {Known: true, Status: absencealarm.StatusSnoozed}}
+
+	out := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now())
+	if out.Verified || out.Status == StatusRecovered {
+		t.Errorf("got verified=%v status=%q; a snoozed pulse is not an observation of recovery", out.Verified, out.Status)
+	}
+}
+
+// RL-32: a heartbeat carrying no usable tick_time is stale evidence of unknown
+// age, not fresh evidence. Bypassing the age check for a zero timestamp let a
+// corrupt or truncated heartbeat confirm recoveries indefinitely.
+func TestLoadPulseTruth_MissingTickTimeIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	hb := filepath.Join(dir, "absence-alarm.heartbeat.json")
+	writeFile(t, hb, `{"results": [{"name": "disk-watchdog-tick", "status": "present"}]}`)
+	st := filepath.Join(dir, "absence-alarm-state.json")
+	writeFile(t, st, `{"pulses": {}}`)
+
+	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
+	truth, err := LoadPulseTruth(hb, st, now, time.Hour)
+	if err == nil {
+		t.Fatal("a heartbeat with no tick_time was accepted; undated evidence must not confirm a recovery")
+	}
+	if truth.Present("disk-watchdog-tick") {
+		t.Error("facts were returned from an undated heartbeat")
+	}
+}
+
+// RL-32: a corrupt alarm state must not be able to produce facts that a caller
+// treating the error as non-fatal would then act on.
+func TestLoadPulseTruth_CorruptAlarmStateYieldsError(t *testing.T) {
+	dir := t.TempDir()
+	hb := filepath.Join(dir, "absence-alarm.heartbeat.json")
+	writeFile(t, hb, `{"tick_time": "2026-09-09T08:00:00Z",
+	  "results": [{"name": "disk-watchdog-tick", "status": "present"}]}`)
+	st := filepath.Join(dir, "absence-alarm-state.json")
+	writeFile(t, st, `{ this is not json`)
+
+	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
+	if _, err := LoadPulseTruth(hb, st, now, time.Hour); err == nil {
+		t.Fatal("a corrupt alarm state was accepted silently")
 	}
 }

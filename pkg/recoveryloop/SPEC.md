@@ -1,14 +1,14 @@
 # Recovery Loop Specification
 
-<!-- Last audited at: 2026-09-09 -->
+<!-- Last audited at: 2026-09-13 -->
 <!-- Audit scope: pkg/recoveryloop (domain) + cmd/recovery-loop (CLI), both
      present at this revision. cmd/recovery-loop/SPEC.owner delegates here.
 
      Domain (pkg/recoveryloop/*_test.go):
-       RL-01 through RL-10, RL-18 through RL-29.
+       RL-01 through RL-10, RL-18 through RL-29, RL-33.
 
      CLI (cmd/recovery-loop/*_test.go):
-       RL-11 through RL-17, RL-30 through RL-32. -->
+       RL-11 through RL-17, RL-30 through RL-32, RL-34 through RL-38. -->
 
 **Status:** Production-ready
 **Scope:** Host critical job self-healing loop and escalation engine
@@ -42,10 +42,10 @@ no action that changed anything: success was measured as "`launchctl kickstart`
 exited 0", the pulse condition was never re-read, and the consecutive failure
 count was reset on every one of those ticks, which made the RL-09 escalation
 unreachable. Two of the three jobs were healthy the whole time and were being
-restarted because they exit non-zero to signal an alarm. RL-23 through RL-32
-close that gap: pulse truth is read from a source that can clear, planning may
-not claim recovery, and a recovery counts only once the condition is observed
-to have gone away.
+restarted because they exit non-zero to signal an alarm. RL-23 through RL-38
+close that gap: pulse truth is read from a source that can clear, only an
+explicit present reading counts as evidence, planning may not claim recovery,
+and a recovery counts only once the condition is observed to have gone away.
 
 ## Applicability
 
@@ -61,7 +61,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-03** When a critical job's launchd service is loaded but reports exit code 78, the system shall attempt to bootout and re-bootstrap the service.
 
-**RL-04** When a critical job's pulse is reported absent or undetermined in the absence-alarm journal and its service is loaded, the system shall attempt to restart the job via launchctl kickstart.
+**RL-04** When a critical job's pulse is reported absent or undetermined in the current pulse truth (RL-23) and its service is loaded, the system shall attempt to restart the job via launchctl kickstart.
 
 **RL-05** When a critical job is covered by an unexpired snooze entry in the snooze configuration, the system shall classify the job as SNOOZED and the system shall not attempt any recovery action for that job.
 
@@ -117,13 +117,25 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-31** When a job's consecutive failure count reaches the give-up threshold, the system shall suppress further remediation for that job and the system shall continue to report it as requiring human intervention.
 
-**RL-32** When the absence-alarm heartbeat is older than the maximum heartbeat age, the system shall treat all pulse truth as unavailable rather than acting on stale evidence.
+**RL-32** When the absence-alarm heartbeat is older than the maximum heartbeat age, or carries no tick time at all, the system shall treat all pulse truth as unavailable rather than acting on stale evidence.
+
+**RL-33** The system shall treat only an explicitly present pulse status as evidence of life, and the system shall not derive presence from the absence of an alarm.
+
+**RL-34** When a job declares a pulse and no pulse truth is available for it, the system shall classify the job as unverifiable, and the system shall not classify it as HEALTHY or reset its consecutive failure count.
+
+**RL-35** When a job is covered by an unexpired snooze, the system shall honour the snooze before settling any pending verification, and the system shall not escalate that job.
+
+**RL-36** When a job requires human intervention and a further remediation is pending verification, the system shall continue to report that job as requiring human intervention.
+
+**RL-37** When a job's consecutive failure count has reached the give-up threshold and that job was escalated within the re-escalation interval, the system shall continue to report the job while not appending a further escalation record.
+
+**RL-38** When the system runs in dry-run mode, the system shall not write state, journal records, escalation records, or notifications on any code path, including the settlement of a verification opened by an earlier tick.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Package tests: `pkg/recoveryloop/loop_test.go` (RL-01..RL-10, RL-18..RL-22)
-- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29)
+- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29, RL-32, RL-33)
 - CLI tests: `cmd/recovery-loop/main_test.go` (RL-11..RL-17)
-- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30)
+- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30, RL-31, RL-32, RL-34..RL-38)
 

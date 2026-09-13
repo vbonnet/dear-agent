@@ -127,7 +127,7 @@ func TestPlan_PulseAlarming_Kickstart(t *testing.T) {
 	launchdJobs := map[string]LaunchdJobInfo{
 		"com.example.myjob": {Loaded: true, Status: 0, PID: 1234},
 	}
-	truth := PulseTruth{"myjob-pulse": {Known: true, Alarming: true}}
+	truth := PulseTruth{"myjob-pulse": {Known: true, Status: absencealarm.StatusAbsent}}
 	action, status, _ := PlanJob(job, nil, truth, launchdJobs, host, host.Now())
 	if action != ActionKickstart {
 		t.Fatalf("expected ActionKickstart, got %s", action)
