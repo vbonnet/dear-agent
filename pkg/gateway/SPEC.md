@@ -35,7 +35,7 @@ share one in-process command contract.
 
 **GATEWAY-CORE-12** When cancel handling is invoked before workflow cancel support exists, the system shall return `CodeUnavailable`.
 
-**GATEWAY-CORE-13** When workflow list handling receives a `state` argument that is present but not a string, or a run-state filter that WFLOW-08 rejects, the system shall return `CodeInvalidArgs`.
+**GATEWAY-CORE-13** When workflow list handling receives a `state` argument that is present but not a string, or a run-state filter that WFLOW-13 rejects, the system shall return `CodeInvalidArgs`.
 
 ## BDD Traceability
 
