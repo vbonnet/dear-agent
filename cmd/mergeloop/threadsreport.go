@@ -54,8 +54,19 @@ func runThreadsReport(argv []string) error {
 
 	resolvable, withheld := partitionResolvable(threads)
 	findings := blockingFindingsIn(threads)
+	remaining := threadsRemainingUnresolved(threads, resolvable)
 
 	fmt.Printf("%s PR #%d: %d review thread(s)\n\n", target, *pr, len(threads))
+	printThreadRows(threads)
+	fmt.Printf("\nauto-resolve:      %d resolvable, %d withheld (blocking or unrecognised severity)\n",
+		len(resolvable), withheld)
+	printGateVerdicts(findings, remaining)
+	return nil
+}
+
+// printThreadRows renders one line per review thread: its resolution state,
+// opening author, classified severity, and whether a person replied.
+func printThreadRows(threads []reviewThread) {
 	for _, t := range threads {
 		state := "unresolved"
 		if t.isResolved {
@@ -68,14 +79,12 @@ func runThreadsReport(argv []string) error {
 		fmt.Printf("  %-12s %-26s severity=%-9s human_reply=%-5t %s\n",
 			state, author, mergeloop.ThreadSeverityOf(t.bodies()), t.hasHumanComment(), t.id)
 	}
+}
 
-	remaining := threadsRemainingUnresolved(threads, resolvable)
-
-	fmt.Printf("\nauto-resolve:      %d resolvable, %d withheld (blocking or unrecognised severity)\n",
-		len(resolvable), withheld)
-
-	// Two INDEPENDENT gates stand between this PR and a merge, and conflating
-	// them is what produced a false PASS. Report each on its own line.
+// printGateVerdicts reports the two INDEPENDENT gates separately, then the
+// overall verdict. Conflating them is what let this command print a bare
+// "merge gate: PASS" for a PR safe-merge would refuse.
+func printGateVerdicts(findings []mergeloop.BlockingFinding, remaining []string) {
 	if len(findings) == 0 {
 		fmt.Printf("bot-finding gate:  PASS, no unaddressed blocking bot findings\n")
 	} else {
@@ -100,7 +109,6 @@ func runThreadsReport(argv []string) error {
 	} else {
 		fmt.Printf("merge gate:        REFUSE\n")
 	}
-	return nil
 }
 
 // threadsRemainingUnresolved returns the IDs of threads that will still be
