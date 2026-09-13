@@ -111,8 +111,8 @@ func SafeMergeContext(ctx context.Context, cfg MergeConfig) error {
 	if cfg.Repo == "" {
 		return fmt.Errorf("--repo is required (owner/repo format)")
 	}
-	if !strings.Contains(cfg.Repo, "/") {
-		return fmt.Errorf("--repo must be in owner/repo format, got %q", cfg.Repo)
+	if _, err := escapedRepoPath(cfg.Repo); err != nil {
+		return fmt.Errorf("--repo must be in owner/repo format: %w", err)
 	}
 
 	// Load the optional P4 config once, up front, so a malformed .safe-merge.yml
@@ -247,6 +247,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	}()
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
+	var attemptState PRState
 
 	// Gate 0: deterministic PR state. Closed/merged, draft, and conflicts are
 	// visible from one `gh pr view` and each has one exact fix, so fail fast
@@ -259,6 +260,10 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		st, err := FetchPRState(ctx, cfg.PRNumber, cfg.Repo)
 		if err != nil {
 			return err
+		}
+		attemptState = st
+		if st.BaseRefName == "" {
+			return fmt.Errorf("PR #%d state omitted baseRefName; cannot anchor target branch", cfg.PRNumber)
 		}
 		if s := strings.ToUpper(st.State); s != "OPEN" {
 			return fmt.Errorf("PR #%d is %s; nothing to merge", cfg.PRNumber, s)
@@ -282,7 +287,9 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ PR state mergeable (open, not draft, no conflicts)")
 
 	// Gate 1: every provider-effective required CI check must pass.
-	if err := runGate(ctx, "ci", func() error { return checkAllCIContext(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
+	if err := runGate(ctx, "ci", func() error {
+		return checkAllCIContextForBase(ctx, cfg.PRNumber, cfg.Repo, attemptState.BaseRefName)
+	}); err != nil {
 		// P4 flake valve: when flaky_checks are configured, give a failing
 		// flaky check one sanctioned rerun before treating it as a real block.
 		// The valve has the final say only when it actually finds a failing
@@ -338,33 +345,35 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		fmt.Fprintln(os.Stderr, "safe-merge: ✓ expected reviewers have fresh reviews")
 	}
 
-	headInfo, err := prHeadInfo(cfg.PRNumber, cfg.Repo)
-	if err != nil {
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "cannot read PR head: "+err.Error())
-		return fmt.Errorf("cannot read PR head info (needed for --match-head-commit): %w", err)
+	headInfo := prHeadResult{SHA: attemptState.HeadRefOid, Branch: attemptState.HeadRefName}
+	if headInfo.SHA == "" || headInfo.Branch == "" {
+		return fmt.Errorf("state gate returned no headRefOid or headRefName; cannot anchor merge")
 	}
 
-	// Gate 5: the head must sit on the current base tip. A strict
-	// required-status-checks policy rejects any behind branch, and `gh pr merge
-	// --auto` only queues the merge — it never advances the branch — so without
-	// this gate an out-of-date PR stays queued forever. Running it last means a
-	// CI cycle is only ever spent on a PR that already cleared every other gate.
+	// Gate 5: independently resolve the live base and prove it is an ancestor of
+	// the exact gated head. Running this last means a branch update and subsequent
+	// CI cycle are only ever requested for a PR that cleared every other gate.
+	var liveBase liveBaseSnapshot
 	if err := runGate(ctx, "freshness", func() error {
-		return checkBranchFreshness(ctx, cfg.PRNumber, cfg.Repo, headInfo.SHA, cfg.DryRun)
+		var err error
+		liveBase, err = checkBranchFreshness(ctx, cfg.PRNumber, cfg.Repo,
+			attemptState.BaseRefName, headInfo.SHA, cfg.DryRun)
+		return err
 	}); err != nil {
-		if errors.Is(err, ErrBranchUpdated) {
-			appendAuditEntry(cfg.Repo, cfg.PRNumber, "branch_updated",
-				fmt.Sprintf("advanced to base tip from head=%s", headInfo.SHA))
+		if errors.Is(err, ErrBranchUpdateRequested) {
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "branch_update_requested",
+				fmt.Sprintf("requested live-base update from head=%s", headInfo.SHA))
 			fmt.Fprintf(os.Stderr,
-				"safe-merge: ↻ PR #%d was behind its base; branch advanced to the base tip\n"+
-					"safe-merge: guidance: required checks are re-running — re-run with --watch to merge on green\n",
+				"safe-merge: ↻ PR #%d did not contain its live base; provider update requested\n"+
+					"safe-merge: guidance: wait for the update and required checks, then re-run with --watch\n",
 				cfg.PRNumber)
 			return err
 		}
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "freshness: "+err.Error())
 		return fmt.Errorf("base-freshness gate: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "safe-merge: ✓ head is on the current base tip")
+	fmt.Fprintf(os.Stderr, "safe-merge: ✓ snapshot: head %s contains live base %s@%s\n",
+		headInfo.SHA, liveBase.Branch, liveBase.OID)
 
 	if cfg.DryRun {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "dry_run", "all gates passed; merge skipped")
@@ -639,6 +648,7 @@ type requiredCheckProjection struct {
 	Runs               []checkRun
 	ProviderRuns       []checkRun
 	AuthoritativeEmpty bool
+	BaseBranch         string
 }
 
 type requiredStatusChecksResponse struct {
@@ -883,7 +893,7 @@ func projectRequiredCheckRuns(ctx context.Context, prNum int, repo string) (requ
 	))
 	if requiredErr != nil {
 		if len(policy.Identities) == 0 && isNoRequiredChecksReported(requiredErr) {
-			return requiredCheckProjection{AuthoritativeEmpty: true}, nil
+			return requiredCheckProjection{AuthoritativeEmpty: true, BaseBranch: baseBranch}, nil
 		}
 		return requiredCheckProjection{}, fmt.Errorf("provider required-check projection unavailable for %d configured identity requirement(s): %w", len(policy.Identities), requiredErr)
 	}
@@ -893,13 +903,13 @@ func projectRequiredCheckRuns(ctx context.Context, prNum int, repo string) (requ
 		return requiredCheckProjection{}, fmt.Errorf("parsing provider-required check output: %w", err)
 	}
 	if len(providerRequired) == 0 && len(policy.Identities) == 0 {
-		return requiredCheckProjection{AuthoritativeEmpty: true}, nil
+		return requiredCheckProjection{AuthoritativeEmpty: true, BaseBranch: baseBranch}, nil
 	}
 	requiredOnly, err := classifyProviderRequiredChecks(providerRequired, policy)
 	if err != nil {
 		return requiredCheckProjection{}, fmt.Errorf("reconciling provider-required checks with discovered policy: %w", err)
 	}
-	return requiredCheckProjection{Runs: requiredOnly, ProviderRuns: providerRequired}, nil
+	return requiredCheckProjection{Runs: requiredOnly, ProviderRuns: providerRequired, BaseBranch: baseBranch}, nil
 }
 
 func isNoRequiredChecksReported(err error) bool {
@@ -1001,9 +1011,17 @@ func checkAllCI(prNum int, repo string) error {
 }
 
 func checkAllCIContext(ctx context.Context, prNum int, repo string) error {
+	return checkAllCIContextForBase(ctx, prNum, repo, "")
+}
+
+func checkAllCIContextForBase(ctx context.Context, prNum int, repo, expectedBase string) error {
 	projection, err := projectRequiredCheckRuns(ctx, prNum, repo)
 	if err != nil {
 		return err
+	}
+	if expectedBase != "" && projection.BaseBranch != expectedBase {
+		return fmt.Errorf("PR #%d base changed before CI policy evaluation (expected %s, got %s); retry",
+			prNum, expectedBase, projection.BaseBranch)
 	}
 	allChecks, err := fetchAllCheckRuns(ctx, prNum, repo, projection.AuthoritativeEmpty)
 	if err != nil {
