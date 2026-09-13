@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -98,8 +99,21 @@ const (
 	tstUnparseable  = "I think this could be structured a little differently, but up to you."
 )
 
+// tstPosted and tstReplied bracket the fixtures in time. GitHub always returns
+// createdAt for a review comment, so fixtures carry one too: engagement is
+// judged on time, and a comment with no timestamp fails closed by design.
+var (
+	tstPosted  = time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC)
+	tstReplied = time.Date(2026, 6, 15, 11, 0, 0, 0, time.UTC)
+)
+
 func botComment(body string) threadComment {
-	return threadComment{author: "chatgpt-codex-connector", body: body, typename: "Bot"}
+	return threadComment{author: "chatgpt-codex-connector", body: body, typename: "Bot", createdAt: tstPosted}
+}
+
+// humanReply is a person answering AFTER the bot fixtures above.
+func humanReply(login, body string) threadComment {
+	return threadComment{author: login, body: body, typename: "User", createdAt: tstReplied}
 }
 
 func TestPartitionResolvable(t *testing.T) {
@@ -148,7 +162,7 @@ func TestPartitionResolvable(t *testing.T) {
 			// MLC-05 preserved: a human reply anywhere protects the thread.
 			name: "bot thread with a human reply is never resolved",
 			thread: reviewThread{id: "t7", comments: []threadComment{
-				botComment(tstCodexP2), {author: "vbonnet", body: "disagree, keep it", typename: "User"},
+				botComment(tstCodexP2), humanReply("vbonnet", "disagree, keep it"),
 			}},
 			wantResolved: 0, wantWithheld: 0,
 		},
@@ -228,7 +242,7 @@ func TestBlockingFindingsIn(t *testing.T) {
 			// override them.
 			name: "P1 with a human reply is treated as addressed",
 			thread: reviewThread{id: "b6", comments: []threadComment{
-				botComment(tstCodexP1), {author: "vbonnet", body: "fixed in a follow-up", typename: "User"},
+				botComment(tstCodexP1), humanReply("vbonnet", "fixed in a follow-up"),
 			}},
 			want: 0,
 		},
@@ -419,7 +433,7 @@ func TestBlockingFindingsInResolvedThreadsFailClosed(t *testing.T) {
 // blocks the merge. This mode is advertised as reporting whether the merge
 // would be refused, so a false PASS misdirects live verification.
 func TestThreadsRemainingUnresolved(t *testing.T) {
-	human := threadComment{author: "alice", body: "please rename this", typename: "User"}
+	human := humanReply("alice", "please rename this")
 	threads := []reviewThread{
 		// Resolvable: bot, unresolved, recognised advisory. Goes away.
 		{id: "advisory", comments: []threadComment{botComment(tstCodexP2)}},
@@ -489,23 +503,25 @@ func TestVerifyPRIdentity(t *testing.T) {
 // merges over a blocking finding nobody read. Only a human comment that comes
 // after the finding can have addressed it.
 func TestBlockingFindingsInHumanBeforeBotP1DoesNotAddressIt(t *testing.T) {
-	human := threadComment{author: "alice", body: "unrelated remark", typename: "User"}
+	earlier := threadComment{author: "alice", body: "unrelated remark", typename: "User",
+		createdAt: tstPosted.Add(-time.Hour)}
+	later := humanReply("alice", "thanks, fixed")
 
 	before := reviewThread{id: "human-first", isResolved: true,
-		comments: []threadComment{human, botComment(tstCodexP1)}}
+		comments: []threadComment{earlier, botComment(tstCodexP1)}}
 	if got := blockingFindingsIn([]reviewThread{before}); len(got) != 1 {
 		t.Errorf("a P1 posted AFTER a human comment must still block; got %d findings", len(got))
 	}
 
 	after := reviewThread{id: "human-last", isResolved: true,
-		comments: []threadComment{botComment(tstCodexP1), human}}
+		comments: []threadComment{botComment(tstCodexP1), later}}
 	if got := blockingFindingsIn([]reviewThread{after}); len(got) != 0 {
 		t.Errorf("a human reply AFTER the P1 addresses it; got %d findings", len(got))
 	}
 
 	// A bot reply between the finding and the human does not break the pairing.
 	interleaved := reviewThread{id: "interleaved", isResolved: true,
-		comments: []threadComment{human, botComment(tstCodexP1), botComment(tstCodexP2), human}}
+		comments: []threadComment{earlier, botComment(tstCodexP1), botComment(tstCodexP2), later}}
 	if got := blockingFindingsIn([]reviewThread{interleaved}); len(got) != 0 {
 		t.Errorf("a human reply after the P1 addresses it even with a bot comment between; got %d", len(got))
 	}
@@ -522,7 +538,7 @@ func TestBlockingFindingsInHumanBeforeBotP1DoesNotAddressIt(t *testing.T) {
 // protected nothing. Partial-page engagement is not evidence about the part
 // nobody read.
 func TestBlockingFindingsInResolvedTruncatedRefusesDespiteVisibleHuman(t *testing.T) {
-	human := threadComment{author: "alice", body: "looks fine to me", typename: "User"}
+	human := humanReply("alice", "looks fine to me")
 	thread := reviewThread{
 		id: "resolved-truncated", isResolved: true, truncated: true,
 		comments: []threadComment{botComment(tstCodexP2), human},
@@ -548,7 +564,8 @@ func TestBlockingFindingsInResolvedTruncatedRefusesDespiteVisibleHuman(t *testin
 // safeguard. An unreadable finding nobody answered is exactly the case that
 // must fail closed.
 func TestBlockingFindingsInResolvedUnknownAfterHumanStillRefuses(t *testing.T) {
-	human := threadComment{author: "alice", body: "unrelated remark", typename: "User"}
+	human := threadComment{author: "alice", body: "unrelated remark", typename: "User",
+		createdAt: tstPosted.Add(-time.Hour)}
 	unreadable := botComment("**<sub><sub>![P7 Badge](https://img.shields.io/badge/P7-orange?style=flat)</sub></sub>  Future format**")
 
 	afterHuman := reviewThread{id: "resolved-unknown", isResolved: true,
@@ -559,7 +576,7 @@ func TestBlockingFindingsInResolvedUnknownAfterHumanStillRefuses(t *testing.T) {
 
 	// A human reply AFTER the unreadable finding does address it.
 	answered := reviewThread{id: "answered-unknown", isResolved: true,
-		comments: []threadComment{unreadable, human}}
+		comments: []threadComment{unreadable, humanReply("alice", "acknowledged")}}
 	if got := blockingFindingsIn([]reviewThread{answered}); len(got) != 0 {
 		t.Errorf("a human reply after the unknown finding addresses it; got %d findings", len(got))
 	}
@@ -582,5 +599,49 @@ func TestExcerptFindingReadsUnknownSeverityComments(t *testing.T) {
 	}
 	if !strings.Contains(got, "Withhold merges") {
 		t.Errorf("excerptFinding() = %q, want the finding title", got)
+	}
+}
+
+// TestUnaddressedBlockingCommentUsesTimeNotPosition pins the ce-lr7j review
+// finding that an EDITED bot comment defeated the ordering check.
+//
+// The per-comment rule asked whether a human appears later in the slice. A bot
+// that edits an earlier advisory comment into a P1 after a human has already
+// replied keeps its original position, so that human still sits in
+// comments[i+1:] and was read as engagement with a finding that did not exist
+// when they wrote. Once the thread is resolved, GitHub's gate protects nothing.
+//
+// Position is a proxy for time, and editing breaks it. The human response must
+// post after the finding's LATEST revision.
+func TestUnaddressedBlockingCommentUsesTimeNotPosition(t *testing.T) {
+	at := func(s string) time.Time {
+		ts, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatalf("bad fixture time %q: %v", s, err)
+		}
+		return ts
+	}
+	edited := botComment(tstCodexP1)
+	edited.createdAt = at("2026-06-15T10:00:00Z")
+	edited.lastEditedAt = at("2026-06-15T12:00:00Z") // became a P1 only here
+	human := threadComment{author: "alice", body: "looks fine", typename: "User",
+		createdAt: at("2026-06-15T11:00:00Z")} // replied before the edit
+
+	if _, ok := unaddressedBlockingComment([]threadComment{edited, human}); !ok {
+		t.Error("a human reply that predates the edit which INTRODUCED the P1 does not address it")
+	}
+
+	// A human replying after the latest revision does address it.
+	later := human
+	later.createdAt = at("2026-06-15T13:00:00Z")
+	if _, ok := unaddressedBlockingComment([]threadComment{edited, later}); ok {
+		t.Error("a human reply after the latest revision addresses the finding")
+	}
+
+	// Missing timestamps must fail closed rather than fall back to position.
+	noTimes := botComment(tstCodexP1)
+	blank := threadComment{author: "alice", body: "ok", typename: "User"}
+	if _, ok := unaddressedBlockingComment([]threadComment{noTimes, blank}); !ok {
+		t.Error("without timestamps the gate cannot prove the reply came after the finding; it must refuse")
 	}
 }

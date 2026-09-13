@@ -272,7 +272,14 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	// Start (or stop) the stall clock BEFORE evaluating it, so a PR that has
 	// only just become actionable is measured from now rather than from
 	// whenever it was first seen as a draft.
-	d.Tracker.NoteActionable(pr.Number, actionableState(cls.State), now)
+	//
+	// Not in a dry run: Tick persists the tracker, so an observational pass
+	// would start a real stall timer on an actionable PR, or erase an existing
+	// one on a draft and delay a later escalation. A dry run must not move the
+	// clock it is only reporting on.
+	if !d.DryRun {
+		d.Tracker.NoteActionable(pr.Number, actionableState(cls.State), now)
+	}
 
 	// Stall detection: an actionable PR untouched for longer than the
 	// threshold is the failure the Define rule forbids.

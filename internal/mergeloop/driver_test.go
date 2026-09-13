@@ -927,3 +927,28 @@ func TestDescribeFindingsNamesTheThread(t *testing.T) {
 		t.Errorf("describeFindings() = %q, want it to name the thread so the refusal is actionable", got)
 	}
 }
+
+// TestDryRunDoesNotMutateActionableClock pins the ce-lr7j review finding that
+// guarding recordEscalation did not guard the OTHER tracker mutation added in
+// the same work.
+//
+// NoteActionable was called unconditionally and Tick then persisted the
+// tracker, so a dry run against an actionable PR could start its real stall
+// timer, and a dry run against a draft could erase an existing one and delay a
+// later escalation. A dry run must not move the clock it is only reporting on.
+func TestDryRunDoesNotMutateActionableClock(t *testing.T) {
+	prs := []PR{{Number: 4, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	d, tr := newTestDriver(t, prs, &Deps{
+		Rebaser: &fakeRebaser{}, Merger: &fakeMerger{},
+		Clock: func() time.Time { return now },
+	})
+	d.DryRun = true
+
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if got := tr.Get(4, now).ActionableSinceAt; !got.IsZero() {
+		t.Errorf("dry run started the real stall clock: ActionableSinceAt = %v", got)
+	}
+}

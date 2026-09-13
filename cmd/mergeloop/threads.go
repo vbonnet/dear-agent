@@ -86,7 +86,7 @@ const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:Str
         nodes{
           id
           isResolved
-          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login __typename } body } }
+          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login __typename } body createdAt lastEditedAt } }
         }
       }
     }
@@ -107,6 +107,23 @@ type threadComment struct {
 	// two-login bot allowlist let dependabot[bot], a GitHub Actions bot, or
 	// any newly introduced review bot silently clear a P1 finding.
 	typename string
+	// createdAt is when the comment was posted and lastEditedAt when it was
+	// last revised (zero if never). Engagement is judged on TIME, not on
+	// position in the thread: a bot that edits an earlier advisory comment
+	// into a P1 keeps its original position, so an ordering check would read a
+	// human who replied before that edit as having engaged with a finding that
+	// did not yet exist.
+	createdAt    time.Time
+	lastEditedAt time.Time
+}
+
+// effectiveAt is the instant this comment last said what it says now. A human
+// can only have engaged with a finding as it reads after its latest revision.
+func (c threadComment) effectiveAt() time.Time {
+	if c.lastEditedAt.After(c.createdAt) {
+		return c.lastEditedAt
+	}
+	return c.createdAt
 }
 
 // reviewThread is one PR review thread as fetched from GraphQL.
@@ -294,6 +311,48 @@ func blockingFindingsIn(threads []reviewThread) []mergeloop.BlockingFinding {
 	return out
 }
 
+// parseGraphQLTime turns a GitHub ISO-8601 timestamp into a time.Time. An
+// empty or unparseable value yields the zero time, which the engagement check
+// treats as "cannot prove" and therefore fails closed on.
+func parseGraphQLTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
+// answeredAfter reports whether a real person commented after this finding's
+// latest revision.
+//
+// The comparison is on TIME rather than position. A bot that edits an earlier
+// advisory comment into a P1 keeps its original slot in the thread, so a
+// positional check read a human who replied before that edit as having engaged
+// with a finding that did not exist when they wrote it. Once such a thread is
+// resolved, GitHub's conversation gate protects nothing.
+//
+// Missing timestamps fail CLOSED. If the API did not give this code enough to
+// prove the reply came after the finding, it has not been shown to be
+// addressed, and an unprovable answer must never clear a blocking finding.
+func answeredAfter(comments []threadComment, finding threadComment) bool {
+	at := finding.effectiveAt()
+	if at.IsZero() {
+		return false
+	}
+	for _, later := range comments {
+		if !isHumanActor(later.typename, later.author) {
+			continue
+		}
+		if later.createdAt.After(at) {
+			return true
+		}
+	}
+	return false
+}
+
 // unaddressedBlockingComment returns the index of the first comment carrying a
 // recognised blocking severity that no human answered afterwards.
 //
@@ -330,14 +389,7 @@ func unaddressedBotComment(comments []threadComment, want mergeloop.ThreadSeveri
 		if mergeloop.ClassifyCommentSeverity(c.body) != want {
 			continue
 		}
-		answered := false
-		for _, later := range comments[i+1:] {
-			if isHumanActor(later.typename, later.author) {
-				answered = true
-				break
-			}
-		}
-		if !answered {
+		if !answeredAfter(comments, c) {
 			return i, true
 		}
 	}
@@ -467,7 +519,9 @@ func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, 
 											Login    string `json:"login"`
 											Typename string `json:"__typename"`
 										} `json:"author"`
-										Body string `json:"body"`
+										Body         string `json:"body"`
+										CreatedAt    string `json:"createdAt"`
+										LastEditedAt string `json:"lastEditedAt"`
 									} `json:"nodes"`
 								} `json:"comments"`
 							} `json:"nodes"`
@@ -490,7 +544,13 @@ func (r *ghThreadResolver) listThreads(ctx context.Context, owner, name string, 
 				truncated:  n.Comments.PageInfo.HasNextPage,
 			}
 			for _, c := range n.Comments.Nodes {
-				t.comments = append(t.comments, threadComment{author: c.Author.Login, body: c.Body, typename: c.Author.Typename})
+				t.comments = append(t.comments, threadComment{
+					author:       c.Author.Login,
+					body:         c.Body,
+					typename:     c.Author.Typename,
+					createdAt:    parseGraphQLTime(c.CreatedAt),
+					lastEditedAt: parseGraphQLTime(c.LastEditedAt),
+				})
 			}
 			out = append(out, t)
 		}
