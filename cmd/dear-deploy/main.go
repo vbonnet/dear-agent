@@ -671,14 +671,19 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "dear-deploy: manifest has no %q artifact\n", pulseArtifactName)
 		return 1
 	}
-	hostPath, defaultsPath := pulsePaths(a, opts)
+	hostPath, _ := pulsePaths(a, opts)
 
 	required, err := requiredPulsesFor(selected, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: resolve required pulses: %v\n", err)
 		return 1
 	}
-	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath, required)
+	rendered, err := a.Render(opts.RepoRoot, opts.Home)
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: render pulse defaults: %v\n", err)
+		return 1
+	}
+	added, err := deploy.MergeRequiredPulsesRendered(hostPath, rendered, required)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: merge pulses: %v\n", err)
 		return 1
@@ -744,7 +749,11 @@ func mergePulsesDuringDeploy(a deploy.Artifact, opts deploy.Options, asJSON bool
 	if err != nil {
 		return err
 	}
-	added, err := deploy.MergeRequiredPulses(hostPath, defaultsPath, required)
+	rendered, err := a.Render(opts.RepoRoot, opts.Home)
+	if err != nil {
+		return fmt.Errorf("render pulse defaults: %w", err)
+	}
+	added, err := deploy.MergeRequiredPulsesRendered(hostPath, rendered, required)
 	if err != nil {
 		return err
 	}

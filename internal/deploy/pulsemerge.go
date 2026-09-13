@@ -51,9 +51,27 @@ func MergeRequiredPulses(hostPath, defaultsPath string, required map[string]bool
 	if err != nil {
 		return nil, fmt.Errorf("read pulse defaults %s: %w", defaultsPath, err)
 	}
+	return mergeRequiredPulses(hostPath, defaultsRaw, required)
+}
+
+// MergeRequiredPulsesRendered is MergeRequiredPulses over already-rendered
+// defaults, so a caller that resolves the artifact through the manifest
+// installs what the manifest would deploy rather than the raw source. Today the
+// pulse registry declares no tokens, but a source that grows one must not reach
+// a host with its placeholders intact.
+func MergeRequiredPulsesRendered(hostPath string, defaultsRaw []byte, required map[string]bool) ([]string, error) {
+	unlock, err := lockPulseRegistry(hostPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	return mergeRequiredPulses(hostPath, defaultsRaw, required)
+}
+
+func mergeRequiredPulses(hostPath string, defaultsRaw []byte, required map[string]bool) ([]string, error) {
 	var defaults pulseDoc
 	if err := json.Unmarshal(defaultsRaw, &defaults); err != nil {
-		return nil, fmt.Errorf("parse pulse defaults %s: %w", defaultsPath, err)
+		return nil, fmt.Errorf("parse pulse defaults: %w", err)
 	}
 
 	hostRaw, err := os.ReadFile(hostPath)
