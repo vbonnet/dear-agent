@@ -482,10 +482,12 @@ func settlePending(
 	st.LastStatus = recoveryloop.StatusPending
 	state.Jobs[job.Name] = st
 	rep.Results = append(rep.Results, recoveryloop.Result{
-		Job:         job.Name,
-		Status:      recoveryloop.StatusPending,
-		Action:      prev.PendingAction,
-		Attempt:     prev.ConsecutiveFailures,
+		Job:    job.Name,
+		Status: recoveryloop.StatusPending,
+		Action: prev.PendingAction,
+		// The same ordinal the recovery.pending record used for this action,
+		// so a consumer following one attempt across ticks sees one number.
+		Attempt:     prev.ConsecutiveFailures + 1,
 		HumanNeeded: prev.HumanNeeded,
 		Reason: fmt.Sprintf("awaiting pulse %q until %s",
 			job.Pulse, prev.PendingDeadline.Format(time.RFC3339)),
@@ -513,7 +515,7 @@ func holdPending(
 		Job:         job.Name,
 		Status:      recoveryloop.StatusPending,
 		Action:      prev.PendingAction,
-		Attempt:     prev.ConsecutiveFailures,
+		Attempt:     prev.ConsecutiveFailures + 1,
 		HumanNeeded: prev.HumanNeeded,
 		Reason: fmt.Sprintf("holding verification of %s: launchd state unavailable this tick (%v)",
 			prev.PendingAction, cause),
