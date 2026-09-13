@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 
 	"github.com/vbonnet/dear-agent/pkg/recoveryloop"
 )
@@ -34,6 +35,18 @@ import (
 // A host config that cannot be parsed is refused rather than replaced, because
 // overwriting it would discard configuration this code cannot read.
 func MergeRequiredPulses(hostPath, defaultsPath string, required map[string]bool) ([]string, error) {
+	// Two post-merge deployments from different worktrees can run at once, and
+	// the registry plus its ledger are a read-modify-write pair. Interleaving
+	// them would let one run's additions be dropped by the other's write while
+	// both ledgers record the names as offered, so neither run would ever add
+	// them again: the pulses would be permanently missing and permanently
+	// believed installed. One exclusive lock covers both files.
+	unlock, err := lockPulseRegistry(hostPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	defaultsRaw, err := os.ReadFile(defaultsPath)
 	if err != nil {
 		return nil, fmt.Errorf("read pulse defaults %s: %w", defaultsPath, err)
@@ -313,4 +326,27 @@ func defaultNamesPresent(defaults pulseDoc, have map[string]bool) []string {
 		}
 	}
 	return names
+}
+
+// lockPulseRegistry takes an exclusive advisory lock covering the pulse
+// registry and its ledger, and returns the release function.
+func lockPulseRegistry(hostPath string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir for pulse lock: %w", err)
+	}
+	path := hostPath + ".lock"
+	//nolint:gosec // the lock path is derived from the manifest-resolved registry path.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open pulse lock %s: %w", path, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("lock pulse registry %s: %w", path, err)
+	}
+	return func() {
+		// Closing the descriptor releases the flock.
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }

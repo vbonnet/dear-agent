@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -345,6 +346,56 @@ func TestRequiredPulseNames_CoversDeployedRegistry(t *testing.T) {
 	for _, want := range []string{"sandbox-gc-tick", "token-refresher-tick", "absence-alarm-heartbeat"} {
 		if !req[want] {
 			t.Errorf("%q is named by a recovery job but not reported as required", want)
+		}
+	}
+}
+
+// Concurrent merges must not lose additions. Two post-merge deployments from
+// different worktrees can overlap, and the registry plus its ledger are a
+// read-modify-write pair: an interleaving that drops one run's additions while
+// both ledgers record them as offered would leave those pulses permanently
+// missing and permanently believed installed.
+func TestMergeRequiredPulses_ConcurrentRunsDoNotLoseAdditions(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	if err := os.WriteFile(host, []byte(`{"pulses":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaults, []byte(`{"pulses":[
+	  {"name":"p1","type":"file_mtime","path":"~/1","window":"1h"},
+	  {"name":"p2","type":"file_mtime","path":"~/2","window":"1h"},
+	  {"name":"p3","type":"file_mtime","path":"~/3","window":"1h"}
+	]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := map[string]bool{"p1": true, "p2": true, "p3": true}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := MergeRequiredPulses(host, defaults, req); err != nil {
+				t.Errorf("concurrent merge: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	got := readPulseNames(t, host)
+	seen := map[string]int{}
+	for _, n := range got {
+		seen[n]++
+	}
+	for _, want := range []string{"p1", "p2", "p3"} {
+		switch seen[want] {
+		case 1:
+			// installed exactly once
+		case 0:
+			t.Errorf("%q was lost by concurrent merges", want)
+		default:
+			t.Errorf("%q installed %d times", want, seen[want])
 		}
 	}
 }

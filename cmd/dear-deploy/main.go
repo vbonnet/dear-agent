@@ -249,12 +249,22 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	// A required pulse that a sync would merge is real drift, even though the
 	// absent-only registry itself compares clean. Reporting OK here is how a
 	// missed migration stays invisible to a deployment audit.
-	pendingPulses := pendingPulseNames(selected, opts, stderr)
+	pendingPulses, pulseErr := pendingPulseNames(selected, opts, stderr)
 	for _, n := range pendingPulses {
 		results = append(results, deploy.StatusResult{
 			Name:         pulseArtifactName + ":" + n,
 			State:        deploy.StateDrift,
 			DeployedPath: n,
+		})
+	}
+	if pulseErr != nil {
+		// "Could not check" is not "clean". A status that exits 0 because it
+		// failed to read the registry tells an audit the host is fine when
+		// nobody looked.
+		results = append(results, deploy.StatusResult{
+			Name:  pulseArtifactName + ":merge-check",
+			State: deploy.StateError,
+			Error: pulseErr.Error(),
 		})
 	}
 
@@ -444,7 +454,10 @@ func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, a
 	plans := make([]plan, 0, len(selected))
 	// An absent-only registry always reports "unchanged", so without this a
 	// preview would show nothing while a real sync merged required pulses.
-	pendingPulses := pendingPulseNames(selected, opts, stderr)
+	pendingPulses, pulsePreviewErr := pendingPulseNames(selected, opts, stderr)
+	if pulsePreviewErr != nil {
+		return 1
+	}
 	for _, a := range selected {
 		// Binaries are status-only — sync/install never copy them into place.
 		if a.IsBinary() {
@@ -497,23 +510,23 @@ func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, a
 // any host that has one. A preview that cannot see a pending migration is a
 // preview that disagrees with the thing it previews, which is how a missed
 // migration stays invisible to deployment audits.
-func pendingPulseNames(selected []deploy.Artifact, opts deploy.Options, stderr io.Writer) []string {
+func pendingPulseNames(selected []deploy.Artifact, opts deploy.Options, stderr io.Writer) ([]string, error) {
 	a, ok := artifactNamed(selected, pulseArtifactName)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	hostPath, defaultsPath := pulsePaths(a, opts)
 	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
 	if err != nil {
-		fmt.Fprintf(stderr, "  WARN      cannot resolve required pulses: %v\n", err)
-		return nil
+		fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
+		return nil, err
 	}
 	pending, err := deploy.PendingPulseMerges(hostPath, defaultsPath, required)
 	if err != nil {
-		fmt.Fprintf(stderr, "  WARN      cannot compute pending pulse merges: %v\n", err)
-		return nil
+		fmt.Fprintf(stderr, "  ERROR     cannot compute pending pulse merges: %v\n", err)
+		return nil, err
 	}
-	return pending
+	return pending, nil
 }
 
 func formatDeploy(cmd string, results []deploy.Result, w io.Writer) {
@@ -638,27 +651,21 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	root := c.repoRoot
-	if root == "" {
-		var err error
-		if root, err = gitToplevel(context.Background()); err != nil {
-			fmt.Fprintf(stderr, "dear-deploy: resolve repo root: %v\n", err)
-			return 1
-		}
+	// Resolve through the manifest, so --manifest and --repo-root behave here
+	// exactly as they do on the sync path instead of this command mutating
+	// hard-coded locations the caller never selected.
+	selected, opts, code := c.load([]string{pulseArtifactName}, stderr)
+	if code != 0 {
+		return code
 	}
-	home := c.home
-	if home == "" {
-		home = os.Getenv("HOME")
-	}
-	if home == "" {
-		fmt.Fprintln(stderr, "dear-deploy: HOME is unset; pass --home")
+	a, ok := artifactNamed(selected, pulseArtifactName)
+	if !ok {
+		fmt.Fprintf(stderr, "dear-deploy: manifest has no %q artifact\n", pulseArtifactName)
 		return 1
 	}
+	hostPath, defaultsPath := pulsePaths(a, opts)
 
-	hostPath := filepath.Join(home, ".config", "dear-agent", "absence-alarm-pulses.json")
-	defaultsPath := filepath.Join(root, "deploy", "absence-alarm", "pulses.json")
-
-	required, err := deploy.RequiredPulseNames(root)
+	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: resolve required pulses: %v\n", err)
 		return 1
@@ -667,6 +674,15 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: merge pulses: %v\n", err)
 		return 1
+	}
+
+	if c.asJSON {
+		// --json is advertised as common to every subcommand, so it must
+		// produce a document here too rather than prose a decoder chokes on.
+		return emitJSON(struct {
+			Registry string   `json:"registry"`
+			Added    []string `json:"added"`
+		}{Registry: hostPath, Added: added}, stdout, stderr)
 	}
 	if len(added) == 0 {
 		fmt.Fprintf(stdout, "absence-alarm pulses: already current (%s)\n", hostPath)
