@@ -108,7 +108,11 @@ func PaneCurrentPath(sessionName string) (string, error) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(sessionName)
-	out, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
+	// -u forces UTF-8 format output for this invocation. Without it tmux
+	// transliterates every non-ASCII and control byte of the path to "_"
+	// whenever the client has no UTF-8 locale, and the comparison below then
+	// reports a workdir mismatch that never happened. See locale.go.
+	out, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-u", "-S", socketPath,
 		"display-message", "-p", "-t", normalizedName, "#{pane_current_path}")
 	if err != nil {
 		return "", fmt.Errorf("failed to read pane_current_path for %q: %w", sessionName, err)
