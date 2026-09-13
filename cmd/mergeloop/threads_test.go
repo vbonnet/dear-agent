@@ -689,3 +689,47 @@ func TestThreadResolvabilityIsTheSingleRule(t *testing.T) {
 		t.Errorf("a thread this code cannot read in full = %v, want notOurs", got)
 	}
 }
+
+// TestBlockingFindingsInUnknownBotStillBlocks pins the ce-lr7j review finding
+// that the independent gate only recognised findings from the two allowlisted
+// logins.
+//
+// A renamed or newly introduced review bot posting a P1 in an already-resolved
+// thread produced no finding at all, and GitHub's conversation gate was already
+// satisfied, so the merge proceeded over an unread blocking finding.
+//
+// The allowlist governs what may be AUTO-RESOLVED, which is a privilege and
+// must stay narrow. What may BLOCK is the opposite question and must be wide:
+// any actor that is not a real person can carry a finding this gate owns.
+func TestBlockingFindingsInUnknownBotStillBlocks(t *testing.T) {
+	newBot := threadComment{author: "some-new-reviewer[bot]", body: tstCodexP1,
+		typename: "Bot", createdAt: tstPosted}
+	thread := reviewThread{id: "new-bot", isResolved: true, comments: []threadComment{newBot}}
+	if got := blockingFindingsIn([]reviewThread{thread}); len(got) != 1 {
+		t.Errorf("a P1 from an unallowlisted BOT must still block; got %d findings", len(got))
+	}
+
+	// An actor the API could not type is not provably a person either.
+	untyped := newBot
+	untyped.typename = ""
+	if got := blockingFindingsIn([]reviewThread{{id: "untyped", isResolved: true,
+		comments: []threadComment{untyped}}}); len(got) != 1 {
+		t.Errorf("a P1 from an untyped actor must block; got %d findings", len(got))
+	}
+
+	// A real person writing badge-shaped text is still not a bot finding: that
+	// is ordinary human feedback GitHub's own gate governs.
+	person := threadComment{author: "alice", body: tstCodexP1, typename: "User", createdAt: tstPosted}
+	if got := blockingFindingsIn([]reviewThread{{id: "human", isResolved: true,
+		comments: []threadComment{person}}}); len(got) != 0 {
+		t.Errorf("a person quoting P1 text is not a bot finding; got %d findings", len(got))
+	}
+
+	// Auto-resolution stays restricted to the allowlist: an unknown bot's
+	// advisory thread is NOT ours to resolve.
+	advisoryNew := threadComment{author: "some-new-reviewer[bot]", body: tstCodexP2,
+		typename: "Bot", createdAt: tstPosted}
+	if got := threadResolvability(reviewThread{id: "x", comments: []threadComment{advisoryNew}}); got != resolvabilityNotOurs {
+		t.Errorf("an unallowlisted bot's thread = %v, want notOurs (auto-resolve stays narrow)", got)
+	}
+}

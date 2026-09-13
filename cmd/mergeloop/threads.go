@@ -187,6 +187,19 @@ func (t reviewThread) hasHumanComment() bool {
 	return false
 }
 
+// isBotFindingAuthor reports whether a comment could carry a bot finding the
+// independent gate owns.
+//
+// It is the complement of isHumanActor rather than a membership test against
+// the auto-resolve allowlist, and the asymmetry is the point. Auto-resolving a
+// thread is a PRIVILEGE granted to two known logins and must stay narrow.
+// Refusing a merge is a PROTECTION, and withholding it from every bot this
+// code has not been told about is exactly how an unread P1 slips through. An
+// actor the API could not type is not provably a person, so it counts too.
+func isBotFindingAuthor(typename, login string) bool {
+	return !isHumanActor(typename, login)
+}
+
 // isHumanActor reports whether a comment author is a real person.
 //
 // It fails closed twice over. The GraphQL actor type must be exactly "User",
@@ -420,12 +433,15 @@ func unaddressedUnknownBotComment(comments []threadComment) (int, bool) {
 // finding they could actually see, so a human comment that PRECEDES the finding
 // says nothing about it. Bot comments between the two are irrelevant.
 //
-// Only an allowlisted BOT's comment is a finding this gate owns. A person
-// writing or quoting badge-shaped text is ordinary human feedback, which
-// GitHub's conversation-resolution gate already holds.
+// Any actor that is not a real PERSON can carry a finding this gate owns. That
+// is deliberately wider than the auto-resolve allowlist: a renamed or newly
+// introduced review bot posting a P1 into an already-resolved thread otherwise
+// produced no finding at all, and GitHub's conversation gate was already
+// satisfied. A person writing or quoting badge-shaped text is still ordinary
+// human feedback, which that gate governs.
 func unaddressedBotComment(comments []threadComment, want mergeloop.ThreadSeverity) (int, bool) {
 	for i, c := range comments {
-		if !isKnownBotAuthor(c.author) {
+		if !isBotFindingAuthor(c.typename, c.author) {
 			continue
 		}
 		if mergeloop.ClassifyCommentSeverity(c.body) != want {

@@ -74,7 +74,15 @@ func (s ThreadSeverity) BlocksResolution() bool {
 // `![P2 Badge](https://img.shields.io/badge/P1-orange?style=flat)` read as
 // advisory while carrying a blocking marker. The resolver and the independent
 // merge gate share this classifier, so a single wrong verdict cleared both.
-var codexBadgePattern = regexp.MustCompile(`!\[P([0-3]) Badge\]\(https://img\.shields\.io/badge/P([0-3])-`)
+// The trailing `[^)\s]*\)` is load-bearing: the pattern must match a COMPLETE
+// Markdown badge, not merely its URL prefix. Stopping at the prefix let a
+// truncated `![P2 Badge](.../badge/P2-yellow` count as parsed while the shape
+// pattern, which does span to ")", swallowed it and a following complete P6
+// badge as one shape. unread then equalled parsed and an unsupported marker
+// rode through on a malformed one. Excluding whitespace stops the suffix from
+// spanning ACROSS a following marker: a URL contains no spaces, so a match that
+// would have to cross one is not a single badge.
+var codexBadgePattern = regexp.MustCompile(`!\[P([0-3]) Badge\]\(https://img\.shields\.io/badge/P([0-3])-[^)\s]*\)`)
 
 // geminiBadgePattern matches the Gemini Code Assist severity badge. Real markup,
 // from PR #945:

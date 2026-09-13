@@ -309,3 +309,29 @@ func TestClassifyCommentSeverityQuerySuffixedBadgeIsUnknown(t *testing.T) {
 		t.Errorf("a shields.io badge with query parameters = %v, want blocking", got)
 	}
 }
+
+// TestClassifyCommentSeverityTruncatedBadgePrefixIsUnknown pins the ce-lr7j
+// review finding about an interaction BETWEEN the two badge patterns.
+//
+// The strict pattern stopped at the URL prefix and did not require the closing
+// parenthesis, so a truncated `![P2 Badge](.../badge/P2-yellow` counted as
+// parsed. The shape pattern, which does span to ")", then swallowed the
+// truncated marker and a following complete P6 badge as ONE shape. unread
+// equalled parsed and the comment classified advisory, so an unsupported
+// marker rode through on a malformed one.
+func TestClassifyCommentSeverityTruncatedBadgePrefixIsUnknown(t *testing.T) {
+	truncated := "![P2 Badge](https://img.shields.io/badge/P2-yellow"
+	unsupported := "![P6 Badge](https://img.shields.io/badge/P6-orange?style=flat)"
+	if got := ClassifyCommentSeverity(truncated + " " + unsupported); got != SeverityUnknown {
+		t.Errorf("ClassifyCommentSeverity(truncated P2 + P6) = %v, want %v", got, SeverityUnknown)
+	}
+	// A truncated badge on its own is not something this parser can read.
+	if got := ClassifyCommentSeverity(truncated); got != SeverityUnknown {
+		t.Errorf("ClassifyCommentSeverity(truncated P2 alone) = %v, want %v", got, SeverityUnknown)
+	}
+	// Complete badges are unaffected.
+	complete := "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  T**"
+	if got := ClassifyCommentSeverity(complete); got != SeverityAdvisory {
+		t.Errorf("a complete P2 = %v, want advisory", got)
+	}
+}
