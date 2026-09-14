@@ -92,6 +92,10 @@ const (
 	tstCodexP1 = "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  " +
 		"Require delivery evidence before closing merged work**\n\nWhen a matching PR has merged but " +
 		"deployment verification is still pending, this branch closes the bead using only the merge timestamp."
+	// tstCodexP3 is the ADVISORY fixture. Advisory starts at P3: P2 is a
+	// correctness finding and must never auto-resolve.
+	tstCodexP3 = "**<sub><sub>![P3 Badge](https://img.shields.io/badge/P3-blue?style=flat)</sub></sub>  " +
+		"Prefer a table here**\n\nA nit about presentation, not correctness."
 	tstCodexP2 = "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  " +
 		"Fail closed when reconciliation is unavailable**\n\nIf this call transiently fails, the code skips it."
 	tstGeminiHigh   = "![high](https://www.gstatic.com/codereviewagent/high-priority.svg)\n\nThis will not build on Windows."
@@ -131,7 +135,7 @@ func TestPartitionResolvable(t *testing.T) {
 		},
 		{
 			name:         "P2 bot thread resolves",
-			thread:       reviewThread{id: "t2", comments: []threadComment{botComment(tstCodexP2)}},
+			thread:       reviewThread{id: "t2", comments: []threadComment{botComment(tstCodexP3)}},
 			wantResolved: 1, wantWithheld: 0,
 		},
 		{
@@ -227,7 +231,7 @@ func TestBlockingFindingsIn(t *testing.T) {
 		},
 		{
 			name:   "P2 does not block",
-			thread: reviewThread{id: "b4", comments: []threadComment{botComment(tstCodexP2)}},
+			thread: reviewThread{id: "b4", comments: []threadComment{botComment(tstCodexP3)}},
 			want:   0,
 		},
 		{
@@ -290,7 +294,7 @@ func TestFullIncidentScenario(t *testing.T) {
 		{id: "p1b", comments: []threadComment{botComment(tstCodexP1)}},
 		{id: "p1c", comments: []threadComment{botComment(tstCodexP1)}},
 		{id: "p1d", comments: []threadComment{botComment(tstCodexP1)}},
-		{id: "p2a", comments: []threadComment{botComment(tstCodexP2)}},
+		{id: "p2a", comments: []threadComment{botComment(tstCodexP3)}},
 	}
 	resolvable, withheld := partitionResolvable(threads)
 	if len(resolvable) != 1 || resolvable[0].id != "p2a" {
@@ -406,7 +410,7 @@ func TestBlockingFindingsInResolvedThreadsFailClosed(t *testing.T) {
 	t.Run("resolved truncated thread blocks even if visible page is advisory", func(t *testing.T) {
 		threads := []reviewThread{{
 			id: "r3", isResolved: true, truncated: true,
-			comments: []threadComment{botComment(tstCodexP2)},
+			comments: []threadComment{botComment(tstCodexP3)},
 		}}
 		got := blockingFindingsIn(threads)
 		if len(got) != 1 {
@@ -416,7 +420,7 @@ func TestBlockingFindingsInResolvedThreadsFailClosed(t *testing.T) {
 	t.Run("resolved advisory thread still merges", func(t *testing.T) {
 		threads := []reviewThread{{
 			id: "r4", isResolved: true,
-			comments: []threadComment{botComment(tstCodexP2)},
+			comments: []threadComment{botComment(tstCodexP3)},
 		}}
 		if got := blockingFindingsIn(threads); len(got) != 0 {
 			t.Fatalf("got %d findings, want 0", len(got))
@@ -436,9 +440,9 @@ func TestThreadsRemainingUnresolved(t *testing.T) {
 	human := humanReply("alice", "please rename this")
 	threads := []reviewThread{
 		// Resolvable: bot, unresolved, recognised advisory. Goes away.
-		{id: "advisory", comments: []threadComment{botComment(tstCodexP2)}},
+		{id: "advisory", comments: []threadComment{botComment(tstCodexP3)}},
 		// Already resolved: nothing left to hold.
-		{id: "done", isResolved: true, comments: []threadComment{botComment(tstCodexP2)}},
+		{id: "done", isResolved: true, comments: []threadComment{botComment(tstCodexP3)}},
 		// Unresolved human thread: never auto-resolved, still blocks the merge.
 		{id: "human", comments: []threadComment{human}},
 		// Unresolved bot thread of unrecognised severity: withheld, still blocks.
@@ -658,7 +662,7 @@ func TestUnaddressedBlockingCommentUsesTimeNotPosition(t *testing.T) {
 // The fix is to re-read the thread and re-decide immediately before mutating,
 // so this predicate is the one rule both decisions use and they cannot drift.
 func TestThreadResolvabilityIsTheSingleRule(t *testing.T) {
-	advisory := reviewThread{id: "t", comments: []threadComment{botComment(tstCodexP2)}}
+	advisory := reviewThread{id: "t", comments: []threadComment{botComment(tstCodexP3)}}
 	if got := threadResolvability(advisory); got != resolvabilityEligible {
 		t.Errorf("an unresolved advisory bot thread = %v, want eligible", got)
 	}
@@ -727,7 +731,7 @@ func TestBlockingFindingsInUnknownBotStillBlocks(t *testing.T) {
 
 	// Auto-resolution stays restricted to the allowlist: an unknown bot's
 	// advisory thread is NOT ours to resolve.
-	advisoryNew := threadComment{author: "some-new-reviewer[bot]", body: tstCodexP2,
+	advisoryNew := threadComment{author: "some-new-reviewer[bot]", body: tstCodexP3,
 		typename: "Bot", createdAt: tstPosted}
 	if got := threadResolvability(reviewThread{id: "x", comments: []threadComment{advisoryNew}}); got != resolvabilityNotOurs {
 		t.Errorf("an unallowlisted bot's thread = %v, want notOurs (auto-resolve stays narrow)", got)

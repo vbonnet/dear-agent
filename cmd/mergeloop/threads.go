@@ -515,11 +515,21 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 		if err != nil {
 			return out, fmt.Errorf("re-reading thread %s by %s before resolving: %w", t.id, t.author, err)
 		}
-		if v := threadResolvability(current); v != resolvabilityEligible {
-			// Someone engaged with it, or it changed into something this gate
-			// must not touch. Leave it open and record it as withheld so the
-			// decision is visible rather than silent.
+		switch threadResolvability(current) {
+		case resolvabilityEligible:
+			// Still ours and still advisory: fall through and resolve.
+		case resolvabilityWithheld:
+			// It became a finding in the window. That IS a severity refusal,
+			// which is what the withheld count means.
 			out.Withheld++
+			continue
+		case resolvabilityNotOurs:
+			// A person joined it, someone else resolved it, or it grew past one
+			// page. Deliberately NOT counted as withheld: the driver audits
+			// that count as "left unresolved: blocking or unrecognised
+			// severity", so counting this would claim an already-resolved
+			// thread is still open, or label human engagement a severity
+			// refusal.
 			continue
 		}
 		if err := r.resolveThread(ctx, t.id); err != nil {

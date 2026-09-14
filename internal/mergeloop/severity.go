@@ -26,11 +26,15 @@ const (
 	SeverityUnknown ThreadSeverity = iota
 
 	// SeverityAdvisory is an explicitly recognised low-priority finding: Codex
-	// P2 or below, Gemini medium or below. These may be auto-resolved.
+	// P3, Gemini medium or below. These may be auto-resolved.
 	SeverityAdvisory
 
 	// SeverityBlocking is an explicitly recognised correctness-class finding:
-	// Codex P1 or above, Gemini high or above. These are never auto-resolved.
+	// Codex P2 or above, Gemini high or above. These are never auto-resolved.
+	//
+	// P2 belongs here, not in advisory. The incident above counts 25 P2
+	// findings among those released unread, and Gemini's "high" maps to the
+	// same tier in the parent implementation.
 	SeverityBlocking
 )
 
@@ -149,7 +153,12 @@ func ClassifyCommentSeverity(body string) ThreadSeverity {
 		}
 		seen = true
 		// P0 and P1 are correctness-class. P2 and below are advisory.
-		if m[1] == "0" || m[1] == "1" {
+		// P0, P1 and P2 are all correctness-class. P2 is NOT advisory: the
+		// incident above counts 25 P2 findings released unread, so treating
+		// them as auto-resolvable would leave the very failure this change
+		// exists to fix intact. The parent implementation agrees, blocking on
+		// `s >= severityP2` and reserving advisory for the P3-P5 badge form.
+		if m[1] == "0" || m[1] == "1" || m[1] == "2" {
 			return SeverityBlocking
 		}
 		if worst != SeverityBlocking {

@@ -292,27 +292,39 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	// clock it is only reporting on.
 	d.Tracker.NoteActionable(pr.Number, actionableState(cls.State), now)
 
-	// Stall detection: an actionable PR untouched for longer than the
-	// threshold is the failure the Define rule forbids.
-	if d.isStalled(cls.State, rec, now) {
+	// Stall detection is EVALUATED here, against the record as it stands before
+	// this tick acts, but it is not reported until after the action. A PR that
+	// had been deferred past the threshold, on the very tick safe-merge finally
+	// became ready, was escalated to a human and then merged seconds later:
+	// the tick reported merged=1 and escalated=1 together, and someone was
+	// paged about work that had just landed. Inactivity that resolves itself is
+	// not a stall worth escalating.
+	stalled := d.isStalled(cls.State, rec, now)
+	stallDetail := ""
+	if stalled {
+		stallDetail = fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))
+	}
+	mergedBefore := res.Merged
+
+	state := d.act(ctx, pr, cls, now, res)
+
+	if stalled && res.Merged == mergedBefore {
 		res.Stalled++
 		d.metrics().recordStall(ctx, pr.Number, cls.State)
-		detail := fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))
-		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected", Detail: detail})
+		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected", Detail: stallDetail})
 		// A stall must leave a DURABLE record, not only an audit line and a
 		// counter. Letting the stall clock run is what makes a permanently
-		// deferred PR detectable; persisting the escalation here is what makes
-		// it actionable by a human. Without this the PR stays unmergeable
-		// indefinitely with EscalationReason empty and no escalation metric.
+		// deferred PR detectable; persisting the escalation is what makes it
+		// actionable by a human.
 		d.recordEscalation(ctx, pr.Number,
-			fmt.Sprintf("stalled in %s: %s", cls.State, detail), "stalled", now)
-		// Count it in the tick summary too. The tracker and the metric alone
-		// left printSummary reporting escalated=0 for a tick that had just
-		// durably escalated a PR, hiding the new remediation path from the
-		// operator reading the one line the command actually prints.
+			fmt.Sprintf("stalled in %s: %s", cls.State, stallDetail), "stalled", now)
 		res.Escalated++
 	}
+	return state
+}
 
+// act performs the one action this PR's classified state calls for.
+func (d *Driver) act(ctx context.Context, pr PR, cls Classification, now time.Time, res *TickResult) State {
 	switch cls.State {
 	case StateDraft, StateAgentInFlight, StateCIPending:
 		res.Skipped++

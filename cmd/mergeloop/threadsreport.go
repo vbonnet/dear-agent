@@ -104,10 +104,15 @@ func printGateVerdicts(findings []mergeloop.BlockingFinding, remaining []string)
 		}
 	}
 
+	// Deliberately NOT called "merge gate". This command reads review threads
+	// and nothing else, while safe-merge separately refuses drafts, conflicts,
+	// failing or pending CI, insufficient soak, missing reviewers and a stale
+	// base. Printing an overall PASS here certified a merge this command never
+	// examined.
 	if len(findings) == 0 && len(remaining) == 0 {
-		fmt.Printf("merge gate:        PASS\n")
+		fmt.Printf("review-thread verdict: PASS (safe-merge still applies its own state, CI, soak and freshness gates)\n")
 	} else {
-		fmt.Printf("merge gate:        REFUSE\n")
+		fmt.Printf("review-thread verdict: REFUSE\n")
 	}
 }
 

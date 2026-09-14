@@ -882,3 +882,53 @@ func TestDescribeFindingsNamesTheThread(t *testing.T) {
 		t.Errorf("describeFindings() = %q, want it to name the thread so the refusal is actionable", got)
 	}
 }
+
+// TestNoStallEscalationOnATickThatMerges pins the ce-lr7j review finding that a
+// PR could be escalated to a human and merged in the same tick.
+//
+// Stall detection ran before the action. A green PR that had been deferred past
+// the threshold, on the tick where safe-merge finally became ready, recorded a
+// durable escalation and emitted the escalation metric, then merged seconds
+// later and had its record forgotten. The tick reported merged=1 AND
+// escalated=1, and an operator was paged about a PR that had just landed.
+//
+// Transient inactivity that resolves itself is not something to escalate.
+func TestNoStallEscalationOnATickThatMerges(t *testing.T) {
+	prs := []PR{{Number: 8, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("not ready yet: %w", ErrNotReady)}
+	var evs []AuditEvent
+	d, tr := newTestDriver(t, prs, &Deps{
+		Merger: mg,
+		Clock:  func() time.Time { return now },
+		Audit:  func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+
+	// Defer past the stall threshold.
+	for range 5 {
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		now = now.Add(20 * time.Minute)
+	}
+
+	// safe-merge becomes ready on this tick.
+	mg.err = nil
+	evs = nil
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("merging tick: %v", err)
+	}
+	if res.Merged != 1 {
+		t.Fatalf("precondition: want the PR to merge on this tick, got %+v", res)
+	}
+	if res.Escalated != 0 {
+		t.Errorf("Escalated = %d on a tick that merged the PR: a human was paged about work "+
+			"that just landed", res.Escalated)
+	}
+	if got := tr.Get(8, now); !got.EscalatedAt.IsZero() {
+		t.Errorf("a durable escalation was recorded for a PR that merged: %v", got.EscalatedAt)
+	}
+}
