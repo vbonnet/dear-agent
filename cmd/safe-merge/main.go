@@ -8,7 +8,7 @@
 //  2. No unresolved review threads (security-* threads need a written verdict).
 //  3. Head commit is ≥ 5 minutes old (soak time).
 //
-// After a successful merge: local worktree and branch are cleaned up.
+// After a successful merge, local recovery state is preserved for sanctioned session cleanup.
 //
 // Usage:
 //
@@ -166,7 +166,7 @@ Audit log:
 Merge execution uses GitHub auto-merge so protected direct-merge policies and
 merge queues remain supported. The exact head SHA is pinned.
 
-Post-merge: local worktree and branch are cleaned up automatically.
+Post-merge: safe-merge preserves local recovery state; sanctioned session cleanup owns any removal.
 `
 
 // WatchInterval is re-exported to allow overriding in tests.
