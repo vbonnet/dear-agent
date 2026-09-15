@@ -491,10 +491,8 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 		// Create under the random provisional name before storing the same token
 		// and renaming. If either later command fails, the surviving session still
 		// has an ownership marker that strict compensation can prove.
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
-			"new-session", "-d", "-P", "-F", "#{session_id}", "-s", identity.CreationName, "-c", workDir,
-			";", "set-option", "@agm_session_identity", identity.Token,
-			";", "rename-session", sanitizedName)
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux",
+			newSessionArgs(socketPath, identity, workDir, sanitizedName)...)
 		defer cancel()
 		output, err := cmd.Output()
 		// A tmux command queue can create the session and print its ID before a
@@ -1244,7 +1242,8 @@ func GetCurrentWorkingDirectory(sessionName string) (string, error) {
 	// Normalize session name to match tmux's conversion (dots/colons → dashes)
 	normalizedName := NormalizeTmuxSessionName(sessionName)
 	// Note: display-message targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "display-message", "-t", normalizedName, "-p", "#{pane_current_path}")
+	// -u keeps non-ASCII bytes in the path intact; see locale.go.
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-u", "-S", socketPath, "display-message", "-t", normalizedName, "-p", "#{pane_current_path}")
 	if err != nil {
 		// Check for timeout error
 		timeoutError := &TimeoutError{}
