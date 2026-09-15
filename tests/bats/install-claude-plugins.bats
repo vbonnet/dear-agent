@@ -8,7 +8,7 @@
 #   - dry-run mode (no side effects)
 #   - per-plugin install vs. update flow
 #   - --uninstall, --github, --scope, --help
-#   - plugin enumeration matches what marketplace.json declares
+#   - the closed four-plugin bulk set excludes source-only catalog entries
 
 setup() {
     load '../test_helper/bats-support/load'
@@ -137,27 +137,14 @@ teardown() {
 
 # ----- enumeration ---------------------------------------------------------
 
-@test "lists every plugin declared in marketplace.json" {
+@test "source catalog declares spec-governance but bulk set remains the historical four" {
+    run grep -F '"name": "spec-governance"' "$PROJECT_ROOT/.claude-plugin/marketplace.json"
+    assert_success
+
     run "$INSTALL_SCRIPT" --dry-run
     assert_success
-    # Pluck the line that lists plugins.
-    assert_output --partial "plugins:"
-    # Every plugin name from the manifest must appear.
-    for p in $(awk '
-        /"plugins"[[:space:]]*:[[:space:]]*\[/ { in_plugins=1; next }
-        in_plugins && /\]/                     { in_plugins=0 }
-        in_plugins && /"name"[[:space:]]*:/ {
-            match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
-            if (RSTART) {
-                s = substr($0, RSTART, RLENGTH)
-                sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-                sub(/".*/, "", s)
-                print s
-            }
-        }
-    ' "$PROJECT_ROOT/.claude-plugin/marketplace.json"); do
-        assert_output --partial "$p"
-    done
+    assert_output --partial "plugins:     agm wayfinder youtube research-pipeline"
+    refute_output --partial "spec-governance"
 }
 
 @test "lists agm and wayfinder plugins specifically" {
@@ -206,12 +193,12 @@ teardown() {
 
 # ----- per-plugin install vs update ----------------------------------------
 
-@test "first install: calls 'plugin install' once per declared plugin" {
+@test "first install: calls 'plugin install' once per bulk-managed plugin" {
     : >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT"
     assert_success
     assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "4"
-    # The declared inventory includes agm, wayfinder, youtube, and research-pipeline.
+    # The bulk-managed inventory includes agm, wayfinder, youtube, and research-pipeline.
     run grep -F "plugin install agm@dear-agent" "$CLAUDE_LOG"
     assert_success
     run grep -F "plugin install wayfinder@dear-agent" "$CLAUDE_LOG"
@@ -220,14 +207,22 @@ teardown() {
     assert_success
     run grep -F "plugin install research-pipeline@dear-agent" "$CLAUDE_LOG"
     assert_success
+    run grep -F "plugin install spec-governance@dear-agent" "$CLAUDE_LOG"
+    assert_failure
+    run grep -F "plugin install dear-agent@dear-agent" "$CLAUDE_LOG"
+    assert_failure
 }
 
 @test "already-installed plugin uses 'plugin update' instead of install" {
-    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\nresearch-pipeline@dear-agent\n' >"$CLAUDE_PLUGINS"
+    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\nresearch-pipeline@dear-agent\nspec-governance@dear-agent\ndear-agent@dear-agent\n' >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT"
     assert_success
     assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "0"
     assert_equal "$(grep -c "^plugin update " "$CLAUDE_LOG")" "4"
+    run grep -F "plugin update spec-governance@dear-agent" "$CLAUDE_LOG"
+    assert_failure
+    run grep -F "plugin update dear-agent@dear-agent" "$CLAUDE_LOG"
+    assert_failure
 }
 
 @test "--scope user is forwarded to plugin install" {
@@ -238,8 +233,8 @@ teardown() {
     assert_success
 }
 
-@test "--uninstall removes every declared plugin" {
-    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\nresearch-pipeline@dear-agent\n' >"$CLAUDE_PLUGINS"
+@test "--uninstall removes only the four bulk-managed plugins" {
+    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\nresearch-pipeline@dear-agent\nspec-governance@dear-agent\ndear-agent@dear-agent\n' >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT" --uninstall
     assert_success
     run grep -F "plugin uninstall agm@dear-agent" "$CLAUDE_LOG"
@@ -249,6 +244,14 @@ teardown() {
     run grep -F "plugin uninstall youtube@dear-agent" "$CLAUDE_LOG"
     assert_success
     run grep -F "plugin uninstall research-pipeline@dear-agent" "$CLAUDE_LOG"
+    assert_success
+    run grep -F "plugin uninstall spec-governance@dear-agent" "$CLAUDE_LOG"
+    assert_failure
+    run grep -F "plugin uninstall dear-agent@dear-agent" "$CLAUDE_LOG"
+    assert_failure
+    run grep -Fx "spec-governance@dear-agent" "$CLAUDE_PLUGINS"
+    assert_success
+    run grep -Fx "dear-agent@dear-agent" "$CLAUDE_PLUGINS"
     assert_success
 }
 

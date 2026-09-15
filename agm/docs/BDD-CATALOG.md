@@ -633,7 +633,8 @@ and `agm/internal/marketplaceparity`.
 
 **Key scenarios:**
 - The neutral marketplace catalog is valid.
-- Claude's native marketplace mirror matches the neutral catalog.
+- Claude's native marketplace mirrors the shared neutral inventory and permits
+  exactly one governed Claude-only SPEC-governance source projection.
 - Published plugin assets exist for declared capabilities.
 - Every active harness has an explicit discovery surface.
 
