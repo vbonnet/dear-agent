@@ -47,9 +47,37 @@ type AgentSpawner interface {
 // interface lets the mergeloop resolve them before attempting the merge.
 type ThreadResolver interface {
 	// ResolveBotThreads resolves unresolved review threads authored by known
-	// bot accounts on the given PR. Returns the number of threads resolved.
-	// Human-authored threads are never touched.
-	ResolveBotThreads(ctx context.Context, repo string, pr int) (int, error)
+	// bot accounts on the given PR, EXCEPT those carrying a blocking or
+	// unrecognised severity marker. Human-authored threads are never touched.
+	ResolveBotThreads(ctx context.Context, repo string, pr int) (ThreadResolution, error)
+
+	// BlockingFindings re-reads the PR's review threads and returns every bot
+	// finding that must stop a merge. It is the independent half of the
+	// ce-lr7j fix: it runs at merge time, queries GitHub afresh, and does not
+	// trust whatever ResolveBotThreads decided earlier in the same tick. A
+	// severity classifier that mis-reads a future badge format therefore still
+	// cannot land a blocking finding, because the merge is refused here.
+	BlockingFindings(ctx context.Context, repo string, pr int) ([]BlockingFinding, error)
+}
+
+// ThreadResolution reports what one ResolveBotThreads pass did.
+type ThreadResolution struct {
+	// Resolved counts threads auto-resolved because every comment was an
+	// allowlisted bot AND carried a recognised advisory severity marker.
+	Resolved int
+	// Withheld counts bot threads deliberately left unresolved because at
+	// least one comment was blocking-severity or carried no marker this code
+	// recognises. Withholding is the safe outcome: the thread stays open and
+	// GitHub's required_review_thread_resolution keeps blocking the merge.
+	Withheld int
+}
+
+// BlockingFinding is one review thread that must prevent a merge.
+type BlockingFinding struct {
+	ThreadID string
+	Author   string
+	Severity ThreadSeverity
+	Excerpt  string
 }
 
 // AgentKind distinguishes the two code-editing tasks the loop delegates.
@@ -131,6 +159,14 @@ type Driver struct {
 	// The cooldown must therefore exceed the slowest required check. Zero
 	// disables it and restores the previous rebase-every-tick behaviour.
 	RebaseCooldown time.Duration
+
+	// DryRun means classify and report, writing nothing durable. The refusal
+	// paths still audit and still count, because observing what WOULD happen is
+	// the entire point, but they must not persist an escalation or emit the
+	// escalation metric: a dry run against the live repository on 2026-09-13
+	// wrote seven escalations an operator never asked for, and the next real
+	// tick would have inherited them.
+	DryRun bool
 }
 
 // TickResult summarizes one pass.
@@ -173,7 +209,7 @@ func (d *Driver) Tick(ctx context.Context) (TickResult, error) {
 	res := TickResult{Actions: map[State]int{}}
 	maxOpen := d.Cap
 	if maxOpen <= 0 {
-		maxOpen = 50
+		maxOpen = DefaultCap
 	}
 	prs, err := d.Deps.Lister.ListOpen(ctx, d.Repo, maxOpen)
 	if err != nil {
@@ -197,7 +233,20 @@ func (d *Driver) Tick(ctx context.Context) (TickResult, error) {
 		res.Actions[st]++
 	}
 
-	d.Deps.Metrics.recordTick(ctx, res)
+	d.metrics().recordTick(ctx, res)
+	// A dry run persists NOTHING. The tick mutates its in-memory tracker
+	// exactly as a real one would, because that is how it computes what it
+	// WOULD do, but none of it reaches disk.
+	//
+	// This is the structural form of two review findings. Guarding
+	// recordEscalation left NoteActionable writing; guarding that left the
+	// merge path writing, and a dry run against the live repository still
+	// DELETED a tracker record, because the dry-run merger reports success and
+	// doMerge then calls RecordAction, recordMerge and Forget. Enumerating
+	// call sites kept missing one; withholding the save cannot.
+	if d.DryRun {
+		return res, nil
+	}
 	if err := d.Tracker.Save(); err != nil {
 		d.audit(AuditEvent{Action: "state_save_error", Detail: err.Error()})
 	}
@@ -233,15 +282,49 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 
 	cls := d.Policy.Classify(pr, rec.AgentAttempts, agentActive)
 
-	// Stall detection: an actionable PR untouched for longer than the
-	// threshold is the failure the Define rule forbids.
-	if d.isStalled(cls.State, rec, now) {
-		res.Stalled++
-		d.Deps.Metrics.recordStall(ctx, pr.Number, cls.State)
-		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected",
-			Detail: fmt.Sprintf("no action since %s", rec.LastActionAt.Format(time.RFC3339))})
-	}
+	// Start (or stop) the stall clock BEFORE evaluating it, so a PR that has
+	// only just become actionable is measured from now rather than from
+	// whenever it was first seen as a draft.
+	//
+	// Not in a dry run: Tick persists the tracker, so an observational pass
+	// would start a real stall timer on an actionable PR, or erase an existing
+	// one on a draft and delay a later escalation. A dry run must not move the
+	// clock it is only reporting on.
+	d.Tracker.NoteActionable(pr.Number, actionableState(cls.State), now)
 
+	// Stall detection is EVALUATED here, against the record as it stands before
+	// this tick acts, but it is not reported until after the action. A PR that
+	// had been deferred past the threshold, on the very tick safe-merge finally
+	// became ready, was escalated to a human and then merged seconds later:
+	// the tick reported merged=1 and escalated=1 together, and someone was
+	// paged about work that had just landed. Inactivity that resolves itself is
+	// not a stall worth escalating.
+	stalled := d.isStalled(cls.State, rec, now)
+	stallDetail := ""
+	if stalled {
+		stallDetail = fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))
+	}
+	mergedBefore := res.Merged
+
+	state := d.act(ctx, pr, cls, now, res)
+
+	if stalled && res.Merged == mergedBefore {
+		res.Stalled++
+		d.metrics().recordStall(ctx, pr.Number, cls.State)
+		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected", Detail: stallDetail})
+		// A stall must leave a DURABLE record, not only an audit line and a
+		// counter. Letting the stall clock run is what makes a permanently
+		// deferred PR detectable; persisting the escalation is what makes it
+		// actionable by a human.
+		d.recordEscalation(ctx, pr.Number,
+			fmt.Sprintf("stalled in %s: %s", cls.State, stallDetail), "stalled", now)
+		res.Escalated++
+	}
+	return state
+}
+
+// act performs the one action this PR's classified state calls for.
+func (d *Driver) act(ctx context.Context, pr PR, cls Classification, now time.Time, res *TickResult) State {
 	switch cls.State {
 	case StateDraft, StateAgentInFlight, StateCIPending:
 		res.Skipped++
@@ -277,17 +360,70 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	return cls.State
 }
 
-func (d *Driver) isStalled(st State, rec *PRRecord, now time.Time) bool {
-	if d.StallThreshold <= 0 || rec.LastActionAt.IsZero() {
-		return false
+// metrics returns the telemetry sink, or nil in a dry run. Metrics is nil-safe
+// on every method, so this one accessor makes an observational pass emit
+// nothing rather than requiring each call site to remember.
+func (d *Driver) metrics() *Metrics {
+	if d.DryRun {
+		return nil
 	}
+	return d.Deps.Metrics
+}
+
+// stallSince is the instant the stall clock for this PR runs from: the last
+// action if the loop has ever acted, and otherwise when the PR last became
+// ACTIONABLE.
+//
+// A fallback matters because "never acted on" is the WORST case, not an exempt
+// one. Treating a zero LastActionAt as not-stalled let an actionable PR the
+// loop never touched escape detection entirely, including a green PR whose
+// merge safe-merge defers on every tick, which by design records no action.
+//
+// The fallback is the actionable anchor and NOT FirstSeenAt, because time the
+// loop was not allowed to act must not be counted against it. A PR that sat as
+// a draft, or behind slow CI, for longer than the threshold would otherwise
+// report as stalled the instant it turned green. A zero return means there is
+// no honest clock to read.
+func stallSince(rec *PRRecord) time.Time {
+	// The LATER of the two anchors wins, and that ordering is the whole point.
+	//
+	// Preferring LastActionAt outright meant a PR the loop HAD acted on, which
+	// then sat as a draft or behind slow CI past the threshold, was reported
+	// and durably escalated as stalled the instant it became actionable again,
+	// even though the fresh actionable clock had only just started. Clearing
+	// ActionableSinceAt on the non-actionable transition did not help, because
+	// the stale action anchor still outranked it.
+	//
+	// Taking the maximum is safe: ActionableSinceAt only advances when the PR
+	// ENTERS an actionable state, and LastActionAt only advances while it is
+	// already actionable, so neither can mask real inactivity.
+	if rec.LastActionAt.After(rec.ActionableSinceAt) {
+		return rec.LastActionAt
+	}
+	return rec.ActionableSinceAt
+}
+
+// actionableState reports whether the loop can currently do something about a
+// PR in this state. It is the same set isStalled measures.
+func actionableState(st State) bool {
 	switch st {
 	case StateBehind, StateConflicted, StateCIFailing, StateGreen:
-		return now.Sub(rec.LastActionAt) > d.StallThreshold
+		return true
 	case StateDraft, StateAbandoned, StateBlockedPolicy, StateAgentInFlight, StateCIPending:
 		return false
 	}
 	return false
+}
+
+func (d *Driver) isStalled(st State, rec *PRRecord, now time.Time) bool {
+	since := stallSince(rec)
+	if d.StallThreshold <= 0 || since.IsZero() {
+		return false
+	}
+	if !actionableState(st) {
+		return false
+	}
+	return now.Sub(since) > d.StallThreshold
 }
 
 // rebaseCoolingDown reports whether this PR was rebased recently enough that
@@ -327,34 +463,122 @@ func (d *Driver) resolveBotThreads(ctx context.Context, pr PR) {
 	if d.Deps.Threads == nil {
 		return
 	}
-	resolved, err := d.Deps.Threads.ResolveBotThreads(ctx, d.Repo, pr.Number)
+	out, err := d.Deps.Threads.ResolveBotThreads(ctx, d.Repo, pr.Number)
 	if err != nil {
+		// The resolver returns a populated ThreadResolution alongside the
+		// error, so withheld evidence exists even on this path. Dropping it
+		// here would delete the only record that a blocking finding was seen
+		// and left alone, which is exactly the silence ce-lr7j exists to end.
+		if out.Withheld > 0 {
+			d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "bot_threads_withheld",
+				Detail: fmt.Sprintf("left %d bot review thread(s) unresolved: blocking or unrecognised severity", out.Withheld)})
+		}
 		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "thread_resolve_error", Detail: err.Error()})
 		return
 	}
-	if resolved > 0 {
+	if out.Resolved > 0 {
 		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "bot_threads_resolved",
-			Detail: fmt.Sprintf("resolved %d bot review thread(s)", resolved)})
+			Detail: fmt.Sprintf("resolved %d advisory bot review thread(s)", out.Resolved)})
 	}
+	// ce-lr7j DoD item 6: withholding must be observable. Silence here is what
+	// let 30 P1 findings pass unnoticed.
+	if out.Withheld > 0 {
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "bot_threads_withheld",
+			Detail: fmt.Sprintf("left %d bot review thread(s) unresolved: blocking or unrecognised severity", out.Withheld)})
+	}
+}
+
+// blockingFindingsGate is the independent at-merge-time review-thread check. It
+// returns true when the merge may proceed.
+//
+// Fail closed in both directions: findings present means no merge, and a gate
+// that cannot be evaluated also means no merge. An unreachable gate must never
+// be read as "no findings" — that is the fail-open shape this whole bead exists
+// to remove.
+// gateRefusal explains why blockingFindingsGate refused, so the escalation
+// state and telemetry can tell review feedback apart from a provider outage.
+// Pointing an operator at "unaddressed bot findings" during a GraphQL failure
+// sends them looking for threads that do not exist.
+type gateRefusal struct {
+	reason string // durable escalation reason
+	kind   string // metric/telemetry discriminator
+}
+
+func (d *Driver) blockingFindingsGate(ctx context.Context, pr PR) (bool, gateRefusal) {
+	if d.Deps.Threads == nil {
+		// No resolver wired means nothing auto-resolved anything, so GitHub's
+		// own required_review_thread_resolution is still the live gate.
+		return true, gateRefusal{}
+	}
+	findings, err := d.Deps.Threads.BlockingFindings(ctx, d.Repo, pr.Number)
+	if err != nil {
+		detail := "refusing merge: cannot evaluate review-thread gate: " + err.Error()
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "thread_gate_error",
+			Detail: detail})
+		return false, gateRefusal{reason: detail, kind: "thread_gate_error"}
+	}
+	if len(findings) > 0 {
+		detail := describeFindings(findings)
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merge_blocked_findings",
+			Detail: detail})
+		return false, gateRefusal{reason: detail, kind: "merge_blocked_findings"}
+	}
+	return true, gateRefusal{}
+}
+
+// describeFindings renders findings for the audit trail, most severe first.
+func describeFindings(findings []BlockingFinding) string {
+	parts := make([]string, 0, len(findings))
+	for _, f := range findings {
+		parts = append(parts, fmt.Sprintf("%s/%s [%s]: %s", f.Author, f.Severity, f.ThreadID, f.Excerpt))
+	}
+	return fmt.Sprintf("%d unaddressed bot finding(s) block this merge: %s",
+		len(findings), strings.Join(parts, "; "))
 }
 
 func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickResult) {
 	if d.Deps.Merger == nil {
 		return
 	}
-	err := d.Deps.Merger.Merge(ctx, d.Repo, pr.Number)
-	d.Tracker.RecordAction(pr.Number, StateGreen, now)
-	if err != nil {
-		// "Not ready" (soak/bot/threads) is a wait, not a failure.
-		action := "merge_error"
-		if isNotReady(err) {
-			action = "merge_deferred"
-		}
-		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: action, Detail: err.Error()})
+	// Independent of whatever resolveBotThreads decided a moment ago.
+	if ok, refusal := d.blockingFindingsGate(ctx, pr); !ok {
+		// Deliberately NOT RecordAction. Recording an action here refreshes
+		// LastActionAt on every tick, which permanently suppresses the stall
+		// detector: the PR would sit green-but-unmergeable forever and the
+		// only trace would be a repeated audit line nobody reads. A blocked
+		// finding is a durable escalation, so it is recorded as one and the
+		// stall clock keeps running.
+		d.recordEscalation(ctx, pr.Number, refusal.reason, refusal.kind, now)
+		res.Escalated++
 		return
 	}
+	err := d.Deps.Merger.Merge(ctx, d.Repo, pr.Number)
+	if err != nil {
+		// "Not ready" (soak/bot/threads) is a wait, not a failure.
+		if isNotReady(err) {
+			// Deliberately NOT RecordAction. A deferral is the ABSENCE of
+			// progress: safe-merge's own gates still hold the merge, and the
+			// loop changed nothing. Recording it as an action refreshed
+			// LastActionAt on every tick and so permanently suppressed the
+			// stall detector.
+			//
+			// The live shape (ce-lr7j review): a bot leaves an unresolved
+			// thread whose badge this parser does not recognise. The resolver
+			// withholds it, blockingFindingsGate lets it through because
+			// GitHub's required_review_thread_resolution is still the live
+			// gate while the thread is unresolved, and safe-merge then refuses
+			// forever. Without this the PR sits green-but-unmergeable with no
+			// escalation and no telemetry — the exact silence this bead ends.
+			d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merge_deferred", Detail: err.Error()})
+			return
+		}
+		d.Tracker.RecordAction(pr.Number, StateGreen, now)
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merge_error", Detail: err.Error()})
+		return
+	}
+	d.Tracker.RecordAction(pr.Number, StateGreen, now)
 	res.Merged++
-	d.Deps.Metrics.recordMerge(ctx, pr.Number, now.Sub(d.Tracker.Get(pr.Number, now).FirstSeenAt))
+	d.metrics().recordMerge(ctx, pr.Number, now.Sub(d.Tracker.Get(pr.Number, now).FirstSeenAt))
 	d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "merged"})
 	d.Tracker.Forget(pr.Number)
 }
@@ -376,9 +600,8 @@ func (d *Driver) doSpawn(ctx context.Context, pr PR, kind AgentKind, failSig str
 	if err != nil {
 		if isSpawnUnavailable(err) {
 			// Defer-don't-block: record a handoff, escalate, keep going.
-			d.Tracker.RecordEscalation(pr.Number, "agent substrate unavailable: "+err.Error(), now)
+			d.recordEscalation(ctx, pr.Number, "agent substrate unavailable: "+err.Error(), "spawn_unavailable", now)
 			res.Escalated++
-			d.Deps.Metrics.recordEscalation(ctx, pr.Number, "spawn_unavailable")
 			d.audit(AuditEvent{PR: pr.Number, Action: "spawn_deferred", Detail: err.Error()})
 			return
 		}
@@ -387,14 +610,21 @@ func (d *Driver) doSpawn(ctx context.Context, pr PR, kind AgentKind, failSig str
 	}
 	d.Tracker.RecordAgentSpawn(pr.Number, failSig, session, now)
 	res.AgentsSpawn++
-	d.Deps.Metrics.recordAgentSpawn(ctx, pr.Number, string(kind))
+	d.metrics().recordAgentSpawn(ctx, pr.Number, string(kind))
 	d.audit(AuditEvent{PR: pr.Number, Action: "agent_spawned",
 		Detail: fmt.Sprintf("kind=%s session=%s sig=%s", kind, session, failSig)})
 }
 
+// recordEscalation persists an escalation and emits its metric, unless this is
+// a dry run. Auditing and counting stay unconditional: a dry run is supposed to
+// show what the loop WOULD do, and hiding the refusal would defeat that.
+func (d *Driver) recordEscalation(ctx context.Context, pr int, reason, kind string, now time.Time) {
+	d.Tracker.RecordEscalation(pr, reason, now)
+	d.metrics().recordEscalation(ctx, pr, kind)
+}
+
 func (d *Driver) escalate(ctx context.Context, pr PR, cls Classification, now time.Time) {
-	d.Tracker.RecordEscalation(pr.Number, cls.Reason, now)
-	d.Deps.Metrics.recordEscalation(ctx, pr.Number, string(cls.State))
+	d.recordEscalation(ctx, pr.Number, cls.Reason, string(cls.State), now)
 	d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "escalated", Detail: cls.Reason})
 }
 

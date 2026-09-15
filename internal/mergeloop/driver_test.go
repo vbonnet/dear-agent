@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,12 +55,40 @@ func (f *fakeSpawner) Spawn(_ context.Context, req AgentRequest) (string, error)
 type fakeThreadResolver struct {
 	calls    []int
 	resolved int
+	withheld int
 	err      error
+
+	gateCalls []int
+	blocking  []BlockingFinding
+	gateErr   error
 }
 
-func (f *fakeThreadResolver) ResolveBotThreads(_ context.Context, _ string, pr int) (int, error) {
+func (f *fakeThreadResolver) ResolveBotThreads(_ context.Context, _ string, pr int) (ThreadResolution, error) {
 	f.calls = append(f.calls, pr)
-	return f.resolved, f.err
+	return ThreadResolution{Resolved: f.resolved, Withheld: f.withheld}, f.err
+}
+
+func (f *fakeThreadResolver) BlockingFindings(_ context.Context, _ string, pr int) ([]BlockingFinding, error) {
+	f.gateCalls = append(f.gateCalls, pr)
+	return f.blocking, f.gateErr
+}
+
+// auditActions flattens an audit log to its action names for assertions.
+func auditActions(evs []AuditEvent) []string {
+	out := make([]string, 0, len(evs))
+	for _, e := range evs {
+		out = append(out, e.Action)
+	}
+	return out
+}
+
+func hasAction(evs []AuditEvent, action string) bool {
+	for _, e := range evs {
+		if e.Action == action {
+			return true
+		}
+	}
+	return false
 }
 
 func newTestDriver(t *testing.T, prs []PR, deps *Deps) (*Driver, *Tracker) {
@@ -382,6 +411,126 @@ func TestThreadResolverErrorDoesNotBlockMerge(t *testing.T) {
 	}
 }
 
+// ---- ce-lr7j: the independent at-merge-time review-thread gate ----
+//
+// The severity classifier decides what the loop may auto-resolve. This gate
+// decides what the loop may merge, and it deliberately does NOT trust the
+// classifier's earlier verdict: it re-queries the PR at merge time. A
+// classifier that mis-reads a future badge format still cannot land a blocking
+// finding, because the merge itself is refused here.
+
+func TestMergeRefusedWhenBlockingFindingPresent(t *testing.T) {
+	prs := []PR{{Number: 30, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{
+		blocking: []BlockingFinding{{
+			ThreadID: "PRRT_x", Author: "chatgpt-codex-connector",
+			Severity: SeverityBlocking, Excerpt: "Require delivery evidence before closing merged work",
+		}},
+	}
+	var audited []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr,
+		Audit: func(ev AuditEvent) { audited = append(audited, ev) }})
+
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(mer.calls) != 0 {
+		t.Errorf("merger was called %v, want no merge over a blocking finding", mer.calls)
+	}
+	if res.Merged != 0 {
+		t.Errorf("Merged = %d, want 0", res.Merged)
+	}
+	if !hasAction(audited, "merge_blocked_findings") {
+		t.Errorf("audit actions = %v, want merge_blocked_findings", auditActions(audited))
+	}
+}
+
+func TestMergeRefusedWhenGateErrors(t *testing.T) {
+	// Fail closed. An unreachable gate must never be read as "no findings".
+	prs := []PR{{Number: 31, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{gateErr: fmt.Errorf("GraphQL 502")}
+	var audited []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr,
+		Audit: func(ev AuditEvent) { audited = append(audited, ev) }})
+
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(mer.calls) != 0 {
+		t.Errorf("merger was called %v, want no merge when the gate cannot be evaluated", mer.calls)
+	}
+	if res.Merged != 0 {
+		t.Errorf("Merged = %d, want 0", res.Merged)
+	}
+	if !hasAction(audited, "thread_gate_error") {
+		t.Errorf("audit actions = %v, want thread_gate_error", auditActions(audited))
+	}
+}
+
+func TestMergeProceedsWhenGateClean(t *testing.T) {
+	prs := []PR{{Number: 32, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{resolved: 2}
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr})
+
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(thr.gateCalls) != 1 || thr.gateCalls[0] != 32 {
+		t.Errorf("gate calls = %v, want [32]: the gate must run on every merge", thr.gateCalls)
+	}
+	if res.Merged != 1 {
+		t.Errorf("Merged = %d, want 1", res.Merged)
+	}
+}
+
+func TestWithheldThreadsAreAudited(t *testing.T) {
+	// DoD item 6: a distinct audit event when a thread is withheld from
+	// auto-resolve on severity grounds, so the withholding is observable.
+	prs := []PR{{Number: 33, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	thr := &fakeThreadResolver{resolved: 1, withheld: 3}
+	var audited []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{Merger: &fakeMerger{}, Threads: thr,
+		Audit: func(ev AuditEvent) { audited = append(audited, ev) }})
+
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if !hasAction(audited, "bot_threads_withheld") {
+		t.Errorf("audit actions = %v, want bot_threads_withheld", auditActions(audited))
+	}
+	if !hasAction(audited, "bot_threads_resolved") {
+		t.Errorf("audit actions = %v, want bot_threads_resolved too", auditActions(audited))
+	}
+}
+
+func TestGateRunsEvenWhenResolverErrors(t *testing.T) {
+	// A resolver error leaves threads unresolved, which GitHub's own gate
+	// blocks, so it does not itself stop the merge attempt. The independent
+	// gate must still run: the resolver failing is not licence to skip it.
+	prs := []PR{{Number: 34, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{err: fmt.Errorf("GraphQL error")}
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr})
+
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(thr.gateCalls) != 1 {
+		t.Errorf("gate calls = %v, want the gate to run despite the resolver error", thr.gateCalls)
+	}
+}
+
 // A PR that is BEHIND must not be rebased again until the CI run the previous
 // rebase started has had time to finish. Rebasing sooner discards that run and
 // restarts the wait, which is how the loop can tick forever and merge nothing.
@@ -481,5 +630,305 @@ func TestRebaseCooldownUnaffectedByAgentSpawn(t *testing.T) {
 	}
 	if len(reb.calls) != 2 {
 		t.Errorf("rebaser calls = %d, want 2", len(reb.calls))
+	}
+}
+
+// TestMergeDeferredDoesNotRefreshStallClock pins the ce-lr7j review finding
+// that a green PR safe-merge keeps refusing can never escalate.
+//
+// The shape: an allowlisted bot leaves an UNRESOLVED thread whose severity this
+// code does not recognise. The resolver withholds it (correctly — an unreadable
+// badge is never auto-resolved), and blockingFindingsGate deliberately lets it
+// through, because while the thread is still unresolved GitHub's own
+// required_review_thread_resolution is the live gate. safe-merge then refuses
+// the merge as not-ready on every tick. doMerge used to call RecordAction on
+// that path, refreshing LastActionAt each time, so the stall detector never
+// fired: the PR sat green-but-unmergeable forever with no durable escalation
+// and no telemetry, which is precisely the silence this bead exists to end.
+//
+// A deferral is the absence of progress. It must not count as an action.
+func TestMergeDeferredDoesNotRefreshStallClock(t *testing.T) {
+	prs := []PR{{Number: 7, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("unresolved review threads: %w", ErrNotReady)}
+	thr := &fakeThreadResolver{withheld: 1}
+	var evs []AuditEvent
+	deps := &Deps{
+		Merger: mg, Threads: thr,
+		Clock: func() time.Time { return now },
+		Audit: func(e AuditEvent) { evs = append(evs, e) },
+	}
+	d, tr := newTestDriver(t, prs, deps)
+	d.StallThreshold = time.Hour
+
+	// First tick: the merge is attempted and deferred.
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if !hasAction(evs, "merge_deferred") {
+		t.Fatalf("want a merge_deferred audit event, got %v", auditActions(evs))
+	}
+	firstAction := tr.Get(7, now).LastActionAt
+
+	// Keep ticking past the stall threshold. Every tick defers again.
+	for range 5 {
+		now = now.Add(20 * time.Minute)
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+	}
+	if len(mg.calls) < 2 {
+		t.Fatalf("merger calls = %v, want the loop to keep retrying", mg.calls)
+	}
+
+	// The stall clock must not have been pushed forward by the deferrals.
+	if got := tr.Get(7, now).LastActionAt; got.After(firstAction) {
+		t.Errorf("LastActionAt advanced from %s to %s: a deferred merge must not "+
+			"refresh the stall clock, or the PR can never be detected as stalled",
+			firstAction.Format(time.RFC3339), got.Format(time.RFC3339))
+	}
+	if !hasAction(evs, "stall_detected") {
+		t.Errorf("want stall_detected after %s of deferrals, got %v", d.StallThreshold, auditActions(evs))
+	}
+}
+
+// TestStallRecordsDurableEscalation pins the ce-lr7j review finding that
+// letting the stall clock run did not, on its own, create the durable
+// remediation path it was supposed to enable.
+//
+// TestMergeDeferredDoesNotRefreshStallClock proved the clock advances. But the
+// stall branch only emitted an audit line and a metric: it never called
+// RecordEscalation, so EscalationReason and EscalatedAt stayed empty and no
+// human-escalation metric was emitted. A PR could therefore sit green and
+// unmergeable forever with nothing durable recording why.
+func TestStallRecordsDurableEscalation(t *testing.T) {
+	prs := []PR{{Number: 7, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("unresolved review threads: %w", ErrNotReady)}
+	thr := &fakeThreadResolver{withheld: 1}
+	var evs []AuditEvent
+	d, tr := newTestDriver(t, prs, &Deps{
+		Merger: mg, Threads: thr,
+		Clock: func() time.Time { return now },
+		Audit: func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+
+	for range 6 {
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		now = now.Add(20 * time.Minute)
+	}
+
+	if !hasAction(evs, "stall_detected") {
+		t.Fatalf("precondition: want stall_detected, got %v", auditActions(evs))
+	}
+	rec := tr.Get(7, now)
+	if rec.EscalatedAt.IsZero() {
+		t.Error("EscalatedAt is zero: a stalled PR must record a durable escalation, " +
+			"not just an audit line nobody reads")
+	}
+	if rec.EscalationReason == "" {
+		t.Error("EscalationReason is empty: the durable record must say why the PR is stuck")
+	}
+}
+
+// TestNoFalseStallAfterLongDraft pins the ce-lr7j review finding that anchoring
+// the stall clock on FirstSeenAt punished PRs for time the loop was never
+// allowed to act on them.
+//
+// A PR observed as a draft (or with CI pending) for longer than the threshold
+// kept that old FirstSeenAt. The moment it turned green the fallback made
+// isStalled fire immediately, even though the loop had only just been handed
+// actionable work. The clock must start when the PR becomes actionable.
+func TestNoFalseStallAfterLongDraft(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	draft := PR{Number: 9, IsDraft: true, MergeStateStatus: "DRAFT", Mergeable: "MERGEABLE"}
+	lister := &fakeLister{prs: []PR{draft}}
+	var evs []AuditEvent
+	d, _ := newTestDriver(t, nil, &Deps{
+		Lister: lister,
+		Merger: &fakeMerger{},
+		Clock:  func() time.Time { return now },
+		Audit:  func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+
+	// Sit as a draft for well over the stall threshold.
+	for range 5 {
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("draft tick: %v", err)
+		}
+		now = now.Add(time.Hour)
+	}
+	if hasAction(evs, "stall_detected") {
+		t.Fatalf("a draft must never be reported stalled, got %v", auditActions(evs))
+	}
+
+	// It becomes green. The loop has had no chance to act on it yet, so this
+	// tick must not report a stall.
+	lister.prs = []PR{{Number: 9, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	evs = nil
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("green tick: %v", err)
+	}
+	if hasAction(evs, "stall_detected") {
+		t.Errorf("stall reported on the first actionable tick after a long draft: the clock "+
+			"must start when the PR becomes actionable, got %v", auditActions(evs))
+	}
+}
+
+// TestNoFalseStallAfterDraftFollowingAnAction pins the ce-lr7j review finding
+// that clearing ActionableSinceAt alone did not stop false stalls.
+//
+// stallSince prefers LastActionAt, so a PR the loop HAD acted on, which then
+// sat as a draft past the threshold, was reported and durably escalated as
+// stalled the instant it became actionable again, even though the new
+// actionable clock had only just started. The stale action anchor must not
+// outrank the fresh actionable one.
+func TestNoFalseStallAfterDraftFollowingAnAction(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	behind := PR{Number: 11, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE"}
+	lister := &fakeLister{prs: []PR{behind}}
+	var evs []AuditEvent
+	d, tr := newTestDriver(t, nil, &Deps{
+		Lister: lister, Rebaser: &fakeRebaser{}, Merger: &fakeMerger{},
+		Clock: func() time.Time { return now },
+		Audit: func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+
+	// The loop acts on it once, recording LastActionAt.
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if tr.Get(11, now).LastActionAt.IsZero() {
+		t.Fatal("precondition: expected a recorded action from the rebase")
+	}
+
+	// It then becomes a draft and sits there well past the threshold.
+	lister.prs = []PR{{Number: 11, IsDraft: true, MergeStateStatus: "DRAFT", Mergeable: "MERGEABLE"}}
+	for range 4 {
+		now = now.Add(time.Hour)
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("draft tick: %v", err)
+		}
+	}
+
+	// Back to actionable. The loop has had no chance to act since, so this must
+	// not report or escalate a stall.
+	lister.prs = []PR{behind}
+	evs = nil
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("actionable tick: %v", err)
+	}
+	if hasAction(evs, "stall_detected") {
+		t.Errorf("stall reported on the first actionable tick after a long draft, using the "+
+			"stale pre-draft action anchor; got %v", auditActions(evs))
+	}
+}
+
+// TestStallCountsTowardTickSummary pins the ce-lr7j review finding that the
+// durable stall escalation was invisible in the tick summary.
+//
+// The stall branch persisted an escalation and emitted the escalation metric
+// but never incremented res.Escalated, so printSummary reported escalated=0 for
+// a tick that had durably escalated a PR. That hides the very remediation path
+// the escalation was added to create from the operator reading the summary.
+func TestStallCountsTowardTickSummary(t *testing.T) {
+	prs := []PR{{Number: 7, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("unresolved review threads: %w", ErrNotReady)}
+	d, _ := newTestDriver(t, prs, &Deps{
+		Merger: mg, Threads: &fakeThreadResolver{withheld: 1},
+		Clock: func() time.Time { return now },
+	})
+	d.StallThreshold = time.Hour
+
+	var last TickResult
+	for range 6 {
+		res, err := d.Tick(context.Background())
+		if err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		last = res
+		now = now.Add(20 * time.Minute)
+	}
+	if last.Stalled == 0 {
+		t.Fatalf("precondition: expected a stalled PR, got %+v", last)
+	}
+	if last.Escalated == 0 {
+		t.Error("TickResult.Escalated = 0 on a tick that durably escalated a stalled PR; " +
+			"the summary must not hide the escalation it just recorded")
+	}
+}
+
+// TestDescribeFindingsNamesTheThread pins the ce-lr7j review finding that a
+// durable escalation identified neither the finding nor its thread: the
+// excerpt for an unknown-severity finding was always "(no excerpt)", and the
+// description omitted the thread ID, leaving an operator with a refusal and no
+// way to find what caused it.
+func TestDescribeFindingsNamesTheThread(t *testing.T) {
+	got := describeFindings([]BlockingFinding{{
+		ThreadID: "PRRT_abc123", Author: "chatgpt-codex-connector",
+		Severity: SeverityUnknown, Excerpt: "(no excerpt)",
+	}})
+	if !strings.Contains(got, "PRRT_abc123") {
+		t.Errorf("describeFindings() = %q, want it to name the thread so the refusal is actionable", got)
+	}
+}
+
+// TestNoStallEscalationOnATickThatMerges pins the ce-lr7j review finding that a
+// PR could be escalated to a human and merged in the same tick.
+//
+// Stall detection ran before the action. A green PR that had been deferred past
+// the threshold, on the tick where safe-merge finally became ready, recorded a
+// durable escalation and emitted the escalation metric, then merged seconds
+// later and had its record forgotten. The tick reported merged=1 AND
+// escalated=1, and an operator was paged about a PR that had just landed.
+//
+// Transient inactivity that resolves itself is not something to escalate.
+func TestNoStallEscalationOnATickThatMerges(t *testing.T) {
+	prs := []PR{{Number: 8, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("not ready yet: %w", ErrNotReady)}
+	var evs []AuditEvent
+	d, tr := newTestDriver(t, prs, &Deps{
+		Merger: mg,
+		Clock:  func() time.Time { return now },
+		Audit:  func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+
+	// Defer past the stall threshold.
+	for range 5 {
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		now = now.Add(20 * time.Minute)
+	}
+
+	// safe-merge becomes ready on this tick.
+	mg.err = nil
+	evs = nil
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("merging tick: %v", err)
+	}
+	if res.Merged != 1 {
+		t.Fatalf("precondition: want the PR to merge on this tick, got %+v", res)
+	}
+	if res.Escalated != 0 {
+		t.Errorf("Escalated = %d on a tick that merged the PR: a human was paged about work "+
+			"that just landed", res.Escalated)
+	}
+	if got := tr.Get(8, now); !got.EscalatedAt.IsZero() {
+		t.Errorf("a durable escalation was recorded for a PR that merged: %v", got.EscalatedAt)
 	}
 }
