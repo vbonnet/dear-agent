@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/diskledger"
 )
 
 // Entry represents a single GC log entry.
@@ -102,18 +104,35 @@ func (l *Logger) Path() string {
 	return l.path
 }
 
-// DirSize computes the total size of a directory tree in bytes.
+// DirSize computes the disk a directory tree occupies, in bytes.
 // Returns 0 if the path doesn't exist or on error.
+//
+// This reports ALLOCATED blocks over distinct inodes, not the sum of file
+// lengths. The distinction matters because DirSize feeds Entry.BytesReclaimed,
+// which the reclaim-health check reads to decide whether the collector is
+// doing anything at all. Summing lengths charges a HARD-LINKED tree once per
+// name, so a sweep would report more bytes reclaimed than the filesystem
+// returned, overstating exactly in the direction that makes a broken collector
+// look healthy.
+//
+// It does NOT fix the reflink case, and an earlier version of this comment
+// wrongly implied that it did. An APFS clone is a distinct inode whose
+// st_blocks reports the full allocation even though creating it consumed no
+// blocks, so inode dedup cannot see the sharing. Measured on an APFS host:
+// cloning a 200 MB file consumes 0 MB, yet both names report 409600 blocks and
+// the directory walks as 400 MB. Sandboxes here are provisioned with clonefile
+// (internal/sandbox/apfs/provider.go uses "cp -c"), so that is the common
+// shape, not a corner case.
+//
+// The consequence is that DirSize is an UPPER BOUND on what deleting the tree
+// would return. Where the question is "how many bytes did the filesystem
+// actually give back", use diskledger.Reclaim, which measures statfs before
+// and after the operation and cannot be flattered by shared extents.
+// See pkg/diskledger/clone_test.go for the executable version of all of this.
 func DirSize(path string) int64 {
-	var size int64
-	filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil //nolint:nilerr // skip errors
-		}
-		if !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
-	return size
+	// A partial walk yields a lower bound rather than an error: the callers
+	// are all best-effort accounting and a hard failure here would abort a
+	// sweep over one unreadable file.
+	u, _ := diskledger.Measure(path)
+	return u.AllocatedBytes
 }
