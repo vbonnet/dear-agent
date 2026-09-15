@@ -76,6 +76,9 @@ type Guard struct {
 	// auditSink is an override for the audit destination, used by tests.
 	// nil → the default JSONL file under the state dir.
 	auditSink func(auditEntry)
+	// durableAuditSink is the error-returning audit destination used by
+	// RequireAudited tests. Production callers use appendAuditDurable.
+	durableAuditSink func(auditEntry) error
 }
 
 // DeniedError is returned when an override is refused. It carries positive
@@ -111,6 +114,18 @@ func (e *DeniedError) Error() string {
 // It never executes the underlying operation — the caller does that only if
 // Require returns nil.
 func Require(ctx context.Context, g Guard, reason string) error {
+	return require(ctx, g, reason, false)
+}
+
+// RequireAudited is Require with a fail-closed durability boundary. The judge's
+// verdict does not authorize a bypass unless the complete audit entry is first
+// persisted. Safety-critical callers use this when an unrecorded allow would be
+// materially different from a denied override.
+func RequireAudited(ctx context.Context, g Guard, reason string) error {
+	return require(ctx, g, reason, true)
+}
+
+func require(ctx context.Context, g Guard, reason string, durableAudit bool) error {
 	judge := g.Judge
 	if judge == nil {
 		judge = defaultJudgeFor(g.Risk)
@@ -137,7 +152,13 @@ func Require(ctx context.Context, g Guard, reason string) error {
 	if jerr != nil {
 		entry.Verdict = "judge error: " + jerr.Error()
 	}
-	g.audit(entry)
+	if durableAudit {
+		if err := g.auditDurable(entry); err != nil {
+			return fmt.Errorf("persist override audit before bypass decision: %w", err)
+		}
+	} else {
+		g.audit(entry)
+	}
 
 	if jerr != nil {
 		// Fail closed: if the judge could not render a verdict, refuse the bypass.
@@ -175,4 +196,11 @@ func (g Guard) audit(e auditEntry) {
 		return
 	}
 	appendAudit(e)
+}
+
+func (g Guard) auditDurable(e auditEntry) error {
+	if g.durableAuditSink != nil {
+		return g.durableAuditSink(e)
+	}
+	return appendAuditDurable(e)
 }
