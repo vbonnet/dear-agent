@@ -3,6 +3,7 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Canonical Go build cache evidence: `cmd/disk-watchdog/gocache_test.go` (DW-52 through DW-57)
 - Reaper-liveness evidence: `cmd/disk-watchdog/reaper_liveness_test.go` (DW-17..DW-23),
   `cmd/disk-watchdog/reaper_liveness_review_test.go` (DW-19, DW-24, DW-25),
   `cmd/disk-watchdog/reaper_liveness_bounds_test.go` (DW-26), and
@@ -166,3 +167,15 @@ would worsen an outage rather than resolve it.
 **DW-50** When evaluating absence-alarm heartbeat liveness, the system shall read the configured heartbeat file, extract the content timestamp (`tick_time`), and ignore heartbeats timestamped beyond the clock-skew tolerance (5 minutes) ahead of the current time.
 
 **DW-51** If the absence-alarm heartbeat file cannot be read, contains invalid JSON, does not contain a valid `tick_time` timestamp, or records a `tick_time` older than the configured absence-alarm heartbeat window (default 30m), then the system shall classify the absence-alarm scheduler as stale and shall emit a WARN alarm without latching the admission brake.
+
+**DW-52** When a disk threshold is breached, the system shall trim every configured canonical Go build cache (GOCACHE, GOLANGCI_LINT_CACHE) whose size exceeds the configured budget, by removing its shard directories while leaving the cache root and its furniture in place.
+
+**DW-53** While no disk threshold is breached, the system shall not walk or trim any canonical Go build cache, because the cache is worth its disk until it is the reason writes fail and measuring it costs a walk of hundreds of thousands of files.
+
+**DW-54** When trimming a canonical Go build cache, the system shall require the same structural proof it requires of an abandoned cache (DW-33) and shall never rely on the directory's name, so a GOCACHE mis-set to a source tree reclaims nothing.
+
+**DW-55** When identifying a canonical Go build cache, the system shall apply no age or liveness gate, because every build touches the canonical cache and a content-addressed entry removed under a running build is a cache miss rather than a corruption.
+
+**DW-56** When a shard directory cannot be removed, the system shall record it as an error and shall not count its bytes as reclaimed, so a still-full disk is never reported as remediated.
+
+**DW-57** When the configured canonical-cache budget is negative, the system shall reject it as a usage error and exit 2. Zero is a valid budget meaning "trim on any breached tick"; passing empty cache directories is the supported way to disable the trim.
