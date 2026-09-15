@@ -121,3 +121,28 @@ func TestOpusCostsMoreThanSonnet(t *testing.T) {
 			opus.OutputPerMillion, sonnet.OutputPerMillion)
 	}
 }
+
+// TestAstraPricedAboveTerra guards the substring trap in Lookup. "gpt-6-astra"
+// shares no prefix with the 5.x rows, so before it had its own row it matched
+// nothing and priced at zero. Astra is the most expensive OpenAI tier we route
+// to, so a zero there understates spend on exactly the model that costs most.
+func TestAstraPricedAboveTerra(t *testing.T) {
+	astra := Lookup("gpt-6-astra")
+	if astra.InputPerMillion == 0 || astra.OutputPerMillion == 0 {
+		t.Fatalf("gpt-6-astra priced at zero: %+v", astra)
+	}
+	if astra.InputPerMillion != 10.00 || astra.OutputPerMillion != 50.00 {
+		t.Errorf("gpt-6-astra = $%.2f/$%.2f, want $10.00/$50.00 standard short-context rate",
+			astra.InputPerMillion, astra.OutputPerMillion)
+	}
+	if astra.Source == "" || astra.AsOf == "" {
+		t.Errorf("gpt-6-astra rate must carry Source and AsOf provenance, got %+v", astra)
+	}
+}
+
+// TestAstraAliasResolves covers the short alias the codex registry exposes.
+func TestAstraAliasResolves(t *testing.T) {
+	if got := Lookup("astra"); got.InputPerMillion != 10.00 {
+		t.Errorf("Lookup(astra) = %+v, want the $10.00 input rate", got)
+	}
+}
