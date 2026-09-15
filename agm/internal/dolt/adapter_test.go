@@ -1,6 +1,7 @@
 package dolt
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -615,6 +616,9 @@ func TestSessionCRUD(t *testing.T) {
 	_, err = adapter.GetSession(session.SessionID)
 	if err == nil {
 		t.Error("Expected error when getting deleted session")
+	}
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("deleted GetSession() error = %T %v, want typed ErrSessionNotFound", err, err)
 	}
 }
 
