@@ -525,8 +525,9 @@ func killTmuxAndProcessGroup(m *manifest.Manifest) {
 // invoking cleanup. A specific live-process refusal is retried for a bounded
 // grace window because a just-terminated harness may briefly retain the
 // sandbox as it exits; every retry re-runs all checker safety gates. Every
-// other refusal keeps the sandbox for the periodic `agm sandbox gc` sweep to
-// retry once the blocker is gone.
+// other refusal preserves the sandbox for a future sweep with authenticated
+// endpoint authority; destructive periodic and manual sweeps are unavailable
+// until that authority exists.
 //
 // Returns (removed, existed, reason): existed is false only when there was
 // no sandbox directory to remove in the first place (not a failure); every
@@ -601,6 +602,10 @@ func reapSandboxWithRetry(
 	sleep func(time.Duration),
 	now func() time.Time,
 ) (removed bool, existed bool, reason string) {
+	// ce-1hu9.68.6: periodic destructive GC cannot retry these failures until
+	// session-store endpoint transport can mint authenticated authority.
+	const periodicGCUnavailable = "Sandbox not removed during archive cleanup — periodic sandbox gc is unavailable until endpoint transport is authenticated"
+
 	if attempts < 1 {
 		attempts = 1
 	}
@@ -615,7 +620,7 @@ func reapSandboxWithRetry(
 		if bounded {
 			remaining := retryDeadline.Sub(now())
 			if remaining <= 0 {
-				slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
+				slog.Warn(periodicGCUnavailable,
 					"session", sessionID, "path", sandboxDir, "attempts", attempt-1,
 					"retry_deadline", retryDeadline)
 				return false, true, "sandbox cleanup grace deadline exceeded"
@@ -634,13 +639,13 @@ func reapSandboxWithRetry(
 			return true, true, ""
 		}
 		if attempt == attempts || !retryableArchiveSandboxRefusal(err) {
-			slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
+			slog.Warn(periodicGCUnavailable,
 				"session", sessionID, "path", sandboxDir, "attempts", attempt, "error", err)
 			return false, true, err.Error()
 		}
 		remaining := retryDeadline.Sub(now())
 		if remaining <= 0 {
-			slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
+			slog.Warn(periodicGCUnavailable,
 				"session", sessionID, "path", sandboxDir, "attempts", attempt,
 				"retry_deadline", retryDeadline, "error", err)
 			return false, true, err.Error()
