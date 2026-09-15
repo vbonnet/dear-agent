@@ -1141,6 +1141,9 @@ install-absence-alarm-launchagent: install-absence-alarm install-jaeger-health i
 	@mkdir -p $(HOME)/.config/dear-agent
 	@[ -f $(HOME)/.config/dear-agent/absence-alarm-pulses.json ] || \
 		cp deploy/absence-alarm/pulses.json $(HOME)/.config/dear-agent/absence-alarm-pulses.json
+	@# The config above is absent-only, so an existing host never receives a
+	@# newly required pulse. Merge in what is missing, keeping local edits.
+	@go run ./cmd/dear-deploy merge-pulses
 	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.absence-alarm.plist \
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.absence-alarm.plist
 	@if [ ! -f $(HOME)/.local/state/dear-agent/absence-alarm.heartbeat.json ]; then \
