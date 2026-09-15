@@ -134,3 +134,13 @@ Feature: Test support package guardrails
     And retired named environment paths should be discovered and removed exactly
     And overlong names should be rejected only for new environments
     And unsafe named test environment paths should be rejected before mutation
+
+  Scenario: Inherited test authentication exposes only approved state
+    When AGM validates inherited test authentication isolation
+    Then approved credential leaves should be exact refreshable links
+    And approved configuration leaves should be bounded private snapshots
+    And missing approved sources should not create provider namespaces
+    And non-allowlisted host provider state should not be projected
+    And changed or unsafe projection inputs should fail before destination mutation
+    And failed projection should remove only nodes created by that attempt
+    And synthetic provider onboarding and Codex trust writes should leave host sentinels unchanged
