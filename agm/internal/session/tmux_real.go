@@ -16,6 +16,7 @@ import (
 var (
 	_ TmuxInterface                 = (*RealTmux)(nil)
 	_ TmuxSessionKiller             = (*RealTmux)(nil)
+	_ StableSessionIdentityManager  = (*RealTmux)(nil)
 	_ StrictSessionExistenceChecker = (*RealTmux)(nil)
 	_ HarnessLivenessChecker        = (*RealTmux)(nil)
 	_ HarnessLivenessBatchChecker   = (*RealTmux)(nil)
@@ -100,10 +101,27 @@ func (t *RealTmux) CreateSession(name, workdir string) error {
 	return tmux.NewSession(name, workdir)
 }
 
+// CreateSessionBound creates a session whose tmux incarnation is bound to the
+// durable AGM session identity before the command queue returns.
+func (t *RealTmux) CreateSessionBound(name, workdir, stableSessionID string) error {
+	return tmux.NewSessionBound(name, workdir, stableSessionID)
+}
+
+// BindSessionStableID adopts one explicitly reused tmux session.
+func (t *RealTmux) BindSessionStableID(ctx context.Context, name, stableSessionID string) (bool, error) {
+	return tmux.BindStableSessionIDContext(ctx, name, stableSessionID)
+}
+
+// ClearSessionStableID compensates only the exact binding written during a
+// failed reused-session creation transaction.
+func (t *RealTmux) ClearSessionStableID(ctx context.Context, name, stableSessionID string) error {
+	return tmux.ClearStableSessionIDContext(ctx, name, stableSessionID)
+}
+
 // CreateSessionWithIdentity creates one exact tmux identity for transactional
 // resume rollback.
-func (t *RealTmux) CreateSessionWithIdentity(name, workdir string) (tmux.SessionIdentity, error) {
-	return tmux.NewSessionWithIdentity(name, workdir)
+func (t *RealTmux) CreateSessionWithIdentity(name, workdir, stableSessionID string) (tmux.SessionIdentity, error) {
+	return tmux.NewSessionWithIdentityBound(name, workdir, stableSessionID)
 }
 
 // KillSession removes a tmux session created by a failed lifecycle operation.
@@ -260,7 +278,12 @@ func (t *RealTmux) CheckInputReadiness(ctx context.Context, sessionName, harness
 	if err != nil {
 		return InputReadiness{}, err
 	}
-	return InputReadiness{Ready: readiness.Ready, State: readiness.State, PaneID: readiness.TargetPane}, nil
+	return InputReadiness{
+		Ready: readiness.Ready, State: readiness.State,
+		PaneID: readiness.TargetPane, PanePID: readiness.TargetPanePID, TargetPID: readiness.TargetPID,
+		HarnessStartTime: readiness.HarnessStartTime,
+		TargetSessionID:  readiness.TargetSessionID, StableSessionID: readiness.StableSessionID,
+	}, nil
 }
 
 // SendPrompt submits one prompt using the active harness's native composer
@@ -277,12 +300,24 @@ func (t *RealTmux) SendPrompt(ctx context.Context, sessionName, harness, prompt 
 // delivery so another AGM sender cannot invalidate the observation.
 func (t *RealTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error) {
 	readiness, err := tmux.CheckExpectedHarnessInputAndSend(ctx, sessionName, harness, keys, tmux.InputDeliveryOptions{
-		AllowQueuedAGM: options.AllowQueuedAGM,
+		AllowQueuedAGM:                options.AllowQueuedAGM,
+		RequireSubmissionConfirmation: options.RequireSubmissionConfirmation,
+		RawBracketedPaste:             options.RawBracketedPaste,
+		ExpectedStableSessionID:       options.ExpectedStableSessionID,
 	})
-	if err != nil {
-		return InputReadiness{}, err
+	result := InputReadiness{
+		Ready: readiness.Ready, State: readiness.State,
+		PaneID: readiness.TargetPane, PanePID: readiness.TargetPanePID, TargetPID: readiness.TargetPID,
+		HarnessStartTime: readiness.HarnessStartTime,
+		TargetSessionID:  readiness.TargetSessionID, StableSessionID: readiness.StableSessionID,
+		MayHaveStarted:       readiness.MayHaveStarted,
+		PostSubmitProcessing: readiness.PostSubmitProcessing,
+		Forced:               readiness.Forced,
 	}
-	return InputReadiness{Ready: readiness.Ready, State: readiness.State, PaneID: readiness.TargetPane, Forced: readiness.Forced}, nil
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // HarnessLiveness scans the session's pane process tree for a live harness

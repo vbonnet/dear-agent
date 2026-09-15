@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,10 @@ const (
 	HarnessInputReady = "YES"
 	// HarnessInputBusy means the harness does not currently own an empty composer.
 	HarnessInputBusy = "QUEUE"
+	// HarnessInputProcessing means the exact foreground harness displays a
+	// current, harness-native active-work indicator. It is positive liveness
+	// evidence, but the composer is not ready to receive input.
+	HarnessInputProcessing = "PROCESSING"
 	// HarnessInputQueuedAGM means a queued-input marker and complete AGM message
 	// header positively identify a stuck AGM paste in the current logical composer.
 	HarnessInputQueuedAGM = "QUEUED_AGM"
@@ -38,11 +43,42 @@ const (
 // HarnessInputReadiness is the harness-specific, fail-closed verdict shared by
 // every surface before it sends input to a tmux pane.
 type HarnessInputReadiness struct {
-	Ready      bool
-	State      string
-	Content    string
-	TargetPane string
-	Forced     bool
+	Ready            bool
+	State            string
+	Content          string
+	TargetPane       string
+	TargetPanePID    int
+	TargetPID        int
+	HarnessStartTime string
+	TargetSessionID  string
+	StableSessionID  string
+	Forced           bool
+	// MayHaveStarted is set only when delivery crossed an irreversible prompt
+	// submission boundary but tmux acknowledgement was lost.
+	MayHaveStarted bool
+	// PostSubmitProcessing is positive, exact-target evidence that the harness
+	// displayed its native active-work indicator after Enter was accepted.
+	PostSubmitProcessing bool
+}
+
+type harnessInputObservationRuntime struct {
+	resolveActive func(context.Context, string) (activePaneTarget, bool, error)
+	resolvePane   func(context.Context, string) (activePaneTarget, bool, error)
+	liveness      func(context.Context, activePaneTarget, string) (PaneLiveness, error)
+	capture       func(context.Context, string) (string, error)
+}
+
+func realHarnessInputObservationRuntime() harnessInputObservationRuntime {
+	return harnessInputObservationRuntime{
+		resolveActive: func(ctx context.Context, sessionName string) (activePaneTarget, bool, error) {
+			return resolveActivePaneTarget(ctx, sessionName, GetSocketPath())
+		},
+		resolvePane: func(ctx context.Context, paneID string) (activePaneTarget, bool, error) {
+			return resolvePaneTarget(ctx, paneID, GetSocketPath())
+		},
+		liveness: checkExpectedHarnessLivenessForPane,
+		capture:  CapturePaneLogicalANSIOutputTargetContext,
+	}
 }
 
 // InputDeliveryOptions controls narrowly scoped exceptions inside the tmux
@@ -52,6 +88,18 @@ type HarnessInputReadiness struct {
 // the queued input.
 type InputDeliveryOptions struct {
 	AllowQueuedAGM bool
+	// RequireSubmissionConfirmation turns a lost post-Enter observation into a
+	// submission-uncertain error instead of legacy best-effort success, then
+	// requires the same exact target to remain positively ready or processing.
+	RequireSubmissionConfirmation bool
+	// RawBracketedPaste preserves embedded newlines as one native composer
+	// paste instead of allowing tmux to translate them into submit keys.
+	RawBracketedPaste bool
+	// ExpectedStableSessionID binds strict delivery to the durable AGM session
+	// identity stored on the tmux session at creation. Missing or mismatched
+	// bindings fail before mutation; a same-named replacement cannot inherit
+	// delivery authority from the manifest name alone.
+	ExpectedStableSessionID string
 }
 
 // CheckExpectedHarnessInput proves that the exact session exists, an expected
@@ -66,21 +114,70 @@ func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string)
 	}
 	scanCtx, cancel := context.WithTimeout(ctx, livenessScanTimeout)
 	defer cancel()
-	pane, exists, err := resolveActivePaneTarget(scanCtx, sessionName, GetSocketPath())
+	return checkExpectedHarnessInput(scanCtx, sessionName, harness, realHarnessInputObservationRuntime())
+}
+
+func checkExpectedHarnessInput(ctx context.Context, sessionName, harness string, runtime harnessInputObservationRuntime) (HarnessInputReadiness, error) {
+	pane, exists, err := runtime.resolveActive(ctx, sessionName)
 	if err != nil {
 		return HarnessInputReadiness{}, err
 	}
 	if !exists {
 		return HarnessInputReadiness{State: HarnessInputNotFound}, nil
 	}
-	liveness, err := checkExpectedHarnessLivenessForPane(scanCtx, pane, harness)
+	return checkExpectedHarnessInputTarget(ctx, pane, harness, 0, runtime)
+}
+
+// CheckExpectedHarnessInputForPane proves readiness for one exact pane and
+// process identity previously returned by atomic delivery. It never follows a
+// later active-pane change, and a missing or replaced pane cannot contribute
+// completion evidence.
+func CheckExpectedHarnessInputForPane(ctx context.Context, paneID string, harnessPID int, harness string) (HarnessInputReadiness, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateReadinessHarness(harness); err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	if !isPaneID(paneID) || harnessPID <= 0 {
+		return HarnessInputReadiness{}, fmt.Errorf("invalid verified tmux pane identity %q/%d", paneID, harnessPID)
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, livenessScanTimeout)
+	defer cancel()
+	return checkExpectedHarnessInputForPane(scanCtx, paneID, harnessPID, harness, realHarnessInputObservationRuntime())
+}
+
+func checkExpectedHarnessInputForPane(ctx context.Context, paneID string, harnessPID int, harness string, runtime harnessInputObservationRuntime) (HarnessInputReadiness, error) {
+	pane, exists, err := runtime.resolvePane(ctx, paneID)
+	if err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	if !exists {
+		return HarnessInputReadiness{State: HarnessInputNotFound, TargetPane: paneID, TargetPID: harnessPID}, nil
+	}
+	return checkExpectedHarnessInputTarget(ctx, pane, harness, harnessPID, runtime)
+}
+
+func checkExpectedHarnessInputTarget(ctx context.Context, pane activePaneTarget, harness string, expectedHarnessPID int, runtime harnessInputObservationRuntime) (HarnessInputReadiness, error) {
+	liveness, err := runtime.liveness(ctx, pane, harness)
 	if err != nil {
 		return HarnessInputReadiness{}, err
 	}
 	if !liveness.HarnessAlive {
-		return HarnessInputReadiness{State: HarnessInputWrongHarness, TargetPane: pane.ID}, nil
+		return HarnessInputReadiness{
+			State: HarnessInputWrongHarness, TargetPane: pane.ID,
+			TargetPanePID:   pane.RootPID,
+			TargetSessionID: pane.SessionID, StableSessionID: pane.StableSessionID,
+		}, nil
 	}
-	styledContent, err := CapturePaneLogicalANSIOutputTargetContext(ctx, pane.ID)
+	if expectedHarnessPID > 0 && liveness.HarnessPID != expectedHarnessPID {
+		return HarnessInputReadiness{
+			State: HarnessInputNotFound, TargetPane: pane.ID, TargetPID: expectedHarnessPID,
+			TargetPanePID:   pane.RootPID,
+			TargetSessionID: pane.SessionID, StableSessionID: pane.StableSessionID,
+		}, nil
+	}
+	styledContent, err := runtime.capture(ctx, pane.ID)
 	if err != nil {
 		return HarnessInputReadiness{}, fmt.Errorf("capture expected %s pane: %w", harness, err)
 	}
@@ -88,7 +185,12 @@ func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string)
 	if err != nil {
 		return HarnessInputReadiness{}, err
 	}
-	return HarnessInputReadiness{Ready: ready, State: state, Content: stripANSI(styledContent), TargetPane: pane.ID}, nil
+	return HarnessInputReadiness{
+		Ready: ready, State: state, Content: stripANSI(styledContent),
+		TargetPane: pane.ID, TargetPanePID: pane.RootPID, TargetPID: liveness.HarnessPID,
+		HarnessStartTime: liveness.HarnessStartTime,
+		TargetSessionID:  pane.SessionID, StableSessionID: pane.StableSessionID,
+	}, nil
 }
 
 // CheckExpectedHarnessInputAndSend serializes the readiness observation and
@@ -99,60 +201,252 @@ func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness,
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if options.ExpectedStableSessionID != "" {
+		if err := validateStableSessionID(options.ExpectedStableSessionID); err != nil {
+			return HarnessInputReadiness{}, err
+		}
+	}
 	if err := acquireTmuxSemaphore(ctx); err != nil {
 		return HarnessInputReadiness{}, fmt.Errorf("tmux concurrency limit reached: %w", err)
 	}
 	defer releaseTmuxSemaphore()
 
+	return checkExpectedHarnessInputAndSendAtBoundary(
+		ctx, sessionName, harness, command, options,
+		realHarnessInputDeliveryRuntime(), withTmuxLockContext,
+	)
+}
+
+type tmuxMutationLockRunner func(context.Context, func() error) error
+
+func realHarnessInputDeliveryRuntime() harnessInputDeliveryRuntime {
+	return harnessInputDeliveryRuntime{
+		check:        CheckExpectedHarnessInput,
+		recheckExact: CheckExpectedHarnessInputForPane,
+		sendKey:      sendReadinessKey,
+		wait:         sleepWithContext,
+		deliver: func(ctx context.Context, target HarnessInputReadiness, command, harness string, requireObservedSubmission, rawBracketedPaste bool) error {
+			return sendCommandToExactTargetForHarnessLockedWithOptions(
+				ctx, exactPasteTarget{
+					PaneID: target.TargetPane, PanePID: target.TargetPanePID,
+					SessionID: target.TargetSessionID, StableSessionID: target.StableSessionID,
+					RequireNoAttachedClients:   requireObservedSubmission,
+					SubmissionBaselineCaptured: target.Content != "",
+					BaselineCommandAnchors: countExactCommandSubmissionAnchors(
+						target.Content, harness, command,
+					),
+				}, command, harness, requireObservedSubmission, rawBracketedPaste,
+			)
+		},
+	}
+}
+
+func checkExpectedHarnessInputAndSendAtBoundary(
+	ctx context.Context,
+	sessionName, harness, command string,
+	options InputDeliveryOptions,
+	runtime harnessInputDeliveryRuntime,
+	withLock tmuxMutationLockRunner,
+) (HarnessInputReadiness, error) {
 	var readiness HarnessInputReadiness
-	err := withTmuxLock(func() error {
-		var err error
-		readiness, err = CheckExpectedHarnessInput(ctx, sessionName, harness)
-		if err != nil {
-			return err
-		}
-		allowed, forced := inputDeliveryAllowed(readiness, options)
-		if !allowed {
-			return nil
-		}
-		if !isPaneID(readiness.TargetPane) {
-			return fmt.Errorf("ready harness returned invalid tmux pane ID %q", readiness.TargetPane)
-		}
-		if forced {
-			readiness.Ready = false
-			readiness.Forced = true
-			recovered, recoveryErr := replaceQueuedAGMInputLocked(ctx, readiness.TargetPane, command, queuedAGMRecoveryRuntime{
-				sendKey: sendReadinessKey,
-				wait:    sleepWithContext,
-				recheck: func() (HarnessInputReadiness, error) {
-					return CheckExpectedHarnessInput(ctx, sessionName, harness)
-				},
-				deliver: func(ctx context.Context, targetPane, command string) error {
-					return sendCommandToTargetForHarnessLocked(ctx, targetPane, command, harness)
-				},
-			})
-			if recoveryErr != nil {
-				return recoveryErr
-			}
-			readiness = recovered
-			return nil
-		}
-		return sendCommandToTargetForHarnessLocked(ctx, readiness.TargetPane, command, harness)
+	err := withLock(ctx, func() error {
+		var deliveryErr error
+		readiness, deliveryErr = checkExpectedHarnessInputAndSendLocked(ctx, sessionName, harness, command, options, runtime)
+		return deliveryErr
 	})
+	if err != nil && readiness.Ready {
+		// The callback can complete delivery and strict reproof before an unlock
+		// failure replaces its nil result. Preserve that irreversible boundary:
+		// retry is unsafe even though the mutation lock's release failed.
+		readiness.Ready = false
+		readiness.MayHaveStarted = true
+		err = MarkPromptSubmissionUncertain(fmt.Errorf(
+			"harness input was delivered but the tmux mutation boundary did not close cleanly: %w", err,
+		))
+	}
 	return readiness, err
+}
+
+type harnessInputDeliveryRuntime struct {
+	check        func(context.Context, string, string) (HarnessInputReadiness, error)
+	recheckExact func(context.Context, string, int, string) (HarnessInputReadiness, error)
+	sendKey      func(context.Context, string, string) error
+	wait         func(context.Context, time.Duration) error
+	deliver      func(context.Context, HarnessInputReadiness, string, string, bool, bool) error
+}
+
+// deliverToExactTarget keeps strict submission confirmation and exact runtime
+// identity proof inside the atomic-delivery module. The caller retains the
+// tmux mutation lock across both observations. Legacy callers intentionally
+// stop after delivery and keep their existing best-effort behavior.
+func (runtime harnessInputDeliveryRuntime) deliverToExactTarget(
+	ctx context.Context,
+	target HarnessInputReadiness,
+	harness, command string,
+	options InputDeliveryOptions,
+) (HarnessInputReadiness, error) {
+	if err := runtime.deliver(
+		ctx, target, command, harness,
+		options.RequireSubmissionConfirmation,
+		options.RawBracketedPaste,
+	); err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	if !options.RequireSubmissionConfirmation {
+		return HarnessInputReadiness{}, nil
+	}
+
+	observed, err := runtime.recheckExact(ctx, target.TargetPane, target.TargetPID, harness)
+	if err != nil {
+		return HarnessInputReadiness{}, MarkPromptSubmissionUncertain(fmt.Errorf(
+			"re-prove submitted harness target %q/%d after confirmed submission: %w",
+			target.TargetPane, target.TargetPID, err,
+		))
+	}
+	// deliver() established only a terminal rendering consistent with the exact
+	// pasted command leaving its parked shape. A multiline human draft can render
+	// the same prefix, so generic BUSY is not positive submission continuity.
+	// Only native PROCESSING or a positively empty READY composer can confirm the
+	// command at this separate exact-runtime boundary.
+	positiveContinuity := (observed.Ready && observed.State == HarnessInputReady) ||
+		(!observed.Ready && observed.State == HarnessInputProcessing)
+	if observed.TargetPane != target.TargetPane ||
+		observed.TargetPanePID != target.TargetPanePID ||
+		observed.TargetPID != target.TargetPID ||
+		observed.HarnessStartTime != target.HarnessStartTime ||
+		observed.TargetSessionID != target.TargetSessionID ||
+		!stableSessionBindingMatches(observed, options.ExpectedStableSessionID) ||
+		!positiveContinuity {
+		return HarnessInputReadiness{}, MarkPromptSubmissionUncertain(fmt.Errorf(
+			"submitted harness target %q pane-pid %d harness-pid %d start %q could not be positively re-proven after confirmed submission: observed ready=%t state %q on %q pane-pid %d harness-pid %d start %q session %q stable %q",
+			target.TargetPane, target.TargetPanePID, target.TargetPID, target.HarnessStartTime,
+			observed.Ready, observed.State, observed.TargetPane, observed.TargetPanePID, observed.TargetPID,
+			observed.HarnessStartTime, observed.TargetSessionID, observed.StableSessionID,
+		))
+	}
+	return observed, nil
+}
+
+func checkExpectedHarnessInputAndSendLocked(
+	ctx context.Context,
+	sessionName, harness, command string,
+	options InputDeliveryOptions,
+	runtime harnessInputDeliveryRuntime,
+) (HarnessInputReadiness, error) {
+	readiness, err := runtime.check(ctx, sessionName, harness)
+	if err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	allowed, forced := inputDeliveryAllowed(readiness, options)
+	if !allowed {
+		return readiness, nil
+	}
+	if err := validateReadyDeliveryTarget(readiness, options.ExpectedStableSessionID); err != nil {
+		readiness.Ready = false
+		return readiness, err
+	}
+	if forced {
+		readiness.Ready = false
+		readiness.Forced = true
+		return replaceQueuedAGMInputLocked(ctx, readiness.TargetPane, readiness.TargetPID, command, queuedAGMRecoveryRuntime{
+			sendKey: runtime.sendKey,
+			wait:    runtime.wait,
+			recheck: func() (HarnessInputReadiness, error) {
+				return runtime.recheckExact(ctx, readiness.TargetPane, readiness.TargetPID, harness)
+			},
+			deliver: func(ctx context.Context, targetPane, command string) (HarnessInputReadiness, error) {
+				return runtime.deliverToExactTarget(ctx, HarnessInputReadiness{
+					TargetPane:       targetPane,
+					TargetPanePID:    readiness.TargetPanePID,
+					TargetPID:        readiness.TargetPID,
+					HarnessStartTime: readiness.HarnessStartTime,
+					TargetSessionID:  readiness.TargetSessionID,
+					StableSessionID:  readiness.StableSessionID,
+				}, harness, command, options)
+			},
+		})
+	}
+
+	// The first observation authorizes no mutation by itself. Re-resolve the
+	// exact pane and foreground harness PID immediately before submission so a
+	// harness restart between capture and send cannot inherit the command.
+	rechecked, err := runtime.recheckExact(ctx, readiness.TargetPane, readiness.TargetPID, harness)
+	if err != nil {
+		return rechecked, err
+	}
+	if err := validateRecheckedDeliveryTarget(readiness, rechecked, options.ExpectedStableSessionID); err != nil {
+		rechecked.Ready = false
+		return rechecked, err
+	}
+	if !rechecked.Ready || rechecked.State != HarnessInputReady {
+		rechecked.Ready = false
+		return rechecked, nil
+	}
+	postSubmit, err := runtime.deliverToExactTarget(ctx, rechecked, harness, command, options)
+	if err != nil {
+		rechecked.Ready = false
+		rechecked.MayHaveStarted = PromptSubmissionMayHaveOccurred(err)
+		return rechecked, err
+	}
+	rechecked.PostSubmitProcessing = postSubmit.State == HarnessInputProcessing
+	return rechecked, nil
+}
+
+func validateReadyDeliveryTarget(readiness HarnessInputReadiness, expectedStableSessionID string) error {
+	if !isPaneID(readiness.TargetPane) {
+		return fmt.Errorf("ready harness returned invalid tmux pane ID %q", readiness.TargetPane)
+	}
+	if readiness.TargetPID <= 0 {
+		return fmt.Errorf("ready harness returned invalid tmux pane PID %d", readiness.TargetPID)
+	}
+	if expectedStableSessionID != "" && readiness.TargetPanePID <= 0 {
+		return fmt.Errorf("ready harness returned invalid tmux pane process ID %d", readiness.TargetPanePID)
+	}
+	if expectedStableSessionID != "" && readiness.HarnessStartTime == "" {
+		return errors.New("ready harness returned no process birth identity")
+	}
+	if !stableSessionBindingMatches(readiness, expectedStableSessionID) {
+		return stableSessionBindingError(readiness, expectedStableSessionID)
+	}
+	return nil
+}
+
+func validateRecheckedDeliveryTarget(
+	expected, observed HarnessInputReadiness,
+	expectedStableSessionID string,
+) error {
+	if observed.TargetPane != expected.TargetPane ||
+		observed.TargetPanePID != expected.TargetPanePID ||
+		observed.TargetPID != expected.TargetPID ||
+		observed.HarnessStartTime != expected.HarnessStartTime {
+		return fmt.Errorf(
+			"verified harness target changed from %q pane-pid %d harness-pid %d start %q to %q pane-pid %d harness-pid %d start %q before delivery",
+			expected.TargetPane, expected.TargetPanePID, expected.TargetPID, expected.HarnessStartTime,
+			observed.TargetPane, observed.TargetPanePID, observed.TargetPID, observed.HarnessStartTime,
+		)
+	}
+	if observed.TargetSessionID != expected.TargetSessionID ||
+		!stableSessionBindingMatches(observed, expectedStableSessionID) {
+		return fmt.Errorf(
+			"verified harness session binding changed from tmux session %q stable %q to %q stable %q before delivery",
+			expected.TargetSessionID, expected.StableSessionID,
+			observed.TargetSessionID, observed.StableSessionID,
+		)
+	}
+	return nil
 }
 
 type queuedAGMRecoveryRuntime struct {
 	sendKey func(context.Context, string, string) error
 	wait    func(context.Context, time.Duration) error
 	recheck func() (HarnessInputReadiness, error)
-	deliver func(context.Context, string, string) error
+	deliver func(context.Context, string, string) (HarnessInputReadiness, error)
 }
 
 // replaceQueuedAGMInputLocked clears one positively identified AGM-owned
 // composer and proves that the same exact pane now owns an empty composer before
 // delivering its replacement. The caller must hold the tmux mutation lock.
-func replaceQueuedAGMInputLocked(ctx context.Context, targetPane, command string, runtime queuedAGMRecoveryRuntime) (HarnessInputReadiness, error) {
+func replaceQueuedAGMInputLocked(ctx context.Context, targetPane string, targetPID int, command string, runtime queuedAGMRecoveryRuntime) (HarnessInputReadiness, error) {
 	clearSteps := []struct {
 		key   string
 		pause time.Duration
@@ -164,37 +458,43 @@ func replaceQueuedAGMInputLocked(ctx context.Context, targetPane, command string
 	}
 	for _, step := range clearSteps {
 		if err := runtime.sendKey(ctx, targetPane, step.key); err != nil {
-			return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("clear queued AGM input with %s: %w", step.key, err)
+			return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, TargetPID: targetPID, Forced: true}, fmt.Errorf("clear queued AGM input with %s: %w", step.key, err)
 		}
 		if step.pause > 0 {
 			if err := runtime.wait(ctx, step.pause); err != nil {
-				return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("wait for queued AGM input clear: %w", err)
+				return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, TargetPID: targetPID, Forced: true}, fmt.Errorf("wait for queued AGM input clear: %w", err)
 			}
 		}
 	}
 
 	cleared, err := runtime.recheck()
 	if err != nil {
-		return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("recheck cleared queued AGM input: %w", err)
+		return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, TargetPID: targetPID, Forced: true}, fmt.Errorf("recheck cleared queued AGM input: %w", err)
 	}
 	cleared.Forced = true
-	if cleared.TargetPane != targetPane {
+	if cleared.TargetPane != targetPane || cleared.TargetPID != targetPID {
 		cleared.Ready = false
-		return cleared, fmt.Errorf("queued AGM input moved from verified pane %q to %q while clearing", targetPane, cleared.TargetPane)
+		return cleared, fmt.Errorf(
+			"queued AGM input moved from verified pane %q/%d to %q/%d while clearing",
+			targetPane, targetPID, cleared.TargetPane, cleared.TargetPID,
+		)
 	}
 	if !cleared.Ready || cleared.State != HarnessInputReady {
 		cleared.Ready = false
 		return cleared, fmt.Errorf("queued AGM input was not cleared on verified pane %q: state %s", targetPane, cleared.State)
 	}
-	if err := runtime.deliver(ctx, targetPane, command); err != nil {
+	postSubmit, err := runtime.deliver(ctx, targetPane, command)
+	if err != nil {
 		cleared.Ready = false
+		cleared.MayHaveStarted = PromptSubmissionMayHaveOccurred(err)
 		return cleared, fmt.Errorf("deliver replacement to cleared pane %q: %w", targetPane, err)
 	}
+	cleared.PostSubmitProcessing = postSubmit.State == HarnessInputProcessing
 	return cleared, nil
 }
 
 func inputDeliveryAllowed(readiness HarnessInputReadiness, options InputDeliveryOptions) (allowed, forced bool) {
-	if readiness.Ready {
+	if readiness.Ready && readiness.State == HarnessInputReady {
 		return true, false
 	}
 	if options.AllowQueuedAGM && readiness.State == HarnessInputQueuedAGM {
@@ -271,7 +571,67 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if queuedInput == QueuedInputAGM {
 		return false, HarnessInputQueuedAGM, nil
 	}
+	// Active work is positive evidence only when the current tail carries a
+	// harness-native status grammar. Generic occupied composers, human drafts,
+	// queued input, and arbitrary prose containing words such as "Working" stay
+	// fail-closed as BUSY.
+	if queuedInput == QueuedInputNone && hasHarnessNativeProcessingTail(styledTail, harness) {
+		return false, HarnessInputProcessing, nil
+	}
 	return false, HarnessInputBusy, nil
+}
+
+var (
+	codexNativeProcessingPattern  = regexp.MustCompile(`(?i)^•\s+working\s+\([^)]*esc to interrupt[^)]*\)$`)
+	claudeNativeProcessingPattern = regexp.MustCompile(`(?i)^[✶✢✻·]\s+\S.*esc to interrupt.*$`)
+)
+
+func hasHarnessNativeProcessingTail(content, harness string) bool {
+	lines := strings.Split(stripANSI(content), "\n")
+	switch harness {
+	case "codex-cli":
+		return nativeProcessingStatusOwnsTail(lines, codexNativeProcessingPattern, func(line string) bool {
+			return codexFooterPattern.MatchString(strings.TrimSpace(line))
+		})
+	case "claude-code":
+		return nativeProcessingStatusOwnsTail(lines, claudeNativeProcessingPattern, func(line string) bool {
+			plain := strings.TrimSpace(line)
+			return !isDecorativeChromeLine(plain) && isClaudeComposerFooterChrome(plain)
+		})
+	case "pi-cli":
+		for _, line := range slices.Backward(lines) {
+			if isDecorativeChromeLine(line) {
+				continue
+			}
+			return PiManagedState(line) == "working"
+		}
+	}
+	// AGY, Gemini, and OpenCode do not currently expose a sufficiently stable
+	// native active-tail contract. Their non-ready output remains generic BUSY.
+	return false
+}
+
+func nativeProcessingStatusOwnsTail(lines []string, status *regexp.Regexp, isNativeFooter func(string) bool) bool {
+	statusIndex := -1
+	for i, line := range lines {
+		if status.MatchString(strings.TrimSpace(line)) {
+			statusIndex = i
+		}
+	}
+	if statusIndex < 0 {
+		return false
+	}
+	foundNativeFooter := false
+	for _, line := range lines[statusIndex+1:] {
+		if isDecorativeChromeLine(line) {
+			continue
+		}
+		if !isNativeFooter(line) {
+			return false
+		}
+		foundNativeFooter = true
+	}
+	return foundNativeFooter
 }
 
 // classifyCurrentQueuedInput scopes queue evidence to the registered harness's
@@ -634,6 +994,36 @@ func handleHarnessStartupStateWithProbe(
 		*observedHarness = true
 	}
 	return false, nil
+}
+
+var stableSessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,100}$`)
+
+func validateStableSessionID(stableSessionID string) error {
+	if !stableSessionIDPattern.MatchString(stableSessionID) {
+		return fmt.Errorf("invalid stable AGM session ID %q", stableSessionID)
+	}
+	return nil
+}
+
+func stableSessionBindingMatches(readiness HarnessInputReadiness, expected string) bool {
+	return expected == "" ||
+		readiness.TargetSessionID != "" && readiness.StableSessionID == expected
+}
+
+func stableSessionBindingError(readiness HarnessInputReadiness, expected string) error {
+	if expected == "" {
+		return nil
+	}
+	if readiness.StableSessionID == "" {
+		return fmt.Errorf(
+			"tmux session %q has no stable AGM session binding; cold-resume or recreate it before strict delivery for %q",
+			readiness.TargetSessionID, expected,
+		)
+	}
+	return fmt.Errorf(
+		"tmux session %q is bound to stable AGM session %q, not %q",
+		readiness.TargetSessionID, readiness.StableSessionID, expected,
+	)
 }
 
 func validateReadinessHarness(harness string) error {

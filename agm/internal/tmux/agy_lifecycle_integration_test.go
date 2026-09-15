@@ -45,8 +45,11 @@ func TestAgyMultilinePasteIntegrationPreservesOneBracketedSubmission(t *testing.
 	}
 	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 
-	const sessionName = "agy-multiline-paste-fixture"
-	if err := tmux.NewSession(sessionName, fixtureDir); err != nil {
+	const (
+		sessionName     = "agy-multiline-paste-fixture"
+		stableSessionID = "agy-multiline-paste-fixture-id"
+	)
+	if err := tmux.NewSessionBound(sessionName, fixtureDir, stableSessionID); err != nil {
 		t.Fatalf("create isolated tmux session: %v", err)
 	}
 	t.Cleanup(func() { cleanupAgyFixtureTmuxServer(t, socketPath) })
@@ -71,13 +74,15 @@ func TestAgyMultilinePasteIntegrationPreservesOneBracketedSubmission(t *testing.
 	}
 
 	prompt := "[From: codex | ID: regression]\n\nReply exactly: AGM_AGY_MULTILINE_OK"
-	readiness, err := tmux.CheckExpectedHarnessInputAndSend(t.Context(), sessionName, "agy", prompt, tmux.InputDeliveryOptions{})
+	readiness, err := tmux.CheckExpectedHarnessInputAndSend(t.Context(), sessionName, "agy", prompt, tmux.InputDeliveryOptions{
+		ExpectedStableSessionID: stableSessionID,
+	})
 	if err != nil {
 		output, _ := tmux.CapturePaneOutput(sessionName, 30)
 		t.Fatalf("send AGY multiline prompt: %v\npane output:\n%s", err, output)
 	}
-	if !readiness.Ready || readiness.TargetPane == "" {
-		t.Fatalf("AGY atomic delivery readiness = %+v, want ready exact pane", readiness)
+	if !readiness.Ready || readiness.TargetPane == "" || readiness.StableSessionID != stableSessionID {
+		t.Fatalf("AGY atomic delivery readiness = %+v, want ready exact pane with stable session %q", readiness, stableSessionID)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
