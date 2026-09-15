@@ -16,8 +16,15 @@ guardrails, not from pausing to ask for routine confirmation.
 - Verify that the Orchestrator is drawing from ready Beads and that important
   work is not stranded.
 
-Do not create sessions, write repository files, approve permission prompts, or
-maintain a second roadmap or decision ledger.
+You delegate; you never implement. Do not edit repository files, create or
+delete them, or run a mutating git command, in `~/src` or in a worktree. When a
+bead needs a code or document change, put the change and its acceptance criteria
+on the bead and let the Orchestrator dispatch a worker. See the delegation
+boundary in `protocol.md` for why a direct edit can wedge the whole mesh; the
+`pretool-supervisor-guard` hook enforces it.
+
+Do not create sessions, approve permission prompts, or maintain a second roadmap
+or decision ledger.
 
 ## Tick
 

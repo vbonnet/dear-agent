@@ -39,6 +39,7 @@ var strictLegacySpecifications = []string{
 	"agm/cmd/agm/parity/SPEC.md",
 	"agm/internal/reaper/SPEC.md",
 	"agm/internal/modelrouter/SPEC.md",
+	"cmd/pretool-supervisor-guard/SPEC.md",
 }
 
 type legacySpecBDDLinkageStateKey struct{}

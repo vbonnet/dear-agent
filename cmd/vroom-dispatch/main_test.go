@@ -1238,3 +1238,49 @@ func TestSpawnRetryDoesNotSwallowSafetyRefusals(t *testing.T) {
 		})
 	}
 }
+
+// A supervisor that performs work itself can wedge on a permission prompt it
+// cannot answer, stalling dispatch for the whole mesh, and it spends the context
+// window the coordination role depends on. The deterministic
+// pretool-supervisor-guard hook is the enforcement; these assertions keep the
+// prompts from drifting back to a state that invites the attempt, which is how
+// the original incident happened: the ban lived in two of the three role files
+// as a buried clause, and protocol.md's shared constraints contradicted it by
+// explaining how to make repository changes from a worktree.
+func TestSupervisorInstructionsForbidDoingTheWorkDirectly(t *testing.T) {
+	roleFiles := []string{"meta-orchestrator.md", "orchestrator.md", "overseer.md"}
+
+	for _, name := range roleFiles {
+		doc := readSupervisorSkill(t, name)
+		if !strings.Contains(doc, "never implement") {
+			t.Errorf("%s must state the delegate-never-implement rule", name)
+		}
+		if !strings.Contains(doc, "pretool-supervisor-guard") {
+			t.Errorf("%s must name the hook that enforces the rule", name)
+		}
+		if !strings.Contains(doc, "worktree") {
+			t.Errorf("%s must close the worktree loophole explicitly", name)
+		}
+	}
+
+	protocol := readSupervisorSkill(t, "protocol.md")
+	if !strings.Contains(protocol, "## Delegation boundary") {
+		t.Error("protocol.md must carry the shared delegation boundary")
+	}
+	for _, want := range []string{
+		"never performs the work itself",
+		"cannot answer a permission",
+		"vroom-dispatch-direct",
+		"pretool-supervisor-guard",
+	} {
+		if !strings.Contains(protocol, want) {
+			t.Errorf("protocol.md delegation boundary missing %q", want)
+		}
+	}
+
+	// The original contradiction: a shared constraint that told supervisors how
+	// to make repository changes rather than that they must not make them.
+	if strings.Contains(protocol, "use a worktree for repository changes") {
+		t.Error("protocol.md still instructs supervisors how to make repository changes")
+	}
+}
