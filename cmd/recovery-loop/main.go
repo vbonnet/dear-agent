@@ -1,9 +1,16 @@
 // Command recovery-loop self-heals dead or wedged fleet background jobs (ce-a1uqr).
 //
-// It consumes the absence-alarm journal, evaluates critical launchd services
-// and binaries against a declarative registry, enforces expiring snooze policies,
-// executes bounded remediation actions (reinstall, bootstrap, kickstart),
-// tracks consecutive failure escalation, and journals every recovery attempt.
+// It reads pulse truth from the absence-alarm HEARTBEAT, which reports presence
+// as well as absence, evaluates critical launchd services and binaries against a
+// declarative registry, enforces expiring snooze policies, executes bounded
+// remediation actions (reinstall, bootstrap, kickstart), VERIFIES that the
+// condition actually cleared before calling anything recovered, tracks
+// consecutive failures to clear, and journals every attempt.
+//
+// The absence-alarm escalation journal is an OUTPUT only: human-needed records
+// are appended to it. It is append-only and records absences alone, so a pulse
+// that recovered leaves no trace in it; reading it as current state was the
+// defect that let this loop report success for 1243 consecutive ticks.
 //
 // Usage:
 //
@@ -40,6 +47,32 @@ import (
 const (
 	defaultActionTimeout = 60 * time.Second
 	defaultNotifyTimeout = 15 * time.Second
+	// defaultVerifyGrace is how long a restarted job has to emit its pulse
+	// before the remediation is judged to have failed. It must exceed one
+	// absence-alarm tick, or a working recovery would be scored a failure.
+	defaultVerifyGrace = 30 * time.Minute
+	// defaultEscalateAfter matches RL-09: two consecutive failures reach a
+	// human. The failures are now failures to CLEAR the condition, not
+	// failures to run a command.
+	defaultEscalateAfter = 2
+	// defaultGiveUpAfter bounds pointless remediation. Past it the job stays
+	// loudly escalated instead of being restarted every tick forever; the
+	// live incident ran 555 consecutive no-op kickstarts on one job.
+	defaultGiveUpAfter = 5
+	// defaultMaxHeartbeatAge is how stale the absence-alarm heartbeat may be
+	// before its pulse truth is refused. Stale evidence must not confirm a
+	// recovery.
+	//
+	// It is deliberately just over the deployed absence-alarm-heartbeat pulse
+	// window (30m), not a round couple of hours: the heartbeat is how a
+	// stopped monitor is detected, so a threshold far beyond that window lets
+	// the monitor's own last "present" self-report vouch for it long after it
+	// died. The slack covers one missed tick and no more.
+	defaultMaxHeartbeatAge = 45 * time.Minute
+	// reEscalateInterval bounds how often one standing, given-up outage may
+	// re-alarm. A sink that receives the same record every tick forever stops
+	// being read, which is the failure mode this whole change exists to fix.
+	reEscalateInterval = 24 * time.Hour
 )
 
 // notifier delivers an escalation message to the operator (RL-09, RL-17).
@@ -66,10 +99,16 @@ type options struct {
 	statePath      string
 	journalPath    string
 	absenceJournal string
+	absenceHB      string
+	absenceState   string
 	heartbeatPath  string
 	dryRun         bool
 	jsonOut        bool
 	timeout        time.Duration
+	verifyGrace    time.Duration
+	escalateAfter  int
+	giveUpAfter    int
+	maxHBAge       time.Duration
 }
 
 func parseFlags(args []string, stderr io.Writer) (*options, int) {
@@ -85,6 +124,12 @@ func parseFlags(args []string, stderr io.Writer) (*options, int) {
 	fs.StringVar(&opts.statePath, "state", filepath.Join(home, ".local", "state", "dear-agent", "recovery-loop-state.json"), "recovery state file (JSON)")
 	fs.StringVar(&opts.journalPath, "journal", filepath.Join(home, ".agm", "escalation", "recovery-loop.jsonl"), "recovery journal (JSONL, append)")
 	fs.StringVar(&opts.absenceJournal, "absence-journal", filepath.Join(home, ".agm", "escalation", "absence-alarm.jsonl"), "absence-alarm journal (JSONL)")
+	fs.StringVar(&opts.absenceHB, "absence-heartbeat", filepath.Join(home, ".local", "state", "dear-agent", "absence-alarm.heartbeat.json"), "absence-alarm heartbeat (JSON): the source of present/absent pulse truth")
+	fs.StringVar(&opts.absenceState, "absence-state", filepath.Join(home, ".local", "state", "dear-agent", "absence-alarm-state.json"), "absence-alarm state (JSON): dates each standing alarm")
+	fs.DurationVar(&opts.verifyGrace, "verify-grace", defaultVerifyGrace, "how long a pulse has to return before a remediation counts as failed")
+	fs.IntVar(&opts.escalateAfter, "escalate-after", defaultEscalateAfter, "consecutive unverified recoveries before escalating to a human")
+	fs.IntVar(&opts.giveUpAfter, "give-up-after", defaultGiveUpAfter, "stop retrying a job after this many consecutive failures (0 = never stop)")
+	fs.DurationVar(&opts.maxHBAge, "max-heartbeat-age", defaultMaxHeartbeatAge, "refuse absence-alarm pulse truth older than this")
 	fs.StringVar(&opts.heartbeatPath, "heartbeat", filepath.Join(home, ".local", "state", "dear-agent", "recovery-loop.heartbeat.json"), "self-liveness heartbeat file")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "plan and report recovery actions without executing or writing state")
 	fs.BoolVar(&opts.jsonOut, "json", false, "emit report as JSON on stdout")
@@ -99,6 +144,26 @@ func parseFlags(args []string, stderr io.Writer) (*options, int) {
 	}
 	if opts.timeout <= 0 {
 		fmt.Fprintf(stderr, "recovery-loop: --timeout must be positive\n")
+		return nil, 2
+	}
+	if opts.maxHBAge <= 0 {
+		// A nonpositive value skipped every heartbeat freshness check,
+		// including the missing and future tick_time cases, so a heartbeat
+		// from any point in history stayed authoritative. This flag has no
+		// documented disable value; it must be a real limit.
+		fmt.Fprintf(stderr, "recovery-loop: --max-heartbeat-age must be positive\n")
+		return nil, 2
+	}
+	if opts.verifyGrace <= 0 {
+		fmt.Fprintf(stderr, "recovery-loop: --verify-grace must be positive\n")
+		return nil, 2
+	}
+	if opts.escalateAfter < 1 {
+		fmt.Fprintf(stderr, "recovery-loop: --escalate-after must be at least 1\n")
+		return nil, 2
+	}
+	if opts.giveUpAfter < 0 {
+		fmt.Fprintf(stderr, "recovery-loop: --give-up-after must not be negative\n")
 		return nil, 2
 	}
 	return &opts, 0
@@ -134,7 +199,31 @@ func resolveJobs(configPath, defaultConfig string) ([]recoveryloop.Job, error) {
 			j.InstallCmd[k] = recoveryloop.ExpandHome(arg)
 		}
 	}
+	backfillPulseKind(jobs)
 	return jobs, nil
+}
+
+// backfillPulseKind marks a job's pulse structural when the built-in registry
+// says that pulse is structural.
+//
+// deploy/manifest.yaml declares recovery-loop-jobs absent-only, so a host that
+// already has a job config keeps it forever. Without this, PulseIsStructural
+// would live in the repository and never reach a running loop, and mergeloop
+// would keep reading HEALTHY on the strength of a loaded-only pulse: the flag
+// would be a fix nobody received. The match is on the pulse name, so a config
+// that has since moved a job to its activity pulse is untouched.
+func backfillPulseKind(jobs []recoveryloop.Job) {
+	structural := make(map[string]bool)
+	for _, b := range recoveryloop.DefaultJobs() {
+		if b.Pulse != "" && b.PulseIsStructural {
+			structural[b.Pulse] = true
+		}
+	}
+	for i := range jobs {
+		if jobs[i].Pulse != "" && structural[jobs[i].Pulse] {
+			jobs[i].PulseIsStructural = true
+		}
+	}
 }
 
 func main() {
@@ -166,15 +255,19 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 		fmt.Fprintf(stderr, "recovery-loop: %v (proceeding with empty state)\n", stateErr)
 	}
 
-	alarmingPulses, err := recoveryloop.LoadAbsenceAlarms(opts.absenceJournal)
+	// Pulse truth comes from the absence-alarm heartbeat, the only source
+	// that reports presence as well as absence. The escalation journal is
+	// append-only and records absences only, so a pulse that recovered would
+	// stay "alarming" in it forever.
+	truth, err := recoveryloop.LoadPulseTruth(opts.absenceHB, opts.absenceState, now, opts.maxHBAge)
 	if err != nil {
-		fmt.Fprintf(stderr, "recovery-loop: load absence alarms: %v\n", err)
+		fmt.Fprintf(stderr, "recovery-loop: load pulse truth: %v\n", err)
 	}
 
 	ctx := context.Background()
-	launchdJobs, listErr := host.LaunchdList(ctx)
-	if listErr != nil {
-		fmt.Fprintf(stderr, "recovery-loop: launchd list: %v\n", listErr)
+	launchdJobs, launchdErr := host.LaunchdList(ctx)
+	if launchdErr != nil {
+		fmt.Fprintf(stderr, "recovery-loop: launchd list: %v\n", launchdErr)
 	}
 
 	rep := recoveryloop.Heartbeat{
@@ -182,7 +275,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	}
 
 	for _, job := range jobs {
-		processJob(ctx, job, opts, &state, &rep, snoozes, alarmingPulses, launchdJobs, host, notifyFn, now, stderr)
+		processJob(ctx, job, opts, &state, &rep, snoozes, truth, launchdJobs, launchdErr, host, notifyFn, now, stderr)
 	}
 
 	if !opts.dryRun {
@@ -202,175 +295,12 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	return 0
 }
 
-func processJob(
-	ctx context.Context,
-	job recoveryloop.Job,
-	opts *options,
-	state *recoveryloop.State,
-	rep *recoveryloop.Heartbeat,
-	snoozes map[string]absencealarm.Snooze,
-	alarmingPulses map[string]bool,
-	launchdJobs map[string]recoveryloop.LaunchdJobInfo,
-	host recoveryloop.HostOps,
-	notifyFn notifier,
-	now time.Time,
-	stderr io.Writer,
-) {
-	action, plannedStatus, reason := recoveryloop.PlanJob(job, snoozes, alarmingPulses, launchdJobs, host, now)
-
-	if action == recoveryloop.ActionNone {
-		rep.Results = append(rep.Results, recoveryloop.Result{
-			Job:    job.Name,
-			Status: plannedStatus,
-			Action: action,
-			Reason: reason,
-		})
-		switch plannedStatus {
-		case recoveryloop.StatusHealthy:
-			rep.Healthy++
-		case recoveryloop.StatusSnoozed:
-			rep.Snoozed++
-		case recoveryloop.StatusRecovered:
-			rep.Recovered++
-		case recoveryloop.StatusFailed:
-			rep.Failed++
-		}
-		return
-	}
-
-	if opts.dryRun {
-		rep.Results = append(rep.Results, recoveryloop.Result{
-			Job:    job.Name,
-			Status: recoveryloop.StatusRecovered,
-			Action: action,
-			Reason: reason + " (planned, dry-run)",
-		})
-		rep.Recovered++
-		return
-	}
-
-	actionCtx, cancel := context.WithTimeout(ctx, opts.timeout)
-	execErr := recoveryloop.ExecuteRecovery(actionCtx, job, action, host)
-	cancel()
-
-	if execErr == nil {
-		recordSuccess(job, action, reason, now, state, rep, opts.journalPath, stderr)
-	} else {
-		recordFailure(job, action, reason, execErr, now, state, rep, opts.journalPath, notifyFn, stderr)
-	}
-}
-
-func recordSuccess(
-	job recoveryloop.Job,
-	action recoveryloop.ActionType,
-	reason string,
-	now time.Time,
-	state *recoveryloop.State,
-	rep *recoveryloop.Heartbeat,
-	journalPath string,
-	stderr io.Writer,
-) {
-	state.Jobs[job.Name] = recoveryloop.JobState{
-		ConsecutiveFailures: 0,
-		LastAttemptTime:     now,
-		LastAction:          action,
-		LastStatus:          recoveryloop.StatusRecovered,
-		HumanNeeded:         false,
-	}
-	rep.Results = append(rep.Results, recoveryloop.Result{
-		Job:    job.Name,
-		Status: recoveryloop.StatusRecovered,
-		Action: action,
-		Reason: reason,
-	})
-	rep.Recovered++
-	if err := recoveryloop.AppendJournal(journalPath, recoveryloop.JournalRecord{
-		Time:        now,
-		Kind:        "recovery.attempt",
-		Job:         job.Name,
-		Action:      action,
-		Status:      recoveryloop.StatusRecovered,
-		Attempt:     1,
-		HumanNeeded: false,
-		Reason:      reason,
-	}); err != nil {
-		fmt.Fprintf(stderr, "recovery-loop: append journal: %v\n", err)
-	}
-}
-
-func recordFailure(
-	job recoveryloop.Job,
-	action recoveryloop.ActionType,
-	reason string,
-	execErr error,
-	now time.Time,
-	state *recoveryloop.State,
-	rep *recoveryloop.Heartbeat,
-	journalPath string,
-	notifyFn notifier,
-	stderr io.Writer,
-) {
-	attempts := state.Jobs[job.Name].ConsecutiveFailures + 1
-	humanNeeded := attempts >= 2
-
-	state.Jobs[job.Name] = recoveryloop.JobState{
-		ConsecutiveFailures: attempts,
-		LastAttemptTime:     now,
-		LastAction:          action,
-		LastStatus:          recoveryloop.StatusFailed,
-		HumanNeeded:         humanNeeded,
-	}
-	rep.Results = append(rep.Results, recoveryloop.Result{
-		Job:         job.Name,
-		Status:      recoveryloop.StatusFailed,
-		Action:      action,
-		Attempt:     attempts,
-		HumanNeeded: humanNeeded,
-		Reason:      reason,
-		Error:       execErr.Error(),
-	})
-	rep.Failed++
-
-	if humanNeeded {
-		rep.HumanNeeded++
-		dispatchEscalation(job.Name, action, attempts, execErr, notifyFn, stderr)
-	}
-
-	if err := recoveryloop.AppendJournal(journalPath, recoveryloop.JournalRecord{
-		Time:        now,
-		Kind:        "recovery.attempt",
-		Job:         job.Name,
-		Action:      action,
-		Status:      recoveryloop.StatusFailed,
-		Attempt:     attempts,
-		HumanNeeded: humanNeeded,
-		Reason:      reason,
-		Error:       execErr.Error(),
-	}); err != nil {
-		fmt.Fprintf(stderr, "recovery-loop: append journal: %v\n", err)
-	}
-}
-
-func dispatchEscalation(
-	jobName string,
-	action recoveryloop.ActionType,
-	attempts int,
-	execErr error,
-	notifyFn notifier,
-	stderr io.Writer,
-) {
-	if notifyFn == nil {
-		return
-	}
-	notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
-	defer cancel()
-	title := fmt.Sprintf("HUMAN NEEDED: %s recovery failed", jobName)
-	body := fmt.Sprintf("Recovery action %s failed (%d consecutive failures): %v", action, attempts, execErr)
-	if err := notifyFn(notifyCtx, title, body); err != nil {
-		fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
-	}
-}
-
+// processJob evaluates, remediates and VERIFIES one job for this tick.
+//
+// The order matters. A verification left pending by an earlier tick is settled
+// first, because the question "did the last remediation actually work?" has to
+// be answered before another one is fired. Skipping that step is what let the
+// loop restart the same job on every tick for days while reporting success.
 func emitReport(stdout, stderr io.Writer, rep recoveryloop.Heartbeat, jsonOut bool) {
 	if jsonOut {
 		enc := json.NewEncoder(stdout)
@@ -397,9 +327,44 @@ func emitReport(stdout, stderr io.Writer, rep recoveryloop.Heartbeat, jsonOut bo
 		}
 		fmt.Fprintln(stdout, line)
 	}
-	if rep.Failed > 0 || rep.HumanNeeded > 0 {
+	switch {
+	case rep.Failed > 0 || rep.HumanNeeded > 0:
 		fmt.Fprintf(stdout, "Status: ALARM (%d recovery failure(s), %d human needed)\n", rep.Failed, rep.HumanNeeded)
-	} else {
-		fmt.Fprintf(stdout, "Status: OK (all jobs healthy, snoozed, or recovered)\n")
+	case rep.Planned > 0:
+		// A dry run that just listed work to do is not a clean bill of health.
+		// Reporting OK underneath a planned remediation is the same report
+		// contradicting itself, which is what operators use dry-run to avoid.
+		fmt.Fprintf(stdout, "Status: ACTION NEEDED (%d remediation(s) planned, none executed)\n", rep.Planned)
+	case rep.Pending > 0:
+		fmt.Fprintf(stdout, "Status: PENDING (%d remediation(s) awaiting verification)\n", rep.Pending)
+	default:
+		fmt.Fprintf(stdout, "Status: OK (no unresolved recovery failures)\n")
 	}
+}
+
+// evidenceStampCLI renders a probe observation time for an operator-facing
+// reason string.
+func evidenceStampCLI(t time.Time) string {
+	if t.IsZero() {
+		return "at an unrecorded time"
+	}
+	return "at " + t.Format(time.RFC3339)
+}
+
+// pulseVerdictIsConclusive reports whether the pulse alone already settles an
+// open verification, so a missing launchd listing changes nothing.
+//
+// Only the negative direction qualifies. A returned pulse still needs the
+// structural re-check before it can verify a recovery (RL-39), but a pulse that
+// has not come back by its deadline is a failure whatever launchctl says.
+func pulseVerdictIsConclusive(
+	job recoveryloop.Job,
+	truth recoveryloop.PulseTruth,
+	prev recoveryloop.JobState,
+	now time.Time,
+) bool {
+	if job.Pulse == "" || job.PulseIsStructural {
+		return false
+	}
+	return truth.Alarming(job.Pulse) && now.After(prev.PendingDeadline)
 }
