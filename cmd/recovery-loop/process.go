@@ -386,6 +386,7 @@ func reportDryRun(
 	status := recoveryloop.StatusUnhealthy
 	planned := action
 	note := " (planned, dry-run)"
+	humanNeeded := prev.HumanNeeded || givenUp
 	if givenUp {
 		status = recoveryloop.StatusFailed
 		planned = recoveryloop.ActionNone
@@ -396,12 +397,14 @@ func reportDryRun(
 		Status:      status,
 		Action:      planned,
 		Attempt:     prev.ConsecutiveFailures,
-		HumanNeeded: givenUp,
+		HumanNeeded: humanNeeded,
 		Reason:      reason + note,
 	})
+	if humanNeeded {
+		rep.HumanNeeded++
+	}
 	if givenUp {
 		rep.Failed++
-		rep.HumanNeeded++
 		return
 	}
 	rep.Planned++

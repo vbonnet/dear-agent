@@ -524,6 +524,38 @@ func TestCLI_HumanNeededSurvivesEscalationThresholdIncrease(t *testing.T) {
 	}
 }
 
+// RL-44/RL-58: a dry-run preview cannot erase a standing human-needed
+// incident merely because the current give-up threshold would still allow an
+// action. It must stay loud and exit nonzero without mutating the state.
+func TestCLI_DryRunPreservesStandingHumanNeededState(t *testing.T) {
+	f := newFixture(t)
+	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
+	f.write(t, f.cfg, absenceAlarmJob)
+	f.write(t, f.absHB, fmt.Sprintf(
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"absent"}]}`,
+		now.Format(time.RFC3339)))
+	f.write(t, f.state, `{"jobs":{"absence-alarm":{"consecutive_failures":2,"last_action":"kickstart","last_status":"failed","human_needed":true}}}`)
+	host, calls := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{
+		"com.dear-agent.absence-alarm": {Loaded: true, Status: 0},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := run(f.args("--dry-run", "--give-up-after", "0"), &stdout, &stderr, host, nil); code != 1 {
+		t.Fatalf("standing human-needed dry-run exit = %d, want 1; stdout:\n%s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[HUMAN NEEDED]") ||
+		!strings.Contains(stdout.String(), "Status: ALARM") {
+		t.Fatalf("dry-run hid standing human-needed state:\n%s", stdout.String())
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("dry-run executed host actions: %v", *calls)
+	}
+	if js := f.jobState(t, "absence-alarm"); !js.HumanNeeded || js.ConsecutiveFailures != 2 ||
+		js.LastStatus != recoveryloop.StatusFailed {
+		t.Fatalf("dry-run mutated standing human-needed state: %+v", js)
+	}
+}
+
 // RL-59: a desktop banner cannot mask failure of the required durable
 // escalation journal. The next tick retries only the missing durable sink.
 func TestCLI_PartialEscalationRetriesDurableJournalOnly(t *testing.T) {

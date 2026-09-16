@@ -139,7 +139,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-43** When a job's pulse only proves its service is loaded rather than that its scheduled work succeeds, the system shall not let that pulse override the exit-status evaluation.
 
-**RL-44** When a dry run plans one or more remediations, the system shall report that action is needed rather than summarising the tick as OK.
+**RL-44** When a dry run plans one or more remediations, the system shall report that action is needed rather than summarising the tick as OK. When persisted state already requires human intervention, the dry-run result and aggregate shall preserve that standing condition and the tick shall exit nonzero even if current give-up policy would still permit a remediation.
 
 **RL-45** When a job's pulse only proves its service is loaded, the system shall not accept that pulse as verification of a recovery, and the system shall verify such a job against its exit status.
 
