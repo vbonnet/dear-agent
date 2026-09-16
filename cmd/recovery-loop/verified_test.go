@@ -172,28 +172,48 @@ func TestCLI_PresentPulse_NoKickstartOnAlarmExitCode(t *testing.T) {
 // NOT be reported as recovered, and must not reset the failure counter.
 func TestCLI_CommandSucceededButPulseStillAbsent_NotRecovered(t *testing.T) {
 	f := newFixture(t)
-	now := time.Date(2026, 9, 9, 8, 0, 0, 0, time.UTC)
+	tickAt := time.Date(2026, 9, 9, 8, 0, 0, 0, time.UTC)
+	actionAt := tickAt.Add(2 * time.Minute)
 	f.write(t, f.cfg, absenceAlarmJob)
 	f.write(t, f.absHB, fmt.Sprintf(
 		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"absent"}]}`,
-		now.Format(time.RFC3339)))
+		tickAt.Format(time.RFC3339)))
 	f.write(t, f.absState, `{"pulses":{"absence-alarm-heartbeat":{"since":"2026-09-03T08:00:00Z"}}}`)
 
-	host, calls := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{
+	host, calls := hostAt(tickAt, map[string]recoveryloop.LaunchdJobInfo{
 		"com.dear-agent.absence-alarm": {Loaded: true, PID: 0, Status: 1},
 	})
+	nowCalls := 0
+	host.Now = func() time.Time {
+		nowCalls++
+		if nowCalls == 1 {
+			return tickAt
+		}
+		return actionAt
+	}
 	var stdout, stderr bytes.Buffer
-	run(f.args(), &stdout, &stderr, host, nil)
+	code := run(f.args(), &stdout, &stderr, host, nil)
 
 	if len(*calls) == 0 {
 		t.Fatal("expected a kickstart for an absent pulse")
 	}
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 while recovery remains pending; stdout:\n%s\nstderr:\n%s",
+			code, stdout.String(), stderr.String())
+	}
 	if strings.Contains(stdout.String(), "recovered") {
 		t.Errorf("reported RECOVERED while the pulse is still absent:\n%s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "Status: PENDING") {
+		t.Errorf("report did not expose the unresolved verification:\n%s", stdout.String())
+	}
 	js := f.jobState(t, "absence-alarm")
-	if js.LastStatus == recoveryloop.StatusRecovered {
-		t.Errorf("persisted last_status=recovered while the pulse is still absent")
+	if js.LastStatus != recoveryloop.StatusPending {
+		t.Errorf("persisted last_status=%q, want pending-verification while the pulse is still absent", js.LastStatus)
+	}
+	if !js.LastAttemptTime.Equal(actionAt) || !js.PendingSince.Equal(actionAt) {
+		t.Errorf("pending boundary = (last_attempt=%s, pending_since=%s), want actual action time %s",
+			js.LastAttemptTime, js.PendingSince, actionAt)
 	}
 }
 
@@ -339,15 +359,18 @@ func (f *fixture) absenceKinds(t *testing.T) []string {
 
 // RL-29/RL-34: structural health is not pulse health.
 //
-// When pulse truth is unavailable, PlanJob falls through to "job is healthy" on
+// When pulse truth is invalid, PlanJob falls through to "job is healthy" on
 // the structural checks alone. Converting that into a verified RECOVERY for a
 // job that has a pulse reintroduces the exact defect this branch removes: it
-// reports that a condition cleared without ever observing the condition.
+// reports that a condition cleared without ever observing the condition. A
+// genuinely missing source is handled separately by RL-54 as an actionable
+// liveness failure of the source owner.
 func TestCLI_StructuralHealthIsNotVerifiedRecovery(t *testing.T) {
 	f := newFixture(t)
 	now := time.Date(2026, 9, 9, 8, 0, 0, 0, time.UTC)
 	f.write(t, f.cfg, absenceAlarmJob)
-	// No heartbeat file at all: no pulse truth exists.
+	// Malformed source data is unavailable, not proof that the owner is down.
+	f.write(t, f.absHB, `{not-json`)
 	f.write(t, f.state, `{"jobs":{"absence-alarm":{"consecutive_failures":1,"human_needed":false}}}`)
 
 	host, _ := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{
@@ -360,7 +383,7 @@ func TestCLI_StructuralHealthIsNotVerifiedRecovery(t *testing.T) {
 		t.Errorf("claimed RECOVERED for a pulsed job with no pulse evidence:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "health unverifiable") {
-		t.Errorf("missing pulse evidence was not classified as unverifiable:\n%s", stdout.String())
+		t.Errorf("invalid pulse evidence was not classified as unverifiable:\n%s", stdout.String())
 	}
 	js := f.jobState(t, "absence-alarm")
 	if js.ConsecutiveFailures != 1 || js.HumanNeeded || js.LastStatus != recoveryloop.StatusUnavailable {

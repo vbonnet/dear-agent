@@ -42,6 +42,49 @@ type PulseFact struct {
 // PulseTruth maps a pulse name to its current fact.
 type PulseTruth map[string]PulseFact
 
+// AbsenceAlarmHeartbeatPulse is the self-heartbeat emitted by the process
+// that owns the pulse-truth file. Missing or stale source data may justify
+// remediating this one owner, while every downstream pulse remains unknown.
+const AbsenceAlarmHeartbeatPulse = "absence-alarm-heartbeat"
+
+// PulseSourceStatus describes the independently observed availability of the
+// pulse-truth source itself. Its zero value is unavailable and therefore
+// fail-closed.
+type PulseSourceStatus uint8
+
+const (
+	// PulseSourceUnavailable means the source could not be classified safely,
+	// for example because it was malformed, unreadable, or future-dated.
+	PulseSourceUnavailable PulseSourceStatus = iota
+	// PulseSourceFresh means the source heartbeat is recent enough to use.
+	PulseSourceFresh
+	// PulseSourceMissing means no source heartbeat has been written.
+	PulseSourceMissing
+	// PulseSourceStale means the source heartbeat exceeded its freshness limit.
+	PulseSourceStale
+)
+
+// RequiresRecovery reports whether the source owner's own liveness is known
+// to have failed, as distinct from an invalid observation that permits no
+// action.
+func (s PulseSourceStatus) RequiresRecovery() bool {
+	return s == PulseSourceMissing || s == PulseSourceStale
+}
+
+func (s PulseSourceStatus) String() string {
+	switch s {
+	case PulseSourceFresh:
+		return "fresh"
+	case PulseSourceMissing:
+		return "missing"
+	case PulseSourceStale:
+		return "stale"
+	case PulseSourceUnavailable:
+		return "unavailable"
+	}
+	return "unavailable"
+}
+
 // EvidenceTiming classifies whether a pulse observation may prove a state
 // transition after a boundary. Keeping the classification here gives every
 // recovery path one clock-skew policy instead of letting command adapters
@@ -150,19 +193,23 @@ type absenceHeartbeat struct {
 // monitor itself stopped. A heartbeat older than maxAge yields no facts at
 // all rather than stale ones: verification then fails loudly instead of
 // silently confirming a recovery against evidence from days ago.
-func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge time.Duration) (PulseTruth, error) {
+func LoadPulseTruth(
+	heartbeatPath, alarmStatePath string,
+	now time.Time,
+	maxAge time.Duration,
+) (PulseTruth, PulseSourceStatus, error) {
 	truth := PulseTruth{}
 
 	raw, err := os.ReadFile(heartbeatPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return truth, nil
+			return truth, PulseSourceMissing, nil
 		}
-		return truth, fmt.Errorf("read absence heartbeat %s: %w", heartbeatPath, err)
+		return truth, PulseSourceUnavailable, fmt.Errorf("read absence heartbeat %s: %w", heartbeatPath, err)
 	}
 	var hb absenceHeartbeat
 	if err := json.Unmarshal(raw, &hb); err != nil {
-		return truth, fmt.Errorf("parse absence heartbeat %s: %w", heartbeatPath, err)
+		return truth, PulseSourceUnavailable, fmt.Errorf("parse absence heartbeat %s: %w", heartbeatPath, err)
 	}
 	if maxAge > 0 {
 		// An undated heartbeat is evidence of unknown age, which is exactly
@@ -170,17 +217,17 @@ func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge 
 		// unparseable tick_time as "fresh" would let a truncated or corrupt
 		// file confirm recoveries forever (RL-32).
 		if hb.TickTime.IsZero() {
-			return PulseTruth{}, fmt.Errorf("absence heartbeat %s has no tick_time: pulse truth unavailable", heartbeatPath)
+			return PulseTruth{}, PulseSourceUnavailable, fmt.Errorf("absence heartbeat %s has no tick_time: pulse truth unavailable", heartbeatPath)
 		}
 		if hb.TickTime.After(now.Add(heartbeatSkewTolerance)) {
 			// A negative age passes any "older than maxAge" test, so a clock
 			// that jumped forward would let this heartbeat's last present
 			// readings suppress remediation until wall time caught up.
-			return PulseTruth{}, fmt.Errorf("absence heartbeat %s is dated %s in the future: pulse truth unavailable",
+			return PulseTruth{}, PulseSourceUnavailable, fmt.Errorf("absence heartbeat %s is dated %s in the future: pulse truth unavailable",
 				heartbeatPath, hb.TickTime.Sub(now).Round(time.Second))
 		}
 		if now.Sub(hb.TickTime) > maxAge {
-			return PulseTruth{}, fmt.Errorf("absence heartbeat %s is %s old (max %s): pulse truth unavailable",
+			return PulseTruth{}, PulseSourceStale, fmt.Errorf("absence heartbeat %s is %s old (max %s): pulse truth unavailable",
 				heartbeatPath, now.Sub(hb.TickTime).Round(time.Second), maxAge)
 		}
 	}
@@ -197,7 +244,7 @@ func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge 
 	// the escalation text, never the alarming/present decision.
 	st, stErr := absencealarm.LoadAlarmState(alarmStatePath)
 	if stErr != nil {
-		return truth, fmt.Errorf("read absence alarm state %s: %w", alarmStatePath, stErr)
+		return truth, PulseSourceFresh, fmt.Errorf("read absence alarm state %s: %w", alarmStatePath, stErr)
 	}
 	for name, alarm := range st.Pulses {
 		f, ok := truth[name]
@@ -207,7 +254,7 @@ func LoadPulseTruth(heartbeatPath, alarmStatePath string, now time.Time, maxAge 
 		f.Since = alarm.Since
 		truth[name] = f
 	}
-	return truth, nil
+	return truth, PulseSourceFresh, nil
 }
 
 // VerifyOutcome is the result of re-checking a job's condition after a

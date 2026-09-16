@@ -23,6 +23,7 @@ func processJob(
 	rep *recoveryloop.Heartbeat,
 	snoozes map[string]absencealarm.Snooze,
 	truth recoveryloop.PulseTruth,
+	pulseSource recoveryloop.PulseSourceStatus,
 	launchdJobs map[string]recoveryloop.LaunchdJobInfo,
 	launchdErr error,
 	host recoveryloop.HostOps,
@@ -46,7 +47,7 @@ func processJob(
 	// either confirms the pulse returned, converts to a counted failure, or
 	// reports that the grace window is still open. In every case this job is
 	// done for this tick and firing another action would only reset the clock.
-	if handleOpenVerification(job, opts, state, rep, truth, launchdJobs, launchdErr, host, prev, now, notifyFn, stderr) {
+	if handleOpenVerification(job, opts, state, rep, truth, pulseSource, launchdJobs, launchdErr, host, prev, now, notifyFn, stderr) {
 		return
 	}
 
@@ -59,7 +60,7 @@ func processJob(
 		return
 	}
 
-	action, plannedStatus, reason := recoveryloop.PlanJob(job, snoozes, truth, launchdJobs, host, now)
+	action, plannedStatus, reason := recoveryloop.PlanJob(job, snoozes, truth, pulseSource, launchdJobs, host, now)
 
 	if action == recoveryloop.ActionNone {
 		recordClear(job, plannedStatus, reason, now, state, rep, opts, prev, truth, stderr)
@@ -100,7 +101,7 @@ func processJob(
 	cancel()
 
 	if execErr != nil {
-		recordFailure(job, action, reason, execErr, now, state, rep, opts, truth, notifyFn, stderr)
+		recordFailure(job, action, reason, execErr, now, actionAt, state, rep, opts, truth, notifyFn, stderr)
 		return
 	}
 
@@ -129,7 +130,7 @@ func processJob(
 	case outcome.Status == recoveryloop.StatusPending:
 		recordPending(job, action, outcome.Reason, now, actionAt, state, rep, opts, prev, stderr)
 	default:
-		recordFailure(job, action, outcome.Reason, errors.New(outcome.Reason), now, state, rep, opts, truth, notifyFn, stderr)
+		recordFailure(job, action, outcome.Reason, errors.New(outcome.Reason), now, actionAt, state, rep, opts, truth, notifyFn, stderr)
 	}
 }
 
@@ -163,6 +164,7 @@ func handleOpenVerification(
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	truth recoveryloop.PulseTruth,
+	pulseSource recoveryloop.PulseSourceStatus,
 	launchdJobs map[string]recoveryloop.LaunchdJobInfo,
 	launchdErr error,
 	host recoveryloop.HostOps,
@@ -179,7 +181,7 @@ func handleOpenVerification(
 	// convert every pending recovery into a counted failure. Hold only when the
 	// heartbeat does not already settle the outcome (RL-41).
 	if launchdErr != nil && job.LaunchdLabel != "" {
-		if pulseVerdictIsConclusive(job, truth, prev, now) {
+		if pulseVerdictIsConclusive(job, truth, pulseSource, prev, now) {
 			failExpiredPulseVerification(job, opts, state, rep, truth, prev, now, notifyFn, stderr)
 			return true
 		}
@@ -188,7 +190,7 @@ func handleOpenVerification(
 			prev.PendingAction, launchdErr), state, rep)
 		return true
 	}
-	settlePending(job, opts, state, rep, truth, launchdJobs, host, prev, now, notifyFn, stderr)
+	settlePending(job, opts, state, rep, truth, pulseSource, launchdJobs, host, prev, now, notifyFn, stderr)
 	return true
 }
 
@@ -204,6 +206,7 @@ func settlePending(
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	truth recoveryloop.PulseTruth,
+	pulseSource recoveryloop.PulseSourceStatus,
 	launchdJobs map[string]recoveryloop.LaunchdJobInfo,
 	host recoveryloop.HostOps,
 	prev recoveryloop.JobState,
@@ -229,7 +232,9 @@ func settlePending(
 		recordSettledPendingFailure(job, outcome.Reason, now, state, rep, opts, truth, prev, notifyFn, stderr)
 		return
 	}
-	if job.Pulse != "" && !job.PulseIsStructural &&
+	sourceOwnerDown := job.Pulse == recoveryloop.AbsenceAlarmHeartbeatPulse &&
+		pulseSource.RequiresRecovery()
+	if job.Pulse != "" && !job.PulseIsStructural && !sourceOwnerDown &&
 		!truth.VerificationObservationAvailable(job.Pulse, prev.PendingSince, now) {
 		holdPendingUnavailable(job, prev, fmt.Sprintf(
 			"holding verification of %s: pulse %q observation unavailable (%s)",
@@ -306,7 +311,7 @@ func recordSettledPendingFailure(
 		prev.MissedVerificationDeadline = prev.PendingDeadline
 		state.Jobs[job.Name] = prev
 	}
-	recordFailure(job, prev.PendingAction, reason, errors.New(reason), now, state, rep, opts, truth, notifyFn, stderr)
+	recordFailure(job, prev.PendingAction, reason, errors.New(reason), now, prev.PendingSince, state, rep, opts, truth, notifyFn, stderr)
 }
 
 // holdPendingUnavailable leaves an open verification open because a required

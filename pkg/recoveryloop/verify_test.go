@@ -26,7 +26,7 @@ func TestLoadPulseTruth_PresentPulseClears(t *testing.T) {
 	writeFile(t, st, `{"pulses": {"mergeloop-tick": {"since": "2026-09-03T08:00:00Z"}}}`)
 
 	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
-	truth, err := LoadPulseTruth(hb, st, now, time.Hour)
+	truth, _, err := LoadPulseTruth(hb, st, now, time.Hour)
 	if err != nil {
 		t.Fatalf("LoadPulseTruth: %v", err)
 	}
@@ -38,6 +38,42 @@ func TestLoadPulseTruth_PresentPulseClears(t *testing.T) {
 	}
 	if got := truth.AbsentFor("mergeloop-tick", now); got != 6*24*time.Hour+5*time.Minute {
 		t.Errorf("AbsentFor = %s, want 144h5m", got)
+	}
+}
+
+// RL-54: the source heartbeat has its own typed liveness observation. Missing
+// and stale are actionable for the source owner, while no downstream fact is
+// fabricated from unavailable data.
+func TestLoadPulseTruth_ClassifiesMissingAndStaleSource(t *testing.T) {
+	dir := t.TempDir()
+	hb := filepath.Join(dir, "absence-alarm.heartbeat.json")
+	st := filepath.Join(dir, "absence-alarm-state.json")
+	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
+
+	truth, source, err := LoadPulseTruth(hb, st, now, time.Hour)
+	if err != nil {
+		t.Fatalf("missing heartbeat: %v", err)
+	}
+	if source != PulseSourceMissing || len(truth) != 0 {
+		t.Fatalf("missing source = (%s, %#v), want (missing, empty truth)", source, truth)
+	}
+
+	writeFile(t, hb, `{"tick_time":"2026-09-16T05:00:00Z","results":[{"name":"disk-watchdog-tick","status":"present"}]}`)
+	truth, source, err = LoadPulseTruth(hb, st, now, time.Hour)
+	if err == nil {
+		t.Fatal("stale heartbeat did not report why pulse truth was unavailable")
+	}
+	if source != PulseSourceStale || len(truth) != 0 {
+		t.Fatalf("stale source = (%s, %#v), want (stale, empty truth)", source, truth)
+	}
+
+	writeFile(t, hb, `{not-json`)
+	truth, source, err = LoadPulseTruth(hb, st, now, time.Hour)
+	if err == nil {
+		t.Fatal("malformed heartbeat did not report pulse truth unavailable")
+	}
+	if source != PulseSourceUnavailable || len(truth) != 0 {
+		t.Fatalf("malformed source = (%s, %#v), want (unavailable, empty truth)", source, truth)
 	}
 }
 
@@ -58,7 +94,7 @@ func TestPlanJob_PresentPulseOverridesNonZeroExit(t *testing.T) {
 	}
 	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusPresent}}
 
-	action, status, reason := PlanJob(job, nil, truth, launchd, host, host.Now())
+	action, status, reason := PlanJob(job, nil, truth, PulseSourceFresh, launchd, host, host.Now())
 	if action != ActionNone || status != StatusHealthy {
 		t.Errorf("got action=%q status=%q reason=%q; want none/healthy: a present pulse proves the job is alive", action, status, reason)
 	}
@@ -76,7 +112,7 @@ func TestPlanJob_NeverClaimsRecovered(t *testing.T) {
 	}
 	truth := PulseTruth{"mergeloop-tick": {Known: true, Status: absencealarm.StatusAbsent}}
 
-	action, status, _ := PlanJob(job, nil, truth, map[string]LaunchdJobInfo{}, host, host.Now())
+	action, status, _ := PlanJob(job, nil, truth, PulseSourceFresh, map[string]LaunchdJobInfo{}, host, host.Now())
 	if action != ActionBootstrap {
 		t.Fatalf("action = %q, want bootstrap", action)
 	}
@@ -202,7 +238,7 @@ func TestLoadPulseTruth_NonPresentStatusIsNotProofOfLife(t *testing.T) {
 	writeFile(t, st, `{"pulses": {}}`)
 
 	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
-	truth, err := LoadPulseTruth(hb, st, now, time.Hour)
+	truth, _, err := LoadPulseTruth(hb, st, now, time.Hour)
 	if err != nil {
 		t.Fatalf("LoadPulseTruth: %v", err)
 	}
@@ -243,12 +279,15 @@ func TestLoadPulseTruth_MissingTickTimeIsRefused(t *testing.T) {
 	writeFile(t, st, `{"pulses": {}}`)
 
 	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
-	truth, err := LoadPulseTruth(hb, st, now, time.Hour)
+	truth, source, err := LoadPulseTruth(hb, st, now, time.Hour)
 	if err == nil {
 		t.Fatal("a heartbeat with no tick_time was accepted; undated evidence must not confirm a recovery")
 	}
 	if truth.Present("disk-watchdog-tick") {
 		t.Error("facts were returned from an undated heartbeat")
+	}
+	if source != PulseSourceUnavailable {
+		t.Errorf("undated source = %s, want unavailable", source)
 	}
 }
 
@@ -263,7 +302,7 @@ func TestLoadPulseTruth_CorruptAlarmStateYieldsError(t *testing.T) {
 	writeFile(t, st, `{ this is not json`)
 
 	now := time.Date(2026, 9, 9, 8, 5, 0, 0, time.UTC)
-	if _, err := LoadPulseTruth(hb, st, now, time.Hour); err == nil {
+	if _, _, err := LoadPulseTruth(hb, st, now, time.Hour); err == nil {
 		t.Fatal("a corrupt alarm state was accepted silently")
 	}
 }
@@ -394,12 +433,15 @@ func TestLoadPulseTruth_FutureTickTimeIsRefused(t *testing.T) {
 	writeFile(t, st, `{"pulses": {}}`)
 
 	now := time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC)
-	truth, err := LoadPulseTruth(hb, st, now, time.Hour)
+	truth, source, err := LoadPulseTruth(hb, st, now, time.Hour)
 	if err == nil {
 		t.Fatal("a heartbeat dated a week in the future was accepted")
 	}
 	if truth.Present("disk-watchdog-tick") {
 		t.Error("facts were returned from a future-dated heartbeat")
+	}
+	if source != PulseSourceUnavailable {
+		t.Errorf("future-dated source = %s, want unavailable", source)
 	}
 }
 
@@ -462,7 +504,7 @@ func TestPlanJob_LoadedOnlyPulseDoesNotOverrideRepeatedFailures(t *testing.T) {
 	}
 	truth := PulseTruth{"mergeloop-loaded": {Known: true, Status: absencealarm.StatusPresent}}
 
-	action, status, reason := PlanJob(job, nil, truth, launchd, host, host.Now())
+	action, status, reason := PlanJob(job, nil, truth, PulseSourceFresh, launchd, host, host.Now())
 	if action == ActionNone || status == StatusHealthy {
 		t.Errorf("got action=%q status=%q reason=%q; a loaded-only pulse says the service exists, not that its runs succeed",
 			action, status, reason)

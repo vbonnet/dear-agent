@@ -60,7 +60,7 @@ func TestPlan_MissingBinary_Reinstall(t *testing.T) {
 	launchdJobs := map[string]LaunchdJobInfo{
 		"com.example.myjob": {Loaded: true, Status: 0},
 	}
-	action, status, _ := PlanJob(job, nil, nil, launchdJobs, host, host.Now())
+	action, status, _ := PlanJob(job, nil, nil, PulseSourceFresh, launchdJobs, host, host.Now())
 	if action != ActionReinstall {
 		t.Fatalf("expected ActionReinstall, got %s", action)
 	}
@@ -79,7 +79,7 @@ func TestPlan_UnloadedJob_Bootstrap(t *testing.T) {
 		LaunchdLabel: "com.example.myjob",
 	}
 	launchdJobs := map[string]LaunchdJobInfo{} // empty, so not loaded
-	action, status, reason := PlanJob(job, nil, nil, launchdJobs, host, host.Now())
+	action, status, reason := PlanJob(job, nil, nil, PulseSourceFresh, launchdJobs, host, host.Now())
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap, got %s", action)
 	}
@@ -103,7 +103,7 @@ func TestPlan_Exit78_Rebootstrap(t *testing.T) {
 	launchdJobs := map[string]LaunchdJobInfo{
 		"com.example.myjob": {Loaded: true, Status: 78},
 	}
-	action, status, reason := PlanJob(job, nil, nil, launchdJobs, host, host.Now())
+	action, status, reason := PlanJob(job, nil, nil, PulseSourceFresh, launchdJobs, host, host.Now())
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap, got %s", action)
 	}
@@ -128,12 +128,69 @@ func TestPlan_PulseAlarming_Kickstart(t *testing.T) {
 		"com.example.myjob": {Loaded: true, Status: 0, PID: 1234},
 	}
 	truth := PulseTruth{"myjob-pulse": {Known: true, Status: absencealarm.StatusAbsent}}
-	action, status, _ := PlanJob(job, nil, truth, launchdJobs, host, host.Now())
+	action, status, _ := PlanJob(job, nil, truth, PulseSourceFresh, launchdJobs, host, host.Now())
 	if action != ActionKickstart {
 		t.Fatalf("expected ActionKickstart, got %s", action)
 	}
 	if status != StatusUnhealthy {
 		t.Fatalf("expected StatusUnhealthy, got %s", status)
+	}
+}
+
+// RL-52: a structural pulse is a duplicate observation of launchd loaded
+// state. An older absent or undetermined result must not override the current
+// direct launchd snapshot and restart a healthy service.
+func TestPlan_StructuralPulseAlarmDoesNotOverrideLaunchd(t *testing.T) {
+	host, _ := mockHostOps()
+	job := Job{
+		Name:              "mergeloop",
+		Pulse:             "mergeloop-loaded",
+		PulseIsStructural: true,
+		LaunchdLabel:      "com.dear-agent.mergeloop",
+	}
+	launchdJobs := map[string]LaunchdJobInfo{
+		job.LaunchdLabel: {Loaded: true, Status: 0},
+	}
+	for _, status := range []absencealarm.Status{
+		absencealarm.StatusAbsent,
+		absencealarm.StatusUndetermined,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			truth := PulseTruth{job.Pulse: {Known: true, Status: status}}
+			action, gotStatus, _ := PlanJob(
+				job, nil, truth, PulseSourceFresh, launchdJobs, host, host.Now())
+			if action != ActionNone || gotStatus != StatusHealthy {
+				t.Fatalf("PlanJob = (%s, %s), want (%s, %s)",
+					action, gotStatus, ActionNone, StatusHealthy)
+			}
+		})
+	}
+}
+
+// RL-54: missing or stale source data is conclusive only for the process that
+// owns the canonical pulse-truth heartbeat.
+func TestPlan_PulseTruthSourceLivenessRestartsOwner(t *testing.T) {
+	host, _ := mockHostOps()
+	job := Job{
+		Name:         "absence-alarm",
+		Pulse:        AbsenceAlarmHeartbeatPulse,
+		LaunchdLabel: "com.dear-agent.absence-alarm",
+	}
+	launchdJobs := map[string]LaunchdJobInfo{
+		job.LaunchdLabel: {Loaded: true, Status: 0},
+	}
+	for _, source := range []PulseSourceStatus{PulseSourceMissing, PulseSourceStale} {
+		t.Run(source.String(), func(t *testing.T) {
+			action, status, reason := PlanJob(
+				job, nil, nil, source, launchdJobs, host, host.Now())
+			if action != ActionKickstart || status != StatusUnhealthy {
+				t.Fatalf("PlanJob = (%s, %s), want (%s, %s)",
+					action, status, ActionKickstart, StatusUnhealthy)
+			}
+			if !strings.Contains(reason, source.String()) {
+				t.Fatalf("reason %q does not identify %s source", reason, source)
+			}
+		})
 	}
 }
 
@@ -155,7 +212,7 @@ func TestPlan_UnexpiredSnooze_Suppressed(t *testing.T) {
 	}
 	// Job is completely unloaded
 	launchdJobs := map[string]LaunchdJobInfo{}
-	action, status, reason := PlanJob(job, snoozes, nil, launchdJobs, host, now)
+	action, status, reason := PlanJob(job, snoozes, nil, PulseSourceFresh, launchdJobs, host, now)
 	if action != ActionNone {
 		t.Fatalf("expected ActionNone for snoozed job, got %s", action)
 	}
@@ -182,7 +239,7 @@ func TestPlan_UnloadedWithoutSnooze_AttemptsRecovery(t *testing.T) {
 		"otherjob": {Pulse: "otherjob", Until: now.Add(time.Hour)},
 	}
 	launchdJobs := map[string]LaunchdJobInfo{}
-	action, status, _ := PlanJob(job, snoozes, nil, launchdJobs, host, now)
+	action, status, _ := PlanJob(job, snoozes, nil, PulseSourceFresh, launchdJobs, host, now)
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap, got %s", action)
 	}
@@ -206,7 +263,7 @@ func TestPlan_ExpiredSnooze_EligibleForRecovery(t *testing.T) {
 		"myjob": {Pulse: "myjob", Until: now.Add(-10 * time.Minute), Reason: "expired yesterday"},
 	}
 	launchdJobs := map[string]LaunchdJobInfo{}
-	action, status, _ := PlanJob(job, snoozes, nil, launchdJobs, host, now)
+	action, status, _ := PlanJob(job, snoozes, nil, PulseSourceFresh, launchdJobs, host, now)
 	if action != ActionBootstrap {
 		t.Fatalf("expected ActionBootstrap for expired snooze, got %s", action)
 	}

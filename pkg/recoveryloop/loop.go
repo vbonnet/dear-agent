@@ -313,6 +313,7 @@ func PlanJob(
 	job Job,
 	snoozes map[string]absencealarm.Snooze,
 	truth PulseTruth,
+	pulseSource PulseSourceStatus,
 	launchdJobs map[string]LaunchdJobInfo,
 	host HostOps,
 	now time.Time,
@@ -339,8 +340,19 @@ func PlanJob(
 		if info.Status == 78 || info.Status == -9 {
 			return ActionBootstrap, StatusUnhealthy, fmt.Sprintf("launchd job %s exited with status %d (LWCR/codesigning issue)", job.LaunchdLabel, info.Status)
 		}
-		// RL-04: pulse absent or undetermined.
-		if job.Pulse != "" && truth.Alarming(job.Pulse) {
+		// The absence-alarm heartbeat is also the liveness observation for the
+		// process that owns the pulse-truth source. Missing or stale source data
+		// is conclusive for that owner alone; every downstream pulse remains
+		// unavailable and cannot trigger remediation (RL-54).
+		if job.Pulse == AbsenceAlarmHeartbeatPulse && pulseSource.RequiresRecovery() {
+			return ActionKickstart, StatusUnhealthy, fmt.Sprintf(
+				"pulse truth source %q is %s", job.Pulse, pulseSource)
+		}
+		// RL-04: an alarming activity pulse means the scheduled work is not
+		// happening. A structural pulse duplicates the launchd-loaded predicate
+		// already observed above; its older or unavailable result must not
+		// overrule the current direct launchd snapshot (RL-52).
+		if job.Pulse != "" && !job.PulseIsStructural && truth.Alarming(job.Pulse) {
 			reason := fmt.Sprintf("launchd job %s is loaded but pulse %q is alarming", job.LaunchdLabel, job.Pulse)
 			if d := truth.AbsentFor(job.Pulse, now); d > 0 {
 				reason += fmt.Sprintf(" (absent for %s)", d.Round(time.Minute))

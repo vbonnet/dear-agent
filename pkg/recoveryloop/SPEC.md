@@ -9,7 +9,7 @@
 
      CLI (cmd/recovery-loop/*_test.go):
        RL-07 through RL-17; RL-20; RL-24, RL-26, RL-27;
-       RL-29 through RL-32; RL-34 through RL-41; RL-44 through RL-50. -->
+       RL-29 through RL-32; RL-34 through RL-41; RL-44 through RL-55. -->
 
 **Status:** Proposed
 **Scope:** Host critical job self-healing loop and escalation engine
@@ -42,7 +42,7 @@ Every recovery attempt and outcome is journaled to ensure that recovery actions
 themselves remain observable and cannot fail silently.
 
 Recovery is an observed post-condition, never an executed command. RL-23
-through RL-50 require clearable current pulse truth, explicit present evidence,
+through RL-55 require clearable current pulse truth, explicit present evidence,
 and post-action observation before recovery is recorded.
 
 ## Applicability
@@ -59,7 +59,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-03** When a critical job's launchd service is loaded but reports exit code 78, the system shall attempt to bootout and re-bootstrap the service.
 
-**RL-04** When a critical job's pulse is reported absent or undetermined in the current pulse truth (RL-23) and its service is loaded, the system shall attempt to restart the job via launchctl kickstart.
+**RL-04** When a critical job's ACTIVITY pulse is reported absent or undetermined in the current pulse truth (RL-23) and its service is loaded, the system shall attempt to restart the job via launchctl kickstart. A structural pulse is governed by RL-52 instead.
 
 **RL-05** When a critical job is covered by an unexpired snooze entry in the snooze configuration, the system shall classify the job as SNOOZED and the system shall not attempt any recovery action for that job.
 
@@ -73,9 +73,9 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-10** The system shall append a structured record to the recovery journal for every recovery attempt, recording the job name, action taken, outcome status, consecutive attempt count, whether human intervention is needed, and any error message.
 
-**RL-11** When all critical jobs are healthy, snoozed, or successfully recovered, the system shall exit 0.
+**RL-11** When all critical jobs are healthy, snoozed, or successfully recovered, with no recovery awaiting verification, the system shall exit 0.
 
-**RL-12** When at least one recovery attempt fails, a required observation is unavailable, or a job remains in human-needed escalation, the system shall exit 1.
+**RL-12** When at least one recovery attempt fails, awaits verification, lacks a required observation, or remains in human-needed escalation, the system shall exit 1.
 
 **RL-13** When configuration loading fails or invalid arguments are supplied, the system shall exit 2 with a usage error.
 
@@ -109,17 +109,17 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-28** When a structural condition (missing binary, unloaded launchd job, or status 78/-9) persists after a recovery action, the system shall classify the recovery as FAILED.
 
-**RL-29** When a job's pulse was not observed by any evidence source, the system shall not classify the recovery as RECOVERED.
+**RL-29** When a job's ACTIVITY pulse was not observed by any evidence source, the system shall not classify the recovery as RECOVERED.
 
 **RL-30** When a tick observes that the verification grace period has expired and the job's pulse has not returned, the system shall increment the consecutive failure count, and when that count reaches the escalation threshold the system shall append a `recovery.human_needed` record to the absence-alarm journal naming the pulse and how long it has been absent.
 
 **RL-31** When a job's consecutive failure count reaches the give-up threshold, the system shall suppress further remediation for that job and the system shall continue to report it as requiring human intervention.
 
-**RL-32** When the absence-alarm heartbeat is older than the maximum heartbeat age, or carries no tick time at all, the system shall treat all pulse truth as unavailable rather than acting on stale evidence.
+**RL-32** When the absence-alarm heartbeat is older than the maximum heartbeat age, or carries no tick time at all, the system shall treat all downstream pulse truth as unavailable rather than acting on stale evidence. RL-54 separately governs the source owner's liveness classification.
 
 **RL-33** The system shall treat only an explicitly present pulse status as evidence of life, and the system shall not derive presence from the absence of an alarm.
 
-**RL-34** When a job declares a pulse and no pulse truth is available for it, the system shall classify the job as unverifiable, and the system shall not classify it as HEALTHY or reset its consecutive failure count.
+**RL-34** When a job declares an ACTIVITY pulse and no pulse truth is available for it, the system shall classify the job as unverifiable, and the system shall not classify it as HEALTHY or reset its consecutive failure count.
 
 **RL-35** When a job is covered by an unexpired snooze, the system shall honour the snooze before settling any pending verification, and the system shall not escalate that job.
 
@@ -153,25 +153,36 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-50** When a pending deadline lies more than one verification grace period in the future, the system shall bound the remaining wait to one grace period without accepting evidence from before the original action as recovery proof.
 
+**RL-51** When a recovery action executes, the system shall use the action's actual execution time as the boundary for subsequent recovery evidence. When a tick takes no recovery action, including suppression at the give-up threshold, the system shall not advance that boundary.
+
+**RL-52** When a job's pulse only duplicates a structural launchd predicate, the system shall decide current health from the direct launchd observation and shall not let older, absent, or unavailable pulse truth override that observation. A current healthy launchd observation may clear a prior structural failure.
+
+**RL-53** When the last successful escalation timestamp lies in the future relative to the current tick, the system shall treat escalation as due immediately and shall replace that timestamp only after an escalation sink accepts the new delivery.
+
+**RL-54** When the canonical pulse-truth source heartbeat is missing or stale, the system shall infer source-unavailability remediation only for the job that owns that heartbeat, shall treat downstream pulse facts as unavailable, and shall require fresh post-action source evidence before recording the owner as recovered. If the source remains missing or stale after the verification grace period, the system shall count the owner's recovery attempt as failed. Independent direct structural predicates remain actionable for every job. When the source is malformed, unreadable, or future-dated, the system shall treat even the owner's source condition as unavailable and shall not remediate from that observation.
+
+**RL-55** While any recovery is awaiting verification, the system shall expose that pending state in its report and exit nonzero.
+
 ## BDD Traceability
 
 - Test consequence: Deterministic Go unit and CLI integration tests listed
-  below exercise RL-01 through RL-50; the existing guardrail feature checks
+  below exercise RL-01 through RL-55; the existing guardrail feature checks
   only co-located SPEC presence and RL-21 wording.
 - Guardrail feature: `agm/test/bdd/features/observability_package_guardrails.feature`
   verifies that this co-located specification exists and that RL-21 declares
   bounded execution. It does not execute recovery-loop outcomes.
-- BDD disposition for RL-47 through RL-50: no scenario change. These are
+- BDD disposition for RL-47 through RL-55: no scenario change. These are
   deterministic evidence-timing, state-transition, reporting, and exit-code
   boundaries exercised directly by the Go tests below.
 - Planning and storage tests: `pkg/recoveryloop/loop_test.go`
-  (RL-01..RL-06, RL-10, RL-18, RL-19, RL-21, RL-22)
+  (RL-01..RL-06, RL-10, RL-18, RL-19, RL-21, RL-22, RL-52, RL-54)
 - Pulse-truth and verification tests: `pkg/recoveryloop/verify_test.go`
-  (RL-23..RL-29, RL-32, RL-33, RL-39, RL-42, RL-43, RL-45, RL-47)
+  (RL-23..RL-29, RL-32, RL-33, RL-39, RL-42, RL-43, RL-45, RL-47, RL-54)
 - CLI tests: `cmd/recovery-loop/main_test.go`
   (RL-09, RL-11..RL-17, RL-46)
 - Multi-tick verified-recovery CLI tests:
   `cmd/recovery-loop/verified_test.go` and
-  `cmd/recovery-loop/observation_test.go`
+  `cmd/recovery-loop/observation_test.go`, plus focused review regressions in
+  `cmd/recovery-loop/review_regression_test.go`
   (RL-07, RL-08, RL-10, RL-12, RL-20, RL-24, RL-26, RL-27,
-  RL-29..RL-32, RL-34..RL-41, RL-44, RL-45, RL-47..RL-50)
+  RL-29..RL-32, RL-34..RL-41, RL-44, RL-45, RL-47..RL-55)

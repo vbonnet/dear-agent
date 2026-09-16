@@ -24,8 +24,8 @@
 //	recovery-loop --heartbeat PATH      # self-liveness heartbeat file (JSON)
 //
 // Exit codes: 0 = all jobs healthy, snoozed, or successfully recovered;
-// 1 = at least one recovery failed, requires human intervention, or could not
-// be observed safely;
+// 1 = at least one recovery failed, awaits verification, requires human
+// intervention, or could not be observed safely;
 // 2 = usage or configuration error.
 package main
 
@@ -260,7 +260,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	// that reports presence as well as absence. The escalation journal is
 	// append-only and records absences only, so a pulse that recovered would
 	// stay "alarming" in it forever.
-	truth, err := recoveryloop.LoadPulseTruth(opts.absenceHB, opts.absenceState, now, opts.maxHBAge)
+	truth, pulseSource, err := recoveryloop.LoadPulseTruth(opts.absenceHB, opts.absenceState, now, opts.maxHBAge)
 	if err != nil {
 		fmt.Fprintf(stderr, "recovery-loop: load pulse truth: %v\n", err)
 	}
@@ -276,7 +276,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	}
 
 	for _, job := range jobs {
-		processJob(ctx, job, opts, &state, &rep, snoozes, truth, launchdJobs, launchdErr, host, notifyFn, now, stderr)
+		processJob(ctx, job, opts, &state, &rep, snoozes, truth, pulseSource, launchdJobs, launchdErr, host, notifyFn, now, stderr)
 	}
 
 	if !opts.dryRun {
@@ -290,7 +290,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 
 	emitReport(stdout, stderr, rep, opts.jsonOut)
 
-	if rep.Failed > 0 || rep.HumanNeeded > 0 || rep.Unavailable > 0 {
+	if rep.Failed > 0 || rep.Pending > 0 || rep.HumanNeeded > 0 || rep.Unavailable > 0 {
 		return 1
 	}
 	return 0
@@ -362,11 +362,15 @@ func evidenceStampCLI(t time.Time) string {
 func pulseVerdictIsConclusive(
 	job recoveryloop.Job,
 	truth recoveryloop.PulseTruth,
+	pulseSource recoveryloop.PulseSourceStatus,
 	prev recoveryloop.JobState,
 	now time.Time,
 ) bool {
 	if job.Pulse == "" || job.PulseIsStructural {
 		return false
+	}
+	if job.Pulse == recoveryloop.AbsenceAlarmHeartbeatPulse && pulseSource.RequiresRecovery() {
+		return now.After(prev.PendingDeadline)
 	}
 	return truth.VerificationObservationAvailable(job.Pulse, prev.PendingSince, now) &&
 		truth.Alarming(job.Pulse) && now.After(prev.PendingDeadline)

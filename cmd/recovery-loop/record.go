@@ -57,7 +57,7 @@ func recordClear(
 	// condition is the original defect wearing a different hat: a recovery
 	// announced without observing the thing that was broken.
 	unverifiable := status == recoveryloop.StatusHealthy &&
-		job.Pulse != "" && !truth.Present(job.Pulse)
+		job.Pulse != "" && !job.PulseIsStructural && !truth.Present(job.Pulse)
 	if unverifiable {
 		recordUnverifiable(job, fmt.Sprintf(
 			"%s, but pulse %q was not observed: health unverifiable",
@@ -72,7 +72,7 @@ func recordClear(
 	// just recorded evaporate without anything new being seen (RL-39).
 	if status == recoveryloop.StatusHealthy && prev.ConsecutiveFailures > 0 {
 		verifiedReason := "condition cleared: " + reason
-		if job.Pulse != "" {
+		if job.Pulse != "" && !job.PulseIsStructural {
 			var admissible bool
 			verifiedReason, admissible = clearingEvidenceReason(job, reason, prev, truth, now)
 			if !admissible {
@@ -267,7 +267,7 @@ func recordPending(
 	}
 	state.Jobs[job.Name] = recoveryloop.JobState{
 		ConsecutiveFailures: prev.ConsecutiveFailures,
-		LastAttemptTime:     now,
+		LastAttemptTime:     actionAt,
 		LastAction:          action,
 		LastStatus:          recoveryloop.StatusPending,
 		HumanNeeded:         prev.HumanNeeded,
@@ -346,7 +346,6 @@ func recordGivenUp(
 	full := fmt.Sprintf("%s; %d consecutive recoveries did not clear it, remediation suppressed pending a human",
 		reason, prev.ConsecutiveFailures)
 	st := prev
-	st.LastAttemptTime = now
 	st.LastStatus = recoveryloop.StatusFailed
 	st.HumanNeeded = true
 	st.PendingAction = ""
@@ -371,9 +370,18 @@ func recordGivenUp(
 	// The durable escalation is rate-limited: appending an identical record
 	// to the human-facing sink every ten minutes forever is how that sink
 	// stops being read, which is the failure this change exists to fix.
-	if prev.LastEscalated.IsZero() || !now.Before(prev.LastEscalated.Add(reEscalateInterval)) {
+	if escalationDue(prev.LastEscalated, now) {
 		escalate(job, action, prev.ConsecutiveFailures, full, now, state, opts, truth, notifyFn, stderr)
 	}
+}
+
+// escalationDue treats a future delivery timestamp as a corrected-clock
+// artifact, not as permission to silence a standing outage until that future
+// instant plus the normal rate-limit window. The timestamp is left untouched
+// until a sink accepts a fresh delivery, preserving RL-40 on delivery failure.
+func escalationDue(lastEscalated, now time.Time) bool {
+	return lastEscalated.IsZero() || lastEscalated.After(now) ||
+		!now.Before(lastEscalated.Add(reEscalateInterval))
 }
 
 func recordFailure(
@@ -382,6 +390,7 @@ func recordFailure(
 	reason string,
 	execErr error,
 	now time.Time,
+	actionAt time.Time,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 	opts *options,
@@ -389,6 +398,9 @@ func recordFailure(
 	notifyFn notifier,
 	stderr io.Writer,
 ) {
+	if actionAt.IsZero() {
+		actionAt = now
+	}
 	prev := state.Jobs[job.Name]
 	attempts := prev.ConsecutiveFailures + 1
 	humanNeeded := attempts >= opts.escalateAfter
@@ -399,7 +411,7 @@ func recordFailure(
 
 	state.Jobs[job.Name] = recoveryloop.JobState{
 		ConsecutiveFailures:        attempts,
-		LastAttemptTime:            now,
+		LastAttemptTime:            actionAt,
 		LastAction:                 action,
 		LastStatus:                 recoveryloop.StatusFailed,
 		HumanNeeded:                humanNeeded,

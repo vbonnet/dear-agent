@@ -129,10 +129,11 @@ func TestCLI_OpenVerificationLaunchdFailureStaysPendingAndExitsUnavailable(t *te
 	}
 }
 
-// RL-12/RL-34: an open verification cannot turn missing pulse truth into a
+// RL-12/RL-34/RL-54: an open verification cannot turn invalid pulse truth into a
 // green pending tick or, after the deadline, into a fabricated job failure.
-// The attempt remains pending and the observation failure stays loud.
-func TestCLI_OpenVerificationMissingPulseStaysPendingAndUnavailable(t *testing.T) {
+// Missing/stale source data is a negative owner observation under RL-54, but
+// malformed data remains unavailable. The attempt stays pending and loud.
+func TestCLI_OpenVerificationInvalidPulseStaysPendingAndUnavailable(t *testing.T) {
 	t0 := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name string
@@ -144,6 +145,7 @@ func TestCLI_OpenVerificationMissingPulseStaysPendingAndUnavailable(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
 			f.write(t, f.cfg, absenceAlarmJob)
+			f.write(t, f.absHB, `{not-json`)
 			f.write(t, f.state, fmt.Sprintf(
 				`{"jobs":{"absence-alarm":{"consecutive_failures":1,"last_action":"kickstart",`+
 					`"last_status":"pending-verification","pending_action":"kickstart",`+
@@ -160,16 +162,16 @@ func TestCLI_OpenVerificationMissingPulseStaysPendingAndUnavailable(t *testing.T
 				t.Errorf("exit = %d, want 1 while pulse observation is unavailable", code)
 			}
 			if len(*calls) != 0 {
-				t.Errorf("missing pulse truth fired a second remediation: %v", *calls)
+				t.Errorf("invalid pulse truth fired a second remediation: %v", *calls)
 			}
 			js := f.jobState(t, "absence-alarm")
 			if js.LastStatus != recoveryloop.StatusPending || js.ConsecutiveFailures != 1 ||
 				!js.PendingSince.Equal(t0) || !js.PendingDeadline.Equal(t0.Add(30*time.Minute)) ||
 				!js.MissedVerificationDeadline.IsZero() {
-				t.Errorf("missing pulse truth changed the pending lifecycle: %+v", js)
+				t.Errorf("invalid pulse truth changed the pending lifecycle: %+v", js)
 			}
 			if len(f.recoveryRecords(t)) != 0 {
-				t.Error("missing pulse truth fabricated a recovery outcome")
+				t.Error("invalid pulse truth fabricated a recovery outcome")
 			}
 			var hb recoveryloop.Heartbeat
 			raw, err := os.ReadFile(f.heartbeat)
