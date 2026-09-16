@@ -31,6 +31,26 @@ record it as an applicability-scoped requirement in the harness-neutral owner.
 Do not create a `SPEC.md` beside a harness or implementation merely because it
 translates or exposes the behavior.
 
+## Implementation projections
+
+When the target repository's discovered governance contract declares an
+implementation-owner projection such as `SPEC.owner`, follow that repository's
+normative ownership and coverage contracts for the exact declaration syntax,
+target constraints, and inherited checks. Do not copy those repository-specific
+rules into this portable model.
+
+The projection is traceability, not a second normative contract. Run each
+projection and canonical-target check exactly where that repository's contract
+assigns it, and record every absent evidence layer as unavailable. Use a
+projection only when the implementation adds no distinct observable contract;
+a new observable requires an ownership decision in the neutral product or
+domain.
+
+Do not invent `SPEC.owner` in a target repository that does not declare this
+capability. Record the projection layer as unavailable, follow the repository's
+native ownership mechanism when one exists, or stop for a product decision
+when neutral ownership cannot be represented.
+
 ## Shared contract pattern
 
 State the outcome once, then make implementations examples:
@@ -71,6 +91,27 @@ domain owner, preserve or deliberately migrate stable requirement IDs, update
 reciprocal BDD links, record every active member's applicability, and retain
 the source or test evidence for native conformance. Stop for maintainer review
 when ownership or observable semantics are uncertain.
+
+When the target repository declares a deterministic source guard for contract
+migration or retirement, follow that guard's admission contract before asking
+for semantic review. Passing structural checks is not semantic deletion
+authority; the changed paths and reviewed diff must still demonstrate stable-ID
+preservation or a deliberate retirement decision.
+
+When the target repository declares `SPEC.owner` projection support and
+implementation source survives, preserve its ownership projection or supply an
+allowed local replacement as required by that repository's guard. If either the
+projection or guard capability is absent, record that evidence layer as
+unavailable and follow the repository's native migration checks; do not invent
+guard evidence or import dear-agent's blocking rules.
+
+When a repository's guard classifies an added directory as a possible
+relocation target, authors must preserve a valid ownership projection or an
+allowed local replacement there before semantic review. That is an
+author-facing admission consequence, not proof of move intent. The exact
+relocation evidence and conservative false-positive boundary belong only in
+the target repository's normative guard contract; discover and follow that
+contract instead of copying its algorithm into this portable model.
 
 ## Capability variation pattern
 

@@ -296,7 +296,7 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 		assertDecisionAndCode(t, result, DecisionBlock, "missing-implementation-spec-owner")
 	})
 
-	t.Run("owner retirement ignores unrelated implementation changes", func(t *testing.T) {
+	t.Run("owner retirement ignores modifications and different-object additions", func(t *testing.T) {
 		fixture := newFixture(t)
 		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
 		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
@@ -314,6 +314,30 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		if result.Decision != DecisionReminder || len(result.Findings) != 0 || strings.Join(result.Changed, "\n") != ".opencode/plugins/SPEC.owner" {
 			t.Fatalf("result = %#v, want retirement reminder without unrelated ownership findings", result)
+		}
+	})
+
+	t.Run("owner retirement treats an unrelated object-identical addition as a relocation candidate", func(t *testing.T) {
+		fixture := newFixture(t)
+		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
+		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
+		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
+		fixture.git("commit", "-m", "add implementation owner edge")
+		for _, relative := range []string{".opencode/plugins/SPEC.owner", ".opencode/plugins/adapter.mjs"} {
+			if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(relative))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// With rename inference disabled, this independently written blob is
+		// indistinguishable from a move in the immutable D/A snapshot.
+		fixture.write("internal/unrelated/adapter.mjs", "export default {};\n")
+		fixture.git("add", "-A", "--", ".opencode/plugins/SPEC.owner", ".opencode/plugins/adapter.mjs", "internal/unrelated/adapter.mjs")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		assertDecisionAndCode(t, result, DecisionBlock, "missing-implementation-spec-owner")
+		for _, finding := range result.Findings {
+			if finding.Code == "missing-implementation-spec-owner" && finding.Path != "internal/unrelated/SPEC.owner" {
+				t.Fatalf("finding path = %q, want relocation candidate ownership path", finding.Path)
+			}
 		}
 	})
 
