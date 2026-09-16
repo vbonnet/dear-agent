@@ -932,3 +932,54 @@ func TestNoStallEscalationOnATickThatMerges(t *testing.T) {
 		t.Errorf("a durable escalation was recorded for a PR that merged: %v", got.EscalatedAt)
 	}
 }
+
+// TestNoFalseStallAfterSuccessfulRebase pins the review finding that stall
+// escalation was gated on res.Merged alone.
+//
+// A merge is not the only way a tick makes progress. A behind PR whose rebase
+// cooldown has expired is rebased by this very tick, which is real forward
+// motion, but the stall branch compared only the merge counter and therefore
+// escalated the PR to a human anyway. The same false page fires when the tick's
+// progress was spawning a repair agent. Escalation must be judged on whether
+// this tick acted, not on whether it merged.
+func TestNoFalseStallAfterSuccessfulRebase(t *testing.T) {
+	prs := []PR{{Number: 11, MergeStateStatus: "BEHIND", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	reb := &fakeRebaser{}
+	var evs []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{
+		Rebaser: reb,
+		Clock:   func() time.Time { return now },
+		Audit:   func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+	d.RebaseCooldown = 30 * time.Minute
+
+	// Tick one rebases and anchors the clock.
+	if _, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	if len(reb.calls) != 1 {
+		t.Fatalf("precondition: want 1 rebase on the first tick, got %d", len(reb.calls))
+	}
+
+	// Past both the stall threshold and the rebase cooldown, so this tick is
+	// stalled on entry yet rebases successfully before the stall is reported.
+	evs = nil
+	now = now.Add(70 * time.Minute)
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if res.Rebased != 1 {
+		t.Fatalf("precondition: want the second tick to rebase, got Rebased=%d", res.Rebased)
+	}
+	if hasAction(evs, "stall_detected") {
+		t.Errorf("a tick that successfully rebased must not also escalate the PR as stalled, got %v",
+			auditActions(evs))
+	}
+	if res.Stalled != 0 {
+		t.Errorf("Stalled = %d, want 0: the tick made progress", res.Stalled)
+	}
+}

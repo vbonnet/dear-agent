@@ -304,11 +304,14 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	if stalled {
 		stallDetail = fmt.Sprintf("no action since %s", stallSince(rec).Format(time.RFC3339))
 	}
-	mergedBefore := res.Merged
+	// Progress is any forward motion this tick, not a merge alone. Gating on
+	// res.Merged alone meant a behind PR that this very tick rebased, or one
+	// whose repair agent this tick spawned, was still escalated as stalled.
+	progressBefore := res.Merged + res.Rebased + res.AgentsSpawn
 
 	state := d.act(ctx, pr, cls, now, res)
 
-	if stalled && res.Merged == mergedBefore {
+	if stalled && res.Merged+res.Rebased+res.AgentsSpawn == progressBefore {
 		res.Stalled++
 		d.metrics().recordStall(ctx, pr.Number, cls.State)
 		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected", Detail: stallDetail})
