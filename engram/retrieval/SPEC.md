@@ -56,7 +56,20 @@ search.
 
 **ERT-11** When parsed results are returned, the system shall record best-effort access metadata for each returned Engram path.
 
-**ERT-12** When the retrieval service is closed, the system shall persist pending access metadata and shall not fail the caller if that persistence fails.
+**ERT-12** When the retrieval service is closed, the system shall attempt to persist pending access metadata, shall retain any record it could not persist, and shall not fail the caller if that persistence fails.
+
+## Retired requirement IDs
+
+`RETRR-01` and `RETRR-02` were the former public IDs for this package. They are
+retired deliberately, not dropped: this SPEC now states the same behaviour at
+the granularity the implementation actually has, so a one-to-one rename would
+have been misleading. The mapping is recorded here for any external
+traceability still keyed to the old IDs.
+
+| Retired | Replaced by | Note |
+| --- | --- | --- |
+| `RETRR-01` | `ERT-02`, `ERT-03`, `ERT-04`, `ERT-09` | Path resolution, indexing, candidate selection and the bounded result limit are now separate requirements. |
+| `RETRR-02` | `ERT-07` | Degrading to deterministic local results when the ranking provider is unavailable. |
 
 ## Behavioral Invariants
 
