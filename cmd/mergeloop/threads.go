@@ -448,6 +448,25 @@ func unaddressedBotComment(comments []threadComment, want mergeloop.ThreadSeveri
 		if mergeloop.ClassifyCommentSeverity(c.body) != want {
 			continue
 		}
+		// SeverityUnknown covers two opposite cases.
+		//
+		// A comment carrying a marker this parser could not read IS a finding,
+		// and must fail closed: that is what catches a future badge format.
+		//
+		// Routine bot prose carrying no marker at all is different. After a
+		// person answers a finding, a bot acknowledgement was reported as an
+		// unaddressed unknown, which refused every merge on a resolved thread
+		// forever with nothing for anyone to go and fix.
+		//
+		// A thread nobody human ever touched still fails closed on markerless
+		// prose, because then there is no evidence anyone read it. The
+		// discriminator is human engagement ANYWHERE in the thread, not just
+		// after this comment: the person answered the finding, and the bot
+		// spoke last only to acknowledge them.
+		if want == mergeloop.SeverityUnknown &&
+			!mergeloop.HasSeverityMarkerShape(c.body) && humanSpokeAnywhere(comments) {
+			continue
+		}
 		if !answeredAfter(comments, c) {
 			return i, true
 		}
@@ -805,3 +824,17 @@ var (
 	dryRunCaveatMu   sync.Mutex
 	dryRunCaveatSeen = map[int]bool{}
 )
+
+// humanSpokeAnywhere reports whether any real person commented in this thread.
+//
+// Unlike answeredAfter this ignores ordering, and that is the point: it is only
+// used to decide whether markerless bot prose is a finding at all, where the
+// person's comment necessarily PRECEDES the acknowledgement that follows it.
+func humanSpokeAnywhere(comments []threadComment) bool {
+	for _, c := range comments {
+		if isHumanActor(c.typename, c.author) {
+			return true
+		}
+	}
+	return false
+}

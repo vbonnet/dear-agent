@@ -122,15 +122,36 @@ var (
 	// whatever its alt text is spelled, which is the part that can actually be
 	// validated. Keying only on the alt text let `![Priority P1](...)` go
 	// uncounted and hide behind a valid P2 in the same comment.
+	// The destination classes exclude "[" so a match can never run past the
+	// start of a LATER marker. With a plain [^)]* an unterminated badge
+	// swallowed everything up to the next badge's closing paren and counted the
+	// pair as one, leaving counted == parsed so nothing looked unread. The
+	// final branch then catches an unterminated badge on its own, which is what
+	// makes the malformed marker countable at all. Ordered: a well-formed badge
+	// still matches an earlier branch and is counted exactly once.
 	codexBadgeShape = regexp.MustCompile(
-		`!\[P\d+ Badge\]\([^)]*\)|!\[[^\]]*\]\(https://img\.shields\.io/badge/P\d+[^)]*\)`)
+		`!\[P\d+ Badge\]\([^)\[]*\)|!\[[^\]]*\]\(https://img\.shields\.io/badge/P\d+[^)\[]*\)|!\[P\d+ Badge\]\(`)
 	// The suffix is deliberately tolerant: a query string or fragment after
 	// ".svg" is still a priority badge, and anchoring on ")" meant
 	// `high-priority.svg?v=2` was counted by neither the strict parser nor this
 	// shape, so it could hide behind a badge the parser CAN read. The strict
 	// parser stays narrow on purpose; the shape counter is what must be liberal.
-	geminiBadgeShape = regexp.MustCompile(`!\[[^\]]*\]\([^)]*-priority\.svg[^)]*\)`)
+	geminiBadgeShape = regexp.MustCompile(`!\[[^\]]*\]\([^)\[]*-priority\.svg[^)\[]*\)`)
 )
+
+// HasSeverityMarkerShape reports whether a body carries anything shaped like a
+// severity badge, readable or not.
+//
+// It separates two cases that both classify as SeverityUnknown but mean
+// opposite things. A comment with an unreadable or unsupported marker IS a
+// finding this parser failed to read, and must fail closed. Routine bot prose
+// with no marker at all, such as an acknowledgement after a human replies, is
+// not a finding, and treating it as one refused every merge on that thread
+// forever with nothing for a human to actually fix.
+func HasSeverityMarkerShape(body string) bool {
+	return codexBadgeShape.MatchString(body) || geminiBadgeShape.MatchString(body) ||
+		codexBadgePattern.MatchString(body) || geminiBadgePattern.MatchString(body)
+}
 
 // ClassifyCommentSeverity reads one review comment body and returns its
 // severity. A body carrying no marker this code recognises returns

@@ -737,3 +737,32 @@ func TestBlockingFindingsInUnknownBotStillBlocks(t *testing.T) {
 		t.Errorf("an unallowlisted bot's thread = %v, want notOurs (auto-resolve stays narrow)", got)
 	}
 }
+
+// TestMarkerlessBotProseIsNotAFinding pins the review finding that routine bot
+// prose was treated as an unreadable finding.
+//
+// After a human answers a P1, a bot acknowledgement carrying no marker at all
+// classified as SeverityUnknown, and since no human spoke after it, the gate
+// reported it as an unaddressed finding. On a resolved thread that refused
+// every merge indefinitely, with no finding to actually go and fix. Only a
+// comment that LOOKS like a finding this parser could not read belongs here.
+func TestMarkerlessBotProseIsNotAFinding(t *testing.T) {
+	comments := []threadComment{
+		{author: "chatgpt-codex-connector", typename: "Bot",
+			body: "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat) Real finding"},
+		{author: "vbonnet", typename: "User", body: "Fixed in abc1234, here is why ..."},
+		{author: "chatgpt-codex-connector", typename: "Bot",
+			body: "Thanks, that addresses it."},
+	}
+	if i, ok := unaddressedUnknownBotComment(comments); ok {
+		t.Errorf("markerless bot prose at index %d reported as an unreadable finding; "+
+			"it carries no marker shape and is not a finding at all", i)
+	}
+
+	// A bot comment that DOES look like a finding but cannot be parsed must
+	// still be reported, since that is the fail-closed case this gate exists for.
+	comments[2].body = "![P9 Badge](https://img.shields.io/badge/P9-black?style=flat) Unknown tier"
+	if _, ok := unaddressedUnknownBotComment(comments); !ok {
+		t.Error("an unparseable badge-shaped marker must still be reported as a finding")
+	}
+}

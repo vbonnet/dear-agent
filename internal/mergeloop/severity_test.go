@@ -388,3 +388,27 @@ func TestCodexP2IsBlocking(t *testing.T) {
 		}
 	}
 }
+
+// TestTruncatedBadgeCannotHideBehindALaterBadge pins the review finding that a
+// badge-shape match could span a later, valid marker.
+//
+// The shape counter used [^)]* after the opening paren, so an unterminated P1
+// badge swallowed everything up to the NEXT badge's closing parenthesis and
+// counted the pair as one marker. The strict parser independently read the
+// valid P3, leaving counted == parsed, so nothing looked unread and the
+// comment classified as advisory. That auto-resolves a malformed P1: exactly
+// the fail-open this classifier exists to prevent.
+func TestTruncatedBadgeCannotHideBehindALaterBadge(t *testing.T) {
+	body := "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat " +
+		"some prose ![P3 Badge](https://img.shields.io/badge/P3-blue?style=flat)"
+	if got := ClassifyCommentSeverity(body); got != SeverityUnknown {
+		t.Errorf("ClassifyCommentSeverity = %v, want SeverityUnknown: a truncated P1 "+
+			"marker must not be readable as advisory just because a valid P3 follows", got)
+	}
+	// A well-formed pair must still classify normally, most severe wins.
+	ok := "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat) and " +
+		"![P3 Badge](https://img.shields.io/badge/P3-blue?style=flat)"
+	if got := ClassifyCommentSeverity(ok); got != SeverityBlocking {
+		t.Errorf("ClassifyCommentSeverity(well-formed pair) = %v, want SeverityBlocking", got)
+	}
+}
