@@ -132,7 +132,6 @@ jobs:
           ./engram/internal/prompt
           ./engram/internal/providers/simple
           ./engram/internal/reflection
-          ./engram/internal/retrieval
           ./engram/internal/scanners
           ./engram/internal/security
           ./engram/internal/signing

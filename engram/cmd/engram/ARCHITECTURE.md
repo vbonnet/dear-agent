@@ -189,7 +189,7 @@ Security-focused utilities:
 
 ### 3. Core Services
 
-#### Retrieval Service (`pkg/retrieval`)
+#### Retrieval Service (`engram/retrieval`)
 AI-powered engram retrieval using ecphory.
 
 **3-Tier System**:

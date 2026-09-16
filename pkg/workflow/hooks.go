@@ -2,11 +2,10 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
-
-const definitionFailureRecordTimeout = 10 * time.Second
 
 // Hooks is the workflow lifecycle extension surface for the workflow runner:
 // Define, Enforce, Audit, and Resolve. The four hooks line up with the substrate
@@ -93,10 +92,13 @@ func (h *Hooks) callDefine(ctx context.Context, p DefinePayload) error {
 
 func (r *Runner) failDefinition(ctx context.Context, report *RunReport, runID string, err error) (*RunReport, error) {
 	report.Finished = time.Now()
-	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), definitionFailureRecordTimeout)
-	defer cancel()
-	r.finishRunRecord(recordCtx, runID, RunStateFailed, err.Error())
-	return report, err
+	persistErr := r.finalizeRun(ctx, terminalFinalization{
+		runID:        runID,
+		state:        RunStateFailed,
+		finishedAt:   report.Finished,
+		errorMessage: err.Error(),
+	})
+	return report, errors.Join(err, persistErr)
 }
 
 // callEnforce invokes OnEnforce if set. A non-nil return propagates back to

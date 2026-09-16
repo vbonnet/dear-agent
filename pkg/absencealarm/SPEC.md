@@ -8,7 +8,8 @@
        AA-01 through AA-06 (pulse classification), AA-09 (journal record),
        AA-11 (re-dispatch interval decision), AA-14 (snooze rejection),
        AA-18 (unreadable alarm state), AA-19 (configuration loading),
-       AA-25 (deadline → UNDETERMINED).
+       AA-25 (deadline → UNDETERMINED),
+       AA-26 through AA-28 (json-timestamp pulse classification).
 
      CLI (cmd/absence-alarm/main_test.go):
        AA-07 (exit 1 when absent/undetermined), AA-08 (exit 0 when healthy),
@@ -147,6 +148,12 @@ the absence alarm itself.
 **AA-24** When a pulse is evaluated, the system shall bound that evaluation with a per-pulse deadline inside a bounded tick deadline, and the system shall continue evaluating the remaining pulses.
 
 **AA-25** If a pulse's probe does not finish before its deadline, then the system shall classify that pulse as UNDETERMINED rather than ABSENT, because a check that did not complete is not evidence that the monitored event is missing.
+
+**AA-26** When a json-timestamp pulse's file has a content timestamp older than the pulse window, the system shall classify the pulse as ABSENT.
+
+**AA-27** When a json-timestamp pulse's file does not exist, the system shall classify the pulse as ABSENT with a reason recording that the file is missing.
+
+**AA-28** If a json-timestamp pulse's file cannot be read, is not valid JSON, or does not contain the configured field, then the system shall classify the pulse as UNDETERMINED.
 
 ## BDD Traceability
 

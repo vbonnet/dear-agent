@@ -2,8 +2,11 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // The forbidden globs as declared in .dear-agent.yml > forbidden-paths.
@@ -221,5 +224,95 @@ func TestRepositoryTreeHasNoTemporalDebt(t *testing.T) {
 		if forbidden(name, patterns) {
 			t.Errorf("tracked temporal artifact: %s", name)
 		}
+	}
+}
+
+// TestWayfinderSessionLeavesNoTemporalDebt is the end-to-end regression for
+// ce-2sgej. The mandated PR path used to block itself: `wayfinder session
+// start` force-added WAYFINDER-STATUS.md and WAYFINDER-HISTORY.jsonl even
+// though .gitignore excludes them, TestRepositoryTreeHasNoTemporalDebt then
+// rejected them as tracked temporal artifacts, that gate runs inside
+// `make preflight-full`, and safe-pr refuses to open a PR when preflight
+// fails. Every agent hit it and had to `git rm --cached` the files Wayfinder
+// had just committed.
+//
+// This drives the real binary through start -> start-phase -> complete-phase in
+// a repository carrying this repository's own ignore and routing policy, then
+// applies the same forbidden-path check the gate above applies.
+func TestWayfinderSessionLeavesNoTemporalDebt(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repository root: %v", err)
+	}
+	patterns, err := loadPatterns(filepath.Join(root, ".dear-agent.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binary := filepath.Join(t.TempDir(), "wayfinder")
+	build := exec.Command("go", "build", "-o", binary, "./wayfinder/cmd/wayfinder")
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build wayfinder: %v\n%s", err, out)
+	}
+
+	repo := t.TempDir()
+	gittest.Run(t, repo, "init")
+	gittest.HardenRepo(t, repo)
+	gittest.Run(t, repo, "config", "user.name", "Test User")
+	gittest.Run(t, repo, "config", "user.email", "test@example.com")
+
+	// Carry this repository's real policy files so the test measures the
+	// shipped rules rather than a paraphrase of them.
+	for _, name := range []string{".gitignore", ".dear-agent.yml"} {
+		content, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, name), content, 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	gittest.Run(t, repo, "add", ".gitignore", ".dear-agent.yml")
+	gittest.Run(t, repo, "commit", "-m", "Seed policy")
+
+	projectDir := filepath.Join(repo, "wf", "ce-2sgej")
+	if err := os.MkdirAll(projectDir, 0o750); err != nil {
+		t.Fatalf("create project directory: %v", err)
+	}
+
+	telemetry := filepath.Join(t.TempDir(), "telemetry.jsonl")
+	for _, args := range [][]string{
+		{"-C", projectDir, "session", "start", "ce-2sgej", "--project-type", "bugfix", "--risk-level", "S"},
+		{"-C", projectDir, "session", "start-phase", "CHARTER"},
+		{"-C", projectDir, "session", "complete-phase", "CHARTER", "--outcome", "success"},
+	} {
+		cmd := exec.Command(binary, args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "ENGRAM_TELEMETRY_PATH="+telemetry)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("wayfinder %v: %v\n%s", args, err, out)
+		}
+	}
+
+	tracked, err := gitLines(repo, "ls-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range tracked {
+		if forbidden(name, patterns) {
+			t.Errorf("wayfinder session tracked a temporal artifact: %s "+
+				"(preflight-full would fail and safe-pr would refuse the PR)", name)
+		}
+	}
+
+	// The worktree must also be clean, or the next start-phase refuses with
+	// "uncommitted files detected" — the constraint the force-add existed for.
+	dirty, err := gitLines(repo, "status", "--porcelain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirty) != 0 {
+		t.Errorf("worktree not clean after the session lifecycle: %v", dirty)
 	}
 }

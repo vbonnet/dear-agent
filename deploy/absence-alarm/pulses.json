@@ -31,11 +31,7 @@
     {
       "name": "otel-receiving",
       "type": "command",
-      "command": [
-        "~/go/bin/jaeger-health",
-        "--lookback",
-        "24h"
-      ],
+      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
       "window": "24h",
       "expect": "Jaeger alive and receiving traces within 24h"
     },
@@ -61,11 +57,33 @@
       "expect": "an absence-alarm tick within 30m (3 missed 10-min launchd intervals)"
     },
     {
-      "name": "merge-pipeline-recent-commit",
+      "name": "merge-gate-not-systemically-failing",
       "type": "command",
-      "command": ["~/go/bin/merge-health", "--repo", "~/src/dear-agent", "--lookback", "96h"],
-      "window": "96h",
-      "expect": "at least one commit landed on origin/main within the last 96h (4 days)"
+      "command": [
+        "~/go/bin/gate-health",
+        "--repo",
+        "vbonnet/dear-agent"
+      ],
+      "window": "1h",
+      "expect": "no single required check failing across 30%+ of the open pull-request queue"
+    },
+    {
+      "name": "retro-lint-guards",
+      "type": "command",
+      "command": [
+        "~/go/bin/retro-lint",
+        "--repo",
+        "~/src/dear-agent",
+        "--retros-dir",
+        "~/src/engram-research/retrospectives",
+        "--baseline",
+        "~/src/dear-agent/deploy/retro-lint/baseline.jsonl",
+        "--absence-lookback",
+        "7d",
+        "--ratchet"
+      ],
+      "window": "24h",
+      "expect": "all retrospectives within 7d declare valid guards or tracked deferrals"
     }
   ]
 }

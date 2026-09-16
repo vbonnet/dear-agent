@@ -11,9 +11,11 @@ import (
 
 // Worktree represents a git worktree
 type Worktree struct {
-	Path   string
-	Branch string
-	IsMain bool
+	Path       string
+	Branch     string
+	IsMain     bool
+	Locked     bool
+	LockReason string
 }
 
 // CleanupResult represents the result of cleaning up one worktree
@@ -80,6 +82,16 @@ func parseWorktreeOutput(output string) []Worktree {
 			ref := strings.TrimPrefix(line, "branch ")
 			// Strip refs/heads/ prefix to get branch name
 			current.Branch = strings.TrimPrefix(ref, "refs/heads/")
+		case line == "locked":
+			current.Locked = true
+			current.LockReason = ""
+		case strings.HasPrefix(line, "locked "):
+			current.Locked = true
+			reason := strings.TrimPrefix(line, "locked ")
+			if unquoted, err := strconv.Unquote(reason); err == nil {
+				reason = unquoted
+			}
+			current.LockReason = reason
 		case line == "" && current.Path != "":
 			// Blank line = end of block
 			if isFirst {
@@ -219,19 +231,38 @@ func DeleteBranch(repoPath, branchName string, force bool) error {
 	return nil
 }
 
+// WorktreeAddOptions configures worktree creation.
+type WorktreeAddOptions struct {
+	Lock       bool
+	LockReason string
+	Detach     bool
+}
+
 // AddWorktree creates a new git worktree at the given path on a new branch.
 // If branch is empty, a detached HEAD worktree is created from the current HEAD.
 func AddWorktree(repoPath, worktreePath, branch string) error {
+	return AddWorktreeWithOpts(repoPath, worktreePath, branch, WorktreeAddOptions{})
+}
+
+// AddWorktreeWithOpts creates a new git worktree with options such as locking.
+func AddWorktreeWithOpts(repoPath, worktreePath, branch string, opts WorktreeAddOptions) error {
 	gitRoot, err := findGitRoot(repoPath)
 	if err != nil {
 		return fmt.Errorf("not a git repository: %w", err)
 	}
 
 	var args []string
-	if branch != "" {
+	if branch != "" && !opts.Detach {
 		args = []string{"-C", gitRoot, "worktree", "add", worktreePath, "-b", branch}
 	} else {
 		args = []string{"-C", gitRoot, "worktree", "add", "--detach", worktreePath}
+	}
+
+	if opts.Lock {
+		args = append(args, "--lock")
+		if opts.LockReason != "" {
+			args = append(args, "--reason", opts.LockReason)
+		}
 	}
 
 	cmd := exec.Command("git", args...)
@@ -239,6 +270,70 @@ func AddWorktree(repoPath, worktreePath, branch string) error {
 		return fmt.Errorf("failed to add worktree at %s: %w\nOutput: %s", worktreePath, err, string(output))
 	}
 	return nil
+}
+
+// LockWorktree locks a git worktree with an optional reason.
+func LockWorktree(repoPath, worktreePath, reason string) error {
+	gitRoot, err := findGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("not a git repository: %w", err)
+	}
+
+	args := []string{"-C", gitRoot, "worktree", "lock"}
+	if reason != "" {
+		args = append(args, "--reason", reason)
+	}
+	args = append(args, worktreePath)
+
+	cmd := exec.Command("git", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to lock worktree %s: %w\nOutput: %s", worktreePath, err, string(output))
+	}
+	return nil
+}
+
+// UnlockWorktree unlocks a git worktree by path.
+// It is idempotent: if the worktree is already unlocked, it returns nil.
+func UnlockWorktree(repoPath, worktreePath string) error {
+	gitRoot, err := findGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("not a git repository: %w", err)
+	}
+
+	cmd := exec.Command("git", "-C", gitRoot, "worktree", "unlock", worktreePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		outStr := string(output)
+		if strings.Contains(outStr, "is not locked") {
+			return nil
+		}
+		return fmt.Errorf("failed to unlock worktree %s: %w\nOutput: %s", worktreePath, err, outStr)
+	}
+	return nil
+}
+
+// IsExplicitPreserve reports whether a worktree lock reason indicates explicit
+// operator preservation (e.g. "preserve", "keep", "hold", "pin", "manual", "do-not-reap", "wip").
+func IsExplicitPreserve(reason string) bool {
+	r := strings.ToLower(strings.TrimSpace(reason))
+	if r == "" {
+		return false
+	}
+	prefixes := []string{
+		"preserve",
+		"keep",
+		"hold",
+		"pin",
+		"manual",
+		"do-not-reap",
+		"do_not_reap",
+		"wip",
+	}
+	for _, p := range prefixes {
+		if r == p || strings.HasPrefix(r, p+":") || strings.HasPrefix(r, p+"-") || strings.HasPrefix(r, p+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // RemoveMergedWorktrees removes worktrees whose branches have been merged
@@ -295,7 +390,19 @@ func RemoveMergedWorktrees(repoPath, baseBranch string) ([]CleanupResult, error)
 			continue
 		}
 
-		// Branch is merged - remove the worktree
+		// Branch is merged - remove the worktree.
+		// If locked, check if explicitly preserved; otherwise unlock before removing.
+		if wt.Locked {
+			if IsExplicitPreserve(wt.LockReason) {
+				continue
+			}
+			if err := UnlockWorktree(gitRoot, wt.Path); err != nil {
+				result.Err = fmt.Errorf("failed to unlock worktree before removal: %w", err)
+				results = append(results, result)
+				continue
+			}
+		}
+
 		removeCmd := exec.Command("git", "-C", gitRoot, "worktree", "remove", wt.Path)
 		if output, err := removeCmd.CombinedOutput(); err != nil {
 			result.Err = fmt.Errorf("failed to remove worktree: %w\nOutput: %s", err, string(output))

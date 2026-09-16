@@ -256,6 +256,7 @@ func TestRun_EmptyE2ECacheDirDisablesReaper(t *testing.T) {
 		"--e2e-cache-dir", "",
 		"--e2e-cache-min-age", "0s",
 		"--gc-max-age", "0",
+		"--absence-max-age", "0",
 		"--free-warn-gb", "0.0001",
 		"--dry-run",
 	}, &out)

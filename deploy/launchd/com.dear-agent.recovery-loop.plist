@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.recovery-loop: self-heal dead or wedged fleet background jobs (cmd/recovery-loop).
+  Consumes absence-alarm escalation journal, attempts recovery via kickstart,
+  re-bootstrap, and reinstall, enforces snooze expiry policies, journals all attempts,
+  and escalates on consecutive failures.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.dear-agent.recovery-loop</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__HOME__/go/bin/recovery-loop</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>__HOME__</string>
+		<key>PATH</key>
+		<string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>StartInterval</key>
+	<integer>600</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>AbandonProcessGroup</key>
+	<false/>
+	<key>WorkingDirectory</key>
+	<string>__HOME__</string>
+	<key>StandardOutPath</key>
+	<string>__HOME__/.local/state/dear-agent/recovery-loop.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/.local/state/dear-agent/recovery-loop.err.log</string>
+</dict>
+</plist>
