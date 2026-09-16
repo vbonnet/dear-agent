@@ -850,21 +850,36 @@ func TestStallCountsTowardTickSummary(t *testing.T) {
 	})
 	d.StallThreshold = time.Hour
 
-	var last TickResult
+	// Escalations are deduplicated, so only the tick that actually records one
+	// reports it. The invariant under test is that THAT tick shows it: a
+	// durable escalation must never be invisible in the summary. Later ticks
+	// correctly report 0 because they recorded nothing.
+	var stalledTicks, escalatingTicks int
+	var escalatingWasStalled bool
 	for range 6 {
 		res, err := d.Tick(context.Background())
 		if err != nil {
 			t.Fatalf("tick: %v", err)
 		}
-		last = res
+		if res.Stalled > 0 {
+			stalledTicks++
+		}
+		if res.Escalated > 0 {
+			escalatingTicks++
+			escalatingWasStalled = res.Stalled > 0
+		}
 		now = now.Add(20 * time.Minute)
 	}
-	if last.Stalled == 0 {
-		t.Fatalf("precondition: expected a stalled PR, got %+v", last)
+	if stalledTicks == 0 {
+		t.Fatalf("precondition: expected a stalled PR across the run")
 	}
-	if last.Escalated == 0 {
-		t.Error("TickResult.Escalated = 0 on a tick that durably escalated a stalled PR; " +
-			"the summary must not hide the escalation it just recorded")
+	if escalatingTicks != 1 {
+		t.Errorf("ticks reporting an escalation = %d, want exactly 1: the stall never "+
+			"changed, so it must escalate once and stay quiet after", escalatingTicks)
+	}
+	if !escalatingWasStalled {
+		t.Error("the escalating tick reported Stalled = 0; the summary must not hide " +
+			"the escalation it just recorded")
 	}
 }
 

@@ -109,16 +109,10 @@ func run(argv []string) error {
 	policy := mergeloop.NewPolicy()
 	policy.MaxAgentAttempts = opts.maxAttempts
 
-	// Shared only between the two dry-run adapters below; nil-safe when unset.
-	var predictions *dryRunThreadPredictions
-	if opts.dryRun {
-		predictions = newDryRunThreadPredictions()
-	}
-
 	deps := mergeloop.Deps{
 		Lister:  &ghLister{},
 		Rebaser: &safeRebaser{dryRun: opts.dryRun},
-		Merger:  &safeMerger{dryRun: opts.dryRun, predictions: predictions},
+		Merger:  &safeMerger{dryRun: opts.dryRun},
 		Spawner: &agmSpawner{
 			dryRun: opts.dryRun, enabled: opts.enableAgents,
 			harness: opts.agentHarness, model: opts.agentModel,
@@ -126,7 +120,7 @@ func run(argv []string) error {
 		// Threads clears the GREEN→MERGE blocker: bot review threads (Gemini)
 		// left unresolved trip required_conversation_resolution even when CI is
 		// green. The driver resolves them just before the merge attempt.
-		Threads: &ghThreadResolver{dryRun: opts.dryRun, predictions: predictions},
+		Threads: &ghThreadResolver{dryRun: opts.dryRun},
 		Metrics: mergeloop.NewMetrics(),
 	}
 

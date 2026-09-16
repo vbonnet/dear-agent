@@ -2,6 +2,7 @@ package mergeloop
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -145,5 +146,52 @@ func TestPersistentGateRefusalEscalatesOnce(t *testing.T) {
 	if at := tr.Get(31, now).EscalatedAt; !at.Equal(firstTick) {
 		t.Errorf("EscalatedAt = %v, want the first escalation %v: the original time is the useful one",
 			at, firstTick)
+	}
+}
+
+// TestStallEscalatesOnceAndResetsAfterRecovery pins two review findings on the
+// escalation paths.
+//
+// The stall branch recorded the same escalation every tick, so an unchanged
+// stall looked freshly escalated each interval, the same defect already fixed
+// on the gate-refusal path. And deduplicating on the reason alone never
+// cleared once the gate recovered, so a finding that returned with an
+// identical reason was suppressed as a duplicate of a resolved one.
+func TestStallEscalatesOnceAndResetsAfterRecovery(t *testing.T) {
+	prs := []PR{{Number: 41, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	mg := &fakeMerger{err: fmt.Errorf("unresolved review threads: %w", ErrNotReady)}
+	d, tr := newTestDriver(t, prs, &Deps{
+		Merger: mg, Threads: &fakeThreadResolver{},
+		Clock: func() time.Time { return now },
+		Audit: func(AuditEvent) {},
+	})
+	d.StallThreshold = time.Hour
+
+	total := 0
+	for range 8 {
+		r, err := d.Tick(context.Background())
+		if err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		total += r.Escalated
+		now = now.Add(20 * time.Minute)
+	}
+	if total != 1 {
+		t.Errorf("stall escalations across 8 ticks = %d, want 1: the stall never changed", total)
+	}
+
+	// The PR merges, which clears the durable escalation, so a later identical
+	// reason must be able to escalate again rather than read as a duplicate.
+	if rec := tr.Get(41, now); rec.EscalationReason != "" {
+		mg.err = nil
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("recovery tick: %v", err)
+		}
+		if got := tr.Get(41, now).EscalationReason; got != "" {
+			t.Errorf("EscalationReason = %q after recovery, want cleared so a "+
+				"returning finding is not suppressed as a duplicate", got)
+		}
 	}
 }

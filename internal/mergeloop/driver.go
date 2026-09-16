@@ -325,9 +325,14 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 		// counter. Letting the stall clock run is what makes a permanently
 		// deferred PR detectable; persisting the escalation is what makes it
 		// actionable by a human.
-		d.recordEscalation(ctx, pr.Number,
-			fmt.Sprintf("stalled in %s: %s", cls.State, stallDetail), "stalled", now)
-		res.Escalated++
+		// Same dedup as the gate-refusal path: an unchanged stall is not a
+		// fresh escalation, and re-recording it would advance EscalatedAt and
+		// emit another human_escalation every interval.
+		reason := fmt.Sprintf("stalled in %s: %s", cls.State, stallDetail)
+		if d.Tracker.Get(pr.Number, now).EscalationReason != reason {
+			d.recordEscalation(ctx, pr.Number, reason, "stalled", now)
+			res.Escalated++
+		}
 	}
 	return state
 }
@@ -550,7 +555,14 @@ func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickRes
 		return
 	}
 	// Independent of whatever resolveBotThreads decided a moment ago.
-	if ok, refusal := d.blockingFindingsGate(ctx, pr); !ok {
+	ok, refusal := d.blockingFindingsGate(ctx, pr)
+	if ok {
+		// The refusal is gone. Clear the durable record so a finding that
+		// returns later with an identical reason escalates again instead of
+		// being suppressed as a duplicate of the one that was resolved.
+		d.Tracker.ClearEscalation(pr.Number, "merge_blocked_findings", "thread_gate_error")
+	}
+	if !ok {
 		// Deliberately NOT RecordAction. Recording an action here refreshes
 		// LastActionAt on every tick, which permanently suppresses the stall
 		// detector: the PR would sit green-but-unmergeable forever and the
@@ -635,7 +647,7 @@ func (d *Driver) doSpawn(ctx context.Context, pr PR, kind AgentKind, failSig str
 // a dry run. Auditing and counting stay unconditional: a dry run is supposed to
 // show what the loop WOULD do, and hiding the refusal would defeat that.
 func (d *Driver) recordEscalation(ctx context.Context, pr int, reason, kind string, now time.Time) {
-	d.Tracker.RecordEscalation(pr, reason, now)
+	d.Tracker.RecordEscalation(pr, reason, kind, now)
 	d.metrics().recordEscalation(ctx, pr, kind)
 }
 

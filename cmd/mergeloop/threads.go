@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/mergeloop"
@@ -75,12 +76,7 @@ func allCommentsFromKnownBots(logins []string) bool {
 // review threads authored by known bots via the GitHub GraphQL
 // resolveReviewThread mutation. Thread resolution is GraphQL-only — there is no
 // REST endpoint — so every call goes through an authenticated gh CLI.
-type ghThreadResolver struct {
-	dryRun bool
-	// predictions is set only in dry-run mode, so the merge-gate simulation
-	// can account for the resolutions this run only reported.
-	predictions *dryRunThreadPredictions
-}
+type ghThreadResolver struct{ dryRun bool }
 
 const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:String){
   repository(owner:$owner,name:$repo){
@@ -501,20 +497,11 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 	if !ok {
 		return mergeloop.ThreadResolution{}, fmt.Errorf("invalid repo %q (want owner/name)", repo)
 	}
-	if r.predictions != nil {
-		// A verdict from an earlier tick must not answer for this one.
-		r.predictions.clear(pr)
-	}
 	threads, err := r.listThreads(ctx, owner, name, pr)
 	if err != nil {
 		return mergeloop.ThreadResolution{}, err
 	}
 	resolvable, withheld := partitionResolvable(threads)
-	if r.predictions != nil {
-		// Only OPEN threads we will not resolve keep the gate shut; an
-		// already-resolved thread blocks nothing.
-		r.predictions.note(pr, len(resolvable), withheld, unresolvedNotOurs(threads))
-	}
 	out := mergeloop.ThreadResolution{Withheld: withheld}
 	for _, t := range resolvable {
 		if r.dryRun {
@@ -552,6 +539,12 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 		emitThreadResolutionEvent(pr, t.id, t.author)
 		out.Resolved++
 	}
+	if r.dryRun && len(resolvable) > 0 {
+		// Say plainly that the gate below is NOT simulated: these threads
+		// stay open in this mode, so safe-merge still counts them.
+		dryRunGateCaveatOnce(pr)
+	}
+
 	return out, nil
 }
 
@@ -787,3 +780,28 @@ func emitThreadResolutionEvent(pr int, threadID, botAuthor string) {
 		}
 	}
 }
+
+// dryRunGateCaveatOnce prints, at most once per PR per process, the one caveat
+// a --dry-run reader needs: the resolutions above did not happen, so the
+// unresolved-thread gate reported below still counts those threads.
+//
+// An earlier revision simulated the gate instead by predicting the
+// resolutions. That was reverted: the prediction had to be invalidated on
+// every path that could change a thread between listing and merging, and each
+// miss failed OPEN, claiming a merge that a real tick would refuse. A dry run
+// that under-reports is a nuisance; one that over-reports is a lie.
+func dryRunGateCaveatOnce(pr int) {
+	dryRunCaveatMu.Lock()
+	defer dryRunCaveatMu.Unlock()
+	if dryRunCaveatSeen[pr] {
+		return
+	}
+	dryRunCaveatSeen[pr] = true
+	fmt.Printf("  [dry-run] note: PR #%d's advisory threads stay open in this mode, "+
+		"so the merge gate below still counts them; a real tick resolves them first\n", pr)
+}
+
+var (
+	dryRunCaveatMu   sync.Mutex
+	dryRunCaveatSeen = map[int]bool{}
+)
