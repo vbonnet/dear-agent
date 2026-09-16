@@ -430,7 +430,7 @@ engram completion powershell | Out-String | Invoke-Expression
 - `internal/config` - Configuration management
 - `internal/plugin` - Plugin system
 - `internal/context` - Context detection
-- `pkg/retrieval` - Ecphory retrieval system
+- `engram/retrieval` - Ecphory retrieval system (sole owner)
 - `pkg/ecphory` - Index management
 
 ## Environment Variables
