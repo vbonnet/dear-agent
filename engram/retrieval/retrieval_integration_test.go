@@ -11,12 +11,6 @@ import (
 // TestRetrieval_WithConfig_Integration verifies retrieval service respects config settings
 // This is an integration test covering retrieval + config interaction
 func TestRetrieval_WithConfig_Integration(t *testing.T) {
-	// Skip if no API key (API ranking optional)
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		t.Skip("Skipping integration test: ANTHROPIC_API_KEY not set")
-	}
-
 	// Create temporary directory with test engrams
 	tmpDir := t.TempDir()
 
