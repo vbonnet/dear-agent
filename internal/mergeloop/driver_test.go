@@ -983,3 +983,52 @@ func TestNoFalseStallAfterSuccessfulRebase(t *testing.T) {
 		t.Errorf("Stalled = %d, want 0: the tick made progress", res.Stalled)
 	}
 }
+
+// TestNoSecondEscalationAfterGateRefusal pins the review finding that a green
+// PR refused by the blocking-findings gate was escalated twice on one tick.
+//
+// doMerge records the refusal and increments Escalated with the useful detail
+// (the thread ID and excerpt, or the provider error). The stall branch then saw
+// no merge/rebase/spawn progress and recorded a SECOND escalation, emitting two
+// human-escalation metrics for one PR and overwriting that specific reason with
+// a generic stall string. An action that already escalated has said why.
+func TestNoSecondEscalationAfterGateRefusal(t *testing.T) {
+	prs := []PR{{Number: 21, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	var evs []AuditEvent
+	d, tr := newTestDriver(t, prs, &Deps{
+		Merger: &fakeMerger{},
+		// Refuse every merge at the independent gate, the way a real blocking
+		// finding does, using the seam the gate already reads.
+		Threads: &fakeThreadResolver{blocking: []BlockingFinding{{
+			Author: "chatgpt-codex-connector", Severity: SeverityBlocking,
+			ThreadID: "PRRT_example", Excerpt: "a blocking finding",
+		}}},
+		Clock: func() time.Time { return now },
+		Audit: func(e AuditEvent) { evs = append(evs, e) },
+	})
+	d.StallThreshold = time.Hour
+
+	var res TickResult
+	for range 6 {
+		r, err := d.Tick(context.Background())
+		if err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		res = r
+		now = now.Add(20 * time.Minute)
+	}
+
+	if res.Escalated > 1 {
+		t.Errorf("Escalated = %d on one tick, want at most 1: the gate refusal already escalated",
+			res.Escalated)
+	}
+	if res.Stalled != 0 {
+		t.Errorf("Stalled = %d, want 0: the tick already escalated with a specific reason", res.Stalled)
+	}
+	if rec := tr.Get(21, now); strings.HasPrefix(rec.EscalationReason, "stalled in") {
+		t.Errorf("EscalationReason = %q: a generic stall reason overwrote the gate refusal detail",
+			rec.EscalationReason)
+	}
+}

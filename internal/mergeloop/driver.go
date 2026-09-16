@@ -308,10 +308,16 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	// res.Merged alone meant a behind PR that this very tick rebased, or one
 	// whose repair agent this tick spawned, was still escalated as stalled.
 	progressBefore := res.Merged + res.Rebased + res.AgentsSpawn
+	// An action that escalated has already recorded WHY, with the thread ID
+	// and excerpt or the provider error. Emitting a stall on top of it double
+	// counts the escalation and overwrites that specific reason with a
+	// generic one, which is strictly less actionable for whoever is paged.
+	escalatedBefore := res.Escalated
 
 	state := d.act(ctx, pr, cls, now, res)
 
-	if stalled && res.Merged+res.Rebased+res.AgentsSpawn == progressBefore {
+	if stalled && res.Merged+res.Rebased+res.AgentsSpawn == progressBefore &&
+		res.Escalated == escalatedBefore {
 		res.Stalled++
 		d.metrics().recordStall(ctx, pr.Number, cls.State)
 		d.audit(AuditEvent{PR: pr.Number, State: cls.State, Action: "stall_detected", Detail: stallDetail})

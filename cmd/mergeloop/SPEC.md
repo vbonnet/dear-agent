@@ -43,7 +43,7 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-17** When the independent review-thread merge gate cannot be evaluated, the command shall refuse the merge and audit the refusal, and shall never treat an unavailable gate as an absence of findings.
 
-**MLC-18** When invoked with the `threads` mode, the command shall report how one pull request's review threads classify and whether the merge gate would refuse, and shall perform no mutation.
+**MLC-18** When invoked with the `threads` mode, the command shall report how one pull request's review threads classify and whether the independent review-thread gate would refuse, shall not report a verdict for the state, CI, soak, reviewer or base-freshness gates that safe-merge applies separately, and shall perform no mutation.
 
 ## BDD Traceability
 

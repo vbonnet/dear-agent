@@ -507,9 +507,9 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 	}
 	resolvable, withheld := partitionResolvable(threads)
 	if r.predictions != nil {
-		// Threads that are neither resolvable nor withheld are not ours to
-		// touch, and they keep the gate shut just as firmly.
-		r.predictions.note(pr, len(resolvable), withheld, len(threads)-len(resolvable)-withheld)
+		// Only OPEN threads we will not resolve keep the gate shut; an
+		// already-resolved thread blocks nothing.
+		r.predictions.note(pr, len(resolvable), withheld, unresolvedNotOurs(threads))
 	}
 	out := mergeloop.ThreadResolution{Withheld: withheld}
 	for _, t := range resolvable {

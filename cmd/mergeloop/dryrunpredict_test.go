@@ -39,3 +39,28 @@ func TestDryRunPredictionsGateSimulation(t *testing.T) {
 		t.Error("an unseen PR must not be reported as clearing the thread gate")
 	}
 }
+
+// TestUnresolvedNotOursCount pins the review finding that deriving the
+// not-ours count by subtraction counted ALREADY-RESOLVED threads as blockers.
+//
+// threadResolvability maps a resolved thread to resolvabilityNotOurs, and the
+// listing includes resolved threads, so len(threads)-len(resolvable)-withheld
+// charged the predictor for threads that cannot block anything. A PR with one
+// resolved thread and one advisory thread was therefore reported as no
+// would-be merge, although a real tick resolves the advisory one and proceeds.
+func TestUnresolvedNotOursCount(t *testing.T) {
+	bot := []threadComment{{author: "chatgpt-codex-connector", body: "nit: advisory only"}}
+	human := []threadComment{{author: "vbonnet", body: "please change this"}}
+	threads := []reviewThread{
+		{id: "resolved-advisory", isResolved: true, comments: bot},
+		{id: "open-advisory", comments: bot},
+	}
+	if got := unresolvedNotOurs(threads); got != 0 {
+		t.Errorf("unresolvedNotOurs = %d, want 0: a resolved thread cannot block a merge", got)
+	}
+
+	threads = append(threads, reviewThread{id: "open-human", comments: human})
+	if got := unresolvedNotOurs(threads); got != 1 {
+		t.Errorf("unresolvedNotOurs = %d, want 1: the open human thread still blocks", got)
+	}
+}

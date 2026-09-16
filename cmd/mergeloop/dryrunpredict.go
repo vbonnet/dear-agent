@@ -44,3 +44,23 @@ func (p *dryRunThreadPredictions) wouldClearThreadGate(pr int) bool {
 	defer p.mu.Unlock()
 	return p.seen[pr]
 }
+
+// unresolvedNotOurs counts threads that are still open and that this loop will
+// not resolve: human threads, unreadable ones, threads past a page.
+//
+// Deriving this by subtraction was wrong. threadResolvability maps an
+// ALREADY-RESOLVED thread to resolvabilityNotOurs, and the listing includes
+// resolved threads, so subtraction charged the predictor for threads that
+// cannot block any gate. Only an OPEN thread can keep the gate shut.
+func unresolvedNotOurs(threads []reviewThread) int {
+	n := 0
+	for _, t := range threads {
+		if t.isResolved {
+			continue
+		}
+		if threadResolvability(t) == resolvabilityNotOurs {
+			n++
+		}
+	}
+	return n
+}
