@@ -13,8 +13,8 @@ type Event struct {
 // EventType constants
 const (
 	EventTypeSessionStarted   = "session.started"
-	EventTypePhaseStarted     = "phase.started"
-	EventTypePhaseCompleted   = "phase.completed"
+	EventTypePhaseStarted     = "wayfinder.phase.started"
+	EventTypePhaseCompleted   = "wayfinder.phase.completed"
 	EventTypeValidationFailed = "validation.failed"
 	EventTypeRewind           = "rewind"
 	EventTypeSessionCompleted = "session.completed"

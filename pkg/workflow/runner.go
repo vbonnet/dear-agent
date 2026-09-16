@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -113,6 +112,11 @@ type Runner struct {
 	// default; the Discord and MCP backends ship in Phase 2.5/2.6.
 	HITLBackend HITLBackend
 
+	// terminalPersistenceTimeout bounds required local cleanup after a run
+	// outcome has been fixed. It is private so callers cannot turn terminal
+	// persistence into an unbounded execution context.
+	terminalPersistenceTimeout time.Duration
+
 	mu      sync.Mutex
 	signals map[string]chan struct{}
 }
@@ -142,14 +146,18 @@ func (r *Runner) audit() AuditSink {
 	return r.Audit
 }
 
+func (r *Runner) notifyAudit(ctx context.Context, ev AuditEvent) {
+	if hookErr := r.Hooks.callAudit(ctx, AuditPayload{Event: ev}); hookErr != nil {
+		r.Logger.Warn("hook OnAudit returned error", "run_id", ev.RunID, "node_id", ev.NodeID, "err", hookErr)
+	}
+}
+
 // emitAudit writes one event to the audit sink AND the OnAudit hook (if any).
 // Hook failures are logged at warn level — they never abort the run, matching
 // the substrate principle that observation must not affect execution.
 func (r *Runner) emitAudit(ctx context.Context, ev AuditEvent) error {
 	err := r.audit().Emit(ctx, ev)
-	if hookErr := r.Hooks.callAudit(ctx, AuditPayload{Event: ev}); hookErr != nil {
-		r.Logger.Warn("hook OnAudit returned error", "run_id", ev.RunID, "node_id", ev.NodeID, "err", hookErr)
-	}
+	r.notifyAudit(ctx, ev)
 	return err
 }
 
@@ -164,10 +172,11 @@ func (r *Runner) permissions() PermissionEnforcer {
 // NewRunner returns a Runner with defaults applied. ai must be non-nil.
 func NewRunner(ai AIExecutor) *Runner {
 	return &Runner{
-		AI:               ai,
-		Logger:           slog.Default(),
-		DefaultBashShell: "/bin/sh",
-		signals:          make(map[string]chan struct{}),
+		AI:                         ai,
+		Logger:                     slog.Default(),
+		DefaultBashShell:           "/bin/sh",
+		terminalPersistenceTimeout: defaultTerminalPersistenceTimeout,
+		signals:                    make(map[string]chan struct{}),
 	}
 }
 
@@ -203,8 +212,9 @@ func (r *Runner) gateChannel(name string) chan struct{} {
 }
 
 // Run executes a workflow end-to-end. Returns a RunReport even on failure
-// so the caller can inspect partial state. An error return is for
-// unrecoverable issues (validation, unresolvable inputs, cycles).
+// so the caller can inspect partial state. An error return reports validation,
+// input, topology, execution, cancellation, or required terminal-persistence
+// failures.
 func (r *Runner) Run(ctx context.Context, w *Workflow, inputs map[string]string) (*RunReport, error) {
 	return r.run(ctx, w, inputs, nil)
 }
@@ -274,7 +284,14 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 		snapStarted = snap.Started
 	}
 
-	r.beginRunRecord(ctx, runID, w.Name, merged, snapStarted)
+	if snap != nil && snap.RunID != "" {
+		if err := r.resumeRunRecord(ctx, runID, w.Name, merged, snapStarted); err != nil {
+			rep.Finished = time.Now()
+			return rep, fmt.Errorf("workflow: resume run %s: %w", runID, err)
+		}
+	} else {
+		r.beginRunRecord(ctx, runID, w.Name, merged, snapStarted)
+	}
 
 	if err := r.Hooks.callDefine(ctx, DefinePayload{
 		RunID:    runID,
@@ -286,19 +303,29 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 
 	order, err := topoOrder(w.Nodes)
 	if err != nil {
-		r.finishRunRecord(ctx, runID, RunStateFailed, err.Error())
-		return rep, err
+		rep.Finished = time.Now()
+		persistErr := r.finalizeRun(ctx, terminalFinalization{
+			runID:        runID,
+			state:        RunStateFailed,
+			finishedAt:   rep.Finished,
+			errorMessage: err.Error(),
+		})
+		return rep, errors.Join(err, persistErr)
 	}
 
-	finalState := RunStateSucceeded
-	var runErr error
 	executed := 0
 	for i, id := range order {
-		if ctx.Err() != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			rep.Finished = time.Now()
-			r.markSkippedDownstream(ctx, runID, w.Nodes, order[i:], "context-cancelled")
-			r.finishRunRecord(ctx, runID, RunStateCancelled, ctx.Err().Error())
-			return rep, ctx.Err()
+			persistErr := r.finalizeRun(ctx, terminalFinalization{
+				runID:        runID,
+				state:        RunStateCancelled,
+				finishedAt:   rep.Finished,
+				errorMessage: ctxErr.Error(),
+				skipped:      uncompletedNodeIDs(order[i:], snap),
+				skipReason:   "context-cancelled",
+			})
+			return rep, errors.Join(ctxErr, persistErr)
 		}
 
 		// Skip already-completed nodes when resuming. The audit log for
@@ -310,20 +337,74 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 		}
 
 		node := findNode(w.Nodes, id)
-		res := r.executeNode(nc, node)
+		outcome := r.executeNode(nc, node)
+		res := outcome.result
 		rep.Results = append(rep.Results, res)
 		executed++
-		if res.Error != nil {
+		if res.Error != nil || outcome.persistenceErr != nil || len(outcome.deferred) > 0 {
 			rep.Finished = time.Now()
-			runErr = fmt.Errorf("node %q: %w", node.ID, res.Error)
-			finalState = RunStateFailed
-			r.markSkippedDownstream(ctx, runID, w.Nodes, order[i+1:], "upstream-failed")
-			r.finishRunRecord(ctx, runID, finalState, runErr.Error())
-			return rep, runErr
+			var runErr error
+			if res.Error != nil {
+				runErr = fmt.Errorf("node %q: %w", node.ID, res.Error)
+			}
+			if outcome.persistenceErr != nil {
+				runErr = errors.Join(
+					runErr,
+					fmt.Errorf("node %q terminal persistence: %w", node.ID, outcome.persistenceErr),
+				)
+			}
+			finalState := RunStateFailed
+			skipReason := "upstream-failed"
+			if res.Error == nil {
+				rep.Succeeded = executed > 0
+				skipReason = "terminal-persistence-failed"
+			}
+			rep.ModelVariant = r.ModelVariant
+			if r.Budget != nil {
+				rep.TotalTokens, rep.TotalDollars = r.Budget.Totals()
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				finalState = RunStateCancelled
+				skipReason = "context-cancelled"
+				if !errors.Is(runErr, ctxErr) {
+					runErr = errors.Join(runErr, ctxErr)
+				}
+			}
+			if runErr == nil {
+				runErr = errors.New("workflow: terminal evidence deferred without cancellation")
+			}
+			persistErr := r.finalizeRun(ctx, terminalFinalization{
+				runID:        runID,
+				state:        finalState,
+				finishedAt:   rep.Finished,
+				errorMessage: runErr.Error(),
+				evidence:     outcome.deferred,
+				skipped:      uncompletedNodeIDs(order[i+1:], snap),
+				skipReason:   skipReason,
+			})
+			return rep, errors.Join(runErr, persistErr)
 		}
 		nc.outputs[node.ID] = res.Output
 
 		snap = r.checkpoint(ctx, w.Name, runID, merged, snapStarted, snap, node.ID, res.Output)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			rep.Finished = time.Now()
+			rep.Succeeded = executed > 0
+			rep.ModelVariant = r.ModelVariant
+			if r.Budget != nil {
+				rep.TotalTokens, rep.TotalDollars = r.Budget.Totals()
+			}
+			persistErr := r.finalizeRun(ctx, terminalFinalization{
+				runID:        runID,
+				state:        RunStateCancelled,
+				finishedAt:   rep.Finished,
+				errorMessage: ctxErr.Error(),
+				evidence:     outcome.deferred,
+				skipped:      uncompletedNodeIDs(order[i+1:], snap),
+				skipReason:   "context-cancelled",
+			})
+			return rep, errors.Join(ctxErr, persistErr)
+		}
 	}
 	rep.Finished = time.Now()
 	rep.Succeeded = executed > 0
@@ -331,82 +412,12 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 	if r.Budget != nil {
 		rep.TotalTokens, rep.TotalDollars = r.Budget.Totals()
 	}
-	r.finishRunRecord(ctx, runID, finalState, "")
-	return rep, nil
-}
-
-// beginRunRecord initialises the run-level rows and emits the run-start
-// audit event. Errors are logged but do not abort the run — the substrate
-// goal is "best-effort recording, never block execution".
-func (r *Runner) beginRunRecord(ctx context.Context, runID, workflowName string, inputs map[string]string, started time.Time) {
-	inputsJSON, _ := json.Marshal(inputs)
-	if err := r.recorder().BeginRun(ctx, RunRecord{
-		RunID:        runID,
-		WorkflowName: workflowName,
-		State:        RunStateRunning,
-		InputsJSON:   string(inputsJSON),
-		StartedAt:    started,
-		Trigger:      r.triggerOrDefault(),
-		TriggeredBy:  r.TriggeredBy,
-		ModelVariant: r.ModelVariant,
-	}); err != nil {
-		r.Logger.Warn("recorder BeginRun failed", "run_id", runID, "err", err)
-	}
-	if err := r.emitAudit(ctx, AuditEvent{
-		RunID:      runID,
-		FromState:  string(RunStatePending),
-		ToState:    string(RunStateRunning),
-		Reason:     "run-started",
-		Actor:      formatActor(r.TriggeredBy),
-		OccurredAt: started,
-	}); err != nil {
-		r.Logger.Warn("audit emit failed", "run_id", runID, "err", err)
-	}
-}
-
-// finishRunRecord marks the run terminal in the recorder + audit log.
-func (r *Runner) finishRunRecord(ctx context.Context, runID string, state RunState, errMsg string) {
-	now := time.Now()
-	if err := r.recorder().FinishRun(ctx, runID, state, now, errMsg); err != nil {
-		r.Logger.Warn("recorder FinishRun failed", "run_id", runID, "err", err)
-	}
-	if err := r.emitAudit(ctx, AuditEvent{
-		RunID:      runID,
-		FromState:  string(RunStateRunning),
-		ToState:    string(state),
-		Reason:     errMsg,
-		Actor:      formatActor(r.TriggeredBy),
-		OccurredAt: now,
-	}); err != nil {
-		r.Logger.Warn("audit emit failed", "run_id", runID, "err", err)
-	}
-}
-
-// markSkippedDownstream emits pending→skipped events for every node that
-// will not execute because of an upstream failure or a cancelled run. The
-// nodes table reflects the same skip state, so `workflow status` shows
-// the full picture rather than a truncated DAG.
-func (r *Runner) markSkippedDownstream(ctx context.Context, runID string, all []Node, remaining []string, reason string) {
-	now := time.Now()
-	for _, id := range remaining {
-		_ = r.recorder().UpsertNode(ctx, NodeRecord{
-			RunID:      runID,
-			NodeID:     id,
-			State:      NodeStateSkipped,
-			FinishedAt: now,
-			Error:      reason,
-		})
-		_ = r.emitAudit(ctx, AuditEvent{
-			RunID:      runID,
-			NodeID:     id,
-			FromState:  string(NodeStatePending),
-			ToState:    string(NodeStateSkipped),
-			Reason:     reason,
-			Actor:      "system",
-			OccurredAt: now,
-		})
-	}
-	_ = all // reserved for future cycle-detection diagnostics
+	persistErr := r.finalizeRun(ctx, terminalFinalization{
+		runID:      runID,
+		state:      RunStateSucceeded,
+		finishedAt: rep.Finished,
+	})
+	return rep, persistErr
 }
 
 func (r *Runner) triggerOrDefault() string {
@@ -454,8 +465,9 @@ func (r *Runner) checkpoint(ctx context.Context, wfName, runID string, inputs ma
 // receive the same nodeContext so they can read inputs + upstream outputs.
 //
 //nolint:gocyclo // when-guard + retry + exit_gate + HITL + outputs are all sequential; splitting hurts locality
-func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
-	res := Result{NodeID: node.ID, Started: time.Now(), Meta: make(map[string]any)}
+func (r *Runner) executeNode(nc *nodeContext, node *Node) nodeOutcome {
+	outcome := nodeOutcome{result: Result{NodeID: node.ID, Started: time.Now(), Meta: make(map[string]any)}}
+	res := &outcome.result
 
 	// Evaluate the When guard before timeout setup or child-ctx
 	// allocation — a skipped node should be observationally identical
@@ -467,19 +479,23 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 		if err != nil {
 			res.Error = fmt.Errorf("when: %w", err)
 			res.Finished = time.Now()
-			r.recordNodeFinished(nc, node, &res, NodeStateFailed, "when-eval-failed")
-			return res
+			if persistErr := r.recordNodeFinished(nc, node, &outcome, NodeStateFailed, "when-eval-failed"); persistErr != nil {
+				outcome.persistenceErr = errors.Join(outcome.persistenceErr, persistErr)
+			}
+			return outcome
 		}
 		if !shouldRun {
 			r.Logger.Debug("node skipped by when clause", "node", node.ID, "when", node.When)
 			res.Meta["skipped"] = true
 			res.Finished = time.Now()
-			r.recordNodeFinished(nc, node, &res, NodeStateSkipped, "when-false")
-			return res
+			if persistErr := r.recordNodeFinished(nc, node, &outcome, NodeStateSkipped, "when-false"); persistErr != nil {
+				outcome.persistenceErr = errors.Join(outcome.persistenceErr, persistErr)
+			}
+			return outcome
 		}
 	}
 
-	r.recordNodeStarted(nc, node, &res)
+	r.recordNodeStarted(nc, node, res)
 
 	ctx := nc.ctx
 	if node.Timeout > 0 {
@@ -496,12 +512,15 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 		policy = nil
 	}
 
-	r.runWithRetry(childNC, node, &res, policy)
+	r.runWithRetry(childNC, node, &outcome, policy)
+	if res.Error == nil {
+		res.Error = childNC.ctx.Err()
+	}
 
 	// Phase 1 substrate gate: exit gates run after the node body
 	// succeeded. Any failing gate transitions the node to failed.
-	if res.Error == nil && len(node.ExitGate) > 0 {
-		gctx := r.exitGateContext(nc, node, &res)
+	if res.Error == nil && outcome.persistenceErr == nil && len(node.ExitGate) > 0 {
+		gctx := r.exitGateContext(nc, node, res)
 		if err := EvaluateExitGates(childNC.ctx, node.ExitGate, gctx); err != nil {
 			res.Error = err
 		}
@@ -512,9 +531,9 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 	// then continues based on the decision. The block runs after exit_gate
 	// so reviewers see post-gate output, but before output materialisation
 	// so a rejected node never leaves a half-written artifact behind.
-	if res.Error == nil {
-		if blocked, reason := shouldBlockOnHITL(node, &res); blocked {
-			if err := r.handleHITL(childNC, node, &res, reason); err != nil {
+	if res.Error == nil && outcome.persistenceErr == nil {
+		if blocked, reason := shouldBlockOnHITL(node, res); blocked {
+			if err := r.handleHITL(childNC, node, res, reason); err != nil {
 				res.Error = err
 			}
 		}
@@ -524,7 +543,7 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 	// ephemeral durability tiers) before we mark the node succeeded.
 	// This is what makes "succeeded" a contract — operators see a
 	// failure rather than a green check that hides a missing artifact.
-	if res.Error == nil && len(node.Outputs) > 0 && r.OutputWriter != nil {
+	if res.Error == nil && outcome.persistenceErr == nil && len(node.Outputs) > 0 && r.OutputWriter != nil {
 		if err := r.OutputWriter.MaterialiseOutputs(childNC.ctx, nc.runID, node.ID, node.Outputs, nc); err != nil {
 			res.Error = err
 		}
@@ -537,8 +556,14 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 	if res.Error != nil {
 		state = NodeStateFailed
 		reason = res.Error.Error()
+	} else if outcome.persistenceErr != nil {
+		state = NodeStateFailed
+		reason = "terminal-persistence-failed"
 	}
-	r.recordNodeFinished(nc, node, &res, state, reason)
+	if persistErr := r.recordNodeFinished(nc, node, &outcome, state, reason); persistErr != nil {
+		r.Logger.Warn("node terminal persistence failed", "node", node.ID, "err", persistErr)
+		outcome.persistenceErr = errors.Join(outcome.persistenceErr, persistErr)
+	}
 
 	// OnResolve fires only when a node terminates in failure. It runs
 	// after the audit row is written so callers reading the audit log can
@@ -547,14 +572,14 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 		if err := r.Hooks.callResolve(nc.ctx, ResolvePayload{
 			RunID:      nc.runID,
 			Node:       node,
-			Result:     &res,
+			Result:     res,
 			ErrorClass: classifyError(res.Error),
 			OccurredAt: res.Finished,
 		}); err != nil {
 			r.Logger.Warn("hook OnResolve returned error", "node", node.ID, "err", err)
 		}
 	}
-	return res
+	return outcome
 }
 
 // exitGateContext builds the ExitGateContext the gate evaluator
@@ -574,73 +599,6 @@ func (r *Runner) exitGateContext(nc *nodeContext, node *Node, res *Result) ExitG
 		Outputs:     outs,
 		WorkflowDir: r.WorkflowDir,
 		Env:         nc.env,
-	}
-}
-
-// recordNodeStarted emits the pending → running transition and a
-// running-state nodes row. The runner calls this once, before the first
-// attempt; later attempts append to node_attempts only.
-func (r *Runner) recordNodeStarted(nc *nodeContext, node *Node, res *Result) {
-	if nc.runID == "" {
-		return
-	}
-	if err := r.recorder().UpsertNode(nc.ctx, NodeRecord{
-		RunID:     nc.runID,
-		NodeID:    node.ID,
-		State:     NodeStateRunning,
-		StartedAt: res.Started,
-		RoleUsed:  nodeRole(node),
-		ModelUsed: nodeModel(node),
-	}); err != nil {
-		r.Logger.Warn("recorder UpsertNode(running) failed", "node", node.ID, "err", err)
-	}
-	if err := r.emitAudit(nc.ctx, AuditEvent{
-		RunID:      nc.runID,
-		NodeID:     node.ID,
-		FromState:  string(NodeStatePending),
-		ToState:    string(NodeStateRunning),
-		Actor:      "system",
-		OccurredAt: res.Started,
-	}); err != nil {
-		r.Logger.Warn("audit emit(running) failed", "node", node.ID, "err", err)
-	}
-}
-
-// recordNodeFinished emits the running → terminal transition and updates
-// the nodes row with attempt count, output, and any error.
-func (r *Runner) recordNodeFinished(nc *nodeContext, node *Node, res *Result, state NodeState, reason string) {
-	if nc.runID == "" {
-		return
-	}
-	attempts, _ := res.Meta["attempts"].(int)
-	if err := r.recorder().UpsertNode(nc.ctx, NodeRecord{
-		RunID:      nc.runID,
-		NodeID:     node.ID,
-		State:      state,
-		Attempts:   attempts,
-		RoleUsed:   nodeRole(node),
-		ModelUsed:  nodeModel(node),
-		Output:     res.Output,
-		StartedAt:  res.Started,
-		FinishedAt: res.Finished,
-		Error:      reason,
-	}); err != nil {
-		r.Logger.Warn("recorder UpsertNode(finish) failed", "node", node.ID, "err", err)
-	}
-	from := NodeStateRunning
-	if state == NodeStateSkipped {
-		from = NodeStatePending
-	}
-	if err := r.emitAudit(nc.ctx, AuditEvent{
-		RunID:      nc.runID,
-		NodeID:     node.ID,
-		FromState:  string(from),
-		ToState:    string(state),
-		Reason:     reason,
-		Actor:      "system",
-		OccurredAt: res.Finished,
-	}); err != nil {
-		r.Logger.Warn("audit emit(finish) failed", "node", node.ID, "err", err)
 	}
 }
 
@@ -673,17 +631,21 @@ func nodeRole(n *Node) string {
 }
 
 // runWithRetry executes the node's kind-specific logic, retrying on failure
-// according to policy. It mutates res in place.
+// according to policy. It mutates outcome in place.
 //
 //nolint:gocyclo // retry loop + kind dispatch + per-attempt recording
-func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *RetryPolicy) {
+func (r *Runner) runWithRetry(nc *nodeContext, node *Node, outcome *nodeOutcome, policy *RetryPolicy) {
+	res := &outcome.result
 	attempts := 0
 	for {
 		attempts++
 		attemptStart := time.Now()
-		// OnEnforce runs once per attempt, before dispatch. A non-nil error
-		// short-circuits the attempt — recorded as an enforcement denial.
-		if err := r.Hooks.callEnforce(nc.ctx, EnforcePayload{
+		// Check cancellation both before and after OnEnforce. Hooks and
+		// recorder callbacks are synchronous extension points, so either can
+		// cancel the run after the outer node-loop check but before dispatch.
+		if ctxErr := nc.ctx.Err(); ctxErr != nil {
+			res.Error = ctxErr
+		} else if err := r.Hooks.callEnforce(nc.ctx, EnforcePayload{
 			RunID:   nc.runID,
 			Node:    node,
 			Inputs:  nc.inputs,
@@ -691,8 +653,10 @@ func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *
 			Attempt: attempts,
 		}); err != nil {
 			res.Error = err
+		} else if ctxErr := nc.ctx.Err(); ctxErr != nil {
+			res.Error = ctxErr
 		} else {
-			r.dispatchKind(nc, node, res)
+			r.dispatchKind(nc, node, outcome)
 		}
 		attemptFinish := time.Now()
 		res.Meta["attempts"] = attempts
@@ -705,7 +669,14 @@ func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *
 			errClass = classifyError(res.Error)
 			errMsg = res.Error.Error()
 		}
-		r.recordAttempt(nc, node, attempts, state, attemptStart, attemptFinish, errClass, errMsg)
+		if persistErr := r.recordAttempt(nc, node, outcome, attempts, state, attemptStart, attemptFinish, errClass, errMsg); persistErr != nil {
+			r.Logger.Warn("recorder RecordAttempt failed", "node", node.ID, "attempt", attempts, "err", persistErr)
+			outcome.persistenceErr = errors.Join(outcome.persistenceErr, persistErr)
+			return
+		}
+		if outcome.persistenceErr != nil {
+			return
+		}
 
 		if res.Error == nil || policy == nil {
 			return
@@ -717,6 +688,10 @@ func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *
 		}
 
 		if !retryAllowedByKinds(policy, node.Kind) || attempts >= maxAttempts {
+			return
+		}
+		if ctxErr := nc.ctx.Err(); ctxErr != nil {
+			res.Error = ctxErr
 			return
 		}
 
@@ -732,31 +707,10 @@ func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *
 	}
 }
 
-// recordAttempt writes one node_attempts row. Called once per attempt
-// regardless of outcome — the row carries the attempt's state so retry
-// stats are queryable.
-func (r *Runner) recordAttempt(nc *nodeContext, node *Node, attemptNo int, state NodeState, started, finished time.Time, errClass, errMsg string) {
-	if nc.runID == "" {
-		return
-	}
-	if err := r.recorder().RecordAttempt(nc.ctx, AttemptRecord{
-		RunID:        nc.runID,
-		NodeID:       node.ID,
-		AttemptNo:    attemptNo,
-		State:        state,
-		ModelUsed:    nodeModel(node),
-		StartedAt:    started,
-		FinishedAt:   finished,
-		ErrorClass:   errClass,
-		ErrorMessage: errMsg,
-	}); err != nil {
-		r.Logger.Warn("recorder RecordAttempt failed", "node", node.ID, "attempt", attemptNo, "err", err)
-	}
-}
-
 // dispatchKind calls the appropriate executor for node.Kind and stores
 // outputs and errors in res.
-func (r *Runner) dispatchKind(nc *nodeContext, node *Node, res *Result) {
+func (r *Runner) dispatchKind(nc *nodeContext, node *Node, outcome *nodeOutcome) {
+	res := &outcome.result
 	switch node.Kind {
 	case KindAI:
 		out, err := r.executeAI(nc, node)
@@ -772,11 +726,17 @@ func (r *Runner) dispatchKind(nc *nodeContext, node *Node, res *Result) {
 	case KindGate:
 		res.Error = r.executeGate(nc, node)
 	case KindLoop:
-		iters, err := r.executeLoop(nc, node)
+		iters, err := r.executeLoop(nc, node, outcome)
+		if errors.Is(err, errNestedTerminalPersistence) {
+			err = nil
+		}
 		res.Meta["iterations"] = iters
 		res.Error = err
 	case KindSpawn:
-		out, count, err := r.executeSpawn(nc, node)
+		out, count, err := r.executeSpawn(nc, node, outcome)
+		if errors.Is(err, errNestedTerminalPersistence) {
+			err = nil
+		}
 		res.Output = out
 		res.Meta["spawned"] = count
 		res.Error = err
@@ -971,16 +931,16 @@ func (r *Runner) executeGate(nc *nodeContext, node *Node) error {
 // to Concurrency goroutines. Each iteration gets an independent copy of
 // the nodeContext so iterations don't share mutable output maps. The
 // {{ .Iter }} template variable contains the 0-based iteration index.
-func (r *Runner) executeLoop(nc *nodeContext, node *Node) (int, error) {
+func (r *Runner) executeLoop(nc *nodeContext, node *Node, outcome *nodeOutcome) (int, error) {
 	if node.Loop.Parallel {
-		return r.executeLoopParallel(nc, node)
+		return r.executeLoopParallel(nc, node, outcome)
 	}
-	return r.executeLoopSequential(nc, node)
+	return r.executeLoopSequential(nc, node, outcome)
 }
 
 // executeLoopSequential runs the nested DAG until Until is true or MaxIters
 // is reached.
-func (r *Runner) executeLoopSequential(nc *nodeContext, node *Node) (int, error) {
+func (r *Runner) executeLoopSequential(nc *nodeContext, node *Node, outcome *nodeOutcome) (int, error) {
 	maxIters := node.Loop.MaxIters
 	if maxIters <= 0 {
 		maxIters = 100
@@ -996,10 +956,14 @@ func (r *Runner) executeLoopSequential(nc *nodeContext, node *Node) (int, error)
 		}
 		for _, id := range order {
 			child := findNode(node.Loop.Nodes, id)
-			res := r.executeNode(nc, child)
-			nc.outputs[child.ID] = res.Output
-			if res.Error != nil {
-				return i + 1, fmt.Errorf("iter %d node %q: %w", i, child.ID, res.Error)
+			childOutcome := r.executeNode(nc, child)
+			outcome.absorb(childOutcome)
+			nc.outputs[child.ID] = childOutcome.result.Output
+			if childOutcome.result.Error != nil {
+				return i + 1, fmt.Errorf("iter %d node %q: %w", i, child.ID, childOutcome.result.Error)
+			}
+			if childOutcome.persistenceErr != nil {
+				return i + 1, errNestedTerminalPersistence
 			}
 		}
 		done, err := evalCondition(node.Loop.Until, nc)
@@ -1017,7 +981,7 @@ func (r *Runner) executeLoopSequential(nc *nodeContext, node *Node) (int, error)
 // concurrently. Iterations don't share mutable state; each gets its own
 // output map seeded from the parent context. Concurrency limits the number
 // of simultaneous goroutines; 0 means runtime.NumCPU().
-func (r *Runner) executeLoopParallel(nc *nodeContext, node *Node) (int, error) {
+func (r *Runner) executeLoopParallel(nc *nodeContext, node *Node, outcome *nodeOutcome) (int, error) {
 	maxIters := node.Loop.MaxIters
 	if maxIters <= 0 {
 		return 0, nil
@@ -1036,6 +1000,7 @@ func (r *Runner) executeLoopParallel(nc *nodeContext, node *Node) (int, error) {
 	// Use a semaphore channel to cap concurrency.
 	sem := make(chan struct{}, concurrency)
 	eg, gCtx := errgroup.WithContext(nc.ctx)
+	var outcomeMu sync.Mutex
 
 	for i := 0; i < maxIters; i++ {
 		iter := i
@@ -1068,10 +1033,16 @@ func (r *Runner) executeLoopParallel(nc *nodeContext, node *Node) (int, error) {
 
 			for _, id := range order {
 				child := findNode(node.Loop.Nodes, id)
-				res := r.executeNode(iterNC, child)
-				iterNC.outputs[child.ID] = res.Output
-				if res.Error != nil {
-					return fmt.Errorf("parallel iter %d node %q: %w", iter, child.ID, res.Error)
+				childOutcome := r.executeNode(iterNC, child)
+				outcomeMu.Lock()
+				outcome.absorb(childOutcome)
+				outcomeMu.Unlock()
+				iterNC.outputs[child.ID] = childOutcome.result.Output
+				if childOutcome.result.Error != nil {
+					return fmt.Errorf("parallel iter %d node %q: %w", iter, child.ID, childOutcome.result.Error)
+				}
+				if childOutcome.persistenceErr != nil {
+					return errNestedTerminalPersistence
 				}
 			}
 			return nil
@@ -1079,6 +1050,9 @@ func (r *Runner) executeLoopParallel(nc *nodeContext, node *Node) (int, error) {
 	}
 
 	if err := eg.Wait(); err != nil {
+		if errors.Is(err, errNestedTerminalPersistence) {
+			return maxIters, nil
+		}
 		return maxIters, err
 	}
 	return maxIters, nil

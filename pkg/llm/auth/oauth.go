@@ -90,6 +90,10 @@ type OAuthResolver struct {
 	// success, failure) for OTel/observability. Token values are never logged.
 	// Nil disables logging.
 	Logger *slog.Logger
+
+	// OnAttempt, when non-nil, is called under the credentials lock with the
+	// refresh token that is about to be presented to the OAuth server.
+	OnAttempt func(refreshToken string)
 }
 
 // log emits a structured refresh event through the resolver's Logger, if one is

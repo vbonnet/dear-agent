@@ -120,15 +120,12 @@ func (e *Escalation) isHolder(id string) bool {
 	return false
 }
 
-// beginConfer opens a programmatic confer: it looks up the live trio from the
-// registry, records the ballot on the escalation, and delivers the question to
-// every member at once. If the registry is unavailable or empty it falls back
-// to single-node conferring (the pre-ce-es7z behaviour) against entry, so a
-// missing registry degrades gracefully rather than wedging the escalation.
-func (e *Engine) beginConfer(ctx context.Context, esc *Escalation, entry ParentRef, from, fromRole string) error {
-	members, err := e.cfg.Registry.Members(ctx)
-	if err != nil || len(members) == 0 {
-		return e.routeSingleVROOM(ctx, esc, entry, from, fromRole)
+// planBeginConfer opens a programmatic confer from members resolved before the
+// Store mutation began. If the registry was unavailable or empty it falls back
+// to single-node conferring without doing external work under the Store lock.
+func (e *Engine) planBeginConfer(esc *Escalation, entry ParentRef, from, fromRole string, members []ParentRef) transitionPlan {
+	if len(members) == 0 {
+		return e.planRouteSingleVROOM(esc, entry, from, fromRole)
 	}
 	ids := make([]string, 0, len(members))
 	for _, m := range members {
@@ -137,7 +134,7 @@ func (e *Engine) beginConfer(ctx context.Context, esc *Escalation, entry ParentR
 		}
 	}
 	if len(ids) == 0 {
-		return e.routeSingleVROOM(ctx, esc, entry, from, fromRole)
+		return e.planRouteSingleVROOM(esc, entry, from, fromRole)
 	}
 
 	now := e.now()
@@ -153,39 +150,37 @@ func (e *Engine) beginConfer(ctx context.Context, esc *Escalation, entry ParentR
 	esc.Phase = PhaseConferring
 	esc.UpdatedAt = now
 
-	// Deliver the confer ask to every member. Best-effort: the Store is the
-	// source of truth and members also poll via `escalate list`, so one failed
-	// delivery must not abort the confer.
+	var plan transitionPlan
+	// Confer fan-out remains best-effort: the Store is the source of truth and
+	// members also poll via `escalate list`.
 	for _, m := range members {
 		if m.SessionID == "" {
 			continue
 		}
-		_ = e.cfg.Messenger.Deliver(ctx, m.SessionID, e.message(esc, from, fromRole, conferAskNote(esc)))
+		plan.deliver(m.SessionID, e.message(esc, from, fromRole, conferAskNote(esc)), true)
 	}
-	e.emit(ctx, esc, PhaseConferring, eventFields{
+	plan.record(e.event(esc, PhaseConferring, eventFields{
 		from: from, fromRole: fromRole, to: VROOMTrioSessionID, toRole: "vroom-trio",
 		note: fmt.Sprintf("confer opened across %d trio members, quorum %d", len(ids), quorum),
-	})
-	return nil
+	}))
+	return plan
 }
 
-// routeSingleVROOM is the legacy path: deliver the escalation to a single VROOM
-// node and mark it conferring (the node then confers via peer messaging). Used
-// when no registry is configured or the registry yields no live members.
-func (e *Engine) routeSingleVROOM(ctx context.Context, esc *Escalation, pref ParentRef, from, fromRole string) error {
+// planRouteSingleVROOM is the legacy path: mark the escalation conferring at a
+// single VROOM node and defer delivery until after the state commits.
+func (e *Engine) planRouteSingleVROOM(esc *Escalation, pref ParentRef, from, fromRole string) transitionPlan {
 	esc.Chain = append(esc.Chain, pref.SessionID)
 	esc.CurrentSessionID = pref.SessionID
 	esc.CurrentRole = pref.Role
 	esc.CurrentKind = pref.Kind
 	esc.Phase = PhaseConferring
 	esc.UpdatedAt = e.now()
-	if err := e.cfg.Messenger.Deliver(ctx, pref.SessionID, e.message(esc, from, fromRole, "")); err != nil {
-		return fmt.Errorf("escalation: deliver to %q: %w", pref.SessionID, err)
-	}
-	e.emit(ctx, esc, PhaseConferring, eventFields{
+	var plan transitionPlan
+	plan.deliver(pref.SessionID, e.message(esc, from, fromRole, ""), false)
+	plan.record(e.event(esc, PhaseConferring, eventFields{
 		from: from, fromRole: fromRole, to: pref.SessionID, toRole: pref.Role,
-	})
-	return nil
+	}))
+	return plan
 }
 
 // CastVote records one trio member's ballot on a conferring escalation and, if
@@ -202,48 +197,47 @@ func (e *Engine) CastVote(ctx context.Context, id, bySessionID, byRole string, v
 	if v == VoteApprove && strings.TrimSpace(answer) == "" {
 		return nil, fmt.Errorf("escalation: an approve vote must carry a proposed answer (--answer)")
 	}
-	esc, err := e.cfg.Store.Get(ctx, id)
+	var plan transitionPlan
+	esc, err := e.cfg.Store.Update(ctx, id, func(current *Escalation) error {
+		if current.resolved() {
+			return fmt.Errorf("escalation %s is already %s", id, current.Phase)
+		}
+		if current.Confer == nil || current.Phase != PhaseConferring {
+			return fmt.Errorf("escalation %s is not in a programmatic confer (phase %s)", id, current.Phase)
+		}
+		if bySessionID == HumanSessionID {
+			return fmt.Errorf("the human resolves with `answer --by human`, not a trio vote")
+		}
+		if !current.Confer.isMember(bySessionID) {
+			return fmt.Errorf("session %q is not a member of this confer", bySessionID)
+		}
+		if current.Confer.hasVoted(bySessionID) {
+			return fmt.Errorf("session %q has already voted on escalation %s", bySessionID, id)
+		}
+
+		now := e.now()
+		current.Confer.Ballots = append(current.Confer.Ballots, Ballot{
+			SessionID: bySessionID, Role: byRole, Vote: v, Answer: answer, Rationale: rationale, At: now,
+		})
+		current.UpdatedAt = now
+		plan.record(e.event(current, PhaseConferring, eventFields{
+			from: bySessionID, fromRole: byRole, vote: string(v), note: rationale,
+		}))
+
+		//nolint:exhaustive // conferPending is the implicit no-op.
+		switch outcome, detail := e.decideConfer(current); outcome {
+		case conferAnswer:
+			plan.append(e.planResolveConferAnswer(current, detail))
+		case conferHuman:
+			note := e.conferNote(current, detail)
+			plan.append(e.planDispatchToHuman(current, VROOMTrioSessionID, "vroom-trio", note))
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if esc.resolved() {
-		return nil, fmt.Errorf("escalation %s is already %s", id, esc.Phase)
-	}
-	if esc.Confer == nil || esc.Phase != PhaseConferring {
-		return nil, fmt.Errorf("escalation %s is not in a programmatic confer (phase %s)", id, esc.Phase)
-	}
-	if bySessionID == HumanSessionID {
-		return nil, fmt.Errorf("the human resolves with `answer --by human`, not a trio vote")
-	}
-	if !esc.Confer.isMember(bySessionID) {
-		return nil, fmt.Errorf("session %q is not a member of this confer", bySessionID)
-	}
-	if esc.Confer.hasVoted(bySessionID) {
-		return nil, fmt.Errorf("session %q has already voted on escalation %s", bySessionID, id)
-	}
-
-	now := e.now()
-	esc.Confer.Ballots = append(esc.Confer.Ballots, Ballot{
-		SessionID: bySessionID, Role: byRole, Vote: v, Answer: answer, Rationale: rationale, At: now,
-	})
-	esc.UpdatedAt = now
-	e.emit(ctx, esc, PhaseConferring, eventFields{
-		from: bySessionID, fromRole: byRole, vote: string(v), note: rationale,
-	})
-
-	//nolint:exhaustive // conferPending is the implicit no-op (fall through to Put below).
-	switch outcome, detail := e.decideConfer(esc); outcome {
-	case conferAnswer:
-		return e.resolveConferAnswer(ctx, esc, detail)
-	case conferHuman:
-		if err := e.dispatchToHuman(ctx, esc, VROOMTrioSessionID, "vroom-trio", e.conferNote(esc, detail)); err != nil {
-			return nil, err
-		}
-	}
-	if err := e.cfg.Store.Put(ctx, esc); err != nil {
-		return nil, err
-	}
-	return esc, nil
+	return e.finishTransition(ctx, esc, plan)
 }
 
 // conferOutcome is the result of tallying a confer's ballots after a vote.
@@ -311,9 +305,9 @@ func (e *Engine) decideConfer(esc *Escalation) (conferOutcome, string) {
 	return conferPending, ""
 }
 
-// resolveConferAnswer records the trio's quorum answer as the terminal answer
-// and returns it to the origin worker.
-func (e *Engine) resolveConferAnswer(ctx context.Context, esc *Escalation, answer string) (*Escalation, error) {
+// planResolveConferAnswer records the trio's quorum answer and returns the
+// delivery and audit effects that the committing caller owns.
+func (e *Engine) planResolveConferAnswer(esc *Escalation, answer string) transitionPlan {
 	now := e.now()
 	esc.Answer = answer
 	esc.AnsweredBy = VROOMTrioSessionID
@@ -321,17 +315,19 @@ func (e *Engine) resolveConferAnswer(ctx context.Context, esc *Escalation, answe
 	esc.Phase = PhaseAnswered
 	esc.ResolvedAt = now
 	esc.UpdatedAt = now
+	var plan transitionPlan
 	if esc.OriginSessionID != "" && esc.OriginSessionID != VROOMTrioSessionID {
-		_ = e.cfg.Messenger.Deliver(ctx, esc.OriginSessionID, e.message(esc, VROOMTrioSessionID, "vroom-trio", answer))
+		plan.deliver(
+			esc.OriginSessionID,
+			e.message(esc, VROOMTrioSessionID, "vroom-trio", answer),
+			true,
+		)
 	}
-	e.emit(ctx, esc, PhaseAnswered, eventFields{
+	plan.record(e.event(esc, PhaseAnswered, eventFields{
 		from: VROOMTrioSessionID, fromRole: "vroom-trio", answer: answer,
 		latency: now.Sub(esc.CreatedAt).Milliseconds(),
-	})
-	if err := e.cfg.Store.Put(ctx, esc); err != nil {
-		return nil, err
-	}
-	return esc, nil
+	}))
+	return plan
 }
 
 // conferAskNote is the instruction delivered to each trio member when a confer

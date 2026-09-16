@@ -128,7 +128,10 @@ func scanOldFormatDirs(dir string) ([]oldFormatEntry, error) {
 }
 
 func runMigrateClaudeToUnified(cmd *cobra.Command, _ []string) error {
-	sessionsDir := getDoctorSessionsDir()
+	sessionsDir, err := getDoctorSessionsDir()
+	if err != nil {
+		return fmt.Errorf("resolve migration sessions directory: %w", err)
+	}
 
 	entries, err := scanOldFormatDirs(sessionsDir)
 	if err != nil {

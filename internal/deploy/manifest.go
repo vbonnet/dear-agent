@@ -74,10 +74,21 @@ type Artifact struct {
 	// binary that has not been built on this machine). A missing source for an
 	// optional artifact is skipped rather than failing the run.
 	Optional bool `yaml:"optional,omitempty"`
+	// AbsentOnly marks a config artifact that should be seeded on first install
+	// but never overwritten once the operator has customised it. Sync and forced
+	// install treat an already-deployed copy as already-current (ActionUnchanged)
+	// regardless of whether its content matches the source, so operator edits
+	// are preserved. Status still reports drift when the file is absent. Use for
+	// files like pulse registries where the repo holds the default and the host
+	// holds the live operator config.
+	AbsentOnly bool `yaml:"absent-only,omitempty"`
 	// Remediation is the command that produces or redeploys this artifact. It is
 	// surfaced when the source is missing so the operator knows the prerequisite
 	// (e.g. "make build-write-guards").
 	Remediation string `yaml:"remediation,omitempty"`
+	// CreateDirs lists runtime directories that must exist on the host for this
+	// artifact to function (e.g. log output directories).
+	CreateDirs []string `yaml:"create-dirs,omitempty"`
 }
 
 // Manifest is the set of artifacts dear-deploy knows how to deploy.

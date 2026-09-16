@@ -460,3 +460,202 @@ func TestDeleteBranch_NotAGitRepo(t *testing.T) {
 		t.Error("Expected error for non-git repo")
 	}
 }
+
+func TestParseWorktreeOutput_LockedAndReason(t *testing.T) {
+	porcelain := `worktree /path/to/main
+HEAD 1111111111111111111111111111111111111111
+branch refs/heads/main
+
+worktree /path/to/locked-no-reason
+HEAD 2222222222222222222222222222222222222222
+branch refs/heads/branch-a
+locked
+
+worktree /path/to/locked-with-reason
+HEAD 3333333333333333333333333333333333333333
+branch refs/heads/branch-b
+locked added with --lock
+
+worktree /path/to/locked-session
+HEAD 4444444444444444444444444444444444444444
+branch refs/heads/branch-c
+locked session:test-session-123
+`
+
+	wts := parseWorktreeOutput(porcelain)
+	if len(wts) != 4 {
+		t.Fatalf("expected 4 worktrees, got %d", len(wts))
+	}
+
+	if wts[0].Locked || wts[0].LockReason != "" {
+		t.Errorf("main worktree should not be locked: %+v", wts[0])
+	}
+	if !wts[1].Locked || wts[1].LockReason != "" {
+		t.Errorf("locked-no-reason should be locked with empty reason: %+v", wts[1])
+	}
+	if !wts[2].Locked || wts[2].LockReason != "added with --lock" {
+		t.Errorf("locked-with-reason should have reason 'added with --lock': %+v", wts[2])
+	}
+	if !wts[3].Locked || wts[3].LockReason != "session:test-session-123" {
+		t.Errorf("locked-session should have reason 'session:test-session-123': %+v", wts[3])
+	}
+}
+
+func TestLockAndUnlockWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	initTestRepo(t, tmpDir)
+
+	wtPath := filepath.Join(t.TempDir(), "wt-locked")
+	if err := AddWorktreeWithOpts(tmpDir, wtPath, "feature-lock", WorktreeAddOptions{
+		Lock:       true,
+		LockReason: "session:test-session",
+	}); err != nil {
+		t.Fatalf("AddWorktreeWithOpts failed: %v", err)
+	}
+
+	wts, err := ListWorktrees(tmpDir)
+	if err != nil {
+		t.Fatalf("ListWorktrees failed: %v", err)
+	}
+
+	var found *Worktree
+	for i := range wts {
+		if strings.HasSuffix(wts[i].Path, "wt-locked") {
+			found = &wts[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("wt-locked not found in ListWorktrees")
+	}
+	if !found.Locked || found.LockReason != "session:test-session" {
+		t.Errorf("expected locked with session:test-session, got locked=%v reason=%q", found.Locked, found.LockReason)
+	}
+
+	// Unlocking should succeed and be idempotent
+	if err := UnlockWorktree(tmpDir, wtPath); err != nil {
+		t.Fatalf("UnlockWorktree failed: %v", err)
+	}
+	if err := UnlockWorktree(tmpDir, wtPath); err != nil {
+		t.Fatalf("subsequent UnlockWorktree on unlocked tree should succeed idempotently: %v", err)
+	}
+
+	wtsAfter, err := ListWorktrees(tmpDir)
+	if err != nil {
+		t.Fatalf("ListWorktrees after unlock failed: %v", err)
+	}
+	for _, wt := range wtsAfter {
+		if strings.HasSuffix(wt.Path, "wt-locked") {
+			if wt.Locked {
+				t.Errorf("worktree should be unlocked after UnlockWorktree: %+v", wt)
+			}
+			break
+		}
+	}
+
+	// Relock with LockWorktree
+	if err := LockWorktree(tmpDir, wtPath, "manual-lock"); err != nil {
+		t.Fatalf("LockWorktree failed: %v", err)
+	}
+	wtsRelocked, err := ListWorktrees(tmpDir)
+	if err != nil {
+		t.Fatalf("ListWorktrees after relock failed: %v", err)
+	}
+	for _, wt := range wtsRelocked {
+		if strings.HasSuffix(wt.Path, "wt-locked") {
+			if !wt.Locked || wt.LockReason != "manual-lock" {
+				t.Errorf("expected relocked with manual-lock, got locked=%v reason=%q", wt.Locked, wt.LockReason)
+			}
+			break
+		}
+	}
+}
+
+func TestIsExplicitPreserve(t *testing.T) {
+	cases := []struct {
+		reason string
+		want   bool
+	}{
+		{"preserve", true},
+		{"preserve: keep for debugging", true},
+		{"PRESERVE-manual", true},
+		{"keep", true},
+		{"keep until review", true},
+		{"hold", true},
+		{"hold: repro", true},
+		{"pin", true},
+		{"manual", true},
+		{"do-not-reap", true},
+		{"do_not_reap", true},
+		{"wip", true},
+		{"wip: testing", true},
+		{"added with --lock", false},
+		{"session:vroom-overseer", false},
+		{"safe-pr-owned:1234:build", false},
+		{"", false},
+		{"other reason", false},
+	}
+
+	for _, tc := range cases {
+		got := IsExplicitPreserve(tc.reason)
+		if got != tc.want {
+			t.Errorf("IsExplicitPreserve(%q) = %v, want %v", tc.reason, got, tc.want)
+		}
+	}
+}
+
+func TestRemoveMergedWorktrees_LockedMergedBranch(t *testing.T) {
+	tmpDir := t.TempDir()
+	initTestRepo(t, tmpDir)
+
+	// Worktree 1: merged and locked with blanket lock -> should be unlocked and removed
+	wtMergedLocked := filepath.Join(t.TempDir(), "wt-merged-locked")
+	if err := AddWorktreeWithOpts(tmpDir, wtMergedLocked, "branch-merged-locked", WorktreeAddOptions{
+		Lock:       true,
+		LockReason: "added with --lock",
+	}); err != nil {
+		t.Fatalf("AddWorktreeWithOpts failed: %v", err)
+	}
+
+	// Worktree 2: merged and locked with explicit preserve -> should be kept
+	wtPreserved := filepath.Join(t.TempDir(), "wt-preserved")
+	if err := AddWorktreeWithOpts(tmpDir, wtPreserved, "branch-preserved", WorktreeAddOptions{
+		Lock:       true,
+		LockReason: "preserve: test pin",
+	}); err != nil {
+		t.Fatalf("AddWorktreeWithOpts failed: %v", err)
+	}
+
+	results, err := RemoveMergedWorktrees(tmpDir, "main")
+	if err != nil {
+		t.Fatalf("RemoveMergedWorktrees failed: %v", err)
+	}
+
+	var foundMergedLocked, foundPreserved bool
+	for _, r := range results {
+		if r.Branch == "branch-merged-locked" {
+			foundMergedLocked = true
+			if !r.Removed {
+				t.Errorf("branch-merged-locked should have been removed, err: %v", r.Err)
+			}
+		}
+		if r.Branch == "branch-preserved" {
+			foundPreserved = true
+			t.Errorf("branch-preserved should have been skipped, but result was: %+v", r)
+		}
+	}
+	if !foundMergedLocked {
+		t.Error("expected to find branch-merged-locked in results")
+	}
+	if foundPreserved {
+		t.Error("branch-preserved should have been skipped and not returned as removed")
+	}
+
+	// Verify filesystem
+	if _, err := os.Stat(wtMergedLocked); !os.IsNotExist(err) {
+		t.Error("expected wtMergedLocked directory to be removed")
+	}
+	if _, err := os.Stat(wtPreserved); os.IsNotExist(err) {
+		t.Error("expected wtPreserved directory to still exist")
+	}
+}
