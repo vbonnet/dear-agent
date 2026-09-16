@@ -155,6 +155,9 @@ standalone binary. It manages critical launchd services and binaries for the
 
 ## BDD Traceability
 
+- Test consequence: Deterministic Go unit and CLI integration tests listed
+  below exercise RL-01 through RL-50; the existing guardrail feature checks
+  only co-located SPEC presence and RL-21 wording.
 - Guardrail feature: `agm/test/bdd/features/observability_package_guardrails.feature`
   verifies that this co-located specification exists and that RL-21 declares
   bounded execution. It does not execute recovery-loop outcomes.
@@ -168,6 +171,7 @@ standalone binary. It manages critical launchd services and binaries for the
 - CLI tests: `cmd/recovery-loop/main_test.go`
   (RL-09, RL-11..RL-17, RL-46)
 - Multi-tick verified-recovery CLI tests:
-  `cmd/recovery-loop/verified_test.go`
+  `cmd/recovery-loop/verified_test.go` and
+  `cmd/recovery-loop/observation_test.go`
   (RL-07, RL-08, RL-10, RL-12, RL-20, RL-24, RL-26, RL-27,
   RL-29..RL-32, RL-34..RL-41, RL-44, RL-45, RL-47..RL-50)
