@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/absencealarm"
@@ -56,13 +57,11 @@ func recordClear(
 	// that is "could not check", not health, and converting it into a cleared
 	// condition is the original defect wearing a different hat: a recovery
 	// announced without observing the thing that was broken.
-	unverifiable := status == recoveryloop.StatusHealthy &&
-		job.Pulse != "" && !job.PulseIsStructural && !truth.Present(job.Pulse)
-	if unverifiable {
-		recordUnverifiable(job, fmt.Sprintf(
-			"%s, but pulse %q was not observed: health unverifiable",
-			reason, job.Pulse), state, rep, prev)
-		return
+	if status == recoveryloop.StatusHealthy && job.Pulse != "" && !job.PulseIsStructural {
+		if evidenceReason, admissible := currentPulseHealthReason(job, reason, truth, now); !admissible {
+			recordUnverifiable(job, evidenceReason, state, rep, prev)
+			return
+		}
 	}
 
 	// A job that was failing and is now observed healthy has genuinely
@@ -85,8 +84,9 @@ func recordClear(
 	}
 	if status == recoveryloop.StatusHealthy {
 		state.Jobs[job.Name] = recoveryloop.JobState{
-			LastAttemptTime: now,
-			LastStatus:      recoveryloop.StatusHealthy,
+			LastAttemptTime:    now,
+			LastStatus:         recoveryloop.StatusHealthy,
+			PendingEscalations: prev.PendingEscalations,
 		}
 	}
 	rep.Results = append(rep.Results, recoveryloop.Result{
@@ -106,6 +106,41 @@ func recordClear(
 		// Not reachable: PlanJob returns only healthy or snoozed alongside
 		// ActionNone, and every other status is recorded by its own path.
 	}
+}
+
+// currentPulseHealthReason refuses to turn an explicit-but-clock-invalid
+// positive reading into current health. Planning and recovery verification
+// share the same evidence-skew boundary, so the same fact cannot be HEALTHY in
+// one path and unusable in another.
+func currentPulseHealthReason(
+	job recoveryloop.Job,
+	planReason string,
+	truth recoveryloop.PulseTruth,
+	now time.Time,
+) (string, bool) {
+	fact := truth[job.Pulse]
+	if !truth.Present(job.Pulse) {
+		observed := "was not observed"
+		if fact.Known {
+			observed = fmt.Sprintf("reported status %q", fact.Status)
+		}
+		return fmt.Sprintf("%s, but pulse %q %s: health unverifiable",
+			planReason, job.Pulse, observed), false
+	}
+	switch truth.ClassifyEvidence(job.Pulse, time.Time{}, now) {
+	case recoveryloop.EvidenceMissing:
+		return fmt.Sprintf("%s, but pulse %q carries no evidence timestamp: health unverifiable",
+			planReason, job.Pulse), false
+	case recoveryloop.EvidenceTooFarInFuture:
+		return fmt.Sprintf("%s, but pulse %q carries evidence dated %s in the future: health unverifiable",
+			planReason, job.Pulse, fact.Evidence.Sub(now).Round(time.Second)), false
+	case recoveryloop.EvidenceAdmissible:
+		return planReason, true
+	case recoveryloop.EvidenceNotAfterBoundary:
+		// No boundary is supplied above, so this case is unreachable.
+	}
+	return fmt.Sprintf("%s, but pulse %q evidence timing is unavailable: health unverifiable",
+		planReason, job.Pulse), false
 }
 
 // clearingEvidenceReason applies the shared temporal evidence policy to the
@@ -216,12 +251,14 @@ func recordVerified(
 	if attempt < 1 {
 		attempt = 1
 	}
+	pendingEscalations := state.Jobs[job.Name].PendingEscalations
 	state.Jobs[job.Name] = recoveryloop.JobState{
 		ConsecutiveFailures: 0,
 		LastAttemptTime:     now,
 		LastAction:          action,
 		LastStatus:          recoveryloop.StatusRecovered,
 		HumanNeeded:         false,
+		PendingEscalations:  pendingEscalations,
 	}
 	rep.Results = append(rep.Results, recoveryloop.Result{
 		Job:     job.Name,
@@ -276,6 +313,8 @@ func recordPending(
 		PendingDeadline:     actionAt.Add(opts.verifyGrace),
 		UnhealthySince:      unhealthySince,
 		LastEscalated:       prev.LastEscalated,
+		PendingEscalations:  prev.PendingEscalations,
+		PendingNotification: prev.PendingNotification,
 	}
 	// The attempt ordinal counts this attempt, so it starts at one. Reporting
 	// the pre-action counter makes the first remediation read as "attempt 0".
@@ -343,8 +382,8 @@ func recordGivenUp(
 	notifyFn notifier,
 	stderr io.Writer,
 ) {
-	full := fmt.Sprintf("%s; %d consecutive recoveries did not clear it, remediation suppressed pending a human",
-		reason, prev.ConsecutiveFailures)
+	full := fmt.Sprintf("%s; planned %s remediation suppressed after %d consecutive recoveries did not clear it, pending a human",
+		reason, action, prev.ConsecutiveFailures)
 	st := prev
 	st.LastStatus = recoveryloop.StatusFailed
 	st.HumanNeeded = true
@@ -370,8 +409,14 @@ func recordGivenUp(
 	// The durable escalation is rate-limited: appending an identical record
 	// to the human-facing sink every ten minutes forever is how that sink
 	// stops being read, which is the failure this change exists to fix.
-	if escalationDue(prev.LastEscalated, now) {
-		escalate(job, action, prev.ConsecutiveFailures, full, now, state, opts, truth, notifyFn, stderr)
+	if prev.PendingNotification != nil {
+		// The post-observation pass retries this incident's exact rejected
+		// banner. Do not replace it with a logical duplicate every tick.
+		return
+	}
+	due := escalationDue(prev.LastEscalated, now)
+	if due {
+		escalate(job, prev.LastAction, prev.ConsecutiveFailures, full, now, state, opts, truth, due, notifyFn, stderr)
 	}
 }
 
@@ -403,7 +448,8 @@ func recordFailure(
 	}
 	prev := state.Jobs[job.Name]
 	attempts := prev.ConsecutiveFailures + 1
-	humanNeeded := attempts >= opts.escalateAfter
+	humanNeeded := prev.HumanNeeded || attempts >= opts.escalateAfter
+	newlyHumanNeeded := !prev.HumanNeeded && humanNeeded
 	unhealthySince := prev.UnhealthySince
 	if unhealthySince.IsZero() {
 		unhealthySince = now
@@ -417,6 +463,8 @@ func recordFailure(
 		HumanNeeded:                humanNeeded,
 		UnhealthySince:             unhealthySince,
 		LastEscalated:              prev.LastEscalated,
+		PendingEscalations:         prev.PendingEscalations,
+		PendingNotification:        prev.PendingNotification,
 		MissedVerificationDeadline: prev.MissedVerificationDeadline,
 	}
 	rep.Results = append(rep.Results, recoveryloop.Result{
@@ -432,7 +480,10 @@ func recordFailure(
 
 	if humanNeeded {
 		rep.HumanNeeded++
-		escalate(job, action, attempts, reason, now, state, opts, truth, notifyFn, stderr)
+		if newlyHumanNeeded || (prev.PendingNotification == nil && escalationDue(prev.LastEscalated, now)) {
+			escalate(job, action, attempts, reason, now, state, opts, truth,
+				true, notifyFn, stderr)
+		}
 	}
 
 	appendJournal(opts, stderr, recoveryloop.JournalRecord{
@@ -479,15 +530,12 @@ func escalate(
 	state *recoveryloop.State,
 	opts *options,
 	truth recoveryloop.PulseTruth,
+	notify bool,
 	notifyFn notifier,
 	stderr io.Writer,
 ) {
 	if opts.dryRun {
 		return
-	}
-	pulse := job.Pulse
-	if pulse == "" {
-		pulse = job.Name
 	}
 	absentFor := truth.AbsentFor(job.Pulse, now)
 	if absentFor == 0 {
@@ -495,15 +543,7 @@ func escalate(
 			absentFor = now.Sub(st.UnhealthySince)
 		}
 	}
-	// The reason carries the condition that actually failed to clear, which is
-	// often structural rather than a missing pulse. Stating "pulse absent"
-	// unconditionally sends whoever reads this to the wrong place.
-	condition := fmt.Sprintf("pulse %q absent for %s", pulse, absentFor.Round(time.Minute))
-	if job.Pulse != "" && truth.Present(job.Pulse) {
-		condition = fmt.Sprintf("pulse %q is present; the unresolved condition is structural", pulse)
-	} else if job.Pulse == "" {
-		condition = fmt.Sprintf("no pulse configured; unhealthy for %s", absentFor.Round(time.Minute))
-	}
+	pulse, pulseStatus, condition := escalationPulseContext(job, truth, absentFor)
 	body := fmt.Sprintf(
 		"recovery-loop could not restore %s. %s. %d consecutive recoveries failed to clear it (last action %s). %s",
 		job.Name, condition, attempts, action, reason)
@@ -512,45 +552,240 @@ func escalate(
 	// LastEscalated when no sink accepted the message would buy 24h of silence
 	// for an escalation nobody received: the false-green shape applied to the
 	// escalation path itself (RL-40).
-	var delivered bool
-	// The record's status is the pulse's real status. Stamping StatusAbsent on
-	// a structural failure whose pulse is present tells a machine consumer the
-	// opposite of what the reason text says.
-	pulseStatus := absencealarm.StatusAbsent
-	if job.Pulse != "" && truth.Present(job.Pulse) {
-		pulseStatus = absencealarm.StatusPresent
-	}
-	if err := absencealarm.AppendJournal(opts.absenceJournal, absencealarm.JournalRecord{
+	record := absencealarm.JournalRecord{
 		Time:   now,
 		Kind:   "recovery.human_needed",
 		Pulse:  pulse,
 		Status: pulseStatus,
 		Reason: body,
 		Misses: attempts,
-	}); err != nil {
+	}
+	var durableDelivered bool
+	if err := absencealarm.AppendJournal(opts.absenceJournal, record); err != nil {
 		fmt.Fprintf(stderr, "recovery-loop: append absence escalation: %v\n", err)
 	} else {
-		delivered = true
-	}
-
-	if notifyFn != nil {
-		notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
-		title := fmt.Sprintf("HUMAN NEEDED: %s not recovered", job.Name)
-		if err := notifyFn(notifyCtx, title, body); err != nil {
-			fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
-		} else {
-			delivered = true
-		}
-		cancel()
+		durableDelivered = true
 	}
 
 	st := state.Jobs[job.Name]
 	st.HumanNeeded = true
-	if delivered {
-		st.LastEscalated = now
-	} else {
+	if !durableDelivered {
+		st.PendingEscalations = append(st.PendingEscalations, record)
+	}
+	var notificationDelivered bool
+	if notify {
+		pending := record
+		st.PendingNotification = &pending
+		if notifyFn != nil {
+			opts.notificationAttempted[job.Name] = true
+			notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
+			title := fmt.Sprintf("HUMAN NEEDED: %s not recovered", job.Name)
+			if err := notifyFn(notifyCtx, title, body); err != nil {
+				fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
+			} else {
+				notificationDelivered = true
+				st.PendingNotification = nil
+				st.LastEscalated = now
+			}
+			cancel()
+		}
+	}
+	accepted := durableDelivered || notificationDelivered
+	if !accepted && notify {
 		fmt.Fprintf(stderr,
 			"recovery-loop: no escalation sink accepted the %s alert; will retry next tick\n", job.Name)
+	} else if !durableDelivered && !notify {
+		fmt.Fprintf(stderr,
+			"recovery-loop: durable escalation for %s is still pending; will retry next tick\n", job.Name)
 	}
 	state.Jobs[job.Name] = st
+}
+
+// retryPendingEscalations services durable delivery debt independently of the
+// current registry. Exact records survive a job rename or removal, while the
+// original pulse identity still participates in the snooze boundary.
+func retryPendingEscalations(
+	jobs []recoveryloop.Job,
+	snoozes map[string]absencealarm.Snooze,
+	now time.Time,
+	state *recoveryloop.State,
+	opts *options,
+	stderr io.Writer,
+) {
+	jobsByName := make(map[string]recoveryloop.Job, len(jobs))
+	for _, job := range jobs {
+		jobsByName[job.Name] = job
+	}
+	names := make([]string, 0, len(state.Jobs))
+	for name, st := range state.Jobs {
+		if len(st.PendingEscalations) > 0 {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		job, configured := jobsByName[name]
+		if !configured {
+			job = recoveryloop.Job{Name: name}
+		} else if _, snoozed := recoveryloop.IsJobSnoozed(job, snoozes, now); snoozed {
+			// A current job-level snooze defers all of its historical debt. The
+			// per-record check below additionally protects renamed pulses.
+			continue
+		}
+		retryPendingEscalationQueue(job, snoozes, now, state, opts, stderr)
+	}
+}
+
+// retryPendingEscalationQueue retries exact durable records rejected on
+// earlier ticks before an unsnoozed job takes any new lifecycle path. The
+// prepass snooze gate intentionally runs first; otherwise the retry is
+// independent of whether this tick becomes pending, unavailable, failed, or
+// recovered (RL-35, RL-59).
+func retryPendingEscalationQueue(
+	job recoveryloop.Job,
+	snoozes map[string]absencealarm.Snooze,
+	now time.Time,
+	state *recoveryloop.State,
+	opts *options,
+	stderr io.Writer,
+) {
+	st := state.Jobs[job.Name]
+	if len(st.PendingEscalations) == 0 || opts.dryRun {
+		return
+	}
+	resolvedIncident := !st.HumanNeeded && st.ConsecutiveFailures == 0
+	if resolvedIncident {
+		// Recovery starts a new notification epoch even when historical durable
+		// debt remains. A later outage in this tick must not inherit the old
+		// incident's rate limit.
+		st.LastEscalated = time.Time{}
+	}
+	queue := st.PendingEscalations
+	for i, record := range queue {
+		// The rejected record is the stable identity of the historical event;
+		// a later config edit must not bypass a snooze on its original pulse.
+		recordJob := job
+		recordJob.Pulse = record.Pulse
+		if _, snoozed := recoveryloop.IsJobSnoozed(recordJob, snoozes, now); snoozed {
+			st.PendingEscalations = append([]absencealarm.JournalRecord(nil), queue[i:]...)
+			state.Jobs[job.Name] = st
+			return
+		}
+		if err := absencealarm.AppendJournal(opts.absenceJournal, record); err != nil {
+			fmt.Fprintf(stderr, "recovery-loop: retry durable escalation: %v\n", err)
+			st.PendingEscalations = append([]absencealarm.JournalRecord(nil), queue[i:]...)
+			state.Jobs[job.Name] = st
+			return
+		}
+	}
+	st.PendingEscalations = nil
+	state.Jobs[job.Name] = st
+}
+
+// retryPendingNotifications runs only after current lifecycle observation.
+// Durable delivery is safe to retry in the prepass, but a banner saying "not
+// recovered" is not: the same tick may prove recovery moments later. Deferring
+// banners until a current result conclusively remains failed keeps their
+// narrative aligned with current state.
+func retryPendingNotifications(
+	jobs []recoveryloop.Job,
+	snoozes map[string]absencealarm.Snooze,
+	now time.Time,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+	opts *options,
+	notifyFn notifier,
+	stderr io.Writer,
+) {
+	if opts.dryRun || notifyFn == nil {
+		return
+	}
+	jobsByName := make(map[string]recoveryloop.Job, len(jobs))
+	for _, job := range jobs {
+		jobsByName[job.Name] = job
+	}
+	confirmedUnresolved := make(map[string]bool, len(rep.Results))
+	for _, result := range rep.Results {
+		if result.Status == recoveryloop.StatusFailed && result.HumanNeeded {
+			confirmedUnresolved[result.Job] = true
+		}
+	}
+	names := make([]string, 0, len(state.Jobs))
+	for name, st := range state.Jobs {
+		if confirmedUnresolved[name] && st.HumanNeeded && st.PendingNotification != nil {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		st := state.Jobs[name]
+		if opts.notificationAttempted[name] || !escalationDue(st.LastEscalated, now) {
+			continue
+		}
+		job, configured := jobsByName[name]
+		if !configured {
+			// Durable debt is registry-independent, but a removed job has no
+			// current observation that can justify a "not recovered" banner.
+			continue
+		}
+		if _, snoozed := recoveryloop.IsJobSnoozed(job, snoozes, now); snoozed {
+			continue
+		}
+		recordJob := job
+		recordJob.Pulse = st.PendingNotification.Pulse
+		if _, snoozed := recoveryloop.IsJobSnoozed(recordJob, snoozes, now); snoozed {
+			continue
+		}
+		opts.notificationAttempted[name] = true
+		notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
+		title := fmt.Sprintf("HUMAN NEEDED: %s not recovered", name)
+		if err := notifyFn(notifyCtx, title, st.PendingNotification.Reason); err != nil {
+			fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
+		} else {
+			st.LastEscalated = now
+			st.PendingNotification = nil
+			state.Jobs[name] = st
+		}
+		cancel()
+	}
+}
+
+// escalationPulseContext returns one shared machine status and human
+// description, preserving the observed pulse polarity instead of fabricating
+// ABSENT for undetermined, unobserved, or pulse-less structural failures.
+func escalationPulseContext(
+	job recoveryloop.Job,
+	truth recoveryloop.PulseTruth,
+	unhealthyFor time.Duration,
+) (string, absencealarm.Status, string) {
+	if job.Pulse == "" {
+		return job.Name, absencealarm.StatusUndetermined,
+			fmt.Sprintf("no pulse configured; structural condition unhealthy for %s", unhealthyFor.Round(time.Minute))
+	}
+	fact, observed := truth[job.Pulse]
+	if !observed || !fact.Known {
+		return job.Pulse, absencealarm.StatusUndetermined,
+			fmt.Sprintf("pulse %q has no current observation; unresolved condition is structural", job.Pulse)
+	}
+	switch fact.Status {
+	case absencealarm.StatusPresent:
+		return job.Pulse, fact.Status,
+			fmt.Sprintf("pulse %q is present; the unresolved condition is structural", job.Pulse)
+	case absencealarm.StatusAbsent:
+		return job.Pulse, fact.Status,
+			fmt.Sprintf("pulse %q absent for %s", job.Pulse, unhealthyFor.Round(time.Minute))
+	case absencealarm.StatusUndetermined:
+		return job.Pulse, fact.Status,
+			fmt.Sprintf("pulse %q observation is undetermined for %s", job.Pulse, unhealthyFor.Round(time.Minute))
+	case absencealarm.StatusSnoozed:
+		return job.Pulse, fact.Status,
+			fmt.Sprintf("pulse %q is snoozed; the unresolved condition is structural", job.Pulse)
+	default:
+		status := fact.Status
+		if status == "" {
+			status = absencealarm.StatusUndetermined
+		}
+		return job.Pulse, status,
+			fmt.Sprintf("pulse %q reported status %q; the unresolved condition is structural", job.Pulse, fact.Status)
+	}
 }

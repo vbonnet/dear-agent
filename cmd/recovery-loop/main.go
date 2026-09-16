@@ -110,6 +110,10 @@ type options struct {
 	escalateAfter  int
 	giveUpAfter    int
 	maxHBAge       time.Duration
+	// notificationAttempted is per-tick process state. It prevents the
+	// post-observation retry pass from dispatching a second banner when the
+	// current lifecycle path already attempted one.
+	notificationAttempted map[string]bool
 }
 
 func parseFlags(args []string, stderr io.Writer) (*options, int) {
@@ -118,7 +122,8 @@ func parseFlags(args []string, stderr io.Writer) (*options, int) {
 	home, _ := os.UserHomeDir()
 	defaultCfg := filepath.Join(home, ".config", "dear-agent", "recovery-loop-jobs.json")
 	opts := options{
-		defaultConfig: defaultCfg,
+		defaultConfig:         defaultCfg,
+		notificationAttempted: make(map[string]bool),
 	}
 	fs.StringVar(&opts.configPath, "config", defaultCfg, "critical jobs configuration file (JSON)")
 	fs.StringVar(&opts.snoozePath, "snooze", filepath.Join(home, ".config", "dear-agent", "absence-alarm-snooze.json"), "shared snooze file (JSON)")
@@ -255,6 +260,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	if stateErr != nil {
 		fmt.Fprintf(stderr, "recovery-loop: %v (proceeding with empty state)\n", stateErr)
 	}
+	retryPendingEscalations(jobs, snoozes, now, &state, opts, stderr)
 
 	// Pulse truth comes from the absence-alarm heartbeat, the only source
 	// that reports presence as well as absence. The escalation journal is
@@ -278,6 +284,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 	for _, job := range jobs {
 		processJob(ctx, job, opts, &state, &rep, snoozes, truth, pulseSource, launchdJobs, launchdErr, host, notifyFn, now, stderr)
 	}
+	retryPendingNotifications(jobs, snoozes, now, &state, &rep, opts, notifyFn, stderr)
 
 	if !opts.dryRun {
 		if err := recoveryloop.SaveState(opts.statePath, state); err != nil {

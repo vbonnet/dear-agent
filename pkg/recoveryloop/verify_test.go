@@ -1,6 +1,7 @@
 package recoveryloop
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,11 +93,71 @@ func TestPlanJob_PresentPulseOverridesNonZeroExit(t *testing.T) {
 		// documented "alarms are present" exit code.
 		"com.dear-agent.absence-alarm": {Label: "com.dear-agent.absence-alarm", PID: 0, Status: 1, Loaded: true},
 	}
-	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusPresent}}
+	truth := PulseTruth{"absence-alarm-heartbeat": {
+		Known: true, Status: absencealarm.StatusPresent, Evidence: host.Now(),
+	}}
 
 	action, status, reason := PlanJob(job, nil, truth, PulseSourceFresh, launchd, host, host.Now())
 	if action != ActionNone || status != StatusHealthy {
 		t.Errorf("got action=%q status=%q reason=%q; want none/healthy: a present pulse proves the job is alive", action, status, reason)
+	}
+}
+
+// RL-24/RL-47: a positive status only overrides a periodic job's non-zero
+// exit when its timestamp is usable as current evidence.
+func TestPlanJob_PresentPulseRequiresAdmissibleEvidence(t *testing.T) {
+	host, _ := mockHostOps()
+	now := host.Now()
+	job := Job{
+		Name:         "absence-alarm",
+		LaunchdLabel: "com.dear-agent.absence-alarm",
+		Pulse:        "absence-alarm-heartbeat",
+	}
+	launchd := map[string]LaunchdJobInfo{
+		job.LaunchdLabel: {Label: job.LaunchdLabel, PID: 0, Status: 1, Loaded: true},
+	}
+	for _, tc := range []struct {
+		name     string
+		evidence time.Time
+	}{
+		{name: "missing timestamp"},
+		{name: "materially future timestamp", evidence: now.Add(3 * time.Minute)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truth := PulseTruth{job.Pulse: {
+				Known: true, Status: absencealarm.StatusPresent, Evidence: tc.evidence,
+			}}
+			action, status, reason := PlanJob(job, nil, truth, PulseSourceFresh, launchd, host, now)
+			if action != ActionKickstart || status != StatusUnhealthy {
+				t.Fatalf("action=%q status=%q reason=%q, want kickstart/unhealthy", action, status, reason)
+			}
+		})
+	}
+}
+
+// RL-03/RL-24: an activity pulse may override ordinary periodic-job exit
+// statuses, but never an independently actionable launchd structural failure.
+func TestPlanJob_PresentPulseDoesNotOverrideStructuralExit(t *testing.T) {
+	host, _ := mockHostOps()
+	job := Job{
+		Name:         "worker",
+		LaunchdLabel: "com.example.worker",
+		PlistPath:    "/tmp/worker.plist",
+		Pulse:        "worker-tick",
+	}
+	truth := PulseTruth{job.Pulse: {
+		Known: true, Status: absencealarm.StatusPresent, Evidence: host.Now(),
+	}}
+	for _, exitStatus := range []int{78, -9} {
+		t.Run(fmt.Sprintf("status_%d", exitStatus), func(t *testing.T) {
+			launchd := map[string]LaunchdJobInfo{
+				job.LaunchdLabel: {Label: job.LaunchdLabel, Loaded: true, Status: exitStatus},
+			}
+			action, status, reason := PlanJob(job, nil, truth, PulseSourceFresh, launchd, host, host.Now())
+			if action != ActionBootstrap || status != StatusUnhealthy {
+				t.Fatalf("action=%q status=%q reason=%q, want bootstrap/unhealthy", action, status, reason)
+			}
+		})
 	}
 }
 

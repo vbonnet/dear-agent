@@ -359,13 +359,13 @@ func PlanJob(
 			}
 			return ActionKickstart, StatusUnhealthy, reason
 		}
-		// RL-24: a present pulse is authoritative proof of life and outranks
+		// RL-24: a current, admissibly dated pulse is authoritative proof of life and outranks
 		// the last exit status. Periodic jobs report findings through their
 		// exit code by design -- absence-alarm exits 1 whenever any pulse is
 		// absent -- so treating a non-zero exit as a wedge restarts a healthy
 		// monitor every tick precisely when it is doing its job. Only fall
 		// through to the exit-status heuristic when no pulse vouches for it.
-		if job.Pulse != "" && !job.PulseIsStructural && truth.Present(job.Pulse) {
+		if job.Pulse != "" && !job.PulseIsStructural && truth.CurrentPresent(job.Pulse, now) {
 			return ActionNone, StatusHealthy, fmt.Sprintf("pulse %q is present", job.Pulse)
 		}
 		// RL-04 (continued): non-zero exit when not running and no pulse

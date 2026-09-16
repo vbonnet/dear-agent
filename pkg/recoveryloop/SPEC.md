@@ -9,7 +9,7 @@
 
      CLI (cmd/recovery-loop/*_test.go):
        RL-07 through RL-17; RL-20; RL-24, RL-26, RL-27;
-       RL-29 through RL-32; RL-34 through RL-41; RL-44 through RL-55. -->
+       RL-29 through RL-32; RL-34 through RL-41; RL-44 through RL-60. -->
 
 **Status:** Proposed
 **Scope:** Host critical job self-healing loop and escalation engine
@@ -42,7 +42,7 @@ Every recovery attempt and outcome is journaled to ensure that recovery actions
 themselves remain observable and cannot fail silently.
 
 Recovery is an observed post-condition, never an executed command. RL-23
-through RL-55 require clearable current pulse truth, explicit present evidence,
+through RL-60 require clearable current pulse truth, explicit present evidence,
 and post-action observation before recovery is recorded.
 
 ## Applicability
@@ -57,7 +57,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-02** When a critical job's launchd service is not loaded in launchctl and the job is not snoozed, the system shall attempt to bootstrap the service.
 
-**RL-03** When a critical job's launchd service is loaded but reports exit code 78, the system shall attempt to bootout and re-bootstrap the service.
+**RL-03** When a critical job's launchd service is loaded but reports exit code 78 or -9, the system shall attempt to bootout and re-bootstrap the service.
 
 **RL-04** When a critical job's ACTIVITY pulse is reported absent or undetermined in the current pulse truth (RL-23) and its service is loaded, the system shall attempt to restart the job via launchctl kickstart. A structural pulse is governed by RL-52 instead.
 
@@ -69,7 +69,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-08** When a recovery attempt fails, the system shall increment the consecutive failure count for that job by 1.
 
-**RL-09** When a job's consecutive failure count reaches 2 or more, the system shall dispatch an escalation notification and record that human intervention is needed.
+**RL-09** When a job's consecutive failure count reaches the configured escalation threshold, the system shall record that human intervention is needed, append the required durable escalation record, and dispatch a desktop notification when the re-escalation interval is due.
 
 **RL-10** The system shall append a structured record to the recovery journal for every recovery attempt, recording the job name, action taken, outcome status, consecutive attempt count, whether human intervention is needed, and any error message.
 
@@ -99,7 +99,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-23** The system shall read current pulse truth from the absence-alarm heartbeat, which reports presence as well as absence, and the system shall not derive pulse health from the append-only escalation journal alone.
 
-**RL-24** When a job's ACTIVITY pulse is present, the system shall classify the job as HEALTHY regardless of its last launchd exit status. A pulse that only proves the service is loaded is not an activity pulse and is governed by RL-43 and RL-45 instead.
+**RL-24** When no structural failure under RL-01 through RL-03 is observed and a job's ACTIVITY pulse is present with evidence admissible under RL-47, the system shall classify the job as HEALTHY regardless of any other nonzero periodic-job exit status. A pulse that only proves the service is loaded is not an activity pulse and is governed by RL-43 and RL-45 instead.
 
 **RL-25** When planning a recovery action, the system shall classify the job as UNHEALTHY and the system shall not classify any job as RECOVERED before an action has been executed and verified.
 
@@ -125,15 +125,15 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-36** When a job requires human intervention and a further remediation is pending verification, the system shall continue to report that job as requiring human intervention.
 
-**RL-37** When a job's consecutive failure count has reached the give-up threshold and that job was escalated within the re-escalation interval, the system shall continue to report the job while not appending a further escalation record.
+**RL-37** When a job's consecutive failure count has reached the give-up threshold and that job was escalated within the re-escalation interval, the system shall continue to report the job while not appending a duplicate escalation record, except that a durable journal delivery pending under RL-59 shall still be retried.
 
 **RL-38** While dry-run mode is set, the system shall not write recovery state, update the heartbeat, append recovery or escalation journal records, or dispatch notifications on any code path, including settlement of a verification opened by an earlier tick.
 
 **RL-39** When verifying a recovery action, the system shall treat a pulse as proof that the action worked only when the pulse was observed after the action ran, and the system shall classify an action confirmed only by earlier evidence as PENDING VERIFICATION.
 
-**RL-40** When no escalation sink accepts a human-needed alert, the system shall not advance the re-escalation timestamp, so the next tick attempts delivery again.
+**RL-40** When no escalation sink accepts a human-needed alert, the system shall not advance the re-escalation timestamp, so the next tick attempts delivery again. Acceptance by a non-durable notification sink does not satisfy the durable-journal obligation in RL-59.
 
-**RL-41** When the post-action launchd listing cannot be obtained and pulse evidence does not independently settle the outcome, the system shall preserve the recovery as PENDING VERIFICATION, report the required observation as unavailable, and exit nonzero rather than verifying against the pre-action snapshot.
+**RL-41** When the post-action launchd listing cannot be obtained, pulse evidence does not independently settle the outcome, and no launchd-independent structural predicate establishes failure under RL-60, the system shall preserve the recovery as PENDING VERIFICATION, report the required observation as unavailable, and exit nonzero rather than verifying against the pre-action snapshot.
 
 **RL-42** When a job declares no pulse and its recovery was triggered by a stopped service with a nonzero exit status, the system shall require that condition to have cleared before classifying the recovery as RECOVERED.
 
@@ -145,13 +145,13 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-46** When a deployed job configuration predates a safety property the built-in registry asserts for the same pulse, the system shall apply that property rather than operating without it.
 
-**RL-47** When pulse evidence is materially future-dated relative to the recovery observation, the system shall not use that evidence to verify a recovery or clear an existing failure state.
+**RL-47** When pulse evidence is missing its observation timestamp or is materially future-dated relative to the recovery observation, the system shall not use that evidence to classify current health, verify a recovery, or clear an existing failure state.
 
 **RL-48** When initial launchd state cannot be observed, the system shall report the observation as unavailable and exit nonzero without executing remediation or changing the job's attempt or failure state.
 
 **RL-49** When pulse evidence first proves recovery after the latest non-superseded verification deadline, the system shall classify the current condition as recovered and report that the evidence arrived after the deadline.
 
-**RL-50** When a pending deadline lies more than one verification grace period in the future, the system shall bound the remaining wait to one grace period without accepting evidence from before the original action as recovery proof.
+**RL-50** When a pending deadline lies more than one verification grace period in the future, the system shall bound the remaining wait to one grace period without accepting evidence from before the original action as recovery proof. When that bounded attempt settles and its action timestamp still lies in the future, the system shall quarantine the damaged timestamp and require subsequent recovery evidence to post-date the settlement observation.
 
 **RL-51** When a recovery action executes, the system shall use the action's actual execution time as the boundary for subsequent recovery evidence. When a tick takes no recovery action, including suppression at the give-up threshold, the system shall not advance that boundary.
 
@@ -163,15 +163,25 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-55** While any recovery is awaiting verification, the system shall expose that pending state in its report and exit nonzero.
 
+**RL-56** When give-up policy suppresses a newly proposed remediation, the system shall distinguish that suppressed proposal from the last remediation that actually executed in reports, durable escalation records, and notifications.
+
+**RL-57** When the system escalates an unhealthy job, it shall preserve the observed pulse status in both the machine-readable record and operator narrative, and it shall classify an unobserved or pulse-less condition as undetermined rather than fabricating an absence.
+
+**RL-58** While a job has a standing human-needed state and no recovery has been verified, the system shall preserve that state across failed, pending, and observation-unavailable transitions, including when the configured escalation threshold changes. When recovery is verified, the system shall clear that incident's human-needed state, pending notification, and notification rate-limit window even if historical durable delivery debt remains.
+
+**RL-59** When appending a required durable human-needed journal record fails, the system shall retain every exact rejected record in order and retry that delivery queue on the next tick where both the current job and each record's original pulse are not snoozed, without repeating a rate-limited notification. When notification dispatch fails, the system shall retain that exact current-incident narrative independently of durable delivery debt and retry it only after current observation conclusively reports the incident as failed and still human-needed. Historical delivery debt shall not suppress or replace the durable record or notification for a fresh incident. A removed job's durable debt shall still retry, but its notification shall remain deferred without a current observation. While a snooze is active, RL-35 shall defer the affected record and its ordered suffix without discarding them.
+
+**RL-60** When a launchd-independent structural predicate proves that a recovery action failed, the system shall settle that attempt as FAILED even if launchd state cannot be observed.
+
 ## BDD Traceability
 
 - Test consequence: Deterministic Go unit and CLI integration tests listed
-  below exercise RL-01 through RL-55; the existing guardrail feature checks
+  below exercise RL-01 through RL-60; the existing guardrail feature checks
   only co-located SPEC presence and RL-21 wording.
 - Guardrail feature: `agm/test/bdd/features/observability_package_guardrails.feature`
   verifies that this co-located specification exists and that RL-21 declares
   bounded execution. It does not execute recovery-loop outcomes.
-- BDD disposition for RL-47 through RL-55: no scenario change. These are
+- BDD disposition for RL-47 through RL-60: no scenario change. These are
   deterministic evidence-timing, state-transition, reporting, and exit-code
   boundaries exercised directly by the Go tests below.
 - Planning and storage tests: `pkg/recoveryloop/loop_test.go`
@@ -183,6 +193,7 @@ standalone binary. It manages critical launchd services and binaries for the
 - Multi-tick verified-recovery CLI tests:
   `cmd/recovery-loop/verified_test.go` and
   `cmd/recovery-loop/observation_test.go`, plus focused review regressions in
-  `cmd/recovery-loop/review_regression_test.go`
+  `cmd/recovery-loop/review_regression_test.go` and
+  `cmd/recovery-loop/escalation_queue_test.go`
   (RL-07, RL-08, RL-10, RL-12, RL-20, RL-24, RL-26, RL-27,
-  RL-29..RL-32, RL-34..RL-41, RL-44, RL-45, RL-47..RL-55)
+  RL-29..RL-32, RL-34..RL-41, RL-44, RL-45, RL-47..RL-60)

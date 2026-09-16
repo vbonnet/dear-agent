@@ -148,8 +148,8 @@ func TestCLI_PresentPulse_NoKickstartOnAlarmExitCode(t *testing.T) {
 	now := time.Date(2026, 9, 9, 8, 0, 0, 0, time.UTC)
 	f.write(t, f.cfg, absenceAlarmJob)
 	f.write(t, f.absHB, fmt.Sprintf(
-		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"present"},{"name":"mergeloop-tick","status":"absent"}]}`,
-		now.Format(time.RFC3339)))
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"present","evidence":%q},{"name":"mergeloop-tick","status":"absent"}]}`,
+		now.Format(time.RFC3339), now.Format(time.RFC3339)))
 
 	host, calls := hostAt(now, map[string]recoveryloop.LaunchdJobInfo{
 		"com.dear-agent.absence-alarm": {Loaded: true, PID: 0, Status: 1},

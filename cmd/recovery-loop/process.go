@@ -34,8 +34,9 @@ func processJob(
 	prev := state.Jobs[job.Name]
 
 	// A snooze silences a job wherever it sits in the lifecycle, including
-	// while a verification is still open. Settling first would escalate over
-	// an outage an operator has explicitly acknowledged (RL-05, RL-22).
+	// while a verification or durable escalation retry is still open. Settling
+	// first would escalate over an outage an operator explicitly acknowledged
+	// (RL-05, RL-22, RL-35).
 	if sn, snoozed := recoveryloop.IsJobSnoozed(job, snoozes, now); snoozed {
 		recordSnoozed(job, sn, state, rep, prev)
 		return
@@ -102,6 +103,11 @@ func processJob(
 
 	if execErr != nil {
 		recordFailure(job, action, reason, execErr, now, actionAt, state, rep, opts, truth, notifyFn, stderr)
+		return
+	}
+	if outcome, failed := recoveryloop.VerifyIndependentStructure(job, action, host); failed {
+		recordFailure(job, action, outcome.Reason, errors.New(outcome.Reason), now, actionAt,
+			state, rep, opts, truth, notifyFn, stderr)
 		return
 	}
 
@@ -175,6 +181,13 @@ func handleOpenVerification(
 ) bool {
 	if prev.PendingDeadline.IsZero() {
 		return false
+	}
+	// A launchd listing failure cannot hide an independently observable
+	// structural failure. In particular, a zero-exit reinstall that leaves its
+	// binary missing is conclusively failed even while launchd is unavailable.
+	if outcome, failed := recoveryloop.VerifyIndependentStructure(job, prev.PendingAction, host); failed {
+		recordSettledPendingFailure(job, outcome.Reason, now, state, rep, opts, truth, prev, notifyFn, stderr)
+		return true
 	}
 	// A listing that failed leaves an empty map, which VerifyRecovery would
 	// read as "the service is not loaded": a transient launchctl failure would
@@ -311,7 +324,15 @@ func recordSettledPendingFailure(
 		prev.MissedVerificationDeadline = prev.PendingDeadline
 		state.Jobs[job.Name] = prev
 	}
-	recordFailure(job, prev.PendingAction, reason, errors.New(reason), now, prev.PendingSince, state, rep, opts, truth, notifyFn, stderr)
+	actionBoundary := prev.PendingSince
+	if actionBoundary.After(now) {
+		// The pending deadline was already bounded against a corrected clock.
+		// Once that quarantined attempt settles, do not copy its still-future
+		// action timestamp into the next proof boundary: current evidence would
+		// otherwise remain unusable until wall time caught up.
+		actionBoundary = now
+	}
+	recordFailure(job, prev.PendingAction, reason, errors.New(reason), now, actionBoundary, state, rep, opts, truth, notifyFn, stderr)
 }
 
 // holdPendingUnavailable leaves an open verification open because a required

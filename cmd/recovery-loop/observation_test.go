@@ -728,7 +728,39 @@ func TestCLI_FuturePendingDeadlineIsBoundedAfterClockCorrection(t *testing.T) {
 		t.Errorf("bounded verification did not settle after its deadline; exit=%d state=%+v stdout:\n%s",
 			code, settled, stdout.String())
 	}
+	if !settled.LastAttemptTime.Equal(later) || settled.LastAttemptTime.After(later) {
+		t.Errorf("clock-corrected settlement retained future proof boundary %s, want %s",
+			settled.LastAttemptTime, later)
+	}
 	if len(*calls) != 0 || len(*laterCalls) != 0 {
 		t.Errorf("clock-correction settlement fired another remediation: first=%v later=%v", *calls, *laterCalls)
+	}
+
+	// Once the quarantined attempt has settled, evidence newer than that
+	// settlement must be usable even though it still predates the original
+	// jumped-forward timestamp. Otherwise the corrected clock blocks recovery
+	// until wall time catches up a day later.
+	recoveryTick := later.Add(10 * time.Minute)
+	recoveryEvidence := later.Add(5 * time.Minute)
+	f.write(t, f.absHB, fmt.Sprintf(
+		`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"present","evidence":%q}]}`,
+		recoveryTick.Format(time.RFC3339), recoveryEvidence.Format(time.RFC3339)))
+	hostRecovered, recoveryCalls := hostAt(recoveryTick, map[string]recoveryloop.LaunchdJobInfo{
+		"com.dear-agent.absence-alarm": {Loaded: true, Status: 0},
+	})
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(f.args("--verify-grace", "30m"), &stdout, &stderr, hostRecovered, nil); code != 0 {
+		t.Fatalf("post-correction recovery exit = %d, want 0; stdout:\n%s", code, stdout.String())
+	}
+	if !recoveryEvidence.Before(futureAction) {
+		t.Fatal("test evidence no longer predates the original future boundary")
+	}
+	if len(*recoveryCalls) != 0 {
+		t.Fatalf("post-correction recovery fired another remediation: %v", *recoveryCalls)
+	}
+	if js := f.jobState(t, "absence-alarm"); js.LastStatus != recoveryloop.StatusRecovered ||
+		js.ConsecutiveFailures != 0 {
+		t.Fatalf("post-correction evidence did not recover the job: %+v", js)
 	}
 }

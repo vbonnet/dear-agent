@@ -122,6 +122,14 @@ func (pt PulseTruth) Present(name string) bool {
 	return f.Known && f.Status == absencealarm.StatusPresent
 }
 
+// CurrentPresent reports whether a positive pulse observation is temporally
+// admissible as evidence about the host now. Presence without a timestamp, or
+// presence dated materially in the future, is not current health evidence.
+func (pt PulseTruth) CurrentPresent(name string, now time.Time) bool {
+	return pt.Present(name) &&
+		pt.ClassifyEvidence(name, time.Time{}, now) == EvidenceAdmissible
+}
+
 // ClassifyEvidence applies the recovery loop's temporal proof boundary to one
 // pulse observation. A zero boundary asks only whether the evidence is
 // plausibly current; a non-zero boundary additionally requires a strictly
@@ -387,11 +395,8 @@ func verifyStructure(
 	launchdJobs map[string]LaunchdJobInfo,
 	host HostOps,
 ) (VerifyOutcome, bool) {
-	if job.BinaryPath != "" && !host.FileExists(job.BinaryPath) {
-		return VerifyOutcome{
-			Status: StatusFailed,
-			Reason: fmt.Sprintf("after %s, binary %s still does not exist", action, job.BinaryPath),
-		}, true
+	if failure, bad := VerifyIndependentStructure(job, action, host); bad {
+		return failure, true
 	}
 	if job.LaunchdLabel == "" {
 		return VerifyOutcome{}, false
@@ -407,6 +412,20 @@ func verifyStructure(
 		return VerifyOutcome{
 			Status: StatusFailed,
 			Reason: fmt.Sprintf("after %s, launchd job %s still reports status %d", action, job.LaunchdLabel, info.Status),
+		}, true
+	}
+	return VerifyOutcome{}, false
+}
+
+// VerifyIndependentStructure checks structural predicates that do not depend
+// on launchd being observable. Callers use it before deferring a verdict on a
+// failed launchctl listing, so a demonstrably unsuccessful reinstall cannot
+// remain pending forever behind an unrelated observation outage.
+func VerifyIndependentStructure(job Job, action ActionType, host HostOps) (VerifyOutcome, bool) {
+	if job.BinaryPath != "" && !host.FileExists(job.BinaryPath) {
+		return VerifyOutcome{
+			Status: StatusFailed,
+			Reason: fmt.Sprintf("after %s, binary %s still does not exist", action, job.BinaryPath),
 		}, true
 	}
 	return VerifyOutcome{}, false

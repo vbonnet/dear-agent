@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/absencealarm"
 )
 
 // JobState tracks the recovery lifecycle and consecutive failure count for one job.
@@ -33,6 +35,15 @@ type JobState struct {
 	// LastEscalated is when this job last reached a human-facing sink, used
 	// to keep a standing escalation loud without duplicating it every tick.
 	LastEscalated time.Time `json:"last_escalated,omitzero"`
+	// PendingEscalations retain the exact machine-readable records when the
+	// required human-needed journal rejects them. A queue, rather than one
+	// replaceable slot, keeps historical delivery debt from swallowing a fresh
+	// incident discovered before the sink recovers.
+	PendingEscalations []absencealarm.JournalRecord `json:"pending_escalations,omitempty"`
+	// PendingNotification retains the exact current-incident narrative when
+	// the desktop sink rejects it. It is separate from durable delivery debt:
+	// an old journal record must never become a stale banner for a new outage.
+	PendingNotification *absencealarm.JournalRecord `json:"pending_notification,omitempty"`
 	// MissedVerificationDeadline preserves the latest non-superseded deadline
 	// after an attempt is settled as failed beyond that boundary. It survives
 	// later non-attempt ticks so a recovery can still report that its evidence
