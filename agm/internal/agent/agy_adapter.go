@@ -176,8 +176,10 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	agyCmd := prepared.Command
 
 	// Start Agy in the tmux session
-	if err := sendPastedShellCommandWith(agySendCommand, tmuxName, agyCmd, agyPastedShellValues(agySpec)...); err != nil {
-		_, _ = harnessexec.ResolveSubmission(err, prepared.Cancel)
+	if err := resolvePrivateLaunchSubmission(
+		"AGY", prepared,
+		sendPastedShellCommandWith(agySendCommand, tmuxName, agyCmd, agyPastedShellValues(agySpec)...),
+	); err != nil {
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to start Agy in tmux session: %w", err))
 	}
 
@@ -331,8 +333,10 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 	}
 	fullCmd := prepared.Command
 
-	if err := sendPastedShellCommandWith(agySendCommand, metadata.TmuxName, fullCmd, agyPastedShellValues(agySpec)...); err != nil {
-		_, _ = harnessexec.ResolveSubmission(err, prepared.Cancel)
+	if err := resolvePrivateLaunchSubmission(
+		"AGY", prepared,
+		sendPastedShellCommandWith(agySendCommand, metadata.TmuxName, fullCmd, agyPastedShellValues(agySpec)...),
+	); err != nil {
 		primaryErr := fmt.Errorf("failed to send resume command: %w", err)
 		if created {
 			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)

@@ -29,7 +29,7 @@ const defaultSpawnMaxChildren = 32
 // emits a cycle fails the parent.
 //
 //nolint:gocyclo // sequential validate-then-execute pipeline; splitting hurts locality
-func (r *Runner) executeSpawn(nc *nodeContext, node *Node) (string, int, error) {
+func (r *Runner) executeSpawn(nc *nodeContext, node *Node, outcome *nodeOutcome) (string, int, error) {
 	cmd, err := renderTemplate(node.Spawn.Cmd, nc)
 	if err != nil {
 		return "", 0, fmt.Errorf("render spawn cmd: %w", err)
@@ -100,10 +100,14 @@ func (r *Runner) executeSpawn(nc *nodeContext, node *Node) (string, int, error) 
 		// nodeContext is shared; only the node id changes).
 		wrapped := *child
 		wrapped.ID = key
-		res := r.executeNode(nc, &wrapped)
-		nc.outputs[key] = res.Output
-		if res.Error != nil {
-			return summariseSpawn(emitted, key, res.Error), len(emitted), fmt.Errorf("spawned %q: %w", key, res.Error)
+		childOutcome := r.executeNode(nc, &wrapped)
+		outcome.absorb(childOutcome)
+		nc.outputs[key] = childOutcome.result.Output
+		if childOutcome.result.Error != nil {
+			return summariseSpawn(emitted, key, childOutcome.result.Error), len(emitted), fmt.Errorf("spawned %q: %w", key, childOutcome.result.Error)
+		}
+		if childOutcome.persistenceErr != nil {
+			return summariseSpawn(emitted, key, childOutcome.persistenceErr), len(emitted), errNestedTerminalPersistence
 		}
 		emitted = append(emitted, key)
 	}

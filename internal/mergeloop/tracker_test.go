@@ -16,6 +16,7 @@ func TestTrackerPersistAndReload(t *testing.T) {
 	}
 	tr.RecordAgentSpawn(42, "Build & Test", "mergeloop/pr-42", now)
 	tr.RecordAction(42, StateCIFailing, now)
+	tr.RecordAction(43, StateBehind, now)
 	if err := tr.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -26,6 +27,9 @@ func TestTrackerPersistAndReload(t *testing.T) {
 	}
 	if got := reloaded.Attempts(42); got != 1 {
 		t.Errorf("attempts after reload = %d, want 1", got)
+	}
+	if got := reloaded.Get(43, now).LastRebaseAt; !got.Equal(now) {
+		t.Errorf("last_rebase_at after reload = %v, want %v", got, now)
 	}
 }
 

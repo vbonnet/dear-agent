@@ -157,9 +157,9 @@ func (f Finding) IsVerified() bool {
 	return ok
 }
 
-// Validate returns a non-nil error if the finding is missing fields
-// the store requires. It does NOT validate lifecycle fields — those
-// are the store's concern.
+// Validate returns a non-nil error if the finding is missing fields the store
+// requires or names an unknown remediation strategy. It does NOT validate
+// lifecycle fields — those are the store's concern.
 func (f Finding) Validate() error {
 	if f.CheckID == "" {
 		return fmt.Errorf("audit: Finding.CheckID is empty")
@@ -172,6 +172,9 @@ func (f Finding) Validate() error {
 	}
 	if f.Title == "" {
 		return fmt.Errorf("audit: Finding.Title is empty (check %q, fp %q)", f.CheckID, f.Fingerprint)
+	}
+	if err := f.Suggested.Validate(); err != nil {
+		return fmt.Errorf("%w (check %q, fp %q)", err, f.CheckID, f.Fingerprint)
 	}
 	return nil
 }

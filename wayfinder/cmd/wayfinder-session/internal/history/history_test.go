@@ -479,17 +479,17 @@ func TestGetEventsByType(t *testing.T) {
 	h.AppendEvent(EventTypePhaseStarted, "RESEARCH", nil)
 	h.AppendEvent(EventTypeValidationFailed, "DESIGN", nil)
 
-	// Get all phase.started events
+	// Get all wayfinder.phase.started events
 	events, err := h.GetEventsByType(EventTypePhaseStarted)
 	if err != nil {
 		t.Fatalf("GetEventsByType() error = %v", err)
 	}
 
 	if len(events) != 2 {
-		t.Fatalf("GetEventsByType(phase.started) returned %d events, want 2", len(events))
+		t.Fatalf("GetEventsByType(wayfinder.phase.started) returned %d events, want 2", len(events))
 	}
 
-	// Verify all events are phase.started
+	// Verify all events are wayfinder.phase.started
 	for i, event := range events {
 		if event.Type != EventTypePhaseStarted {
 			t.Errorf("event[%d].Type = %q, want %q", i, event.Type, EventTypePhaseStarted)

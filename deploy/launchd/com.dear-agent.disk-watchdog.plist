@@ -47,7 +47,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin</string>
     <key>HOME</key>
     <string>__HOME__</string>
     <key>DOLT_PORT</key>

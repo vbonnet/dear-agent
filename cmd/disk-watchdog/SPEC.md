@@ -13,8 +13,12 @@
   the refusal and producer-tag wire contracts is pinned in
   `agm/internal/ops/sandbox_gc_test.go` and `agm/internal/gclog/gclog_test.go`
   (SGC-17), since `cmd/` cannot import `agm/internal/...`.
+- Build-cache reaper evidence: `cmd/disk-watchdog/buildcache_test.go` (DW-32..DW-38).
+- E2E-cache reaper evidence: `cmd/disk-watchdog/e2ecache_test.go` (DW-39..DW-42).
+- Preflight-scratch reaper evidence: `cmd/disk-watchdog/preflight_scratch_test.go` (DW-43..DW-47).
+- Absence-alarm cross-watch evidence: `cmd/disk-watchdog/absence_heartbeat_test.go` (DW-48..DW-51).
 
-<!-- Last audited at: 2026-08-14 -->
+<!-- Last audited at: 2026-09-05 -->
 
 ## Purpose
 
@@ -47,9 +51,17 @@ shape as ce-93lw.18, one layer down.
 
 A stale reaper alarms and exits 1 but deliberately does **not** latch the brake
 (DW-18): halting every spawn because a GC is behind would be a worse outage than
-the leak it warns about. Only proof of a *real* sweep counts (DW-21) — a dry run
+the leak it warns about. Only proof of a *real* sweep counts (DW-21) - a dry run
 reclaims nothing and a sweep whose deletions all failed leaves the sandboxes in
 place, so counting either would let a broken reaper suppress its own alarm.
+
+Since ce-x2h49 it also performs **absence-alarm cross-watch** (DW-48..DW-51).
+absence-alarm already pulses on disk-watchdog ticks. disk-watchdog closes the loop
+by watching the watcher: verifying that absence-alarm's heartbeat file records a
+positive tick_time content timestamp within the lookback window (default 30m).
+A dead absence-alarm scheduler alarms at WARN pressure and exits 1, but deliberately
+does not engage the admission brake: halting spawns because monitoring is behind
+would worsen an outage rather than resolve it.
 
 ## EARS Requirements
 
@@ -114,3 +126,43 @@ place, so counting either would let a broken reaper suppress its own alarm.
 **DW-22** When evaluating reaper liveness, the system shall ignore records that are not sandbox-GC operations and records timestamped beyond the clock-skew tolerance (5 minutes) ahead of the current time.
 
 **DW-23** If the sandbox GC log cannot be read, then the system shall classify the sandbox reaper as stale.
+
+**DW-32** The system shall reap abandoned Go-style build caches on every tick, regardless of whether any disk threshold is breached. A cache older than the age gate has no value — the next run creates its own — and on this host they accrued roughly 9 GB/day, so deferring the reap to a breach would absorb that growth between breaches instead of bounding it.
+
+**DW-33** When identifying a build cache, the system shall require structural proof and shall never rely on the directory's name: every top-level entry must be a two-hex-digit shard directory or known cache furniture, there must be at least 64 shards, and every sampled shard must contain only content-addressed cache files or nothing at all. A directory holding any foreign entry, at either level, shall be kept.
+
+**DW-34** When a build cache's modification time is newer than the configured age gate, when a process holds a file open inside it, or when that liveness probe cannot be evaluated, the system shall keep the cache and shall record the reason it was kept.
+
+**DW-35** While dry-run mode is set, the system shall scan for build caches and report the reclaimable bytes but shall delete nothing.
+
+**DW-36** The system shall not follow symbolic links when scanning for build caches, so a link planted inside a scanned directory cannot direct a deletion outside the configured scan roots.
+
+**DW-37** When the configured build-cache age gate is not positive while the reaper is enabled, the system shall reject it as a usage error and exit 2, because a zero or negative window would make a cache an in-flight build is writing immediately eligible. Passing empty scan roots is the supported way to disable the reaper.
+
+**DW-38** When a configured build-cache scan root does not exist, the system shall treat it as an empty result rather than a failure, so a host without that directory still completes a healthy tick.
+
+**DW-39** The system shall reap abandoned E2E test fixture directories under the configured E2E cache directory on every tick, regardless of whether any disk threshold is breached.
+
+**DW-40** When identifying an E2E test fixture directory, the system shall verify that its name matches the prefix "agm-", that it is owned by the current user, that it is not a symlink, and that its contents contain only expected fixture files ("agm", "agm.lock", or "agm-build-*"). A directory containing any foreign entry shall be kept.
+
+**DW-41** When an E2E test fixture directory is within the configured max-entries bound and newer than the configured age gate, when a process holds a file open inside it, or when its liveness probe cannot be evaluated, the system shall keep the fixture directory and shall record the reason it was kept.
+
+**DW-42** When the configured E2E cache age gate is not positive while the E2E reaper is enabled, the system shall reject it as a usage error and exit 2. Passing an empty E2E cache directory is the supported way to disable the E2E reaper.
+
+**DW-43** The system shall reap abandoned preflight scratch directories across configured preflight scratch roots on every tick, regardless of whether any disk threshold is breached.
+
+**DW-44** When identifying candidate preflight scratch directories, the system shall discover directories under `${XDG_CACHE_HOME:-$HOME/.cache}/dear-agent/preflight-tmp` and `${XDG_CACHE_HOME:-$HOME/.cache}/dear-agent/preflight-runs`, as well as legacy preflight directories matching `.preflight-home-*`, `.preflight-*`, `ce*-preflight*`, `.ce[0-9]*`, and `.tmp` under `$HOME`, and `ce*-preflight*`, `dear-agent-preflight-*`, and `ce-*-host-tmp*` under `~/.cache`.
+
+**DW-45** When identifying a candidate preflight scratch directory, the system shall verify that the candidate is owned by the current user EUID, is a regular directory and not a symbolic link, is older than the configured preflight scratch age gate (default 24h), and has no active processes holding files open inside it. A directory failing any safety check or whose liveness probe cannot be evaluated shall be kept.
+
+**DW-46** While dry-run mode is set, the system shall scan for abandoned preflight scratch directories and report reclaimable bytes but shall delete nothing.
+
+**DW-47** When the configured preflight scratch age gate is not positive while the preflight reaper is enabled, the system shall reject it as a usage error and exit 2. Passing empty preflight scratch roots is the supported way to disable the preflight scratch reaper.
+
+**DW-48** While the configured absence-alarm heartbeat window is zero or the absence-alarm heartbeat path is empty, the system shall not evaluate absence-alarm heartbeat liveness.
+
+**DW-49** When the configured absence-alarm heartbeat window is negative, the system shall reject it as a usage error and exit 2 rather than disabling the check. Only zero disables the check (DW-48).
+
+**DW-50** When evaluating absence-alarm heartbeat liveness, the system shall read the configured heartbeat file, extract the content timestamp (`tick_time`), and ignore heartbeats timestamped beyond the clock-skew tolerance (5 minutes) ahead of the current time.
+
+**DW-51** If the absence-alarm heartbeat file cannot be read, contains invalid JSON, does not contain a valid `tick_time` timestamp, or records a `tick_time` older than the configured absence-alarm heartbeat window (default 30m), then the system shall classify the absence-alarm scheduler as stale and shall emit a WARN alarm without latching the admission brake.

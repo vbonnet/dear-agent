@@ -142,9 +142,9 @@ func TestSessionStarted_EmptyRole(t *testing.T) {
 
 // TestInitMeter_ShutdownBoundedWhenCollectorBlackHoles is the metrics twin of
 // otelsetup's tracer test: a collector that accepts the TCP connection but
-// never answers must not stall MeterProvider.Shutdown. cc-usage-monitor and
-// merge-velocity flush metrics on exit, so an unbounded export shows up as a
-// hung CLI. The bound comes from otlpmetricgrpc.WithTimeout — disabling retry
+// never answers must not stall MeterProvider.Shutdown. cc-usage-monitor
+// flushes metrics on exit, so an unbounded export shows up as a
+// hung CLI. The bound comes from otlpmetricgrpc.WithTimeout: disabling retry
 // does not help, because it is the initial attempt that blocks.
 func TestInitMeter_ShutdownBoundedWhenCollectorBlackHoles(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

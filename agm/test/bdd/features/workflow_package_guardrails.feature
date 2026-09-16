@@ -31,3 +31,8 @@ Feature: Workflow package guardrails
     Given a valid workflow whose definition policy rejects it
     When AGM attempts to run the definition-rejected workflow
     Then the run should fail before node execution with a terminal definition error
+
+  Scenario: Cancellation after run start leaves truthful terminal evidence
+    Given a durable workflow run whose context cancels before node dispatch
+    When AGM runs the cancellation-sensitive workflow
+    Then the cancelled run and every unexecuted node should have terminal SQLite evidence

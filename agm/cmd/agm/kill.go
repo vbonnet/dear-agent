@@ -277,6 +277,19 @@ func renderKillError(sessionName, message string, textRender func() error) error
 
 // handleKillError dispatches an error from ops.KillSession into specific
 // rendering or interactive flows. Returns the (possibly updated) killResult,
+var confirmKillProtected = func(sessionName string) (bool, error) {
+	var confirmed bool
+	err := huh.NewConfirm().
+		Title("Kill recently active session?").
+		Description("This session has recent activity. Are you sure you want to kill it?").
+		Affirmative("Yes, kill it").
+		Negative("Cancel").
+		Value(&confirmed).
+		WithTheme(ui.GetTheme()).
+		Run()
+	return confirmed, err
+}
+
 // the (possibly resolved) error, and a `done` flag indicating whether the
 // caller should return immediately. When done=false, the original killErr
 // has been resolved and the caller should continue with killResult.
@@ -325,15 +338,7 @@ func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.K
 			ago = fmt.Sprintf("%s ago", time.Since(*killResult.LastActivity).Truncate(time.Second))
 		}
 		ui.PrintWarning(fmt.Sprintf("Session '%s' was active %s", sessionName, ago))
-		var confirmed bool
-		confirmErr := huh.NewConfirm().
-			Title("Kill recently active session?").
-			Description("This session has recent activity. Are you sure you want to kill it?").
-			Affirmative("Yes, kill it").
-			Negative("Cancel").
-			Value(&confirmed).
-			WithTheme(ui.GetTheme()).
-			Run()
+		confirmed, confirmErr := confirmKillProtected(sessionName)
 		if confirmErr != nil || !confirmed {
 			fmt.Println("Cancelled")
 			return killResult, true, nil //nolint:nilerr // user cancellation is not an error
