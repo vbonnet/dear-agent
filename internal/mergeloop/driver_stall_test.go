@@ -106,3 +106,44 @@ func TestNoSecondEscalationAfterGateRefusal(t *testing.T) {
 			rec.EscalationReason)
 	}
 }
+
+// TestPersistentGateRefusalEscalatesOnce pins the review finding that an
+// unchanged blocking finding re-escalated on every daemon tick.
+//
+// Each tick overwrote EscalatedAt, incremented Escalated and emitted another
+// human_escalation metric, so a finding that had sat untouched for hours looked
+// like a brand new escalation every interval and lost the original time that
+// said how long it had actually been stuck.
+func TestPersistentGateRefusalEscalatesOnce(t *testing.T) {
+	prs := []PR{{Number: 31, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	d, tr := newTestDriver(t, prs, &Deps{
+		Merger: &fakeMerger{},
+		Threads: &fakeThreadResolver{blocking: []BlockingFinding{{
+			Author: "chatgpt-codex-connector", Severity: SeverityBlocking,
+			ThreadID: "PRRT_same", Excerpt: "the same unchanged finding",
+		}}},
+		Clock: func() time.Time { return now },
+		Audit: func(AuditEvent) {},
+	})
+
+	firstTick := now
+	total := 0
+	for range 4 {
+		r, err := d.Tick(context.Background())
+		if err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		total += r.Escalated
+		now = now.Add(10 * time.Minute)
+	}
+
+	if total != 1 {
+		t.Errorf("escalations across 4 ticks = %d, want 1: the finding never changed", total)
+	}
+	if at := tr.Get(31, now).EscalatedAt; !at.Equal(firstTick) {
+		t.Errorf("EscalatedAt = %v, want the first escalation %v: the original time is the useful one",
+			at, firstTick)
+	}
+}

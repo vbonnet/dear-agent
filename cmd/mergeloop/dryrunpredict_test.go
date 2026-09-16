@@ -64,3 +64,25 @@ func TestUnresolvedNotOursCount(t *testing.T) {
 		t.Errorf("unresolvedNotOurs = %d, want 1: the open human thread still blocks", got)
 	}
 }
+
+// TestPredictionsClearedBeforeEachPass pins the review finding that the
+// prediction map is reused across ticks in `mergeloop run --dry-run`.
+//
+// If a PR was predicted clear on one tick and the next ResolveBotThreads call
+// fails before note() updates the entry, a later read still saw the stale
+// true and skipped the unresolved-thread check, so the run could report a
+// would-be merge over review feedback that had appeared in between. Clearing
+// before each pass makes the failure mode fail closed.
+func TestPredictionsClearedBeforeEachPass(t *testing.T) {
+	p := newDryRunThreadPredictions()
+	p.note(7, 2, 0, 0)
+	if !p.wouldClearThreadGate(7) {
+		t.Fatalf("precondition: PR 7 should be predicted clear")
+	}
+	// Next tick begins; the resolver clears before it re-decides, then fails
+	// before it can note a new verdict.
+	p.clear(7)
+	if p.wouldClearThreadGate(7) {
+		t.Error("a stale prediction survived into the next pass: the gate must fail closed")
+	}
+}

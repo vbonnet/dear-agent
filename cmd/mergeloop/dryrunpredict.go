@@ -36,6 +36,18 @@ func (p *dryRunThreadPredictions) note(pr, resolvable, withheld, other int) {
 	p.seen[pr] = resolvable > 0 && withheld == 0 && other == 0
 }
 
+// clear drops any prediction for this PR.
+//
+// The map outlives a tick in `mergeloop run --dry-run`, so a verdict from an
+// earlier tick must never answer for this one. The resolver clears before it
+// re-decides: if it then fails before noting a new verdict, the gate reads
+// false and stays shut rather than trusting a stale true.
+func (p *dryRunThreadPredictions) clear(pr int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.seen, pr)
+}
+
 // wouldClearThreadGate reports whether the unresolved-thread gate would be
 // clear for this PR once the predicted resolutions were applied. A PR the
 // resolver never reached is never predicted-clear.

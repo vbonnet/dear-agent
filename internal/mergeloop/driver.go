@@ -557,8 +557,15 @@ func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickRes
 		// only trace would be a repeated audit line nobody reads. A blocked
 		// finding is a durable escalation, so it is recorded as one and the
 		// stall clock keeps running.
-		d.recordEscalation(ctx, pr.Number, refusal.reason, refusal.kind, now)
-		res.Escalated++
+		// Record only when the refusal is NEW or materially changed. The same
+		// finding is re-read every tick, and re-recording it overwrote
+		// EscalatedAt and emitted another human_escalation each interval, so a
+		// finding stuck for hours looked freshly escalated every time and lost
+		// the original timestamp that said how long it had been stuck.
+		if d.Tracker.Get(pr.Number, now).EscalationReason != refusal.reason {
+			d.recordEscalation(ctx, pr.Number, refusal.reason, refusal.kind, now)
+			res.Escalated++
+		}
 		return
 	}
 	err := d.Deps.Merger.Merge(ctx, d.Repo, pr.Number)

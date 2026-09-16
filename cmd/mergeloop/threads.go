@@ -501,6 +501,10 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 	if !ok {
 		return mergeloop.ThreadResolution{}, fmt.Errorf("invalid repo %q (want owner/name)", repo)
 	}
+	if r.predictions != nil {
+		// A verdict from an earlier tick must not answer for this one.
+		r.predictions.clear(pr)
+	}
 	threads, err := r.listThreads(ctx, owner, name, pr)
 	if err != nil {
 		return mergeloop.ThreadResolution{}, err
