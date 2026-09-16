@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/absencealarm"
 )
 
 // JobState tracks the recovery lifecycle and consecutive failure count for one job.
@@ -16,6 +18,37 @@ type JobState struct {
 	LastAction          ActionType     `json:"last_action,omitempty"`
 	LastStatus          RecoveryStatus `json:"last_status,omitempty"`
 	HumanNeeded         bool           `json:"human_needed"`
+
+	// PendingAction is the remediation awaiting confirmation that the pulse
+	// came back. A pending verification is the record that an action ran and
+	// has not yet been shown to have worked; without it the loop had no way
+	// to notice that the pulse never returned.
+	PendingAction ActionType `json:"pending_action,omitempty"`
+	// PendingSince is when that action ran.
+	PendingSince time.Time `json:"pending_since,omitzero"`
+	// PendingDeadline is when the pulse must have returned by. Past it, an
+	// un-cleared pulse converts the attempt into a counted failure.
+	PendingDeadline time.Time `json:"pending_deadline,omitzero"`
+	// UnhealthySince is when the job was first seen unhealthy without having
+	// recovered since. It bounds how long a condition has really persisted.
+	UnhealthySince time.Time `json:"unhealthy_since,omitzero"`
+	// LastEscalated is when this job last reached a human-facing sink, used
+	// to keep a standing escalation loud without duplicating it every tick.
+	LastEscalated time.Time `json:"last_escalated,omitzero"`
+	// PendingEscalations retain the exact machine-readable records when the
+	// required human-needed journal rejects them. A queue, rather than one
+	// replaceable slot, keeps historical delivery debt from swallowing a fresh
+	// incident discovered before the sink recovers.
+	PendingEscalations []absencealarm.JournalRecord `json:"pending_escalations,omitempty"`
+	// PendingNotification retains the exact current-incident narrative when
+	// the desktop sink rejects it. It is separate from durable delivery debt:
+	// an old journal record must never become a stale banner for a new outage.
+	PendingNotification *absencealarm.JournalRecord `json:"pending_notification,omitempty"`
+	// MissedVerificationDeadline preserves the latest non-superseded deadline
+	// after an attempt is settled as failed beyond that boundary. It survives
+	// later non-attempt ticks so a recovery can still report that its evidence
+	// arrived late, and is cleared when a newer remediation attempt begins.
+	MissedVerificationDeadline time.Time `json:"missed_verification_deadline,omitzero"`
 }
 
 // State is the persisted recovery state keyed by job name.
@@ -100,6 +133,9 @@ func AppendJournal(path string, rec JournalRecord) error {
 type Heartbeat struct {
 	TickTime    time.Time `json:"tick_time"`
 	Recovered   int       `json:"recovered"`
+	Pending     int       `json:"pending"`
+	Unavailable int       `json:"unavailable"`
+	Planned     int       `json:"planned"`
 	Failed      int       `json:"failed"`
 	HumanNeeded int       `json:"human_needed"`
 	Healthy     int       `json:"healthy"`

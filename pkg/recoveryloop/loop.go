@@ -36,6 +36,19 @@ const (
 	StatusSnoozed   RecoveryStatus = "snoozed"
 	StatusRecovered RecoveryStatus = "recovered"
 	StatusFailed    RecoveryStatus = "failed"
+	// StatusUnavailable means the loop could not observe the state required
+	// to safely plan or evaluate current health. It is distinct from pending
+	// verification: no remediation ran, and unknown state must not be collapsed
+	// into absence or health.
+	StatusUnavailable RecoveryStatus = "observation-unavailable"
+	// StatusUnhealthy is a job that needs remediation. It is what planning
+	// returns; planning must never return StatusRecovered, because an
+	// intention to act is not an observed outcome (RL-25).
+	StatusUnhealthy RecoveryStatus = "unhealthy"
+	// StatusPending is a job whose remediation ran and whose structural
+	// checks now pass, but whose pulse has not yet returned. It is neither a
+	// success nor yet a failure (RL-26).
+	StatusPending RecoveryStatus = "pending-verification"
 )
 
 // Job defines one critical job to monitor and self-heal.
@@ -46,6 +59,18 @@ type Job struct {
 	BinaryPath   string   `json:"binary_path,omitempty"`
 	InstallCmd   []string `json:"install_cmd,omitempty"`
 	Pulse        string   `json:"pulse,omitempty"`
+	// PulseIsStructural marks a pulse that only proves the service exists,
+	// such as a launchd_loaded probe, rather than that its scheduled work is
+	// succeeding.
+	//
+	// RL-24 lets a present pulse outrank the exit-status heuristic, which is
+	// right for an activity pulse: a job writing its tick is alive whatever
+	// its exit code means. It is wrong for a structural one. The deployed
+	// config wires mergeloop to `mergeloop-loaded`, so without this flag a
+	// mergeloop that is loaded and fails every single run reads HEALTHY
+	// forever, because "the service is loaded" is answering a question nobody
+	// asked (RL-43).
+	PulseIsStructural bool `json:"pulse_is_structural,omitempty"`
 }
 
 // Config is the configuration document for recovery-loop.
@@ -92,7 +117,12 @@ func DefaultJobs() []Job {
 			PlistPath:    "~/Library/LaunchAgents/com.dear-agent.mergeloop.plist",
 			BinaryPath:   "~/go/bin/mergeloop",
 			InstallCmd:   []string{"go", "install", "./cmd/mergeloop"},
-			Pulse:        "mergeloop-loaded",
+			// mergeloop-loaded is a launchd_loaded probe: it proves the
+			// service exists, not that its scheduled runs succeed
+			// (mergeloop-tick is the activity pulse). Without this flag a
+			// loaded mergeloop that fails every run reads HEALTHY forever.
+			Pulse:             "mergeloop-loaded",
+			PulseIsStructural: true,
 		},
 		{
 			Name:         "disk-watchdog",
@@ -259,35 +289,6 @@ func DefaultHostOps() HostOps {
 	}
 }
 
-// LoadAbsenceAlarms reads the absence-alarm journal and returns pulses that are alarming.
-func LoadAbsenceAlarms(journalPath string) (map[string]bool, error) {
-	alarming := make(map[string]bool)
-	f, err := os.Open(journalPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return alarming, nil
-		}
-		return nil, fmt.Errorf("open absence journal %s: %w", journalPath, err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var rec absencealarm.JournalRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue
-		}
-		if rec.Kind == "absence.alarm" || rec.Status == absencealarm.StatusAbsent || rec.Status == absencealarm.StatusUndetermined {
-			alarming[rec.Pulse] = true
-		}
-	}
-	return alarming, scanner.Err()
-}
-
 // IsJobSnoozed checks if a job is covered by an active, unexpired snooze (RL-05, RL-22).
 func IsJobSnoozed(job Job, snoozes map[string]absencealarm.Snooze, now time.Time) (absencealarm.Snooze, bool) {
 	candidates := []string{job.Name, job.Pulse, job.LaunchdLabel}
@@ -305,10 +306,14 @@ func IsJobSnoozed(job Job, snoozes map[string]absencealarm.Snooze, now time.Time
 }
 
 // PlanJob determines the required recovery action for a job without executing it.
+//
+// It returns StatusUnhealthy, never StatusRecovered: whether a job recovered is
+// decided by VerifyRecovery after the action ran, not by the decision to act.
 func PlanJob(
 	job Job,
 	snoozes map[string]absencealarm.Snooze,
-	alarmingPulses map[string]bool,
+	truth PulseTruth,
+	pulseSource PulseSourceStatus,
 	launchdJobs map[string]LaunchdJobInfo,
 	host HostOps,
 	now time.Time,
@@ -320,7 +325,7 @@ func PlanJob(
 	// RL-01: missing binary check
 	if job.BinaryPath != "" && !host.FileExists(job.BinaryPath) {
 		if len(job.InstallCmd) > 0 {
-			return ActionReinstall, StatusRecovered, fmt.Sprintf("binary %s does not exist on disk", job.BinaryPath)
+			return ActionReinstall, StatusUnhealthy, fmt.Sprintf("binary %s does not exist on disk", job.BinaryPath)
 		}
 	}
 
@@ -329,15 +334,44 @@ func PlanJob(
 		info, loaded := launchdJobs[job.LaunchdLabel]
 		// RL-02, RL-06: unloaded launchd job
 		if !loaded {
-			return ActionBootstrap, StatusRecovered, fmt.Sprintf("launchd job %s is not loaded", job.LaunchdLabel)
+			return ActionBootstrap, StatusUnhealthy, fmt.Sprintf("launchd job %s is not loaded", job.LaunchdLabel)
 		}
 		// RL-03: exit code 78 (EX_CONFIG) or -9 (SIGKILL / code signing mismatch)
 		if info.Status == 78 || info.Status == -9 {
-			return ActionBootstrap, StatusRecovered, fmt.Sprintf("launchd job %s exited with status %d (LWCR/codesigning issue)", job.LaunchdLabel, info.Status)
+			return ActionBootstrap, StatusUnhealthy, fmt.Sprintf("launchd job %s exited with status %d (LWCR/codesigning issue)", job.LaunchdLabel, info.Status)
 		}
-		// RL-04: pulse absent/undetermined or non-zero exit when not running
-		if (job.Pulse != "" && alarmingPulses[job.Pulse]) || (info.PID == 0 && info.Status != 0) {
-			return ActionKickstart, StatusRecovered, fmt.Sprintf("launchd job %s is loaded but pulse %q is alarming (last exit status %d)", job.LaunchdLabel, job.Pulse, info.Status)
+		// The absence-alarm heartbeat is also the liveness observation for the
+		// process that owns the pulse-truth source. Missing or stale source data
+		// is conclusive for that owner alone; every downstream pulse remains
+		// unavailable and cannot trigger remediation (RL-54).
+		if job.Pulse == AbsenceAlarmHeartbeatPulse && pulseSource.RequiresRecovery() {
+			return ActionKickstart, StatusUnhealthy, fmt.Sprintf(
+				"pulse truth source %q is %s", job.Pulse, pulseSource)
+		}
+		// RL-04: an alarming activity pulse means the scheduled work is not
+		// happening. A structural pulse duplicates the launchd-loaded predicate
+		// already observed above; its older or unavailable result must not
+		// overrule the current direct launchd snapshot (RL-52).
+		if job.Pulse != "" && !job.PulseIsStructural && truth.Alarming(job.Pulse) {
+			reason := fmt.Sprintf("launchd job %s is loaded but pulse %q is alarming", job.LaunchdLabel, job.Pulse)
+			if d := truth.AbsentFor(job.Pulse, now); d > 0 {
+				reason += fmt.Sprintf(" (absent for %s)", d.Round(time.Minute))
+			}
+			return ActionKickstart, StatusUnhealthy, reason
+		}
+		// RL-24: a current, admissibly dated pulse is authoritative proof of life and outranks
+		// the last exit status. Periodic jobs report findings through their
+		// exit code by design -- absence-alarm exits 1 whenever any pulse is
+		// absent -- so treating a non-zero exit as a wedge restarts a healthy
+		// monitor every tick precisely when it is doing its job. Only fall
+		// through to the exit-status heuristic when no pulse vouches for it.
+		if job.Pulse != "" && !job.PulseIsStructural && truth.CurrentPresent(job.Pulse, now) {
+			return ActionNone, StatusHealthy, fmt.Sprintf("pulse %q is present", job.Pulse)
+		}
+		// RL-04 (continued): non-zero exit when not running and no pulse
+		// evidence either way.
+		if info.PID == 0 && info.Status != 0 {
+			return ActionKickstart, StatusUnhealthy, fmt.Sprintf("launchd job %s is not running and last exited %d with no pulse evidence", job.LaunchdLabel, info.Status)
 		}
 	}
 
