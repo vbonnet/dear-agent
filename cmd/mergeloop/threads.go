@@ -75,7 +75,12 @@ func allCommentsFromKnownBots(logins []string) bool {
 // review threads authored by known bots via the GitHub GraphQL
 // resolveReviewThread mutation. Thread resolution is GraphQL-only — there is no
 // REST endpoint — so every call goes through an authenticated gh CLI.
-type ghThreadResolver struct{ dryRun bool }
+type ghThreadResolver struct {
+	dryRun bool
+	// predictions is set only in dry-run mode, so the merge-gate simulation
+	// can account for the resolutions this run only reported.
+	predictions *dryRunThreadPredictions
+}
 
 const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:String){
   repository(owner:$owner,name:$repo){
@@ -501,6 +506,11 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 		return mergeloop.ThreadResolution{}, err
 	}
 	resolvable, withheld := partitionResolvable(threads)
+	if r.predictions != nil {
+		// Threads that are neither resolvable nor withheld are not ours to
+		// touch, and they keep the gate shut just as firmly.
+		r.predictions.note(pr, len(resolvable), withheld, len(threads)-len(resolvable)-withheld)
+	}
 	out := mergeloop.ThreadResolution{Withheld: withheld}
 	for _, t := range resolvable {
 		if r.dryRun {

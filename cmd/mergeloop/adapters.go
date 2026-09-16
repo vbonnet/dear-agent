@@ -184,13 +184,22 @@ func (s *safeRebaser) Rebase(ctx context.Context, repo string, pr int) error {
 
 // ---- safe-merge backed merger ----
 
-type safeMerger struct{ dryRun bool }
+type safeMerger struct {
+	dryRun bool
+	// predictions is set only in dry-run mode; see dryRunThreadPredictions.
+	predictions *dryRunThreadPredictions
+}
 
 func (s *safeMerger) Merge(_ context.Context, repo string, pr int) error {
+	// Dry run only: treat threads this tick reported it would resolve as
+	// resolved, so the simulated gate matches what a real tick would do.
+	// Nothing is merged in this mode, so no gate is actually bypassed.
+	predictedClear := s.dryRun && s.predictions != nil && s.predictions.wouldClearThreadGate(pr)
 	err := safegit.SafeMerge(safegit.MergeConfig{
-		PRNumber: pr,
-		Repo:     repo,
-		DryRun:   s.dryRun,
+		PRNumber:        pr,
+		Repo:            repo,
+		DryRun:          s.dryRun,
+		SkipReviewCheck: predictedClear,
 	})
 	if err != nil && isSoftMergeError(err) {
 		return fmt.Errorf("%w: %w", mergeloop.ErrNotReady, err)
