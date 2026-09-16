@@ -2258,8 +2258,8 @@ func TestSourceConstructionHasNoPrematureOwnershipTransferSurface(t *testing.T) 
 			parsed:       parsed,
 		})
 	}
-	if matched != 3 {
-		t.Fatalf("source construction governance matched %d production files, want 3", matched)
+	if matched != 4 {
+		t.Fatalf("source construction governance matched %d production files, want 4", matched)
 	}
 
 	for _, source := range parsedFiles {
@@ -7121,6 +7121,9 @@ func sourceConstructionAllowedSensitiveParameters() map[string]map[int]map[strin
 		"validateSourceAdministrativeInventoryOwner": {
 			1: {"*sourceConstructionOwner": true},
 		},
+		"validateSourceObjectPathInventoryOwner": {
+			1: {"*sourceConstructionOwner": true},
+		},
 		"(*sourceConstructionBuilder).acceptRootAcquisition": {
 			0: {"*ownedSourceRoot": true},
 		},
@@ -7613,8 +7616,8 @@ func sourceConstructionEscapeViolations(typedPackage *packages.Package) []string
 			)
 		}
 	}
-	if len(constructionFiles) != 3 {
-		violations = append(violations, "typed source-construction module did not contain exactly three files")
+	if len(constructionFiles) != 4 {
+		violations = append(violations, "typed source-construction module did not contain exactly four files")
 	}
 	return violations
 }
@@ -10417,11 +10420,12 @@ func sourceConstructionResolvedCallClosureViolations(
 	typedPackage *packages.Package,
 ) []string {
 	moduleFiles := map[string]bool{
-		"source_construction.go":           true,
-		"source_construction_acquire.go":   true,
-		"source_construction_inventory.go": true,
-		"source_primitives.go":             true,
-		"source_primitives_darwin.go":      true,
+		"source_construction.go":              true,
+		"source_construction_acquire.go":      true,
+		"source_construction_inventory.go":    true,
+		"source_construction_object_paths.go": true,
+		"source_primitives.go":                true,
+		"source_primitives_darwin.go":         true,
 	}
 	allowedExternal := map[string]bool{
 		"bytes|(*bytes.Buffer).Bytes":     true,
@@ -10449,6 +10453,7 @@ func sourceConstructionResolvedCallClosureViolations(
 		"strings|HasSuffix":         true,
 		"strings|Index":             true,
 		"strings|IndexByte":         true,
+		"strings|LastIndexByte":     true,
 		"strings|Split":             true,
 		"strings|SplitSeq":          true,
 		"strings|Trim":              true,
