@@ -142,6 +142,80 @@ func TestCheckGCHealth_ReapFallbackCannotOverrideFailedCompletion(t *testing.T) 
 	}
 }
 
+func TestCheckGCHealth_NewerErrorInvalidatesLegacyReapFallback(t *testing.T) {
+	now := time.Now()
+	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,
+		gcReapAt(now.Add(-2*time.Minute)),
+		`{"timestamp":"`+now.Add(-1*time.Minute).Format(time.RFC3339Nano)+
+			`","operation":"sandbox_gc_error","error":"context canceled before completion commit"}`,
+	)}
+
+	got := checkGCHealth(cfg, now)
+	if got == nil || !got.Stale {
+		t.Fatalf("an aborted modern sweep must invalidate reap-only fallback, got %+v", got)
+	}
+	if !got.LastSuccess.IsZero() {
+		t.Fatalf("aborted sweep supplied legacy proof of life at %v", got.LastSuccess)
+	}
+	if !strings.Contains(got.Reason, "context canceled before completion commit") {
+		t.Fatalf("alarm reason = %q, want the newer cancellation error", got.Reason)
+	}
+}
+
+func TestCheckGCHealth_EqualTimestampErrorInvalidatesLegacyReapFallback(t *testing.T) {
+	now := time.Now()
+	timestamp := now.Add(-1 * time.Minute)
+	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,
+		gcReapAt(timestamp),
+		`{"timestamp":"`+timestamp.Format(time.RFC3339Nano)+
+			`","operation":"sandbox_gc_error","error":"context canceled at completion boundary"}`,
+	)}
+
+	got := checkGCHealth(cfg, now)
+	if got == nil || !got.Stale {
+		t.Fatalf("an error at the reap timestamp must invalidate reap-only fallback, got %+v", got)
+	}
+	if !got.LastSuccess.IsZero() {
+		t.Fatalf("equal-timestamp error left legacy proof of life at %v", got.LastSuccess)
+	}
+}
+
+func TestCheckGCHealth_OlderErrorDoesNotInvalidateLegacyReapFallback(t *testing.T) {
+	now := time.Now()
+	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,
+		`{"timestamp":"`+now.Add(-2*time.Minute).Format(time.RFC3339Nano)+
+			`","operation":"sandbox_gc_error","error":"older transient failure"}`,
+		gcReapAt(now.Add(-1*time.Minute)),
+	)}
+
+	got := checkGCHealth(cfg, now)
+	if got == nil || got.Stale {
+		t.Fatalf("a later legacy reap must supersede an older error, got %+v", got)
+	}
+	if got.LastSuccess.IsZero() {
+		t.Fatal("later legacy reap did not supply proof of life")
+	}
+}
+
+func TestCheckGCHealth_SelfRemediationReapCannotBecomeLegacyProof(t *testing.T) {
+	now := time.Now()
+	source := `,"source":"` + gcSelfSource + `"`
+	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,
+		`{"timestamp":"`+now.Add(-2*time.Minute).Format(time.RFC3339Nano)+
+			`","operation":"sandbox_gc_reap"`+source+`,"session_id":"abc"}`,
+		`{"timestamp":"`+now.Add(-1*time.Minute).Format(time.RFC3339Nano)+
+			`","operation":"sandbox_gc_error"`+source+`,"error":"context canceled"}`,
+	)}
+
+	got := checkGCHealth(cfg, now)
+	if got == nil || !got.Stale {
+		t.Fatalf("self-remediation receipts must not prove scheduled liveness, got %+v", got)
+	}
+	if !got.LastSuccess.IsZero() {
+		t.Fatalf("self-remediation reap supplied legacy proof of life at %v", got.LastSuccess)
+	}
+}
+
 // An append-only log keeps the maximum timestamp forever. One heartbeat written
 // while the clock ran fast would otherwise yield a negative age — permanently
 // "healthy" — that no later correct record could displace.
