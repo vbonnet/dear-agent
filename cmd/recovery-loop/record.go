@@ -700,16 +700,41 @@ func retryPendingNotifications(
 	if opts.dryRun || notifyFn == nil {
 		return
 	}
-	jobsByName := make(map[string]recoveryloop.Job, len(jobs))
-	for _, job := range jobs {
-		jobsByName[job.Name] = job
+	jobsByName := configuredJobsByName(jobs)
+	confirmedUnresolved := failedHumanNeededJobs(rep)
+	for _, name := range pendingNotificationNames(state, confirmedUnresolved) {
+		job, configured := jobsByName[name]
+		if !configured {
+			// Durable debt is registry-independent, but a removed job has no
+			// current observation that can justify a "not recovered" banner.
+			continue
+		}
+		retryPendingNotification(job, snoozes, now, state, opts, notifyFn, stderr)
 	}
-	confirmedUnresolved := make(map[string]bool, len(rep.Results))
+}
+
+func configuredJobsByName(jobs []recoveryloop.Job) map[string]recoveryloop.Job {
+	byName := make(map[string]recoveryloop.Job, len(jobs))
+	for _, job := range jobs {
+		byName[job.Name] = job
+	}
+	return byName
+}
+
+func failedHumanNeededJobs(rep *recoveryloop.Heartbeat) map[string]bool {
+	confirmed := make(map[string]bool, len(rep.Results))
 	for _, result := range rep.Results {
 		if result.Status == recoveryloop.StatusFailed && result.HumanNeeded {
-			confirmedUnresolved[result.Job] = true
+			confirmed[result.Job] = true
 		}
 	}
+	return confirmed
+}
+
+func pendingNotificationNames(
+	state *recoveryloop.State,
+	confirmedUnresolved map[string]bool,
+) []string {
 	names := make([]string, 0, len(state.Jobs))
 	for name, st := range state.Jobs {
 		if confirmedUnresolved[name] && st.HumanNeeded && st.PendingNotification != nil {
@@ -717,37 +742,41 @@ func retryPendingNotifications(
 		}
 	}
 	sort.Strings(names)
-	for _, name := range names {
-		st := state.Jobs[name]
-		if opts.notificationAttempted[name] || !escalationDue(st.LastEscalated, now) {
-			continue
-		}
-		job, configured := jobsByName[name]
-		if !configured {
-			// Durable debt is registry-independent, but a removed job has no
-			// current observation that can justify a "not recovered" banner.
-			continue
-		}
-		if _, snoozed := recoveryloop.IsJobSnoozed(job, snoozes, now); snoozed {
-			continue
-		}
-		recordJob := job
-		recordJob.Pulse = st.PendingNotification.Pulse
-		if _, snoozed := recoveryloop.IsJobSnoozed(recordJob, snoozes, now); snoozed {
-			continue
-		}
-		opts.notificationAttempted[name] = true
-		notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
-		title := fmt.Sprintf("HUMAN NEEDED: %s not recovered", name)
-		if err := notifyFn(notifyCtx, title, st.PendingNotification.Reason); err != nil {
-			fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
-		} else {
-			st.LastEscalated = now
-			st.PendingNotification = nil
-			state.Jobs[name] = st
-		}
-		cancel()
+	return names
+}
+
+func retryPendingNotification(
+	job recoveryloop.Job,
+	snoozes map[string]absencealarm.Snooze,
+	now time.Time,
+	state *recoveryloop.State,
+	opts *options,
+	notifyFn notifier,
+	stderr io.Writer,
+) {
+	st := state.Jobs[job.Name]
+	if opts.notificationAttempted[job.Name] || !escalationDue(st.LastEscalated, now) {
+		return
 	}
+	if _, snoozed := recoveryloop.IsJobSnoozed(job, snoozes, now); snoozed {
+		return
+	}
+	recordJob := job
+	recordJob.Pulse = st.PendingNotification.Pulse
+	if _, snoozed := recoveryloop.IsJobSnoozed(recordJob, snoozes, now); snoozed {
+		return
+	}
+	opts.notificationAttempted[job.Name] = true
+	notifyCtx, cancel := context.WithTimeout(context.Background(), defaultNotifyTimeout)
+	title := fmt.Sprintf("HUMAN NEEDED: %s not recovered", job.Name)
+	if err := notifyFn(notifyCtx, title, st.PendingNotification.Reason); err != nil {
+		fmt.Fprintf(stderr, "recovery-loop: notify: %v\n", err)
+	} else {
+		st.LastEscalated = now
+		st.PendingNotification = nil
+		state.Jobs[job.Name] = st
+	}
+	cancel()
 }
 
 // escalationPulseContext returns one shared machine status and human

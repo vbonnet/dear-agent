@@ -160,7 +160,7 @@ func TestCLI_NoSinkDoesNotDuplicateStandingIncidentQueue(t *testing.T) {
 		notifications++
 		return errors.New("desktop unavailable")
 	}
-	for tick := 0; tick < 2; tick++ {
+	for tick := range 2 {
 		at := now.Add(time.Duration(tick) * time.Minute)
 		f.write(t, f.absHB, fmt.Sprintf(
 			`{"tick_time":%q,"results":[{"name":"absence-alarm-heartbeat","status":"absent"}]}`,
