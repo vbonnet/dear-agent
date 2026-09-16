@@ -115,9 +115,21 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 	wantHash := sha256hex(content)
 	res.SHA256 = wantHash
 
+	for _, d := range a.CreateDirs {
+		target := expandPath(d, home)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return res, fmt.Errorf("creating required dir %s: %w", target, err)
+		}
+	}
+
 	// Decide install vs update vs unchanged from the current host state.
 	existing, statErr := os.ReadFile(deployedPath)
 	switch {
+	case statErr == nil && a.AbsentOnly:
+		// Absent-only: already deployed, preserve operator edits unconditionally,
+		// taking precedence over generic force installs.
+		res.Action = ActionUnchanged
+		return res, nil
 	case statErr == nil && sha256hex(existing) == wantHash && !opts.Force:
 		res.Action = ActionUnchanged
 		return res, nil
@@ -268,7 +280,31 @@ func Status(a Artifact, opts Options) StatusResult {
 		res.Error = err.Error()
 		return res
 	}
+
+	for _, d := range a.CreateDirs {
+		target := expandPath(d, home)
+		fi, err := os.Stat(target)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				res.State = StateDrift
+				return res
+			}
+			res.State = StateError
+			res.Error = err.Error()
+			return res
+		}
+		if !fi.IsDir() {
+			res.State = StateDrift
+			return res
+		}
+	}
+
 	if sha256hex(deployed) == sha256hex(content) {
+		res.State = StateOK
+	} else if a.AbsentOnly {
+		// An absent-only artifact is seeded once on first install and intentionally
+		// preserved against repo changes so operator edits survive sync; its deployed
+		// presence satisfies the deployment contract without drift.
 		res.State = StateOK
 	} else {
 		res.State = StateDrift

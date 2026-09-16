@@ -1,6 +1,6 @@
 # ADR-011: Scheduled repository audit subsystem
 
-Status: Accepted (2026-06-16; verified 2026-07-17; amended 2026-08-02)
+Status: Accepted (2026-06-16; verified 2026-07-17; amended 2026-08-28)
 
 ## Context
 
@@ -18,8 +18,13 @@ Finding and remediation-suggestion generation remain separate stages, and findin
 fingerprints prevent the same unresolved problem from inflating counts across
 runs. Remediation fields are suggestion-only data: the audit runner does not
 execute commands, open pull requests or issues, or alter finding state on their
-behalf. `StrategyAuto` means eligible for an external automation system, not
-inline execution authority.
+behalf. Strategies are closed handling hints, not evidence that automation, a
+command, a patch, a pull request, or an issue is applicable or authorized.
+Command, patch, title, and body are optional operator context; a patchless PR
+suggestion can recommend investigation or PR-producing work. Typed `Store`
+writes enforce the closed strategy vocabulary. Direct SQL is an out-of-band
+corruption path; finding reads, re-emission, and lifecycle transitions reject
+an unknown stored value before exposing or mutating it.
 
 A side-effecting dispatcher would need its own charter and a proven live producer
 and consumer. It must define durable intent and outcome records, idempotency,

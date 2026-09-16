@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 )
 
 // trio is the standard three-member registry used across confer tests.
@@ -340,4 +341,207 @@ func TestConfer_CustomQuorum(t *testing.T) {
 	if got.Phase != PhaseAnswered || got.Answer != "X" {
 		t.Fatalf("unanimous approve should answer, got phase=%q answer=%q", got.Phase, got.Answer)
 	}
+}
+
+func concurrentConferState(quorum int, ballots ...Ballot) *Escalation {
+	created := time.Unix(1, 0).UTC()
+	return &Escalation{
+		ID:               "concurrent-confer",
+		Kind:             KindQuestion,
+		Mode:             ModeAsync,
+		Question:         "Which approach should the worker use?",
+		OriginSessionID:  "worker",
+		OriginRole:       "coder",
+		CurrentSessionID: VROOMTrioSessionID,
+		CurrentRole:      "vroom-trio",
+		CurrentKind:      NodeVROOMOrchestrator,
+		Chain:            []string{"worker", VROOMTrioSessionID},
+		Phase:            PhaseConferring,
+		Confer: &Confer{
+			Members:   []string{"meta-o", "orch", "overseer"},
+			Quorum:    quorum,
+			Ballots:   append([]Ballot(nil), ballots...),
+			StartedAt: created,
+		},
+		CreatedAt: created,
+		UpdatedAt: created,
+	}
+}
+
+func requireBallotsFrom(t *testing.T, esc *Escalation, want ...string) {
+	t.Helper()
+	if esc.Confer == nil {
+		t.Fatal("confer is nil")
+	}
+	got := make(map[string]bool, len(esc.Confer.Ballots))
+	for _, ballot := range esc.Confer.Ballots {
+		got[ballot.SessionID] = true
+	}
+	if len(esc.Confer.Ballots) != len(want) {
+		t.Fatalf("ballots=%+v, want voters %v", esc.Confer.Ballots, want)
+	}
+	for _, member := range want {
+		if !got[member] {
+			t.Fatalf("ballots=%+v, missing voter %q", esc.Confer.Ballots, member)
+		}
+	}
+}
+
+func runSeededConferTerminalRace(
+	t *testing.T,
+	ctx context.Context,
+	vote Vote,
+	answer string,
+	rationale string,
+) (*concurrentEngineHarness, *Escalation) {
+	t.Helper()
+	initial := concurrentConferState(2, Ballot{
+		SessionID: "meta-o", Role: "meta-orchestrator", Vote: vote,
+		Answer: answer, Rationale: rationale, At: time.Unix(2, 0),
+	})
+	h := newConcurrentEngineHarness(t, initial, nil)
+	cast := func(member, role string) func(*Engine) (*Escalation, error) {
+		return func(eng *Engine) (*Escalation, error) {
+			return eng.CastVote(ctx, "concurrent-confer", member, role, vote, answer, rationale)
+		}
+	}
+	results := h.run(t, cast("orch", "orchestrator"), cast("overseer", "overseer"))
+	requireOneSuccessOneError(t, results)
+	got, err := h.store.Get(ctx, "concurrent-confer")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Confer.Ballots) != 2 {
+		t.Fatalf("state=%+v, want exactly two ballots", got)
+	}
+	return h, got
+}
+
+func TestConfer_FileStoreConcurrentVotes(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("distinct ballots remain durable", func(t *testing.T) {
+		h := newConcurrentEngineHarness(t, concurrentConferState(3), nil)
+		results := h.run(t,
+			func(eng *Engine) (*Escalation, error) {
+				return eng.CastVote(ctx, "concurrent-confer", "meta-o", "meta-orchestrator", VoteApprove, "Use A", "")
+			},
+			func(eng *Engine) (*Escalation, error) {
+				return eng.CastVote(ctx, "concurrent-confer", "orch", "orchestrator", VoteApprove, "Use A", "")
+			},
+		)
+		for _, result := range results {
+			if result.err != nil {
+				t.Fatalf("CastVote: %v", result.err)
+			}
+		}
+		got, err := h.store.Get(ctx, "concurrent-confer")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		requireBallotsFrom(t, got, "meta-o", "orch")
+		if got.Phase != PhaseConferring {
+			t.Fatalf("phase=%q, want conferring", got.Phase)
+		}
+		if h.sink.voteCount() != 2 || h.messenger.count() != 0 || h.human.count() != 0 {
+			t.Fatalf("votes=%d messages=%d human=%d, want 2/0/0", h.sink.voteCount(), h.messenger.count(), h.human.count())
+		}
+	})
+
+	t.Run("duplicate member is accepted once", func(t *testing.T) {
+		h := newConcurrentEngineHarness(t, concurrentConferState(3), nil)
+		vote := func(eng *Engine) (*Escalation, error) {
+			return eng.CastVote(ctx, "concurrent-confer", "meta-o", "meta-orchestrator", VoteApprove, "Use A", "")
+		}
+		results := h.run(t, vote, vote)
+		requireOneSuccessOneError(t, results)
+		got, err := h.store.Get(ctx, "concurrent-confer")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		requireBallotsFrom(t, got, "meta-o")
+		if h.sink.voteCount() != 1 {
+			t.Fatalf("vote events=%d, want 1", h.sink.voteCount())
+		}
+	})
+
+	t.Run("matching quorum answers once", func(t *testing.T) {
+		h := newConcurrentEngineHarness(t, concurrentConferState(2), nil)
+		results := h.run(t,
+			func(eng *Engine) (*Escalation, error) {
+				return eng.CastVote(ctx, "concurrent-confer", "meta-o", "meta-orchestrator", VoteApprove, "Use A", "")
+			},
+			func(eng *Engine) (*Escalation, error) {
+				return eng.CastVote(ctx, "concurrent-confer", "orch", "orchestrator", VoteApprove, "Use A", "")
+			},
+		)
+		for _, result := range results {
+			if result.err != nil {
+				t.Fatalf("CastVote: %v", result.err)
+			}
+		}
+		got, err := h.store.Get(ctx, "concurrent-confer")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		requireBallotsFrom(t, got, "meta-o", "orch")
+		if got.Phase != PhaseAnswered || got.Answer != "Use A" {
+			t.Fatalf("phase=%q answer=%q, want answered/Use A", got.Phase, got.Answer)
+		}
+		if h.messenger.resolvedCount() != 1 || h.sink.phaseCount(PhaseAnswered) != 1 || h.human.count() != 0 {
+			t.Fatalf("resolved messages=%d answer events=%d human=%d, want 1/1/0",
+				h.messenger.resolvedCount(), h.sink.phaseCount(PhaseAnswered), h.human.count())
+		}
+	})
+
+	t.Run("split answers remain nonterminal", func(t *testing.T) {
+		h := newConcurrentEngineHarness(t, concurrentConferState(2), nil)
+		results := h.run(t,
+			func(eng *Engine) (*Escalation, error) {
+				return eng.CastVote(ctx, "concurrent-confer", "meta-o", "meta-orchestrator", VoteApprove, "Use A", "")
+			},
+			func(eng *Engine) (*Escalation, error) {
+				return eng.CastVote(ctx, "concurrent-confer", "orch", "orchestrator", VoteApprove, "Use B", "")
+			},
+		)
+		for _, result := range results {
+			if result.err != nil {
+				t.Fatalf("CastVote: %v", result.err)
+			}
+		}
+		got, err := h.store.Get(ctx, "concurrent-confer")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		requireBallotsFrom(t, got, "meta-o", "orch")
+		if got.Phase != PhaseConferring {
+			t.Fatalf("phase=%q, want conferring", got.Phase)
+		}
+		if h.messenger.count() != 0 || h.human.count() != 0 || h.sink.phaseCount(PhaseAnswered) != 0 {
+			t.Fatalf("messages=%d human=%d answer events=%d, want 0/0/0",
+				h.messenger.count(), h.human.count(), h.sink.phaseCount(PhaseAnswered))
+		}
+	})
+
+	t.Run("seeded approval has one terminal owner", func(t *testing.T) {
+		h, got := runSeededConferTerminalRace(t, ctx, VoteApprove, "Use A", "")
+		if got.Phase != PhaseAnswered {
+			t.Fatalf("state=%+v, want answered with exactly two ballots", got)
+		}
+		if h.messenger.resolvedCount() != 1 || h.sink.phaseCount(PhaseAnswered) != 1 || h.sink.voteCount() != 1 {
+			t.Fatalf("resolved messages=%d answer events=%d vote events=%d, want 1/1/1",
+				h.messenger.resolvedCount(), h.sink.phaseCount(PhaseAnswered), h.sink.voteCount())
+		}
+	})
+
+	t.Run("seeded rejection dispatches human once", func(t *testing.T) {
+		h, got := runSeededConferTerminalRace(t, ctx, VoteReject, "", "human")
+		if got.Phase != PhaseDispatchedToHuman {
+			t.Fatalf("state=%+v, want human dispatch with exactly two ballots", got)
+		}
+		if h.human.count() != 1 || h.sink.phaseCount(PhaseDispatchedToHuman) != 1 || h.sink.voteCount() != 1 {
+			t.Fatalf("human=%d dispatch events=%d vote events=%d, want 1/1/1",
+				h.human.count(), h.sink.phaseCount(PhaseDispatchedToHuman), h.sink.voteCount())
+		}
+	})
 }

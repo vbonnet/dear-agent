@@ -54,6 +54,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -84,20 +85,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("token-refresher", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		check       = fs.Bool("check", false, "report credential status only; no network call or mutation")
-		force       = fs.Bool("force", false, "refresh even if the current token is still fresh")
-		quiet       = fs.Bool("quiet", false, "suppress structured stderr logs (stdout still gets the token)")
-		credPath    = fs.String("credentials", "", "path to credentials.json (default ~/.claude/.credentials.json)")
-		endpoint    = fs.String("endpoint", "", "OAuth token endpoint override (default built-in / $CLAUDE_OAUTH_TOKEN_ENDPOINT)")
-		clientID    = fs.String("client-id", "", "OAuth client ID override (default built-in / $CLAUDE_OAUTH_CLIENT_ID)")
-		cadence     = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
-		lockTimeout = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
-		expirySkew  = fs.Duration("expiry-skew", 0, "treat the access token as stale this long before it expires; MUST exceed the scheduler's tick or the cadence job will sample straight past the expiry (default 60s)")
-		auditPath   = fs.String("audit-log", defaultAuditPath(), "JSONL audit log path (empty to disable)")
-		quarPath    = fs.String("quarantine", defaultQuarantinePath(), "refresh-token quarantine marker path (empty to disable quarantine)")
-		clearQuar   = fs.Bool("clear-quarantine", false, "clear the refresh-token quarantine and exit (operator override)")
+		check          = fs.Bool("check", false, "report credential status only; no network call or mutation")
+		force          = fs.Bool("force", false, "refresh even if the current token is still fresh")
+		quiet          = fs.Bool("quiet", false, "suppress structured stderr logs (stdout still gets the token)")
+		credPath       = fs.String("credentials", "", "path to credentials.json (default ~/.claude/.credentials.json)")
+		endpoint       = fs.String("endpoint", "", "OAuth token endpoint override (default built-in / $CLAUDE_OAUTH_TOKEN_ENDPOINT)")
+		clientID       = fs.String("client-id", "", "OAuth client ID override (default built-in / $CLAUDE_OAUTH_CLIENT_ID)")
+		cadence        = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
+		lockTimeout    = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
+		expirySkew     = fs.Duration("expiry-skew", 0, "treat the access token as stale this long before it expires; MUST exceed the scheduler's tick or the cadence job will sample straight past the expiry (default 60s)")
+		auditPath      = fs.String("audit-log", defaultAuditPath(), "JSONL audit log path (empty to disable)")
+		quarPath       = fs.String("quarantine", defaultQuarantinePath(), "refresh-token quarantine marker path (empty to disable quarantine)")
+		clearQuar      = fs.Bool("clear-quarantine", false, "clear the refresh-token quarantine and exit (operator override)")
+		stateDir       = fs.String("state-dir", defaultStateDir(), "state directory for cadence alert sentinels (default ~/.local/state/dear-agent)")
+		sentinelMaxAge = fs.Duration("sentinel-max-age", defaultSentinelMaxAge, "maximum age of cadence alert sentinels before pruning (0 to disable, default 24h)")
 	)
 	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if *sentinelMaxAge < 0 {
+		fmt.Fprintln(stderr, "token-refresher: -sentinel-max-age cannot be negative")
 		return exitError
 	}
 	quarantineExplicit := false
@@ -109,6 +116,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if *check && *clearQuar {
 		fmt.Fprintln(stderr, "token-refresher: -check and -clear-quarantine are mutually exclusive")
+		return exitError
+	}
+	if *check && *cadence {
+		fmt.Fprintln(stderr, "token-refresher: -check and -cadence are mutually exclusive")
 		return exitError
 	}
 	resolvedCredPath := canonicalCredentialsPath(*credPath)
@@ -129,6 +140,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, span := otel.Tracer("token-refresher").Start(context.Background(), "token-refresher.run")
 	defer span.End()
 
+	var attemptedFP string
 	r := auth.OAuthResolver{
 		CredentialsPath: resolvedCredPath,
 		TokenEndpoint:   *endpoint,
@@ -138,11 +150,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		QuarantinePath:  *quarPath,
 		Logger:          logger,
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
+		OnAttempt: func(token string) {
+			attemptedFP = auth.RefreshTokenFingerprint(token)
+		},
 	}
-	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath)
+	resolvedStateDir := canonicalStateDir(*stateDir)
+	if *cadence && !*check {
+		if err := ensureSecureStateDir(resolvedStateDir); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: state directory unavailable: %v\n", err)
+			return exitError
+		}
+	}
+	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath, resolvedStateDir)
 
 	if *clearQuar {
-		if err := clearCadenceSentinel(defaultStateDir(), cadenceSentinelName(*quarPath)); err != nil {
+		if err := clearCadenceSentinel(resolvedStateDir, cadenceSentinelName(*quarPath, resolvedCredPath)); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
 			return exitError
 		}
@@ -163,33 +185,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
+			sentinelName := cadenceSentinelName(*quarPath, resolvedCredPath)
 			if code == exitNotPersisted {
-				stateDir := defaultStateDir()
-				sentinelName := cadenceSentinelName(*quarPath)
 				canonicalQuarantine := defaultQuarantinePathForCredentials(resolvedCredPath)
 				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
+				retCode := exitNotPersisted
 				if _, _, _, quarantined := r.QuarantineStatus(); quarantined && sharedQuarantine {
-					notifyCadenceOnce(stateDir, sentinelName,
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, "quarantined",
 						"Claude auth AT RISK",
 						"Credential persistence failed; the refresh-token quarantine is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh QUARANTINED until -clear-quarantine re-arms it.")
-					return exitOK
-				}
-				stopped, stopErr := r.RefreshStopped()
-				if stopErr == nil && stopped {
-					notifyCadenceOnce(stateDir, sentinelName,
+					retCode = exitOK
+				} else if stopped, stopErr := r.RefreshStopped(); stopErr == nil && stopped {
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, "quarantined",
 						"Claude auth AT RISK",
 						"Refresh quarantine could not be persisted; the durable refresh stop is active. Run "+clearProtectionsCommand+" after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
-					return exitOK
+					retCode = exitOK
+				} else {
+					notifyCadenceOnce(resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, "quarantined",
+						"Claude auth AT RISK",
+						"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
+					fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
 				}
-				notifyCadenceOnce(stateDir, sentinelName,
-					"Claude auth AT RISK",
-					"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
-				fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
-				return exitNotPersisted
+				pruneCadenceAlerts(resolvedStateDir, *sentinelMaxAge, sentinelName, stderr)
+				return retCode
 			}
-			return cadenceExit(code, defaultStateDir(), cadenceSentinelName(*quarPath), stderr)
+			return cadenceExit(code, resolvedStateDir, sentinelName, *quarPath, resolvedCredPath, fp, stderr, *sentinelMaxAge)
 		}
 		return code
 	}
@@ -232,6 +254,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	token, refreshed, err := r.EnsureFresh(ctx)
+	if attemptedFP != "" {
+		fp = attemptedFP
+	}
 	mode := "ensure"
 	if *force {
 		mode = "force"
@@ -361,8 +386,29 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 	}
 }
 
-func clearRefreshProtectionsCommand(credentialsPath, quarantinePath string) string {
-	return fmt.Sprintf("token-refresher -credentials %q -quarantine %q -clear-quarantine", credentialsPath, quarantinePath)
+func canonicalStateDir(dir string) string {
+	if dir == "" {
+		return defaultStateDir()
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return filepath.Clean(dir)
+	}
+	return filepath.Clean(abs)
+}
+
+// shellQuote wraps a value in single quotes for safe POSIX shell interpolation.
+// Embedded single quotes are safely escaped using the standard single-quote termination sequence.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func clearRefreshProtectionsCommand(credentialsPath, quarantinePath, stateDir string) string {
+	cmd := fmt.Sprintf("token-refresher -credentials %s -quarantine %s", shellQuote(credentialsPath), shellQuote(quarantinePath))
+	if stateDir != "" {
+		cmd += fmt.Sprintf(" -state-dir %s", shellQuote(canonicalStateDir(stateDir)))
+	}
+	return cmd + " -clear-quarantine"
 }
 
 // fpOrUnknown and credModOrUnknown keep the operator-facing death message

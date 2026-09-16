@@ -198,7 +198,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 
 	// Commit phase completion
-	err := g.CommitPhaseCompletion("PROBLEM", "success", "Completed discovery phase")
+	_, err := g.CommitPhaseCompletion("PROBLEM", "success", "Completed discovery phase")
 	if err != nil {
 		t.Fatalf("CommitPhaseCompletion() error = %v", err)
 	}
@@ -282,7 +282,7 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := New(repoDir).CommitPhaseCompletion("DESIGN", "success", "Reviewed design documents"); err != nil {
+	if _, err := New(repoDir).CommitPhaseCompletion("DESIGN", "success", "Reviewed design documents"); err != nil {
 		t.Fatalf("CommitPhaseCompletion(DESIGN): %v", err)
 	}
 	showOutput, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=").CombinedOutput()
@@ -312,7 +312,11 @@ func TestCommitRewindCommitsCanonicalMarkersAndExactArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
-		".gitignore":              "*.jsonl\n.wayfinder/archives/\nRETRO-retrospective.md\n",
+		// This case pins archive scoping, not ignore policy: the artifacts are
+		// commit-eligible here so the assertions below measure which paths
+		// rewind selects. Ignored artifacts are covered by
+		// TestLifecycleCommitsLeaveIgnoredMarkersUntracked (ce-2sgej).
+		".gitignore":              "*.tmp\n",
 		"WAYFINDER-STATUS.md":     "status: in-progress\n",
 		"WAYFINDER-HISTORY.jsonl": "{}\n",
 		"RETRO-retrospective.md":  "# Retro\n",
@@ -339,7 +343,7 @@ func TestCommitRewindCommitsCanonicalMarkersAndExactArchive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sibling, "unrelated.txt"), []byte("private\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := New(repoDir).CommitRewind("BUILD", "DESIGN", archiveRef); err != nil {
+	if _, err := New(repoDir).CommitRewind("BUILD", "DESIGN", archiveRef); err != nil {
 		t.Fatalf("CommitRewind: %v", err)
 	}
 	showOutput, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=").CombinedOutput()
@@ -364,7 +368,7 @@ func TestCommitRewindCommitsCanonicalMarkersAndExactArchive(t *testing.T) {
 // (returns nil, no error) outside a git repository so non-git workflows work.
 func TestCommitSessionInit_NonGitRepo(t *testing.T) {
 	g := New(t.TempDir())
-	if err := g.CommitSessionInit("my-project"); err != nil {
+	if _, err := g.CommitSessionInit("my-project"); err != nil {
 		t.Errorf("CommitSessionInit() on non-git repo should return nil, got: %v", err)
 	}
 }
@@ -385,7 +389,7 @@ func TestCommitSessionInit_CommitsStatusFile(t *testing.T) {
 	// Write the STATUS file (mirrors what `wayfinder session start` does).
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("schema_version: \"2.0\"\n"), 0644)
 
-	if err := g.CommitSessionInit("my-project"); err != nil {
+	if _, err := g.CommitSessionInit("my-project"); err != nil {
 		t.Fatalf("CommitSessionInit() error = %v", err)
 	}
 
@@ -418,7 +422,7 @@ func TestCommitSessionInit_NothingToCommit(t *testing.T) {
 	gittest.Command(t, repoDir, "add", ".").Run()
 	gittest.Command(t, repoDir, "commit", "-m", "Add status").Run()
 
-	if err := g.CommitSessionInit("my-project"); err != nil {
+	if _, err := g.CommitSessionInit("my-project"); err != nil {
 		t.Errorf("CommitSessionInit() with nothing to commit should not error, got: %v", err)
 	}
 }
@@ -436,7 +440,7 @@ func TestCommitSessionInit_MissingStatusFile(t *testing.T) {
 	gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run()
 
 	// No STATUS file written — CommitSessionInit should be a silent no-op.
-	if err := g.CommitSessionInit("my-project"); err != nil {
+	if _, err := g.CommitSessionInit("my-project"); err != nil {
 		t.Errorf("CommitSessionInit() with no STATUS file should not error, got: %v", err)
 	}
 }
@@ -466,7 +470,7 @@ func TestCommitPhaseStart(t *testing.T) {
 		t.Fatalf("failed to write HISTORY: %v", err)
 	}
 
-	if err := g.CommitPhaseStart("CHARTER"); err != nil {
+	if _, err := g.CommitPhaseStart("CHARTER"); err != nil {
 		t.Fatalf("CommitPhaseStart() error = %v", err)
 	}
 
@@ -489,49 +493,15 @@ func TestCommitPhaseStart(t *testing.T) {
 	}
 }
 
-func TestCommitPhaseStartForceAddsIgnoredCanonicalHistory(t *testing.T) {
-	repoDir := setupGitRepo(t)
-	g := New(repoDir)
-
-	for path, content := range map[string]string{
-		".gitignore":              "*.jsonl\n",
-		"README.md":               "# Test Project\n",
-		"WAYFINDER-STATUS.md":     "# Status\n",
-		"WAYFINDER-HISTORY.jsonl": "{}\n",
-	} {
-		if err := os.WriteFile(filepath.Join(repoDir, path), []byte(content), 0o644); err != nil {
-			t.Fatalf("write %s: %v", path, err)
-		}
-	}
-	if err := gittest.Command(t, repoDir, "add", ".gitignore", "README.md").Run(); err != nil {
-		t.Fatalf("stage initial files: %v", err)
-	}
-	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
-		t.Fatalf("initial commit: %v", err)
-	}
-
-	if err := g.CommitPhaseStart("CHARTER"); err != nil {
-		t.Fatalf("CommitPhaseStart() error = %v", err)
-	}
-
-	names, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("git show: %v", err)
-	}
-	for _, marker := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.jsonl"} {
-		if !strings.Contains(string(names), marker) {
-			t.Errorf("lifecycle commit missing ignored canonical marker %s:\n%s", marker, names)
-		}
-	}
-}
-
 func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
 	tests := map[string]func(*GitIntegrator) error{
 		"start": func(g *GitIntegrator) error {
-			return g.CommitPhaseStart("CHARTER")
+			_, err := g.CommitPhaseStart("CHARTER")
+			return err
 		},
 		"completion": func(g *GitIntegrator) error {
-			return g.CommitPhaseCompletion("PROBLEM", "success", "")
+			_, err := g.CommitPhaseCompletion("PROBLEM", "success", "")
+			return err
 		},
 		"rewind": func(g *GitIntegrator) error {
 			if err := os.WriteFile(filepath.Join(g.projectDir, "RETRO-retrospective.md"), []byte("# Retro\n"), 0o644); err != nil {
@@ -541,7 +511,8 @@ func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return g.CommitRewind("BUILD", "DESIGN", archiveRef)
+			_, err = g.CommitRewind("BUILD", "DESIGN", archiveRef)
+			return err
 		},
 	}
 
@@ -600,7 +571,7 @@ func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
 // when the directory is not inside a git repository.
 func TestCommitPhaseStart_NonGitRepo(t *testing.T) {
 	g := New(t.TempDir())
-	if err := g.CommitPhaseStart("CHARTER"); err == nil {
+	if _, err := g.CommitPhaseStart("CHARTER"); err == nil {
 		t.Error("CommitPhaseStart() on non-git repo should return error")
 	}
 }
@@ -618,7 +589,7 @@ func TestCommitPhaseStart_NothingToCommit(t *testing.T) {
 	gittest.Command(t, repoDir, "commit", "-m", "Add wayfinder files").Run()
 
 	// CommitPhaseStart when nothing has changed should succeed silently.
-	if err := g.CommitPhaseStart("PROBLEM"); err != nil {
+	if _, err := g.CommitPhaseStart("PROBLEM"); err != nil {
 		t.Errorf("CommitPhaseStart() with nothing to commit should not error, got: %v", err)
 	}
 }
@@ -644,7 +615,7 @@ func TestCommitPhaseStart_ScopedToMarkerFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"), []byte("{}\n"), 0644)
 
-	if err := g.CommitPhaseStart("DESIGN"); err != nil {
+	if _, err := g.CommitPhaseStart("DESIGN"); err != nil {
 		t.Fatalf("CommitPhaseStart() error = %v", err)
 	}
 
@@ -684,7 +655,7 @@ func TestCommitPhaseStart_LeavesWorktreeCleanForNextTransition(t *testing.T) {
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("status: in_progress\n"), 0644)
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"), []byte("[]\n"), 0644)
 
-	if err := g.CommitPhaseStart("CHARTER"); err != nil {
+	if _, err := g.CommitPhaseStart("CHARTER"); err != nil {
 		t.Fatalf("CommitPhaseStart() error = %v", err)
 	}
 
@@ -704,7 +675,7 @@ func TestCommitPhaseCompletion_NonGitRepo(t *testing.T) {
 	tmpDir := t.TempDir()
 	g := New(tmpDir)
 
-	err := g.CommitPhaseCompletion("PROBLEM", "success", "")
+	_, err := g.CommitPhaseCompletion("PROBLEM", "success", "")
 	if err == nil {
 		t.Error("CommitPhaseCompletion() on non-git repo should return error")
 	}
@@ -739,7 +710,7 @@ func TestCommitPhaseCompletion_NothingToCommit(t *testing.T) {
 	commitCmd2.Run()
 
 	// Try to commit again without changes (should not error)
-	err := g.CommitPhaseCompletion("PROBLEM", "success", "")
+	_, err := g.CommitPhaseCompletion("PROBLEM", "success", "")
 	if err != nil {
 		t.Errorf("CommitPhaseCompletion() with nothing to commit should not error, got: %v", err)
 	}

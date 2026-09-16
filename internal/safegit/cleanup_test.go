@@ -427,6 +427,9 @@ func TestAttemptMergeRetainsCleanupPlanAcrossProviderMutation(t *testing.T) {
 			if count := strings.Count(output, "safe-merge: ✓ merge complete"); count != 1 {
 				t.Fatalf("confirmed merge message count = %d, want 1:\n%s", count, output)
 			}
+			if count := strings.Count(output, "snapshot: head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa contains live base main@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); count != 1 {
+				t.Fatalf("live-base proof receipt count = %d, want 1:\n%s", count, output)
+			}
 			if confirmedAt, cleanupAt := strings.Index(output, "safe-merge: ✓ merge complete"),
 				strings.Index(output, "removed local branch "+fixture.branch); confirmedAt > cleanupAt {
 				t.Fatalf("cleanup completed before the confirmed-merge record:\n%s", output)
@@ -621,11 +624,17 @@ func runAttemptMergeCleanupHelper(
 set -eu
 case "$*" in
   "pr view 42 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid")
-    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"abc123"}' ;;
+    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
   "pr view 42 --repo owner/repo --json baseRefName")
     printf '%s\n' '{"baseRefName":"main"}' ;;
+  "pr view 42 --repo owner/repo --json baseRefName,headRefOid")
+    printf '%s\n' '{"baseRefName":"main","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
+  "api repos/owner/repo/git/ref/heads%2Fmain")
+    printf '%s\n' '{"ref":"refs/heads/main","object":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","type":"commit"}}' ;;
+  "api repos/owner/repo/compare/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    printf '%s\n' '{"status":"ahead","base_commit":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"merge_base_commit":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}' ;;
   "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100")
-    printf '%s\n' '[[]]' ;;
+	printf '%s\n' '[[]]' ;;
   "api repos/owner/repo/branches/main/protection/required_status_checks")
     printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2
     exit 1 ;;
@@ -633,19 +642,19 @@ case "$*" in
   "pr checks 42 --repo owner/repo --json name,state")
     printf '%s\n' '[]' ;;
   "pr view 42 --repo owner/repo --json headRefOid,commits")
-    printf '%s\n' '{"headRefOid":"abc123","commits":[{"committedDate":"2000-01-01T00:00:00Z"}]}' ;;
+    printf '%s\n' '{"headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","commits":[{"committedDate":"2000-01-01T00:00:00Z"}]}' ;;
   "pr view 42 --repo owner/repo --json headRefName,headRefOid")
-    printf '%s\n' '{"headRefName":"cleanup-topic","headRefOid":"abc123"}' ;;
+    printf '%s\n' '{"headRefName":"cleanup-topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
   "pr view 42 --repo owner/repo --json mergeStateStatus")
     if [ "${SAFEGIT_ATTEMPT_MERGE_BEHIND:-}" = "1" ]; then
       printf '%s\n' '{"mergeStateStatus":"BEHIND"}'
     else
       printf '%s\n' '{"mergeStateStatus":"CLEAN"}'
     fi ;;
-  "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=abc123")
+  "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{"message":"Updating pull request branch."}' ;;
-  "pr merge 42 --repo owner/repo --squash --auto --delete-branch --match-head-commit abc123")
+  "pr merge 42 --repo owner/repo --squash --auto --delete-branch --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	printf '%s\n' provider >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
 	if [ "${SAFEGIT_ATTEMPT_MERGE_PROVIDER_FAILURE:-}" = "1" ]; then
 	  printf '%s\n' 'synthetic provider failure' >&2
@@ -665,14 +674,14 @@ case "$*" in
 	count=$((count + 1))
 	printf '%s' "$count" > "$SAFEGIT_ATTEMPT_MERGE_CONFIRM_COUNT"
     if [ "${SAFEGIT_ATTEMPT_MERGE_HEAD_MISMATCH:-}" = "1" ]; then
-      printf '%s\n' '{"state":"MERGED","headRefOid":"changed-head"}'
+      printf '%s\n' '{"state":"MERGED","headRefOid":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}'
 	elif [ "${SAFEGIT_ATTEMPT_MERGE_TRANSIENT_CONFIRMATION:-}" = "1" ] && [ "$count" = "1" ]; then
 	  printf '%s\n' 'synthetic confirmation transport failure' >&2
 	  exit 7
 	elif [ "${SAFEGIT_ATTEMPT_MERGE_DELAY_CONFIRMATION:-}" = "1" ] && [ "$count" = "1" ]; then
-	  printf '%s\n' '{"state":"OPEN","headRefOid":"abc123"}'
+	  printf '%s\n' '{"state":"OPEN","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
     else
-      printf '%s\n' '{"state":"MERGED","headRefOid":"abc123"}'
+      printf '%s\n' '{"state":"MERGED","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
     fi ;;
   *)
     printf '%s\n' "unexpected gh invocation: $*" >&2

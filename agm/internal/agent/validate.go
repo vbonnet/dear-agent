@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ var harnessBinaries = map[string][]string{
 
 // lookPath is a variable for testing
 var lookPath = exec.LookPath
+
+// statPath is a variable for testing credential and config path selection.
+var statPath = os.Stat
 
 // Harness help URLs
 var harnessHelpURLs = map[string]string{
@@ -81,8 +85,24 @@ func ValidateHarnessName(name string) error {
 
 // ValidateHarnessAvailability checks if the harness is available.
 // A harness is available if its binary is on PATH (it manages its own auth),
-// or if the appropriate API key / auth environment is configured.
+// or if the appropriate API key / auth environment is configured. This
+// compatibility entrypoint selects the live process HOME once.
 func ValidateHarnessAvailability(name string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Preserve the compatibility entrypoint's prior behavior: a missing
+		// process HOME removes only filesystem-backed credential evidence.
+		// Binary and environment availability remain valid, while a Codex
+		// caller with no other signal still receives HarnessUnavailableError.
+		home = ""
+	}
+	return validateHarnessAvailabilityAtHome(name, home)
+}
+
+// validateHarnessAvailabilityAtHome checks harness availability against one
+// selected HOME. Callers that already retain runtime authority use this seam
+// so a later process-environment change cannot redirect credential reads.
+func validateHarnessAvailabilityAtHome(name, home string) error {
 	name = NormalizeHarnessName(name)
 	if name == "pi-cli" {
 		if isHarnessBinaryOnPath(name) {
@@ -116,7 +136,7 @@ func ValidateHarnessAvailability(name string) error {
 	}
 
 	// Skip API key check for Codex if OAuth credentials exist (~/.codex/auth.json)
-	if name == "codex-cli" && IsCodexOAuthConfigured() {
+	if name == "codex-cli" && isCodexOAuthConfiguredAtHome(home) {
 		return nil
 	}
 
@@ -166,7 +186,14 @@ func IsCodexOAuthConfigured() bool {
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(home + "/.codex/auth.json")
+	return isCodexOAuthConfiguredAtHome(home)
+}
+
+func isCodexOAuthConfiguredAtHome(home string) bool {
+	if !filepath.IsAbs(home) {
+		return false
+	}
+	_, err := statPath(filepath.Join(home, ".codex", "auth.json"))
 	return err == nil
 }
 

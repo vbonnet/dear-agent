@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,5 +69,112 @@ func TestPrintHuman_BlockedListsFixesAndForbidsGuessing(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("blocked output missing %q, got:\n%s", want, out)
 		}
+	}
+}
+
+func TestUsageRoutesReviewThreadLifecycleToOwner(t *testing.T) {
+	assertRoutesReplyFileLifecycleToOwner(t, usage)
+}
+
+func TestSkillRoutesReviewThreadLifecycleToOwner(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", ".claude", "skills", "pr-merge-blockers", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read pr-merge-blockers skill: %v", err)
+	}
+	assertRoutesReplyFileLifecycleToOwner(t, string(content))
+}
+
+func assertRoutesReplyFileLifecycleToOwner(t *testing.T, got string) {
+	t.Helper()
+	if !strings.Contains(got, "resolve-review-threads --help") {
+		t.Errorf("review-thread guidance does not route to its owning command:\n%s", got)
+	}
+}
+
+func TestReplyFileLifecycleHasOneProductionOwner(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+	ownerPath := filepath.Join(repoRoot, "cmd", "resolve-review-threads", "recovery_guidance.go")
+	owner, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatalf("read canonical reply-file guidance owner: %v", err)
+	}
+	for _, want := range []string{
+		`reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"`,
+		`--body-file "$reply_file"`,
+		`rm -f -- "$reply_file"`,
+	} {
+		if !strings.Contains(string(owner), want) {
+			t.Errorf("canonical reply-file guidance owner missing %q", want)
+		}
+	}
+
+	walkErr := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".beads", "node_modules", "test", "tests", "testdata", "vendor":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isProductionGuidanceSource(path) || filepath.Clean(path) == filepath.Clean(ownerPath) {
+			return nil
+		}
+		source, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if duplicatesInitialReplyFileLifecycle(string(source)) {
+			relative, relErr := filepath.Rel(repoRoot, path)
+			if relErr != nil {
+				relative = path
+			}
+			t.Errorf("production guidance %s duplicates the complete owner recipe", relative)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("scan production guidance: %v", walkErr)
+	}
+}
+
+func isProductionGuidanceSource(path string) bool {
+	if strings.HasSuffix(path, "_test.go") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml":
+		return true
+	default:
+		return filepath.Base(path) == "Makefile"
+	}
+}
+
+func duplicatesInitialReplyFileLifecycle(source string) bool {
+	normalized := strings.ReplaceAll(source, `\"`, `"`)
+	for _, required := range []string{
+		`reply_file="$(mktemp /tmp/resolve-review-thread.XXXXXX)"`,
+		`--body-file "$reply_file"`,
+		`rm -f -- "$reply_file"`,
+	} {
+		if !strings.Contains(normalized, required) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestCompleteReplyFileLifecycleDetectionDoesNotRejectReferences(t *testing.T) {
+	if duplicatesInitialReplyFileLifecycle(`See --body-file "$reply_file" for the parameter contract.`) {
+		t.Fatal("a body-file reference alone must not be treated as a duplicated lifecycle")
+	}
+	if !duplicatesInitialReplyFileLifecycle(`
+reply_file=\"$(mktemp /tmp/resolve-review-thread.XXXXXX)\"
+resolve-review-threads reply-resolve ID --body-file \"$reply_file\"
+rm -f -- \"$reply_file\"
+`) {
+		t.Fatal("the complete normalized lifecycle must be detected")
 	}
 }

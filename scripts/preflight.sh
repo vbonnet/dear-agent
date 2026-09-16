@@ -19,6 +19,22 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Records the failing gate to $PREFLIGHT_GATE_LOG so callers (safe-pr) can name
+# it. Streaming output already says what broke; a caller that only sees the
+# exit status does not (ce-2sgej).
+# shellcheck source=scripts/lib/preflight-gate.sh
+source "$REPO_ROOT/scripts/lib/preflight-gate.sh"
+
+# One cleanup list so a later gate adding a temp file does not silently replace
+# an earlier gate's EXIT trap.
+PREFLIGHT_TMP_FILES=()
+cleanup_preflight_tmp() {
+  if [[ ${#PREFLIGHT_TMP_FILES[@]} -gt 0 ]]; then
+    rm -f "${PREFLIGHT_TMP_FILES[@]}"
+  fi
+}
+trap cleanup_preflight_tmp EXIT
+
 MODE="fast"
 case "${1:-}" in
   --full) MODE="full" ;;
@@ -45,7 +61,169 @@ fi
 step() { printf '%s==> %s%s\n' "$B" "$*" "$N"; }
 ok()   { printf '%s✓%s %s\n' "$G" "$N" "$*"; }
 warn() { printf '%s!%s %s\n' "$Y" "$N" "$*"; }
-fail() { printf '%s✗%s %s\n' "$R" "$N" "$*"; exit 1; }
+fail() {
+  printf '%s✗%s %s\n' "$R" "$N" "$*"
+  preflight_record_gate "$*"
+  exit 1
+}
+
+# Aborts on a gate that has already written its own report (with details), so
+# the summary line does not overwrite the detail lines with a bare gate name.
+fail_recorded() { printf '%s✗%s %s\n' "$R" "$N" "$*"; exit 1; }
+
+# Full preflight requires an exclusive host-scoped advisory lease so that
+# concurrent preflight-full runs across worktrees do not contend for memory,
+# CPU, or disk caches.
+LEASE_DIR="${PREFLIGHT_LEASE_DIR:-${_PREFLIGHT_LEASE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dear-agent}}"
+LEASE_FILE="$LEASE_DIR/preflight-full.lock"
+OWNER_FILE="$LEASE_DIR/preflight-full.owner"
+LEASE_TIMEOUT="${PREFLIGHT_LEASE_TIMEOUT:-3600}"
+
+format_owner_info() {
+  if [[ -f "$OWNER_FILE" ]]; then
+    local pid="" started="" worktree=""
+    while IFS='=' read -r k v || [[ -n "$k" ]]; do
+      case "$k" in
+        PID) pid="$v" ;;
+        STARTED) started="$v" ;;
+        WORKTREE) worktree="$v" ;;
+      esac
+    done < "$OWNER_FILE"
+    if [[ -n "$pid" && -n "$worktree" && -n "$started" ]]; then
+      printf 'held by PID %s (%s) since %s' "$pid" "$worktree" "$started"
+      return
+    elif [[ -n "$pid" ]]; then
+      printf 'held by PID %s' "$pid"
+      return
+    fi
+  fi
+  printf 'held by another process'
+}
+
+# Cleanup handler for owner metadata and temporary scan files.
+cleanup_preflight() {
+  if [[ -n "${OWNER_FILE:-}" && -f "$OWNER_FILE" ]]; then
+    if grep -q "^PID=$$$" "$OWNER_FILE" 2>/dev/null; then
+      rm -f "$OWNER_FILE" 2>/dev/null || true
+    fi
+  fi
+  if [[ ${#PREFLIGHT_TMP_FILES[@]} -gt 0 ]]; then
+    rm -f "${PREFLIGHT_TMP_FILES[@]}" 2>/dev/null || true
+  fi
+  if [[ -n "${TMP_VULN:-}" && -f "${TMP_VULN:-}" ]]; then
+    rm -f "$TMP_VULN" 2>/dev/null || true
+  fi
+}
+trap cleanup_preflight EXIT
+
+if [[ "$MODE" == "full" ]]; then
+  if [[ "${PREFLIGHT_LOCKED:-}" != "true" ]]; then
+    mkdir -p "$LEASE_DIR"
+    touch "$LEASE_FILE"
+    ACQUIRED_FILE="$LEASE_DIR/preflight-full.acquired.$$"
+    rm -f "$ACQUIRED_FILE"
+    PREFLIGHT_INNER_PID_FILE="$LEASE_DIR/preflight-full.pid.$$"
+    rm -f "$PREFLIGHT_INNER_PID_FILE"
+
+    # shellcheck disable=SC2317,SC2329
+    on_lease_cancel() {
+      trap - INT TERM
+      local owner_diag
+      owner_diag="$(format_owner_info)"
+      warn "cancelled while waiting for full-preflight lease (${owner_diag})"
+      if [[ -f "${PREFLIGHT_INNER_PID_FILE:-}" ]]; then
+        local inner_pid
+        inner_pid=$(cat "$PREFLIGHT_INNER_PID_FILE" 2>/dev/null)
+        if [[ -n "$inner_pid" ]]; then
+          kill "$inner_pid" 2>/dev/null || true
+        fi
+      fi
+      if [[ -n "${LOCK_PID:-}" ]]; then
+        kill "$LOCK_PID" 2>/dev/null || true
+        wait "$LOCK_PID" 2>/dev/null || true
+      fi
+      rm -f "$ACQUIRED_FILE" "${PREFLIGHT_INNER_PID_FILE:-}" 2>/dev/null || true
+      exit 130
+    }
+    trap on_lease_cancel INT TERM
+
+    export PREFLIGHT_LOCKED=true
+    export PREFLIGHT_ACQUIRED_FILE="$ACQUIRED_FILE"
+    export PREFLIGHT_INNER_PID_FILE="$PREFLIGHT_INNER_PID_FILE"
+
+    if command -v lockf >/dev/null 2>&1; then
+      if ! lockf -s -t 0 "$LEASE_FILE" true 2>/dev/null; then
+        warn "waiting for full-preflight lease $(format_owner_info)..."
+      fi
+      lockf -s -k -t "$LEASE_TIMEOUT" "$LEASE_FILE" "$0" "$@" &
+      LOCK_PID=$!
+      set +e
+      wait "$LOCK_PID"
+      RC=$?
+      set -e
+    elif command -v flock >/dev/null 2>&1; then
+      if flock --help 2>&1 | grep -q -- '-w'; then
+        if ! flock -n -x "$LEASE_FILE" true 2>/dev/null; then
+          warn "waiting for full-preflight lease $(format_owner_info)..."
+        fi
+        flock -x -w "$LEASE_TIMEOUT" "$LEASE_FILE" "$0" "$@" &
+        LOCK_PID=$!
+        set +e
+        wait "$LOCK_PID"
+        RC=$?
+        set -e
+      else
+        flock "$LEASE_FILE" "$0" "$@" &
+        LOCK_PID=$!
+        elapsed=0
+        while [[ ! -f "$ACQUIRED_FILE" ]]; do
+          if [[ "$elapsed" -eq 0 ]]; then
+            warn "waiting for full-preflight lease $(format_owner_info)..."
+          fi
+          sleep 0.2
+          elapsed=$((elapsed + 1))
+          if [[ "$elapsed" -ge $((LEASE_TIMEOUT * 5)) ]]; then
+            kill "$LOCK_PID" 2>/dev/null || true
+            fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
+          fi
+          if ! kill -0 "$LOCK_PID" 2>/dev/null; then
+            break
+          fi
+        done
+        set +e
+        wait "$LOCK_PID"
+        RC=$?
+        set -e
+      fi
+    else
+      fail "neither lockf nor flock is available for lease serialization"
+    fi
+
+    if [[ ! -f "$ACQUIRED_FILE" ]]; then
+      fail "timed out waiting for full-preflight lease after ${LEASE_TIMEOUT}s ($(format_owner_info))"
+    fi
+    rm -f "$ACQUIRED_FILE" "${PREFLIGHT_INNER_PID_FILE:-}" 2>/dev/null || true
+    exit $RC
+  else
+    # Inner re-executed shell holding the lock
+    if [[ -n "${PREFLIGHT_ACQUIRED_FILE:-}" ]]; then
+      touch "$PREFLIGHT_ACQUIRED_FILE"
+    fi
+    if [[ -n "${PREFLIGHT_INNER_PID_FILE:-}" ]]; then
+      echo "$$" > "$PREFLIGHT_INNER_PID_FILE"
+    fi
+
+    # Restore standard signal traps now that lease is acquired
+    trap cleanup_preflight EXIT INT TERM
+
+    cat > "$OWNER_FILE" <<EOF
+PID=$$
+STARTED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+WORKTREE=$REPO_ROOT
+COMMAND=$0 $*
+EOF
+  fi
+fi
 
 # Mirror CI: GOWORK=off so we don't accidentally pull in unrelated modules.
 export GOWORK=off
@@ -72,7 +250,7 @@ export GOLANGCI_LINT_CACHE
 START_TS=$(date +%s)
 
 step "go mod download"
-go mod download
+go mod download || fail "go mod download failed"
 ok "modules ready"
 
 step "go vet ./..."
@@ -157,10 +335,14 @@ if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
   fi
   # --full and --race both use -race -count=1 (CI parity for data-race detection).
   # --tests skips -race for a faster contributor sanity check.
+  TEST_LOG="$(mktemp)"
+  PREFLIGHT_TMP_FILES+=("$TEST_LOG")
   if [[ "$MODE" == "full" || "$MODE" == "race" ]]; then
-    go test -race -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail "tests failed"
+    preflight_run_go_tests "tests failed" "$TEST_LOG" \
+      go test -race -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail_recorded "tests failed"
   else
-    go test -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail "tests failed"
+    preflight_run_go_tests "tests failed" "$TEST_LOG" \
+      go test -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail_recorded "tests failed"
   fi
   ok "tests pass"
 fi
@@ -175,12 +357,15 @@ if [[ "$MODE" == "full" ]]; then
   # Clear inherited Go test flags as well as CI: GOFLAGS=-race, -short, -run,
   # or custom tags can otherwise skip the exact assertions this gate exists to
   # enforce while `go test` still exits successfully.
-  GOFLAGS='' CI='' go test -race=false -short=false -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
+  SLA_LOG="$(mktemp)"
+  PREFLIGHT_TMP_FILES+=("$SLA_LOG")
+  preflight_run_go_tests "ordinary performance SLA tests failed" "$SLA_LOG" \
+    env GOFLAGS='' CI='' go test -race=false -short=false -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
     ./pkg/workflow \
     ./agm/test/performance \
     ./internal/telemetry/enrichment \
     ./pkg/validation/scope ||
-    fail "ordinary performance SLA tests failed"
+    fail_recorded "ordinary performance SLA tests failed"
   ok "ordinary performance SLAs pass"
 
   step "govulncheck ./..."
@@ -212,7 +397,7 @@ if [[ "$MODE" == "full" ]]; then
   # `-t prefix.XXX.json` template tripping GNU mktemp's "must end in XXX"
   # rule is not worth the prettier filename.
   TMP_VULN=$(mktemp)
-  trap 'rm -f "$TMP_VULN"' EXIT
+  PREFLIGHT_TMP_FILES+=("$TMP_VULN")
   # govulncheck exit codes: 0 = no findings, 3 = findings (allowlisted or
   # not). Anything else (compile error, panic, module load failure) is a
   # real failure we must not mask. A blanket `|| true` would let those

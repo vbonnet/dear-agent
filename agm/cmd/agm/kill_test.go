@@ -169,11 +169,16 @@ func TestKill_HumanMode_NoEnvelope(t *testing.T) {
 }
 
 // TestKill_HumanMode_Prompts confirms the kill-protected path in human mode
-// takes the interactive prompt branch rather than the envelope branch. In a
-// non-TTY test environment huh.Run() fails, so the prompt is treated as a
-// cancellation: the function returns done=true with no error and no envelope.
+// takes the interactive prompt branch rather than the envelope branch.
 func TestKill_HumanMode_Prompts(t *testing.T) {
 	setHumanText(t)
+	origPrompt := confirmKillProtected
+	var promptCalled bool
+	confirmKillProtected = func(sessionName string) (bool, error) {
+		promptCalled = true
+		return false, errors.New("prompt cancelled")
+	}
+	t.Cleanup(func() { confirmKillProtected = origPrompt })
 
 	var done bool
 	var retErr error
@@ -181,6 +186,9 @@ func TestKill_HumanMode_Prompts(t *testing.T) {
 		_, done, retErr = handleKillError(nil, "demo", nil, ops.ErrKillProtected("demo", time.Time{}))
 	})
 
+	if !promptCalled {
+		t.Fatalf("prompt was not called in human mode")
+	}
 	if !done {
 		t.Fatalf("done = false, want true (cancelled prompt is terminal)")
 	}

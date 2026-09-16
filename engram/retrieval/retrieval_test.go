@@ -4,10 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/engram/ecphory"
 	"github.com/vbonnet/dear-agent/internal/testutil"
+	"github.com/vbonnet/dear-agent/pkg/engram"
 )
 
 // TestNewService tests the Service constructor
@@ -360,6 +363,73 @@ func TestService_Search_IndexOnly(t *testing.T) {
 	}
 }
 
+func TestService_SearchTracksResultsAndCloseFlushes(t *testing.T) {
+	service := NewService()
+	tmpdir := testutil.SetupTestEngrams(t)
+
+	results, err := service.Search(context.Background(), SearchOptions{
+		EngramPath: tmpdir,
+		Limit:      2,
+	})
+	if err != nil {
+		t.Fatalf("Search() failed: %v", err)
+	}
+	if got := len(results); got != 2 {
+		t.Fatalf("Search() returned %d results, want 2", got)
+	}
+
+	if err := service.Close(); err != nil {
+		t.Fatalf("Close() returned a tracking flush error: %v", err)
+	}
+
+	// The flush itself is asserted above and runs everywhere. The persisted
+	// values cannot be: MetadataUpdater.UpdateMetadata replaces the engram
+	// through os.Rename over an existing destination, which Windows does not
+	// perform reliably, and Tracker.Flush deliberately suppresses that error
+	// so tracking never fails a search. Asserting persistence here would fail
+	// every Engram PR on the windows job, which runs ./engram/retrieval.
+	// Making the updater replace portably is the better fix and is the
+	// updater's own concern, not this ownership refactor's.
+	if runtime.GOOS == "windows" {
+		t.Skip("metadata replacement via os.Rename over an existing file is not reliable on Windows")
+	}
+
+	for _, result := range results {
+		persisted, err := engram.NewParser().Parse(result.Path)
+		if err != nil {
+			t.Fatalf("parse tracked result %q: %v", result.Path, err)
+		}
+		if got := persisted.Frontmatter.RetrievalCount; got != 1 {
+			t.Errorf("%s retrieval_count = %d, want 1", result.Path, got)
+		}
+		if persisted.Frontmatter.LastAccessed.IsZero() {
+			t.Errorf("%s last_accessed was not persisted", result.Path)
+		}
+	}
+}
+
+func TestService_CloseIsBestEffort(t *testing.T) {
+	service := NewService()
+	tmpdir := testutil.SetupTestEngrams(t)
+	results, err := service.Search(context.Background(), SearchOptions{
+		EngramPath: tmpdir,
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("Search() failed: %v", err)
+	}
+	if got := len(results); got != 1 {
+		t.Fatalf("Search() returned %d results, want 1", got)
+	}
+	if err := os.Remove(results[0].Path); err != nil {
+		t.Fatalf("remove tracked result before flush: %v", err)
+	}
+
+	if err := service.Close(); err != nil {
+		t.Fatalf("Close() returned a tracking flush error: %v", err)
+	}
+}
+
 // TestService_Search_WithAPIFallback tests API ranking fallback behavior
 func TestService_Search_WithAPIFallback(t *testing.T) {
 	service := NewService()
@@ -560,4 +630,40 @@ func TestService_Search_WithQuery(t *testing.T) {
 			t.Error("expected fallback results")
 		}
 	})
+}
+
+// Tags take precedence when both filters are supplied. The assertion compares
+// result sets rather than sizes: the "go" tag and the "workflow" type select
+// disjoint engrams in the fixture, so a precedence regression would return
+// workflow1 instead of the tag matches, which a count check could miss.
+func TestService_FilterCandidates_TagsTakePrecedenceOverType(t *testing.T) {
+	service := NewService()
+	tmpdir := testutil.SetupTestEngrams(t)
+
+	index := ecphory.NewIndex()
+	if err := index.Build(tmpdir); err != nil {
+		t.Fatalf("failed to build index: %v", err)
+	}
+
+	sorted := func(in []string) []string {
+		out := slices.Clone(in)
+		slices.Sort(out)
+		return out
+	}
+
+	tagsOnly := service.filterCandidates(index, SearchOptions{Tags: []string{"go"}})
+	typeOnly := service.filterCandidates(index, SearchOptions{Type: "workflow"})
+	both := service.filterCandidates(index, SearchOptions{Tags: []string{"go"}, Type: "workflow"})
+
+	if len(tagsOnly) == 0 || len(typeOnly) == 0 {
+		t.Fatalf("fixture cannot prove precedence: tags matched %d, type matched %d", len(tagsOnly), len(typeOnly))
+	}
+	if !slices.Equal(sorted(both), sorted(tagsOnly)) {
+		t.Errorf("filterCandidates(tags+type) = %v, want the tag-only result %v", both, tagsOnly)
+	}
+	for _, typed := range typeOnly {
+		if slices.Contains(both, typed) {
+			t.Errorf("type-only candidate %q leaked into the combined result %v", typed, both)
+		}
+	}
 }
