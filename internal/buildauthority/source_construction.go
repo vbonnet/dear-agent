@@ -34,7 +34,8 @@ type retainedSourceGit struct {
 }
 
 type retainedSourceObjects struct {
-	root retainedSourceRoot
+	root  retainedSourceRoot
+	paths *sourceObjectPathInventory
 }
 
 type retainedSourceConfig struct {
@@ -139,7 +140,8 @@ func (owner *sourceConstructionOwner) validInitialConfig() bool {
 }
 
 func (owner *sourceConstructionOwner) validInitialObjects() bool {
-	return owner.objects != nil && owner.objects.root.validOpenDirectory()
+	return owner.objects != nil && owner.objects.root.validOpenDirectory() &&
+		owner.objects.paths == nil
 }
 
 func (owner *sourceConstructionOwner) validPackedRefsRetention() bool {
@@ -178,6 +180,30 @@ func (owner *sourceConstructionOwner) validAdministrativeRetention() bool {
 		owner.git.root.evidence,
 		owner.config.evidence,
 		owner.objects.root.evidence,
+	)
+}
+
+func (owner *sourceConstructionOwner) validObjectPathRetention() bool {
+	if owner == nil || owner.state != sourceConstructionActive || owner.closeFailure ||
+		!owner.validInitialRepository() || owner.git == nil ||
+		!owner.git.root.validOpenDirectory() || owner.git.administration == nil ||
+		owner.objects == nil || !owner.objects.root.validOpenDirectory() ||
+		owner.objects.paths == nil || !owner.validInitialConfig() ||
+		!owner.validResolvedPackedRefs() {
+		return false
+	}
+	if !owner.git.administration.valid(
+		owner.config.claim.objectFormat,
+		owner.packedRefs,
+		owner.git.root.evidence,
+		owner.config.evidence,
+		owner.objects.root.evidence,
+	) {
+		return false
+	}
+	return owner.objects.paths.valid(
+		owner.config.claim.objectFormat,
+		owner.git.administration,
 	)
 }
 
