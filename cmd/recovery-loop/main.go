@@ -9,8 +9,8 @@
 //
 // The absence-alarm escalation journal is an OUTPUT only: human-needed records
 // are appended to it. It is append-only and records absences alone, so a pulse
-// that recovered leaves no trace in it; reading it as current state was the
-// defect that let this loop report success for 1243 consecutive ticks.
+// that recovered leaves no trace in it; reading it as current state can make a
+// cleared pulse appear alarming forever.
 //
 // Usage:
 //
@@ -24,7 +24,8 @@
 //	recovery-loop --heartbeat PATH      # self-liveness heartbeat file (JSON)
 //
 // Exit codes: 0 = all jobs healthy, snoozed, or successfully recovered;
-// 1 = at least one recovery failed or requires human intervention;
+// 1 = at least one recovery failed, requires human intervention, or could not
+// be observed safely;
 // 2 = usage or configuration error.
 package main
 
@@ -289,7 +290,7 @@ func run(args []string, stdout, stderr io.Writer, host recoveryloop.HostOps, not
 
 	emitReport(stdout, stderr, rep, opts.jsonOut)
 
-	if rep.Failed > 0 || rep.HumanNeeded > 0 {
+	if rep.Failed > 0 || rep.HumanNeeded > 0 || rep.Unavailable > 0 {
 		return 1
 	}
 	return 0
@@ -328,8 +329,9 @@ func emitReport(stdout, stderr io.Writer, rep recoveryloop.Heartbeat, jsonOut bo
 		fmt.Fprintln(stdout, line)
 	}
 	switch {
-	case rep.Failed > 0 || rep.HumanNeeded > 0:
-		fmt.Fprintf(stdout, "Status: ALARM (%d recovery failure(s), %d human needed)\n", rep.Failed, rep.HumanNeeded)
+	case rep.Failed > 0 || rep.HumanNeeded > 0 || rep.Unavailable > 0:
+		fmt.Fprintf(stdout, "Status: ALARM (%d recovery failure(s), %d observation unavailable, %d human needed)\n",
+			rep.Failed, rep.Unavailable, rep.HumanNeeded)
 	case rep.Planned > 0:
 		// A dry run that just listed work to do is not a clean bill of health.
 		// Reporting OK underneath a planned remediation is the same report
@@ -366,5 +368,6 @@ func pulseVerdictIsConclusive(
 	if job.Pulse == "" || job.PulseIsStructural {
 		return false
 	}
-	return truth.Alarming(job.Pulse) && now.After(prev.PendingDeadline)
+	return truth.VerificationObservationAvailable(job.Pulse, prev.PendingSince, now) &&
+		truth.Alarming(job.Pulse) && now.After(prev.PendingDeadline)
 }

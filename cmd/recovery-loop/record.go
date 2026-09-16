@@ -59,7 +59,9 @@ func recordClear(
 	unverifiable := status == recoveryloop.StatusHealthy &&
 		job.Pulse != "" && !truth.Present(job.Pulse)
 	if unverifiable {
-		recordUnverifiable(job, reason, state, rep, prev)
+		recordUnverifiable(job, fmt.Sprintf(
+			"%s, but pulse %q was not observed: health unverifiable",
+			reason, job.Pulse), state, rep, prev)
 		return
 	}
 
@@ -69,16 +71,16 @@ func recordClear(
 	// inside its freshness window, and clearing on that would let the failure
 	// just recorded evaporate without anything new being seen (RL-39).
 	if status == recoveryloop.StatusHealthy && prev.ConsecutiveFailures > 0 {
-		if job.Pulse != "" && !prev.LastAttemptTime.IsZero() {
-			if ev := truth[job.Pulse].Evidence; !ev.After(prev.LastAttemptTime) {
-				recordUnverifiable(job, fmt.Sprintf(
-					"%s, but pulse %q was last observed %s, before the %s that failed",
-					reason, job.Pulse, evidenceStampCLI(ev), prev.LastAction),
-					state, rep, prev)
+		verifiedReason := "condition cleared: " + reason
+		if job.Pulse != "" {
+			var admissible bool
+			verifiedReason, admissible = clearingEvidenceReason(job, reason, prev, truth, now)
+			if !admissible {
+				recordUnverifiable(job, verifiedReason, state, rep, prev)
 				return
 			}
 		}
-		recordVerified(job, prev.LastAction, "condition cleared: "+reason, prev.ConsecutiveFailures, now, state, rep, opts, stderr)
+		recordVerified(job, prev.LastAction, verifiedReason, prev.ConsecutiveFailures, now, state, rep, opts, stderr)
 		return
 	}
 	if status == recoveryloop.StatusHealthy {
@@ -99,9 +101,68 @@ func recordClear(
 	case recoveryloop.StatusSnoozed:
 		rep.Snoozed++
 	case recoveryloop.StatusRecovered, recoveryloop.StatusFailed,
-		recoveryloop.StatusUnhealthy, recoveryloop.StatusPending:
+		recoveryloop.StatusUnhealthy, recoveryloop.StatusPending,
+		recoveryloop.StatusUnavailable:
 		// Not reachable: PlanJob returns only healthy or snoozed alongside
 		// ActionNone, and every other status is recorded by its own path.
+	}
+}
+
+// clearingEvidenceReason applies the shared temporal evidence policy to the
+// no-action clearing path. It returns either a verified recovery narrative or
+// the fail-closed reason that must be reported as observation-unavailable.
+func clearingEvidenceReason(
+	job recoveryloop.Job,
+	planReason string,
+	prev recoveryloop.JobState,
+	truth recoveryloop.PulseTruth,
+	now time.Time,
+) (string, bool) {
+	ev := truth[job.Pulse].Evidence
+	switch truth.ClassifyEvidence(job.Pulse, prev.LastAttemptTime, now) {
+	case recoveryloop.EvidenceMissing:
+		return fmt.Sprintf("%s, but pulse %q carries no evidence timestamp: health unverifiable",
+			planReason, job.Pulse), false
+	case recoveryloop.EvidenceTooFarInFuture:
+		return fmt.Sprintf("%s, but pulse %q carries evidence dated %s in the future: health unverifiable",
+			planReason, job.Pulse, ev.Sub(now).Round(time.Second)), false
+	case recoveryloop.EvidenceNotAfterBoundary:
+		return fmt.Sprintf("%s, but pulse %q was last observed %s, before the %s that failed: health unverifiable",
+			planReason, job.Pulse, evidenceStampCLI(ev), prev.LastAction), false
+	case recoveryloop.EvidenceAdmissible:
+		reason := "condition cleared: " + planReason
+		if !job.PulseIsStructural && !prev.MissedVerificationDeadline.IsZero() &&
+			ev.After(prev.MissedVerificationDeadline) {
+			reason += fmt.Sprintf("; pulse evidence arrived %s after the verification deadline",
+				ev.Sub(prev.MissedVerificationDeadline).Round(time.Second))
+		}
+		return reason, true
+	}
+	return "pulse evidence classification unavailable", false
+}
+
+// recordObservationUnavailable reports a failed observation without changing
+// the job's durable recovery state. No action ran, so there is no attempt to
+// count, no pending verification to open, and no recovery journal entry to
+// append (RL-48).
+func recordObservationUnavailable(
+	job recoveryloop.Job,
+	cause error,
+	rep *recoveryloop.Heartbeat,
+	prev recoveryloop.JobState,
+) {
+	rep.Results = append(rep.Results, recoveryloop.Result{
+		Job:         job.Name,
+		Status:      recoveryloop.StatusUnavailable,
+		Action:      recoveryloop.ActionNone,
+		Attempt:     prev.ConsecutiveFailures,
+		HumanNeeded: prev.HumanNeeded,
+		Reason: fmt.Sprintf("launchd observation unavailable; no remediation attempted (%v)",
+			cause),
+	})
+	rep.Unavailable++
+	if prev.HumanNeeded {
+		rep.HumanNeeded++
 	}
 }
 
@@ -123,18 +184,17 @@ func recordUnverifiable(
 	// against. Advancing it here would move the goalposts on every tick that
 	// simply could not see anything, so an outage would never accumulate a
 	// comparable observation. Nothing was attempted, so nothing is stamped.
-	st.LastStatus = recoveryloop.StatusPending
+	st.LastStatus = recoveryloop.StatusUnavailable
 	state.Jobs[job.Name] = st
 	rep.Results = append(rep.Results, recoveryloop.Result{
 		Job:         job.Name,
-		Status:      recoveryloop.StatusPending,
+		Status:      recoveryloop.StatusUnavailable,
 		Action:      recoveryloop.ActionNone,
 		Attempt:     prev.ConsecutiveFailures,
 		HumanNeeded: prev.HumanNeeded,
-		Reason: fmt.Sprintf("%s, but pulse %q was not observed: health unverifiable",
-			reason, job.Pulse),
+		Reason:      reason,
 	})
-	rep.Pending++
+	rep.Unavailable++
 	if prev.HumanNeeded {
 		rep.HumanNeeded++
 	}
@@ -248,6 +308,26 @@ func recordPending(
 	})
 }
 
+// recordPendingUnavailable preserves the pending recovery lifecycle while
+// marking this tick's required observation as unavailable. Pending state says
+// the prior action is still awaiting a verdict; Unavailable makes the tick
+// fail closed instead of returning a false-green exit code (RL-12, RL-41).
+func recordPendingUnavailable(
+	job recoveryloop.Job,
+	action recoveryloop.ActionType,
+	reason string,
+	now time.Time,
+	actionAt time.Time,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+	opts *options,
+	prev recoveryloop.JobState,
+	stderr io.Writer,
+) {
+	recordPending(job, action, reason, now, actionAt, state, rep, opts, prev, stderr)
+	rep.Unavailable++
+}
+
 // recordGivenUp records a job whose remediation is suppressed because repeated
 // attempts have not cleared the condition.
 func recordGivenUp(
@@ -318,13 +398,14 @@ func recordFailure(
 	}
 
 	state.Jobs[job.Name] = recoveryloop.JobState{
-		ConsecutiveFailures: attempts,
-		LastAttemptTime:     now,
-		LastAction:          action,
-		LastStatus:          recoveryloop.StatusFailed,
-		HumanNeeded:         humanNeeded,
-		UnhealthySince:      unhealthySince,
-		LastEscalated:       prev.LastEscalated,
+		ConsecutiveFailures:        attempts,
+		LastAttemptTime:            now,
+		LastAction:                 action,
+		LastStatus:                 recoveryloop.StatusFailed,
+		HumanNeeded:                humanNeeded,
+		UnhealthySince:             unhealthySince,
+		LastEscalated:              prev.LastEscalated,
+		MissedVerificationDeadline: prev.MissedVerificationDeadline,
 	}
 	rep.Results = append(rep.Results, recoveryloop.Result{
 		Job:         job.Name,

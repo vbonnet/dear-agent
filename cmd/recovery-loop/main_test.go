@@ -314,7 +314,7 @@ func TestCLI_SecondFailure_EscalationNotification(t *testing.T) {
 	}
 }
 
-// RL-43: a deployed job config that predates PulseIsStructural must not lose
+// RL-46: a deployed job config that predates PulseIsStructural must not lose
 // the property.
 //
 // deploy/manifest.yaml marks recovery-loop-jobs absent-only, so every host that
@@ -347,8 +347,9 @@ func TestResolveJobs_BackfillsStructuralPulseFromBuiltins(t *testing.T) {
 	}
 }
 
-// An explicit false in a newer config is an operator decision and is kept.
-func TestResolveJobs_DoesNotOverrideAnExplicitPulseKind(t *testing.T) {
+// A different activity pulse must not inherit the built-in structural flag,
+// which is specific to the matching loaded-only pulse.
+func TestResolveJobs_BackfillsStructuralPulseOnlyForMatchingBuiltinPulse(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "jobs.json")
 	if err := os.WriteFile(cfg, []byte(`{"jobs":[

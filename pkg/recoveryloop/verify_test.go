@@ -123,9 +123,12 @@ func TestVerifyRecovery_PulseReturnedIsRecovered(t *testing.T) {
 	launchd := map[string]LaunchdJobInfo{
 		"com.dear-agent.absence-alarm": {Label: "com.dear-agent.absence-alarm", PID: 0, Status: 0, Loaded: true},
 	}
-	truth := PulseTruth{"absence-alarm-heartbeat": {Known: true, Status: absencealarm.StatusPresent}}
+	now := host.Now()
+	truth := PulseTruth{"absence-alarm-heartbeat": {
+		Known: true, Status: absencealarm.StatusPresent, Evidence: now,
+	}}
 
-	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, host.Now(), time.Time{})
+	outcome := VerifyRecovery(job, ActionKickstart, truth, launchd, host, now, now.Add(-time.Minute))
 	if !outcome.Verified || outcome.Status != StatusRecovered {
 		t.Errorf("got verified=%v status=%q; want verified recovered", outcome.Verified, outcome.Status)
 	}
@@ -177,7 +180,7 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// RL-24/RL-29: only an explicitly present pulse is proof of life.
+// RL-24/RL-29/RL-33: only an explicitly present pulse is proof of life.
 //
 // Status.Alarming() is false for "absent" and "undetermined" only, so deriving
 // presence as "not alarming" silently promoted "snoozed" and any status this
@@ -319,6 +322,65 @@ func TestVerifyRecovery_PostActionPulseVerifies(t *testing.T) {
 	}
 }
 
+// RL-47: every recovery path shares one temporal evidence classifier. This
+// table pins the boundary semantics directly so a future adapter cannot copy
+// only the post-action comparison and forget the clock-skew ceiling.
+func TestPulseTruth_ClassifyEvidence(t *testing.T) {
+	now := time.Date(2026, 9, 16, 8, 10, 0, 0, time.UTC)
+	boundary := now.Add(-5 * time.Minute)
+
+	tests := []struct {
+		name     string
+		evidence time.Time
+		want     EvidenceTiming
+	}{
+		{name: "after boundary", evidence: boundary.Add(time.Minute), want: EvidenceAdmissible},
+		{name: "at boundary", evidence: boundary, want: EvidenceNotAfterBoundary},
+		{name: "materially future", evidence: now.Add(3 * time.Minute), want: EvidenceTooFarInFuture},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truth := PulseTruth{"job-tick": {Evidence: tt.evidence}}
+			if got := truth.ClassifyEvidence("job-tick", boundary, now); got != tt.want {
+				t.Errorf("ClassifyEvidence() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if got := (PulseTruth{"job-tick": {}}).ClassifyEvidence(
+		"job-tick", time.Time{}, now); got != EvidenceMissing {
+		t.Errorf("ClassifyEvidence() with no timestamp or boundary = %v, want %v", got, EvidenceMissing)
+	}
+}
+
+func TestPulseTruth_VerificationObservationAvailable(t *testing.T) {
+	now := time.Date(2026, 9, 16, 8, 10, 0, 0, time.UTC)
+	boundary := now.Add(-5 * time.Minute)
+	tests := []struct {
+		name string
+		fact PulseFact
+		want bool
+	}{
+		{name: "missing fact", fact: PulseFact{}, want: false},
+		{name: "undetermined", fact: PulseFact{Known: true, Status: absencealarm.StatusUndetermined}, want: false},
+		{name: "observed absent", fact: PulseFact{Known: true, Status: absencealarm.StatusAbsent}, want: true},
+		{name: "present without timestamp", fact: PulseFact{Known: true, Status: absencealarm.StatusPresent}, want: false},
+		{name: "present before boundary", fact: PulseFact{
+			Known: true, Status: absencealarm.StatusPresent, Evidence: boundary.Add(-time.Minute),
+		}, want: true},
+		{name: "present too far in future", fact: PulseFact{
+			Known: true, Status: absencealarm.StatusPresent, Evidence: now.Add(3 * time.Minute),
+		}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truth := PulseTruth{"job-tick": tt.fact}
+			if got := truth.VerificationObservationAvailable("job-tick", boundary, now); got != tt.want {
+				t.Errorf("VerificationObservationAvailable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // RL-32: a heartbeat dated in the future is evidence of a broken clock, not
 // fresh evidence. now.Sub(tick) is negative for a future tick, so an age-only
 // check accepts it however far ahead it is, and its last "present" results then
@@ -407,7 +469,7 @@ func TestPlanJob_LoadedOnlyPulseDoesNotOverrideRepeatedFailures(t *testing.T) {
 	}
 }
 
-// RL-43: a structural pulse must not verify a recovery either.
+// RL-45: a structural pulse must not verify a recovery either.
 //
 // PlanJob now refuses to let a loaded-only pulse override the exit status, but
 // verification took the pulse-present branch regardless, so a kickstart of a

@@ -40,25 +40,22 @@ func processJob(
 		return
 	}
 
+	prev = boundPendingDeadline(job.Name, prev, state, now, opts.verifyGrace)
+
 	// A verification left open by an earlier tick is always conclusive: it
 	// either confirms the pulse returned, converts to a counted failure, or
 	// reports that the grace window is still open. In every case this job is
 	// done for this tick and firing another action would only reset the clock.
-	if !prev.PendingDeadline.IsZero() {
-		// A listing that failed leaves an empty map, which VerifyRecovery
-		// would read as "the service is not loaded": a transient launchctl
-		// failure would convert every pending recovery into a counted failure
-		// and escalate. Not observed is not observed absent (RL-41).
-		// Hold only when the verdict genuinely depends on the listing. A
-		// pulse-backed job whose grace window has expired with the pulse
-		// still absent has a conclusive answer from the heartbeat alone, and
-		// holding it would postpone a real failure indefinitely every time
-		// launchctl hiccups.
-		if launchdErr != nil && job.LaunchdLabel != "" && !pulseVerdictIsConclusive(job, truth, prev, now) {
-			holdPending(job, prev, launchdErr, state, rep)
-			return
-		}
-		settlePending(job, opts, state, rep, truth, launchdJobs, host, prev, now, notifyFn, stderr)
+	if handleOpenVerification(job, opts, state, rep, truth, launchdJobs, launchdErr, host, prev, now, notifyFn, stderr) {
+		return
+	}
+
+	// The initial launchd listing is an observation boundary, not an empty
+	// collection. Treating its nil map as authoritative makes a transient
+	// launchctl failure look like every service is unloaded and can trigger a
+	// fleet-wide bootstrap. Unknown state permits no action (RL-48).
+	if launchdErr != nil && job.LaunchdLabel != "" {
+		recordObservationUnavailable(job, launchdErr, rep, prev)
 		return
 	}
 
@@ -92,6 +89,11 @@ func processJob(
 	// this loop, so a heartbeat published between the two would make
 	// pre-action evidence look post-action and verify a recovery that had not
 	// happened (RL-39).
+	// A new action supersedes any deadline provenance from the prior attempt.
+	// If this action fails before opening a new verification, a later recovery
+	// must not be annotated against the older attempt's deadline.
+	prev.MissedVerificationDeadline = time.Time{}
+	state.Jobs[job.Name] = prev
 	actionAt := host.Now()
 	actionCtx, cancel := context.WithTimeout(ctx, opts.timeout)
 	execErr := recoveryloop.ExecuteRecovery(actionCtx, job, action, host)
@@ -114,7 +116,7 @@ func processJob(
 		// listing failure means structural truth is unavailable, which is
 		// pending, not failed.
 		fmt.Fprintf(stderr, "recovery-loop: re-list launchd for verification: %v\n", listErr)
-		recordPending(job, action, fmt.Sprintf(
+		recordPendingUnavailable(job, action, fmt.Sprintf(
 			"%s ran; launchd could not be re-observed to verify it (%v)", action, listErr),
 			now, actionAt, state, rep, opts, prev, stderr)
 		return
@@ -129,6 +131,65 @@ func processJob(
 	default:
 		recordFailure(job, action, outcome.Reason, errors.New(outcome.Reason), now, state, rep, opts, truth, notifyFn, stderr)
 	}
+}
+
+// boundPendingDeadline limits the damage from a host clock that jumped ahead
+// when a pending action was recorded and was later corrected. It never moves
+// PendingSince, so evidence still has to post-date the original action.
+func boundPendingDeadline(
+	jobName string,
+	prev recoveryloop.JobState,
+	state *recoveryloop.State,
+	now time.Time,
+	grace time.Duration,
+) recoveryloop.JobState {
+	if prev.PendingDeadline.IsZero() {
+		return prev
+	}
+	latestDeadline := now.Add(grace)
+	if prev.PendingDeadline.After(latestDeadline) {
+		prev.PendingDeadline = latestDeadline
+		state.Jobs[jobName] = prev
+	}
+	return prev
+}
+
+// handleOpenVerification owns the one-action-at-a-time boundary. Once a prior
+// action is pending, this tick either settles it or holds it for more evidence;
+// it never plans a second action.
+func handleOpenVerification(
+	job recoveryloop.Job,
+	opts *options,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+	truth recoveryloop.PulseTruth,
+	launchdJobs map[string]recoveryloop.LaunchdJobInfo,
+	launchdErr error,
+	host recoveryloop.HostOps,
+	prev recoveryloop.JobState,
+	now time.Time,
+	notifyFn notifier,
+	stderr io.Writer,
+) bool {
+	if prev.PendingDeadline.IsZero() {
+		return false
+	}
+	// A listing that failed leaves an empty map, which VerifyRecovery would
+	// read as "the service is not loaded": a transient launchctl failure would
+	// convert every pending recovery into a counted failure. Hold only when the
+	// heartbeat does not already settle the outcome (RL-41).
+	if launchdErr != nil && job.LaunchdLabel != "" {
+		if pulseVerdictIsConclusive(job, truth, prev, now) {
+			failExpiredPulseVerification(job, opts, state, rep, truth, prev, now, notifyFn, stderr)
+			return true
+		}
+		holdPendingUnavailable(job, prev, fmt.Sprintf(
+			"holding verification of %s: launchd state unavailable this tick (%v)",
+			prev.PendingAction, launchdErr), state, rep)
+		return true
+	}
+	settlePending(job, opts, state, rep, truth, launchdJobs, host, prev, now, notifyFn, stderr)
+	return true
 }
 
 // settlePending resolves a verification left open by an earlier tick.
@@ -153,24 +214,31 @@ func settlePending(
 	outcome := recoveryloop.VerifyRecovery(job, prev.PendingAction, truth, launchdJobs, host, now, prev.PendingSince)
 	switch {
 	case outcome.Verified:
+		if job.Pulse != "" && !job.PulseIsStructural {
+			ev := truth[job.Pulse].Evidence
+			if !prev.PendingDeadline.IsZero() && ev.After(prev.PendingDeadline) {
+				outcome.Reason += fmt.Sprintf("; pulse evidence arrived %s after the verification deadline",
+					ev.Sub(prev.PendingDeadline).Round(time.Second))
+			}
+		}
 		recordVerified(job, prev.PendingAction, outcome.Reason, prev.ConsecutiveFailures+1, now, state, rep, opts, stderr)
 		return
 	case outcome.Status == recoveryloop.StatusFailed:
 		// A structural condition came back or never cleared: that is
 		// observable now, so there is nothing left to wait for.
-		recordFailure(job, prev.PendingAction, outcome.Reason, errors.New(outcome.Reason),
-			now, state, rep, opts, truth, notifyFn, stderr)
+		recordSettledPendingFailure(job, outcome.Reason, now, state, rep, opts, truth, prev, notifyFn, stderr)
+		return
+	}
+	if job.Pulse != "" && !job.PulseIsStructural &&
+		!truth.VerificationObservationAvailable(job.Pulse, prev.PendingSince, now) {
+		holdPendingUnavailable(job, prev, fmt.Sprintf(
+			"holding verification of %s: pulse %q observation unavailable (%s)",
+			prev.PendingAction, job.Pulse, outcome.Reason), state, rep)
 		return
 	}
 
 	if now.After(prev.PendingDeadline) {
-		absentFor := truth.AbsentFor(job.Pulse, now)
-		reason := fmt.Sprintf("pulse %q did not return within %s of %s",
-			job.Pulse, opts.verifyGrace, prev.PendingAction)
-		if absentFor > 0 {
-			reason += fmt.Sprintf("; absent for %s", absentFor.Round(time.Minute))
-		}
-		recordFailure(job, prev.PendingAction, reason, errors.New(reason), now, state, rep, opts, truth, notifyFn, stderr)
+		failExpiredPulseVerification(job, opts, state, rep, truth, prev, now, notifyFn, stderr)
 		return
 	}
 	// Still inside the grace window: the answer is not in yet, and firing
@@ -195,13 +263,60 @@ func settlePending(
 	}
 }
 
-// holdPending leaves an open verification open because the host could not be
-// observed this tick. It judges nothing and counts nothing: the deadline and
-// failure count are carried forward untouched.
-func holdPending(
+// failExpiredPulseVerification settles an open attempt from pulse evidence
+// alone. This remains safe when launchd cannot be listed: a missed pulse
+// deadline is independently conclusive, while a nil launchd map is not proof
+// that the service is unloaded.
+func failExpiredPulseVerification(
+	job recoveryloop.Job,
+	opts *options,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+	truth recoveryloop.PulseTruth,
+	prev recoveryloop.JobState,
+	now time.Time,
+	notifyFn notifier,
+	stderr io.Writer,
+) {
+	absentFor := truth.AbsentFor(job.Pulse, now)
+	reason := fmt.Sprintf("pulse %q did not return within %s of %s",
+		job.Pulse, opts.verifyGrace, prev.PendingAction)
+	if absentFor > 0 {
+		reason += fmt.Sprintf("; absent for %s", absentFor.Round(time.Minute))
+	}
+	recordSettledPendingFailure(job, reason, now, state, rep, opts, truth, prev, notifyFn, stderr)
+}
+
+// recordSettledPendingFailure records failure of an open attempt and captures
+// its deadline only when that attempt actually outlived the deadline. A newer
+// action clears this provenance before it runs.
+func recordSettledPendingFailure(
+	job recoveryloop.Job,
+	reason string,
+	now time.Time,
+	state *recoveryloop.State,
+	rep *recoveryloop.Heartbeat,
+	opts *options,
+	truth recoveryloop.PulseTruth,
+	prev recoveryloop.JobState,
+	notifyFn notifier,
+	stderr io.Writer,
+) {
+	if !prev.PendingDeadline.IsZero() && now.After(prev.PendingDeadline) {
+		prev.MissedVerificationDeadline = prev.PendingDeadline
+		state.Jobs[job.Name] = prev
+	}
+	recordFailure(job, prev.PendingAction, reason, errors.New(reason), now, state, rep, opts, truth, notifyFn, stderr)
+}
+
+// holdPendingUnavailable leaves an open verification open because a required
+// observation was unavailable this tick. It judges no recovery and counts no
+// failure: the deadline and failure count are carried forward, while the tick
+// fails closed instead of reading green.
+func holdPendingUnavailable(
 	job recoveryloop.Job,
 	prev recoveryloop.JobState,
-	cause error,
+	reason string,
 	state *recoveryloop.State,
 	rep *recoveryloop.Heartbeat,
 ) {
@@ -214,10 +329,10 @@ func holdPending(
 		Action:      prev.PendingAction,
 		Attempt:     prev.ConsecutiveFailures + 1,
 		HumanNeeded: prev.HumanNeeded,
-		Reason: fmt.Sprintf("holding verification of %s: launchd state unavailable this tick (%v)",
-			prev.PendingAction, cause),
+		Reason:      reason,
 	})
 	rep.Pending++
+	rep.Unavailable++
 	if prev.HumanNeeded {
 		rep.HumanNeeded++
 	}

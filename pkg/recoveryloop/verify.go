@@ -42,6 +42,27 @@ type PulseFact struct {
 // PulseTruth maps a pulse name to its current fact.
 type PulseTruth map[string]PulseFact
 
+// EvidenceTiming classifies whether a pulse observation may prove a state
+// transition after a boundary. Keeping the classification here gives every
+// recovery path one clock-skew policy instead of letting command adapters
+// grow subtly different timestamp checks.
+type EvidenceTiming uint8
+
+const (
+	// EvidenceMissing has no observation timestamp, so it cannot establish
+	// ordering even when the persisted transition boundary is also absent.
+	EvidenceMissing EvidenceTiming = iota
+	// EvidenceAdmissible is not materially future-dated and, when a boundary
+	// is supplied, was observed strictly after it.
+	EvidenceAdmissible
+	// EvidenceNotAfterBoundary was observed at or before the transition it is
+	// being offered to prove.
+	EvidenceNotAfterBoundary
+	// EvidenceTooFarInFuture is beyond the recovery loop's tolerated clock
+	// skew and cannot prove anything about current host state.
+	EvidenceTooFarInFuture
+)
+
 // Alarming reports whether the named pulse is currently alarming.
 func (pt PulseTruth) Alarming(name string) bool {
 	return pt[name].Status.Alarming()
@@ -56,6 +77,46 @@ func (pt PulseTruth) Alarming(name string) bool {
 func (pt PulseTruth) Present(name string) bool {
 	f := pt[name]
 	return f.Known && f.Status == absencealarm.StatusPresent
+}
+
+// ClassifyEvidence applies the recovery loop's temporal proof boundary to one
+// pulse observation. A zero boundary asks only whether the evidence is
+// plausibly current; a non-zero boundary additionally requires a strictly
+// newer observation.
+func (pt PulseTruth) ClassifyEvidence(name string, boundary, now time.Time) EvidenceTiming {
+	ev := pt[name].Evidence
+	if ev.IsZero() {
+		return EvidenceMissing
+	}
+	if ev.After(now.Add(heartbeatSkewTolerance)) {
+		return EvidenceTooFarInFuture
+	}
+	if !boundary.IsZero() && !ev.After(boundary) {
+		return EvidenceNotAfterBoundary
+	}
+	return EvidenceAdmissible
+}
+
+// VerificationObservationAvailable reports whether the current pulse fact can
+// settle or continue timing a recovery attempt. Explicit absence and present
+// evidence with a usable timestamp are observations. Missing, undetermined,
+// snoozed, or clock-invalid facts are unavailable and must fail the tick closed
+// without being fabricated into proof that the job stayed broken.
+func (pt PulseTruth) VerificationObservationAvailable(name string, boundary, now time.Time) bool {
+	fact := pt[name]
+	if !fact.Known {
+		return false
+	}
+	switch fact.Status {
+	case absencealarm.StatusAbsent:
+		return true
+	case absencealarm.StatusPresent:
+		timing := pt.ClassifyEvidence(name, boundary, now)
+		return timing == EvidenceAdmissible || timing == EvidenceNotAfterBoundary
+	case absencealarm.StatusUndetermined, absencealarm.StatusSnoozed:
+		return false
+	}
+	return false
 }
 
 // AbsentFor reports how long the named pulse has been alarming. It returns 0
@@ -205,19 +266,28 @@ func VerifyRecovery(
 			// Evidence dated in the future is a broken clock or a touched
 			// file, not proof: it beats any actionAt automatically, which is
 			// exactly the comparison this guard exists to make meaningful.
-			if ev := truth[job.Pulse].Evidence; ev.After(now.Add(heartbeatSkewTolerance)) {
+			ev := truth[job.Pulse].Evidence
+			switch truth.ClassifyEvidence(job.Pulse, actionAt, now) {
+			case EvidenceMissing:
+				return VerifyOutcome{
+					Status: StatusPending,
+					Reason: fmt.Sprintf("pulse %q is present but carries no evidence timestamp: not usable as proof",
+						job.Pulse),
+				}
+			case EvidenceTooFarInFuture:
 				return VerifyOutcome{
 					Status: StatusPending,
 					Reason: fmt.Sprintf("pulse %q carries evidence dated %s in the future: not usable as proof",
 						job.Pulse, ev.Sub(now).Round(time.Second)),
 				}
-			}
-			if ev := truth[job.Pulse].Evidence; !actionAt.IsZero() && !ev.After(actionAt) {
+			case EvidenceNotAfterBoundary:
 				return VerifyOutcome{
 					Status: StatusPending,
 					Reason: fmt.Sprintf("pulse %q was last observed %s, before %s ran: awaiting fresh evidence",
 						job.Pulse, evidenceStamp(ev), action),
 				}
+			case EvidenceAdmissible:
+				// Continue to the verified outcome below.
 			}
 			return VerifyOutcome{
 				Verified: true,

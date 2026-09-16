@@ -215,8 +215,9 @@ func TestPlan_ExpiredSnooze_EligibleForRecovery(t *testing.T) {
 	}
 }
 
-// RL-07, RL-08, RL-09: Success resets consecutive failures; failure increments; >= 2 sets human needed.
-func TestState_GraduatedEscalation(t *testing.T) {
+// State persistence preserves failure-count and escalation fields written by
+// the CLI transition paths.
+func TestState_RoundTripPreservesRecoveryFields(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.json")
 

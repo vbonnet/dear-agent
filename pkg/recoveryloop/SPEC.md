@@ -1,17 +1,17 @@
 # Recovery Loop Specification
 
-<!-- Last audited at: 2026-09-13 -->
-<!-- Audit scope: pkg/recoveryloop (domain) + cmd/recovery-loop (CLI), both
+<!-- Verification map: pkg/recoveryloop (domain) + cmd/recovery-loop (CLI), both
      present at this revision. cmd/recovery-loop/SPEC.owner delegates here.
 
      Domain (pkg/recoveryloop/*_test.go):
-       RL-01 through RL-10, RL-18 through RL-29, RL-33, RL-39, RL-42, RL-43, RL-45.
+       RL-01 through RL-06; RL-10; RL-18, RL-19, RL-21 through RL-29;
+       RL-32, RL-33, RL-39, RL-42, RL-43, RL-45, RL-47.
 
      CLI (cmd/recovery-loop/*_test.go):
-       RL-11 through RL-17, RL-30 through RL-32, RL-34 through RL-38,
-       RL-40, RL-41, RL-44, RL-46. -->
+       RL-07 through RL-17; RL-20; RL-24, RL-26, RL-27;
+       RL-29 through RL-32; RL-34 through RL-41; RL-44 through RL-50. -->
 
-**Status:** Production-ready
+**Status:** Proposed
 **Scope:** Host critical job self-healing loop and escalation engine
 
 ## Purpose
@@ -41,17 +41,9 @@ unexpired snooze is treated as a defect and recovered.
 Every recovery attempt and outcome is journaled to ensure that recovery actions
 themselves remain observable and cannot fail silently.
 
-Recovery is an observed post-condition, never an executed command. Between
-2026-09-05 and 2026-09-09 this loop reported `status: recovered,
-human_needed: false` on 1243 consecutive ticks across three jobs while taking
-no action that changed anything: success was measured as "`launchctl kickstart`
-exited 0", the pulse condition was never re-read, and the consecutive failure
-count was reset on every one of those ticks, which made the RL-09 escalation
-unreachable. Two of the three jobs were healthy the whole time and were being
-restarted because they exit non-zero to signal an alarm. RL-23 through RL-46
-close that gap: pulse truth is read from a source that can clear, only an
-explicit present reading counts as evidence, planning may not claim recovery,
-and a recovery counts only once the condition is observed to have gone away.
+Recovery is an observed post-condition, never an executed command. RL-23
+through RL-50 require clearable current pulse truth, explicit present evidence,
+and post-action observation before recovery is recorded.
 
 ## Applicability
 
@@ -73,7 +65,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-06** When an unexpired snooze does not cover an unloaded critical job, the system shall attempt recovery regardless of manual disabled state.
 
-**RL-07** When a recovery attempt succeeds, the system shall reset the consecutive failure count for that job to 0.
+**RL-07** When the condition that triggered a recovery action is observed to have cleared, the system shall reset the consecutive failure count for that job to 0.
 
 **RL-08** When a recovery attempt fails, the system shall increment the consecutive failure count for that job by 1.
 
@@ -83,11 +75,11 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-11** When all critical jobs are healthy, snoozed, or successfully recovered, the system shall exit 0.
 
-**RL-12** When at least one recovery attempt fails or remains in human-needed escalation, the system shall exit 1.
+**RL-12** When at least one recovery attempt fails, a required observation is unavailable, or a job remains in human-needed escalation, the system shall exit 1.
 
 **RL-13** When configuration loading fails or invalid arguments are supplied, the system shall exit 2 with a usage error.
 
-**RL-14** While dry-run mode is set, the system shall plan and report recovery actions on stdout without executing commands, writing state, updating heartbeats, or appending to the journal.
+**RL-14** While dry-run mode is set, the system shall report the recovery actions it would attempt on stdout without executing those commands.
 
 **RL-15** When JSON mode is set, the system shall emit the recovery report as a single JSON object on stdout.
 
@@ -99,7 +91,7 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-19** When the critical jobs configuration cannot be loaded or contains duplicate job names, the system shall exit 2 with a usage error.
 
-**RL-20** When the snooze configuration has an invalid entry or an expiry beyond the maximum snooze horizon (14 days), the system shall exit 2 with a usage error.
+**RL-20** When the shared snooze configuration is rejected under AA-14, the system shall exit 2 with a usage error.
 
 **RL-21** When a recovery action is executed, the system shall bound execution with a timeout so a hung command cannot block the recovery loop indefinitely.
 
@@ -113,13 +105,13 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-26** When a recovery action's command succeeds and the job's pulse has not returned, the system shall classify the job as PENDING VERIFICATION and the system shall not reset the consecutive failure count.
 
-**RL-27** When a job's pulse is observed present after a recovery action, the system shall classify the recovery as RECOVERED and the system shall reset the consecutive failure count to 0.
+**RL-27** When a job's ACTIVITY pulse is observed present after a recovery action with evidence admissible under RL-39 and RL-47, the system shall classify the recovery as RECOVERED and the system shall reset the consecutive failure count to 0.
 
 **RL-28** When a structural condition (missing binary, unloaded launchd job, or status 78/-9) persists after a recovery action, the system shall classify the recovery as FAILED.
 
 **RL-29** When a job's pulse was not observed by any evidence source, the system shall not classify the recovery as RECOVERED.
 
-**RL-30** When a job's pulse has not returned within the verification grace period, the system shall increment the consecutive failure count, and when that count reaches the escalation threshold the system shall append a `recovery.human_needed` record to the absence-alarm journal naming the pulse and how long it has been absent.
+**RL-30** When a tick observes that the verification grace period has expired and the job's pulse has not returned, the system shall increment the consecutive failure count, and when that count reaches the escalation threshold the system shall append a `recovery.human_needed` record to the absence-alarm journal naming the pulse and how long it has been absent.
 
 **RL-31** When a job's consecutive failure count reaches the give-up threshold, the system shall suppress further remediation for that job and the system shall continue to report it as requiring human intervention.
 
@@ -135,29 +127,47 @@ standalone binary. It manages critical launchd services and binaries for the
 
 **RL-37** When a job's consecutive failure count has reached the give-up threshold and that job was escalated within the re-escalation interval, the system shall continue to report the job while not appending a further escalation record.
 
+**RL-38** While dry-run mode is set, the system shall not write recovery state, update the heartbeat, append recovery or escalation journal records, or dispatch notifications on any code path, including settlement of a verification opened by an earlier tick.
+
 **RL-39** When verifying a recovery action, the system shall treat a pulse as proof that the action worked only when the pulse was observed after the action ran, and the system shall classify an action confirmed only by earlier evidence as PENDING VERIFICATION.
 
 **RL-40** When no escalation sink accepts a human-needed alert, the system shall not advance the re-escalation timestamp, so the next tick attempts delivery again.
 
-**RL-41** When the post-action launchd listing cannot be obtained, the system shall classify the recovery as PENDING VERIFICATION rather than verifying it against the pre-action snapshot.
+**RL-41** When the post-action launchd listing cannot be obtained and pulse evidence does not independently settle the outcome, the system shall preserve the recovery as PENDING VERIFICATION, report the required observation as unavailable, and exit nonzero rather than verifying against the pre-action snapshot.
 
 **RL-42** When a job declares no pulse and its recovery was triggered by a stopped service with a nonzero exit status, the system shall require that condition to have cleared before classifying the recovery as RECOVERED.
 
 **RL-43** When a job's pulse only proves its service is loaded rather than that its scheduled work succeeds, the system shall not let that pulse override the exit-status evaluation.
 
+**RL-44** When a dry run plans one or more remediations, the system shall report that action is needed rather than summarising the tick as OK.
+
 **RL-45** When a job's pulse only proves its service is loaded, the system shall not accept that pulse as verification of a recovery, and the system shall verify such a job against its exit status.
 
 **RL-46** When a deployed job configuration predates a safety property the built-in registry asserts for the same pulse, the system shall apply that property rather than operating without it.
 
-**RL-44** When a dry run plans one or more remediations, the system shall report that action is needed rather than summarising the tick as OK.
+**RL-47** When pulse evidence is materially future-dated relative to the recovery observation, the system shall not use that evidence to verify a recovery or clear an existing failure state.
 
-**RL-38** When the system runs in dry-run mode, the system shall not write state, journal records, escalation records, or notifications on any code path, including the settlement of a verification opened by an earlier tick.
+**RL-48** When initial launchd state cannot be observed, the system shall report the observation as unavailable and exit nonzero without executing remediation or changing the job's attempt or failure state.
+
+**RL-49** When pulse evidence first proves recovery after the latest non-superseded verification deadline, the system shall classify the current condition as recovered and report that the evidence arrived after the deadline.
+
+**RL-50** When a pending deadline lies more than one verification grace period in the future, the system shall bound the remaining wait to one grace period without accepting evidence from before the original action as recovery proof.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
-- Package tests: `pkg/recoveryloop/loop_test.go` (RL-01..RL-10, RL-18..RL-22)
-- Verification tests: `pkg/recoveryloop/verify_test.go` (RL-23..RL-29, RL-32, RL-33, RL-39, RL-42, RL-43, RL-45)
-- CLI tests: `cmd/recovery-loop/main_test.go` (RL-11..RL-17)
-- Verified-recovery CLI tests: `cmd/recovery-loop/verified_test.go` (RL-24, RL-26, RL-27, RL-30, RL-31, RL-32, RL-34..RL-38, RL-40, RL-41, RL-44, RL-46)
-
+- Guardrail feature: `agm/test/bdd/features/observability_package_guardrails.feature`
+  verifies that this co-located specification exists and that RL-21 declares
+  bounded execution. It does not execute recovery-loop outcomes.
+- BDD disposition for RL-47 through RL-50: no scenario change. These are
+  deterministic evidence-timing, state-transition, reporting, and exit-code
+  boundaries exercised directly by the Go tests below.
+- Planning and storage tests: `pkg/recoveryloop/loop_test.go`
+  (RL-01..RL-06, RL-10, RL-18, RL-19, RL-21, RL-22)
+- Pulse-truth and verification tests: `pkg/recoveryloop/verify_test.go`
+  (RL-23..RL-29, RL-32, RL-33, RL-39, RL-42, RL-43, RL-45, RL-47)
+- CLI tests: `cmd/recovery-loop/main_test.go`
+  (RL-09, RL-11..RL-17, RL-46)
+- Multi-tick verified-recovery CLI tests:
+  `cmd/recovery-loop/verified_test.go`
+  (RL-07, RL-08, RL-10, RL-12, RL-20, RL-24, RL-26, RL-27,
+  RL-29..RL-32, RL-34..RL-41, RL-44, RL-45, RL-47..RL-50)

@@ -36,6 +36,11 @@ const (
 	StatusSnoozed   RecoveryStatus = "snoozed"
 	StatusRecovered RecoveryStatus = "recovered"
 	StatusFailed    RecoveryStatus = "failed"
+	// StatusUnavailable means the loop could not observe the state required
+	// to safely plan or evaluate current health. It is distinct from pending
+	// verification: no remediation ran, and unknown state must not be collapsed
+	// into absence or health.
+	StatusUnavailable RecoveryStatus = "observation-unavailable"
 	// StatusUnhealthy is a job that needs remediation. It is what planning
 	// returns; planning must never return StatusRecovered, because an
 	// intention to act is not an observed outcome (RL-25).

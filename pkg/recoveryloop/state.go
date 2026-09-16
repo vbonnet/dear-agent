@@ -33,6 +33,11 @@ type JobState struct {
 	// LastEscalated is when this job last reached a human-facing sink, used
 	// to keep a standing escalation loud without duplicating it every tick.
 	LastEscalated time.Time `json:"last_escalated,omitzero"`
+	// MissedVerificationDeadline preserves the latest non-superseded deadline
+	// after an attempt is settled as failed beyond that boundary. It survives
+	// later non-attempt ticks so a recovery can still report that its evidence
+	// arrived late, and is cleared when a newer remediation attempt begins.
+	MissedVerificationDeadline time.Time `json:"missed_verification_deadline,omitzero"`
 }
 
 // State is the persisted recovery state keyed by job name.
@@ -118,6 +123,7 @@ type Heartbeat struct {
 	TickTime    time.Time `json:"tick_time"`
 	Recovered   int       `json:"recovered"`
 	Pending     int       `json:"pending"`
+	Unavailable int       `json:"unavailable"`
 	Planned     int       `json:"planned"`
 	Failed      int       `json:"failed"`
 	HumanNeeded int       `json:"human_needed"`
