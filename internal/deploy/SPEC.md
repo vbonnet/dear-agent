@@ -24,7 +24,7 @@ broken.
 
 **DEP-01** When a file artifact's deployed copy differs from its source, the system shall stage the new content, verify it, and activate it with an atomic replace.
 
-**DEP-02** When any deploy write fails, the system shall leave the previously installed artifact untouched.
+**DEP-02** When a deploy write fails before an artifact is activated, the system shall leave the previously installed artifact untouched.
 
 **DEP-03** When `AtomicInstall` cannot resolve the intended source ref in the repo, the system shall fail loud and install nothing.
 
@@ -45,3 +45,7 @@ broken.
 **DEP-11** When `AtomicInstall` invokes `go build`, the system shall use the finite ten-minute cold-build deadline and leave the live binary untouched if that deadline expires.
 
 **DEP-12** When an operator installs a root-owned hook helper, the system shall require exact artifact and fixed-bootstrap digest confirmation, reject a passwordless probe, and stage, verify, and atomically activate the helper beneath verified root-owned non-writable non-symlink ancestry in one non-caching privileged command.
+
+**DEP-13** When a required-pulse merge would advance either the registry or its offered ledger, the system shall record the exact base registry digest, target registry digest, and ledger projection in a pending transaction before activating either projection, reconcile that transaction before another merge, preserve it on ambiguous registry drift, and not roll back an activated pulse.
+
+**DEP-14** While a pulse ledger transaction is pending or the registry and ledger change during a read-only preview, the system shall fail the preview without writing and not report the pulse projection clean.

@@ -401,8 +401,8 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 		r, err := deploy.Deploy(a, opts)
 		if err != nil {
 			// One bad artifact is reported but does not abort the rest: a
-			// failed write is already rolled back (the target is untouched),
-			// so continuing cannot corrupt anything.
+			// Deploy error occurs before that artifact's atomic activation, so
+			// its target is untouched and continuing cannot corrupt it.
 			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
 			failures = append(failures, a.Name)
 			continue
@@ -519,13 +519,24 @@ func pendingPulseNames(selected []deploy.Artifact, opts deploy.Options, stderr i
 	if !ok {
 		return nil, nil
 	}
-	hostPath, defaultsPath := pulsePaths(a, opts)
+	hostPath, _ := pulsePaths(a, opts)
 	required, err := requiredPulsesFor(selected, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
 		return nil, err
 	}
-	pending, err := deploy.PendingPulseMerges(hostPath, defaultsPath, required)
+	rendered, err := a.Render(opts.RepoRoot, opts.Home)
+	if err != nil {
+		// PendingPulseMerges historically treated a missing source as no pending
+		// merge. Keep that behavior: Status already reports source-missing, and a
+		// second merge-check error would misclassify the same condition.
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		fmt.Fprintf(stderr, "  ERROR     cannot render pulse defaults: %v\n", err)
+		return nil, err
+	}
+	pending, err := deploy.PendingPulseMergesRendered(hostPath, rendered, required)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot compute pending pulse merges: %v\n", err)
 		return nil, err
@@ -620,8 +631,10 @@ Usage:
   dear-deploy merge-pulses         add newly required absence-alarm pulses to the
                                    host config, keeping operator customization
 
-Each write is atomic (stage -> verify -> activate); a failed deploy leaves the
-previously-installed artifact untouched. There is no force/bypass flag.
+Each file write is staged and verified before atomic activation. Failures before
+activation leave the prior artifact untouched; a pulse-ledger failure after
+registry activation leaves a pending transaction for the next sync to reconcile.
+There is no force/bypass flag.
 
 build-install flags:
   --pkg PKG         go package to build, relative to repo root (e.g. ./agm/cmd/agm) [required]
@@ -687,7 +700,12 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "dear-deploy: render pulse defaults: %v\n", err)
 		return 1
 	}
-	added, err := deploy.MergeRequiredPulsesRendered(hostPath, rendered, required)
+	mode, err := a.FileMode()
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: resolve pulse registry mode: %v\n", err)
+		return 1
+	}
+	added, err := deploy.MergeRequiredPulsesRendered(hostPath, rendered, mode, required)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: merge pulses: %v\n", err)
 		return 1
@@ -763,7 +781,11 @@ func mergePulsesDuringDeploy(
 	if err != nil {
 		return nil, fmt.Errorf("render pulse defaults: %w", err)
 	}
-	added, err := deploy.MergeRequiredPulsesRendered(hostPath, rendered, required)
+	mode, err := a.FileMode()
+	if err != nil {
+		return nil, fmt.Errorf("resolve pulse registry mode: %w", err)
+	}
+	added, err := deploy.MergeRequiredPulsesRendered(hostPath, rendered, mode, required)
 	if err != nil {
 		return nil, err
 	}

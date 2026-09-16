@@ -157,6 +157,116 @@ func TestSync_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
+func TestPulsePreviewRendersTokensAndMatchesSync(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"),
+		`{"pulses":[{"name":"__PULSE__","type":"file_mtime","path":"~/pulse","window":"1h"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    absent-only: true
+    tokens:
+      __PULSE__: sandbox-gc-tick
+`)
+	host := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	mustWrite(t, host, `{"pulses":[]}`)
+	before, err := os.ReadFile(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantCode int
+	}{
+		{name: "status", args: []string{"status"}, wantCode: 2},
+		{name: "dry-run", args: []string{"sync", "--dry-run"}, wantCode: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := invoke(t, repo, home, tc.args...)
+			if code != tc.wantCode {
+				t.Fatalf("exit = %d, want %d; stdout=%s stderr=%s", code, tc.wantCode, out, errs)
+			}
+			if !strings.Contains(out, "absence-alarm-pulses:sandbox-gc-tick") {
+				t.Fatalf("preview did not report rendered pulse name: %s", out)
+			}
+			after, err := os.ReadFile(host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("preview changed host registry: got %q, want %q", after, before)
+			}
+			if _, err := os.Stat(host + ".offered"); !os.IsNotExist(err) {
+				t.Fatalf("preview wrote pulse ledger: %v", err)
+			}
+		})
+	}
+
+	code, out, errs := invoke(t, repo, home, "sync")
+	if code != 0 {
+		t.Fatalf("sync exit = %d; stdout=%s stderr=%s", code, out, errs)
+	}
+	if got := pulseNamesAt(t, host); len(got) != 1 || got[0] != "sandbox-gc-tick" {
+		t.Fatalf("sync merged %v, want [sandbox-gc-tick]", got)
+	}
+	if code, out, errs := invoke(t, repo, home, "status"); code != 0 {
+		t.Fatalf("post-sync status exit = %d; stdout=%s stderr=%s", code, out, errs)
+	}
+}
+
+func TestMergePulsesSeedsWithManifestMode(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"),
+		`{"pulses":[{"name":"sandbox-gc-tick","type":"file_mtime","path":"~/pulse","window":"1h"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0640"
+    absent-only: true
+`)
+
+	code, out, errs := invoke(t, repo, home, "merge-pulses")
+	if code != 0 {
+		t.Fatalf("merge-pulses exit = %d; stdout=%s stderr=%s", code, out, errs)
+	}
+	host := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	info, err := os.Stat(host)
+	if err != nil {
+		t.Fatalf("stat seeded registry: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("seeded mode = %04o, want manifest mode 0640", got)
+	}
+}
+
+func pulseNamesAt(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Pulses []struct {
+			Name string `json:"name"`
+		} `json:"pulses"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(doc.Pulses))
+	for _, pulse := range doc.Pulses {
+		names = append(names, pulse.Name)
+	}
+	return names
+}
+
 func TestStatus_JSON(t *testing.T) {
 	repo, home := scaffold(t)
 	code, out, _ := invoke(t, repo, home, "status", "--json")

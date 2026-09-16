@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -52,7 +53,7 @@ func TestMergeRequiredPulses_AddsMissingAndKeepsCustomisation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
+	added, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestMergeRequiredPulses_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
+	added, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestMergeRequiredPulses_Idempotent(t *testing.T) {
 		t.Errorf("added = %v on an already-current host, want none", added)
 	}
 	before, _ := os.ReadFile(host)
-	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err != nil {
+	if _, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults)); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	after, _ := os.ReadFile(host)
@@ -127,7 +128,7 @@ func TestMergeRequiredPulses_SeedsAbsentHostConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
+	added, err := MergeRequiredPulses(host, defaults, 0o600, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -137,6 +138,99 @@ func TestMergeRequiredPulses_SeedsAbsentHostConfig(t *testing.T) {
 	if got := readPulseNames(t, host); len(got) != 1 || got[0] != "a" {
 		t.Errorf("seeded pulses = %v", got)
 	}
+	info, err := os.Stat(host)
+	if err != nil {
+		t.Fatalf("stat seeded registry: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("seeded mode = %04o, want manifest mode 0600", got)
+	}
+}
+
+func TestMergeRequiredPulses_PreservesExistingRegistryMode(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	if err := os.WriteFile(host, []byte(
+		`{"pulses":[{"name":"existing","type":"file_mtime","path":"~/a","window":"1h"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaults, []byte(`{"pulses":[
+	  {"name":"existing","type":"file_mtime","path":"~/a","window":"1h"},
+	  {"name":"new","type":"file_mtime","path":"~/b","window":"1h"}
+	]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	added, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults))
+	if err != nil {
+		t.Fatalf("MergeRequiredPulses: %v", err)
+	}
+	if len(added) != 1 || added[0] != "new" {
+		t.Fatalf("added = %v, want [new]", added)
+	}
+	info, err := os.Stat(host)
+	if err != nil {
+		t.Fatalf("stat merged registry: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("merged mode = %04o, want existing mode 0600", got)
+	}
+}
+
+func TestMergeRequiredPulses_PreservesUnknownTopLevelFields(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	hostRaw := []byte(`{
+	  "pulses": [{"name":"existing","type":"file_mtime","path":"~/a","window":"1h"}],
+	  "generation": 9007199254740993,
+	  "enabled": true,
+	  "metadata": {"ratio":1.2300,"labels":{"owner":"ops"}},
+	  "owners": ["ops",{"rank":2}],
+	  "override": null
+	}`)
+	if err := os.WriteFile(host, hostRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaults, []byte(`{"pulses":[
+	  {"name":"existing","type":"file_mtime","path":"~/a","window":"1h"},
+	  {"name":"new","type":"file_mtime","path":"~/b","window":"1h"}
+	]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults)); err != nil {
+		t.Fatalf("MergeRequiredPulses: %v", err)
+	}
+	afterRaw, err := os.ReadFile(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after map[string]json.RawMessage
+	if err := json.Unmarshal(hostRaw, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(afterRaw, &after); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"generation", "enabled", "metadata", "owners", "override"} {
+		if got, want := compactJSON(t, after[field]), compactJSON(t, before[field]); got != want {
+			t.Errorf("top-level field %q changed: got %s, want %s", field, got, want)
+		}
+	}
+	if got := readPulseNames(t, host); len(got) != 2 || got[0] != "existing" || got[1] != "new" {
+		t.Errorf("merged pulses = %v, want [existing new]", got)
+	}
+}
+
+func compactJSON(t *testing.T, raw []byte) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := json.Compact(&out, raw); err != nil {
+		t.Fatalf("compact JSON %q: %v", raw, err)
+	}
+	return out.String()
 }
 
 // A corrupt host config must fail loudly rather than being silently replaced:
@@ -152,7 +246,7 @@ func TestMergeRequiredPulses_CorruptHostConfigRefuses(t *testing.T) {
 		`{"pulses":[{"name":"a","type":"file_mtime","path":"~/a","window":"1h"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err == nil {
+	if _, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults)); err == nil {
 		t.Fatal("a corrupt host config was accepted; it would have been overwritten")
 	}
 	raw, _ := os.ReadFile(host)
@@ -186,7 +280,7 @@ func TestMergeRequiredPulses_DoesNotResurrectRemovedPulses(t *testing.T) {
 	}
 
 	// First sync adopts the current defaults and records them.
-	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err != nil {
+	if _, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults)); err != nil {
 		t.Fatalf("first merge: %v", err)
 	}
 
@@ -197,7 +291,7 @@ func TestMergeRequiredPulses_DoesNotResurrectRemovedPulses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
+	added, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
@@ -222,7 +316,7 @@ func TestMergeRequiredPulses_StillAddsGenuinelyNewDefaults(t *testing.T) {
 		`{"pulses":[{"name":"keep","type":"file_mtime","path":"~/a","window":"1h"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := MergeRequiredPulses(host, defaults, allRequired(defaults)); err != nil {
+	if _, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults)); err != nil {
 		t.Fatalf("first merge: %v", err)
 	}
 
@@ -233,7 +327,7 @@ func TestMergeRequiredPulses_StillAddsGenuinelyNewDefaults(t *testing.T) {
 	]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	added, err := MergeRequiredPulses(host, defaults, allRequired(defaults))
+	added, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults))
 	if err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
@@ -284,7 +378,7 @@ func TestMergeRequiredPulses_LeavesUnrequiredDefaultsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults, map[string]bool{"needed": true, "job-critical": true})
+	added, err := MergeRequiredPulses(host, defaults, 0o644, map[string]bool{"needed": true, "job-critical": true})
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -328,7 +422,7 @@ func TestPendingPulseMerges_ReportsWithoutWriting(t *testing.T) {
 		t.Error("PendingPulseMerges wrote to the host registry")
 	}
 
-	added, err := MergeRequiredPulses(host, defaults, req)
+	added, err := MergeRequiredPulses(host, defaults, 0o644, req)
 	if err != nil {
 		t.Fatalf("MergeRequiredPulses: %v", err)
 	}
@@ -374,7 +468,7 @@ func TestMergeRequiredPulses_ConcurrentRunsDoNotLoseAdditions(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			if _, err := MergeRequiredPulses(host, defaults, req); err != nil {
+			if _, err := MergeRequiredPulses(host, defaults, 0o644, req); err != nil {
 				t.Errorf("concurrent merge: %v", err)
 			}
 		})

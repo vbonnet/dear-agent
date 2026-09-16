@@ -3,9 +3,9 @@ package deploy
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
 	"syscall"
 
 	"github.com/vbonnet/dear-agent/pkg/recoveryloop"
@@ -34,7 +34,11 @@ import (
 // supplies what is missing, it does not reassert defaults over local choices.
 // A host config that cannot be parsed is refused rather than replaced, because
 // overwriting it would discard configuration this code cannot read.
-func MergeRequiredPulses(hostPath, defaultsPath string, required map[string]bool) ([]string, error) {
+func MergeRequiredPulses(
+	hostPath, defaultsPath string,
+	seedMode os.FileMode,
+	required map[string]bool,
+) ([]string, error) {
 	// Two post-merge deployments from different worktrees can run at once, and
 	// the registry plus its ledger are a read-modify-write pair. Interleaving
 	// them would let one run's additions be dropped by the other's write while
@@ -51,7 +55,7 @@ func MergeRequiredPulses(hostPath, defaultsPath string, required map[string]bool
 	if err != nil {
 		return nil, fmt.Errorf("read pulse defaults %s: %w", defaultsPath, err)
 	}
-	return mergeRequiredPulses(hostPath, defaultsRaw, required)
+	return mergeRequiredPulses(hostPath, defaultsRaw, seedMode, required)
 }
 
 // MergeRequiredPulsesRendered is MergeRequiredPulses over already-rendered
@@ -59,16 +63,40 @@ func MergeRequiredPulses(hostPath, defaultsPath string, required map[string]bool
 // installs what the manifest would deploy rather than the raw source. Today the
 // pulse registry declares no tokens, but a source that grows one must not reach
 // a host with its placeholders intact.
-func MergeRequiredPulsesRendered(hostPath string, defaultsRaw []byte, required map[string]bool) ([]string, error) {
+func MergeRequiredPulsesRendered(
+	hostPath string,
+	defaultsRaw []byte,
+	seedMode os.FileMode,
+	required map[string]bool,
+) ([]string, error) {
 	unlock, err := lockPulseRegistry(hostPath)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	return mergeRequiredPulses(hostPath, defaultsRaw, required)
+	return mergeRequiredPulses(hostPath, defaultsRaw, seedMode, required)
 }
 
-func mergeRequiredPulses(hostPath string, defaultsRaw []byte, required map[string]bool) ([]string, error) {
+func mergeRequiredPulses(
+	hostPath string,
+	defaultsRaw []byte,
+	seedMode os.FileMode,
+	required map[string]bool,
+) ([]string, error) {
+	return mergeRequiredPulsesWithOps(hostPath, defaultsRaw, seedMode, required, defaultPulseFileOps())
+}
+
+func mergeRequiredPulsesWithOps(
+	hostPath string,
+	defaultsRaw []byte,
+	seedMode os.FileMode,
+	required map[string]bool,
+	ops pulseFileOps,
+) ([]string, error) {
+	if err := reconcilePulseLedgerTransaction(hostPath, ops); err != nil {
+		return nil, err
+	}
+
 	var defaults pulseDoc
 	if err := json.Unmarshal(defaultsRaw, &defaults); err != nil {
 		return nil, fmt.Errorf("parse pulse defaults: %w", err)
@@ -79,8 +107,13 @@ func mergeRequiredPulses(hostPath string, defaultsRaw []byte, required map[strin
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("read host pulses %s: %w", hostPath, err)
 		}
-		return seedPulseConfig(hostPath, defaultsRaw, defaults)
+		return seedPulseConfig(hostPath, defaultsRaw, defaults, seedMode, ops)
 	}
+	hostInfo, err := os.Stat(hostPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat host pulses %s: %w", hostPath, err)
+	}
+	hostMode := hostInfo.Mode().Perm()
 
 	var host pulseDoc
 	if err := json.Unmarshal(hostRaw, &host); err != nil {
@@ -113,37 +146,96 @@ func mergeRequiredPulses(hostPath string, defaultsRaw []byte, required map[strin
 		// Nothing to install. The ledger still advances to the defaults this
 		// host already HAS, so that removing one later is recognised as a
 		// removal rather than as a host that predates the pulse.
-		if err := savePulseLedger(hostPath, defaultNamesPresent(defaults, have)); err != nil {
+		if err := advancePulseLedger(
+			hostPath,
+			hostRaw,
+			defaultNamesPresent(defaults, have),
+			ops,
+		); err != nil {
 			return nil, err
 		}
 		return nil, nil
 	}
 
-	merged, err := json.MarshalIndent(host, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("encode merged pulses: %w", err)
-	}
-	if err := writePulseDoc(hostPath, append(merged, '\n')); err != nil {
-		return nil, err
-	}
-	// The ledger advances only after the registry is live, and records only
-	// names now genuinely present in it. Recording an intent first would mean
-	// a crash between the two writes leaves those names permanently in `seen`
-	// while absent from the registry, so every later merge skips them and the
-	// recovery loop stays unwired: a durable false green written by a failed
-	// write.
-	present := defaultNamesPresent(defaults, pulseNameSet(host.Pulses))
-	if err := savePulseLedger(hostPath, present); err != nil {
+	if err := activatePulseRegistryAdditions(
+		hostPath,
+		hostRaw,
+		host,
+		hostMode,
+		defaults,
+		ops,
+	); err != nil {
 		return nil, err
 	}
 	return added, nil
 }
 
-// pulseDoc keeps every field of every pulse verbatim. Decoding into a typed
-// struct would silently drop any key this binary does not know about, which on
-// a rewrite would delete operator configuration.
+func activatePulseRegistryAdditions(
+	hostPath string,
+	hostRaw []byte,
+	host pulseDoc,
+	hostMode os.FileMode,
+	defaults pulseDoc,
+	ops pulseFileOps,
+) error {
+	merged, err := json.MarshalIndent(host, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode merged pulses: %w", err)
+	}
+	merged = append(merged, '\n')
+	present := defaultNamesPresent(defaults, pulseNameSet(host.Pulses))
+	offered, err := nextPulseLedgerNames(hostPath, present)
+	if err != nil {
+		return err
+	}
+	txn, err := preparePulseLedgerTransaction(hostPath, sha256hex(hostRaw), merged, offered, ops)
+	if err != nil {
+		return err
+	}
+	if err := writePulseDoc(hostPath, merged, hostMode, ops); err != nil {
+		return err
+	}
+	if err := commitPulseLedgerTransaction(hostPath, txn, ops); err != nil {
+		return err
+	}
+	return nil
+}
+
+// pulseDoc decodes the pulses that merge logic needs while retaining every
+// other top-level value as raw JSON. A rewrite replaces only the pulses member;
+// fields this binary does not know about remain part of the host document
+// without lossy number or type coercion.
 type pulseDoc struct {
+	fields map[string]json.RawMessage
 	Pulses []map[string]any `json:"pulses"`
+}
+
+func (d *pulseDoc) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	var pulses []map[string]any
+	if raw, ok := fields["pulses"]; ok {
+		if err := json.Unmarshal(raw, &pulses); err != nil {
+			return fmt.Errorf("parse pulses member: %w", err)
+		}
+	}
+	d.fields = fields
+	d.Pulses = pulses
+	return nil
+}
+
+func (d pulseDoc) MarshalJSON() ([]byte, error) {
+	fields := make(map[string]json.RawMessage, len(d.fields)+1)
+	maps.Copy(fields, d.fields)
+	pulses, err := json.Marshal(d.Pulses)
+	if err != nil {
+		return nil, err
+	}
+	fields["pulses"] = pulses
+	return json.Marshal(fields)
 }
 
 func pulseName(p map[string]any) string {
@@ -176,75 +268,32 @@ func pulseNames(ps []map[string]any) []string {
 // artifact does (internal/deploy SPEC DEP-01). A mangled staged write must not
 // be able to replace a working pulse registry with invalid JSON, which would
 // make absence-alarm reject every subsequent tick.
-func writePulseDoc(path string, data []byte) error {
-	// deploy/manifest.yaml declares absence-alarm-pulses mode 0644: it is
-	// world-readable configuration, and narrowing it here would drift from the
-	// manifest the deploy status check compares against.
-	return atomicWrite(path, data, 0o644, sha256hex(data))
-}
-
-// pulseLedgerPath is a sidecar next to the registry recording every default
-// pulse this host has been offered.
-func pulseLedgerPath(hostPath string) string {
-	return hostPath + ".offered"
-}
-
-// loadPulseLedger reads the set of default pulses already offered to this host.
-// A missing ledger is not an error: it means this host has never been merged,
-// and the first run adopts the current defaults.
-func loadPulseLedger(hostPath string) (map[string]bool, error) {
-	raw, err := os.ReadFile(pulseLedgerPath(hostPath))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]bool{}, nil
-		}
-		return nil, fmt.Errorf("read pulse ledger: %w", err)
-	}
-	var names []string
-	//nolint:nilerr // A corrupt ledger degrades to "nothing offered yet", which
-	// can only re-offer a default. Propagating this would let an unreadable
-	// sidecar block a required pulse, which is the failure this file prevents.
-	if err := json.Unmarshal(raw, &names); err != nil {
-		return map[string]bool{}, nil
-	}
-	seen := make(map[string]bool, len(names))
-	for _, n := range names {
-		seen[n] = true
-	}
-	return seen, nil
-}
-
-// savePulseLedger records the current default pulse names, unioned with what
-// was already offered so a pulse retired from the defaults is not forgotten
-// and then resurrected if it returns.
-func savePulseLedger(hostPath string, offered []string) error {
-	seen, err := loadPulseLedger(hostPath)
-	if err != nil {
-		return err
-	}
-	for _, n := range offered {
-		seen[n] = true
-	}
-	names := make([]string, 0, len(seen))
-	for n := range seen {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	raw, err := json.Marshal(names)
-	if err != nil {
-		return fmt.Errorf("encode pulse ledger: %w", err)
-	}
-	return atomicWrite(pulseLedgerPath(hostPath), raw, 0o644, sha256hex(raw))
+func writePulseDoc(path string, data []byte, mode os.FileMode, ops pulseFileOps) error {
+	return ops.atomicWrite(path, data, mode, sha256hex(data))
 }
 
 // seedPulseConfig installs the defaults verbatim on a host that has no pulse
 // registry yet.
-func seedPulseConfig(hostPath string, defaultsRaw []byte, defaults pulseDoc) ([]string, error) {
-	if err := writePulseDoc(hostPath, defaultsRaw); err != nil {
+func seedPulseConfig(
+	hostPath string,
+	defaultsRaw []byte,
+	defaults pulseDoc,
+	seedMode os.FileMode,
+	ops pulseFileOps,
+) ([]string, error) {
+	names := pulseNames(defaults.Pulses)
+	offered, err := nextPulseLedgerNames(hostPath, names)
+	if err != nil {
 		return nil, err
 	}
-	names := pulseNames(defaults.Pulses)
-	if err := savePulseLedger(hostPath, names); err != nil {
+	txn, err := preparePulseLedgerTransaction(hostPath, "", defaultsRaw, offered, ops)
+	if err != nil {
+		return nil, err
+	}
+	if err := writePulseDoc(hostPath, defaultsRaw, seedMode, ops); err != nil {
+		return nil, err
+	}
+	if err := commitPulseLedgerTransaction(hostPath, txn, ops); err != nil {
 		return nil, err
 	}
 	return names, nil
@@ -296,6 +345,9 @@ func RequiredPulseNamesFrom(jobsPath string) (map[string]bool, error) {
 // writing anything, so `status` and `--dry-run` can surface a migration that
 // has not happened yet.
 func PendingPulseMerges(hostPath, defaultsPath string, required map[string]bool) ([]string, error) {
+	if err := rejectPendingPulseLedgerTransaction(hostPath); err != nil {
+		return nil, err
+	}
 	defaultsRaw, err := os.ReadFile(defaultsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -303,30 +355,37 @@ func PendingPulseMerges(hostPath, defaultsPath string, required map[string]bool)
 		}
 		return nil, fmt.Errorf("read pulse defaults %s: %w", defaultsPath, err)
 	}
+	return PendingPulseMergesRendered(hostPath, defaultsRaw, required)
+}
+
+// PendingPulseMergesRendered is PendingPulseMerges over already-rendered
+// defaults. Status and dry-run use this path so their preview is based on the
+// same token-substituted bytes a real sync would merge.
+func PendingPulseMergesRendered(
+	hostPath string,
+	defaultsRaw []byte,
+	required map[string]bool,
+) ([]string, error) {
 	var defaults pulseDoc
 	if err := json.Unmarshal(defaultsRaw, &defaults); err != nil {
-		return nil, fmt.Errorf("parse pulse defaults %s: %w", defaultsPath, err)
+		return nil, fmt.Errorf("parse rendered pulse defaults: %w", err)
 	}
 
-	hostRaw, err := os.ReadFile(hostPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return pulseNames(defaults.Pulses), nil
-		}
-		return nil, fmt.Errorf("read host pulses %s: %w", hostPath, err)
-	}
-	var host pulseDoc
-	if err := json.Unmarshal(hostRaw, &host); err != nil {
-		return nil, fmt.Errorf("parse host pulses %s: %w", hostPath, err)
-	}
-	have := pulseNameSet(host.Pulses)
-	seen, err := loadPulseLedger(hostPath)
+	snapshot, err := readPulseMergeSnapshot(hostPath)
 	if err != nil {
 		return nil, err
 	}
+	if !snapshot.registryExists {
+		return pulseNames(defaults.Pulses), nil
+	}
+	var host pulseDoc
+	if err := json.Unmarshal(snapshot.registryRaw, &host); err != nil {
+		return nil, fmt.Errorf("parse host pulses %s: %w", hostPath, err)
+	}
+	have := pulseNameSet(host.Pulses)
 	var pending []string
 	for _, p := range defaults.Pulses {
-		if n := pulseName(p); wantsPulse(n, have, seen, required) {
+		if n := pulseName(p); wantsPulse(n, have, snapshot.ledger, required) {
 			pending = append(pending, n)
 		}
 	}
