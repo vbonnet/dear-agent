@@ -34,5 +34,7 @@ complete file, not linearizable commit against a hostile same-UID writer.
 
 ## Test Traceability
 
+- Feature: `agm/test/bdd/features/sandbox_onboarding_guardrails.feature`
+- Feature: `agm/test/bdd/features/sandbox_onboarding_cli_guardrails.feature`
 - Unit package: `agm/internal/sandboxonboarding`
 - Command integration: `agm/cmd/agm/new_sandbox_test.go`

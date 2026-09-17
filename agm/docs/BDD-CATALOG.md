@@ -516,6 +516,39 @@ Wayfinder. Provider-specific isolation, secrets, cleanup, and path-resolution
 contracts need executable traceability without requiring privileged mounts in
 BDD.
 
+### Sandbox Onboarding Output Guardrails
+
+**File:** [`sandbox_onboarding_guardrails.feature`](../test/bdd/features/sandbox_onboarding_guardrails.feature)
+
+**Drives:** authenticated onboarding installation in
+`agm/internal/sandboxonboarding`.
+
+**Key scenarios:**
+- Ambient `HOME` drift cannot redirect output away from the retained runtime
+  authority.
+- Retained-HOME installation rejects symlink, FIFO, and staged-file identity
+  replacement attacks without accepting skipped platform proofs.
+
+**Why this matters:** Onboarding writes into retained user state after sandbox
+creation. Executable evidence must prove the filesystem trust boundary rather
+than treating unit-test discovery as successful execution.
+
+### Sandbox Onboarding CLI Rollback Guardrails
+
+**File:** [`sandbox_onboarding_cli_guardrails.feature`](../test/bdd/features/sandbox_onboarding_cli_guardrails.feature)
+
+**Drives:** fatal onboarding handling and provider rollback in `agm/cmd/agm`.
+
+**Key scenarios:**
+- A fatal onboarding failure preserves external paths and rolls back the exact
+  provider sandbox exactly once with bounded cancellation-independent cleanup.
+- If provider cleanup also fails, that failure remains joined with the fatal
+  onboarding error.
+
+**Why this matters:** Provider creation happens before onboarding installation.
+The CLI contract must prove that a failed retained-state write cannot leave a
+live sandbox or hide its cleanup failure.
+
 ### Instruction Parity
 
 **File:** [`instruction_parity.feature`](../test/bdd/features/instruction_parity.feature)

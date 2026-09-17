@@ -126,6 +126,7 @@ func RegisterScenarioDefinitions(ctx *godog.ScenarioContext) {
 	steps.RegisterRootSafetyCommandGuardrailSteps(ctx)
 	steps.RegisterRootIntelligenceCommandGuardrailSteps(ctx)
 	steps.RegisterRootOperationsCommandGuardrailSteps(ctx)
+	steps.RegisterSandboxOnboardingGuardrailSteps(ctx)
 	steps.RegisterSandboxProviderGuardrailSteps(ctx)
 	steps.RegisterSharedRuntimePolicyGuardrailSteps(ctx)
 	steps.RegisterSessionProtocolGuardrailSteps(ctx)
