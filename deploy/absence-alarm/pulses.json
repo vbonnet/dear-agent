@@ -99,9 +99,9 @@
     {
       "name": "token-refresher-tick",
       "type": "file_mtime",
-      "path": "~/.local/state/dear-agent/token-refresher-audit.jsonl",
+      "path": "~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl",
       "window": "1h",
-      "expect": "a token-refresher audit append within 1h. file_mtime, not json_timestamp: the audit log is JSONL and the json_timestamp probe decodes only the first value in the stream, which is the OLDEST record (2026-06-19 on this host) and would alarm forever. Proves the refresher runs and writes evidence, not that the refresh succeeded."
+      "expect": "a cadence-only token-refresher audit append within 1h. The deployed LaunchAgent explicitly selects this path; unrelated manual check, force, and ordinary invocations with default audit wiring use the separate general audit log and do not mask a stalled scheduler. file_mtime, not json_timestamp: the audit log is JSONL and the json_timestamp probe decodes only the oldest record. This is schedule-specific wiring, not tamper-proof proof of autonomous launchd execution; it proves the configured cadence invocation wrote evidence, not that refresh succeeded."
     }
   ]
 }

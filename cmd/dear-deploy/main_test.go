@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/deploy"
 )
 
 // scaffold builds a repo root (with a manifest + sources) and a host home, and
@@ -222,8 +224,11 @@ func TestPulsePreviewRendersTokensAndMatchesSync(t *testing.T) {
 			if code != tc.wantCode {
 				t.Fatalf("exit = %d, want %d; stdout=%s stderr=%s", code, tc.wantCode, out, errs)
 			}
-			if !strings.Contains(out, "absence-alarm-pulses:custom-tick") || strings.Contains(out, "__PULSE__") {
+			if !strings.Contains(out, pulseArtifactName) || !strings.Contains(out, "custom-tick") || strings.Contains(out, "__PULSE__") {
 				t.Fatalf("preview did not report rendered pulse name: %s", out)
+			}
+			if strings.Contains(out, pulseArtifactName+":custom-tick") {
+				t.Fatalf("preview emitted a synthetic artifact selector: %s", out)
 			}
 			if tc.name == "status" {
 				if !strings.Contains(out, "fix: dear-deploy sync absence-alarm-pulses") ||
@@ -244,7 +249,33 @@ func TestPulsePreviewRendersTokensAndMatchesSync(t *testing.T) {
 		})
 	}
 
-	code, out, errs := invoke(t, repo, home, "sync", pulseArtifactName)
+	code, out, errs := invoke(t, repo, home, "status", pulseArtifactName, "--json")
+	if code != 2 {
+		t.Fatalf("status --json exit = %d, want drift; stdout=%s stderr=%s", code, out, errs)
+	}
+	var statuses []deploy.StatusResult
+	if err := json.Unmarshal([]byte(out), &statuses); err != nil {
+		t.Fatalf("decode status JSON: %v\n%s", err, out)
+	}
+	if len(statuses) != 1 || statuses[0].Name != pulseArtifactName ||
+		!strings.Contains(statuses[0].Detail, "custom-tick") {
+		t.Fatalf("status rows = %+v, want one selectable pulse artifact with nested detail", statuses)
+	}
+
+	code, out, errs = invoke(t, repo, home, "sync", pulseArtifactName, "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("dry-run --json exit = %d; stdout=%s stderr=%s", code, out, errs)
+	}
+	var plans []deployPlan
+	if err := json.Unmarshal([]byte(out), &plans); err != nil {
+		t.Fatalf("decode dry-run JSON: %v\n%s", err, out)
+	}
+	if len(plans) != 1 || plans[0].Name != pulseArtifactName ||
+		!strings.Contains(plans[0].Detail, "custom-tick") {
+		t.Fatalf("dry-run rows = %+v, want one selectable pulse artifact with nested detail", plans)
+	}
+
+	code, out, errs = invoke(t, repo, home, "sync", pulseArtifactName)
 	if code != 0 {
 		t.Fatalf("targeted sync exit = %d; stdout=%s stderr=%s", code, out, errs)
 	}
@@ -374,8 +405,8 @@ func TestPulseCommandsUseLiveAbsentOnlyJobRegistry(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("status exit = %d, want drift; stdout=%s stderr=%s", code, out, errs)
 	}
-	if !strings.Contains(out, pulseArtifactName+":operator-tick") ||
-		strings.Contains(out, pulseArtifactName+":source-tick") {
+	if !strings.Contains(out, pulseArtifactName) || !strings.Contains(out, "operator-tick") ||
+		strings.Contains(out, "source-tick") || strings.Contains(out, pulseArtifactName+":operator-tick") {
 		t.Fatalf("status did not follow live jobs registry: %s", out)
 	}
 
@@ -495,9 +526,21 @@ func TestPulseCommandsFailWhenDeclaredJobRegistryCannotRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs := invoke(t, repo, home, "status", pulseArtifactName)
-	if code != 1 || !strings.Contains(out, "MISSING") || !strings.Contains(out, "ERROR") ||
+	if code != 1 || strings.Contains(out, "MISSING") || !strings.Contains(out, "ERROR") ||
+		strings.Count(out, pulseArtifactName) != 1 || strings.Contains(out, pulseArtifactName+":merge-check") ||
 		!strings.Contains(errs, "render recovery job registry") {
-		t.Fatalf("mixed drift/error status exit = %d; stdout=%s stderr=%s", code, out, errs)
+		t.Fatalf("aggregate error status exit = %d; stdout=%s stderr=%s", code, out, errs)
+	}
+	code, out, errs = invoke(t, repo, home, "status", pulseArtifactName, "--json")
+	if code != 1 {
+		t.Fatalf("status --json exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	var rows []deploy.StatusResult
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("decode status error JSON: %v\n%s", err, out)
+	}
+	if len(rows) != 1 || rows[0].Name != pulseArtifactName || rows[0].State != deploy.StateError {
+		t.Fatalf("status error rows=%+v, want one selectable pulse artifact error", rows)
 	}
 }
 

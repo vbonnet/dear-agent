@@ -63,3 +63,11 @@ broken.
 **DEP-20** When sync or install emits JSON, the system shall preserve the top-level array of artifact results used by existing automation.
 
 **DEP-21** When a required-pulse merge rewrites an existing registry, the system shall preserve the exact values of fields in operator-owned pulse entries.
+
+**DEP-22** When a pulse artifact is not declared absent-only, the system shall validate and atomically deploy its exact rendered source instead of applying additive pulse-merge semantics.
+
+**DEP-23** When the explicit pulse-merge command selects a pulse artifact that is not declared absent-only, the system shall fail without modifying the deployed artifact.
+
+**DEP-24** When status or dry-run reports nested pulse state, the system shall keep every result name equal to a manifest-declared artifact selector and shall carry pulse-level context separately.
+
+**DEP-25** When scheduled token refresh liveness is monitored, the system shall observe the LaunchAgent's dedicated cadence audit path rather than the ordinary CLI default audit path.

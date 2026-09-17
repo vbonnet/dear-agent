@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/pkg/recoveryloop"
@@ -124,4 +125,51 @@ func TestJSONTimestampPulsesAreNotAppendOnlyLogs(t *testing.T) {
 				"would alarm forever. Use file_mtime.", p.Name, p.Path)
 		}
 	}
+}
+
+func TestTokenRefresherPulseUsesCadenceOnlyLaunchdEvidence(t *testing.T) {
+	root := filepath.Join("..", "..")
+	plistRaw, err := os.ReadFile(filepath.Join(root, "deploy", "launchd", "com.dear-agent.token-refresher.plist"))
+	if err != nil {
+		t.Fatalf("read token-refresher plist: %v", err)
+	}
+	args := programArguments(t, string(plistRaw))
+	var cadenceAudit string
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-audit-log" {
+			cadenceAudit = strings.Replace(args[i+1], "__HOME__", "~", 1)
+			break
+		}
+	}
+	if cadenceAudit == "" {
+		t.Fatal("token-refresher LaunchAgent has no explicit cadence audit path")
+	}
+	if cadenceAudit == "~/.local/state/dear-agent/token-refresher-audit.jsonl" {
+		t.Fatal("cadence audit path is still shared with manual token-refresher invocations")
+	}
+
+	pulsesRaw, err := os.ReadFile(filepath.Join(root, "deploy", "absence-alarm", "pulses.json"))
+	if err != nil {
+		t.Fatalf("read pulses.json: %v", err)
+	}
+	var doc struct {
+		Pulses []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+			Path string `json:"path"`
+		} `json:"pulses"`
+	}
+	if err := json.Unmarshal(pulsesRaw, &doc); err != nil {
+		t.Fatalf("parse pulses.json: %v", err)
+	}
+	for _, p := range doc.Pulses {
+		if p.Name != "token-refresher-tick" {
+			continue
+		}
+		if p.Type != "file_mtime" || p.Path != cadenceAudit {
+			t.Fatalf("token-refresher pulse = type %q path %q, want file_mtime on cadence path %q", p.Type, p.Path, cadenceAudit)
+		}
+		return
+	}
+	t.Fatal("pulses.json has no token-refresher-tick pulse")
 }

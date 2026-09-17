@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -73,6 +74,30 @@ func resolveHome(opts Options) (string, error) {
 // previously-installed artifact is left exactly as it was. There is no bypass
 // flag: the only way to deploy is through this sequence (ADR-031, principle 9).
 func Deploy(a Artifact, opts Options) (Result, error) {
+	return deploy(a, opts, nil)
+}
+
+// DeployValidated renders an artifact once, validates those rendered bytes,
+// and atomically deploys the same bytes. It is for file formats whose
+// invariants must be checked after token expansion but before activation.
+// Validation failure leaves the previously installed artifact untouched. An
+// optional missing source is skipped before validation because there are no
+// rendered bytes to validate.
+func DeployValidated(
+	a Artifact,
+	opts Options,
+	validate func([]byte) error,
+) (Result, error) {
+	if validate == nil {
+		return Result{}, fmt.Errorf("deploy validated: validator is required")
+	}
+	if a.IsBinary() {
+		return Result{}, fmt.Errorf("deploy validated: binary artifact %q has no rendered file content", a.Name)
+	}
+	return deploy(a, opts, validate)
+}
+
+func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, error) {
 	if opts.RepoRoot == "" {
 		return Result{}, fmt.Errorf("deploy: RepoRoot is required")
 	}
@@ -97,28 +122,43 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 		return res, err
 	}
 
-	content, err := a.Render(opts.RepoRoot, home)
+	content, skipped, err := renderForDeploy(a, opts, home, validate)
 	if err != nil {
-		if a.Optional && errors.Is(err, os.ErrNotExist) {
-			res.Action = ActionSkipped
-			return res, nil
-		}
-		if errors.Is(err, os.ErrNotExist) {
-			hint := ""
-			if a.Remediation != "" {
-				hint = fmt.Sprintf(" — produce it with: %s", a.Remediation)
-			}
-			return res, fmt.Errorf("source not found for %q: %s%s", a.Name, filepath.Join(opts.RepoRoot, a.Source), hint)
-		}
-		return res, fmt.Errorf("rendering %q: %w", a.Name, err)
+		return res, err
+	}
+	if skipped {
+		res.Action = ActionSkipped
+		return res, nil
 	}
 	wantHash := sha256hex(content)
 	res.SHA256 = wantHash
 
+	action, shouldWrite, err := prepareDeploymentTarget(a, opts, home, deployedPath, wantHash)
+	if err != nil {
+		return res, err
+	}
+	res.Action = action
+	if !shouldWrite {
+		return res, nil
+	}
+
+	if err := atomicWrite(deployedPath, content, mode, wantHash); err != nil {
+		return res, fmt.Errorf("deploying %q: %w", a.Name, err)
+	}
+	return res, nil
+}
+
+func prepareDeploymentTarget(
+	a Artifact,
+	opts Options,
+	home string,
+	deployedPath string,
+	wantHash string,
+) (Action, bool, error) {
 	for _, d := range a.CreateDirs {
 		target := expandPath(d, home)
 		if err := os.MkdirAll(target, 0o755); err != nil {
-			return res, fmt.Errorf("creating required dir %s: %w", target, err)
+			return "", false, fmt.Errorf("creating required dir %s: %w", target, err)
 		}
 	}
 
@@ -128,23 +168,52 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 	case statErr == nil && a.AbsentOnly:
 		// Absent-only: already deployed, preserve operator edits unconditionally,
 		// taking precedence over generic force installs.
-		res.Action = ActionUnchanged
-		return res, nil
+		return ActionUnchanged, false, nil
 	case statErr == nil && sha256hex(existing) == wantHash && !opts.Force:
-		res.Action = ActionUnchanged
-		return res, nil
+		return ActionUnchanged, false, nil
 	case statErr == nil:
-		res.Action = ActionUpdated
+		return ActionUpdated, true, nil
 	case errors.Is(statErr, os.ErrNotExist):
-		res.Action = ActionInstalled
+		return ActionInstalled, true, nil
 	default:
-		return res, fmt.Errorf("reading deployed %q: %w", deployedPath, statErr)
+		return "", false, fmt.Errorf("reading deployed %q: %w", deployedPath, statErr)
 	}
+}
 
-	if err := atomicWrite(deployedPath, content, mode, wantHash); err != nil {
-		return res, fmt.Errorf("deploying %q: %w", a.Name, err)
+func renderForDeploy(
+	a Artifact,
+	opts Options,
+	home string,
+	validate func([]byte) error,
+) ([]byte, bool, error) {
+	content, err := a.Render(opts.RepoRoot, home)
+	if err != nil {
+		if a.Optional && errors.Is(err, os.ErrNotExist) {
+			return nil, true, nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			hint := ""
+			if a.Remediation != "" {
+				hint = fmt.Sprintf(" — produce it with: %s", a.Remediation)
+			}
+			return nil, false, fmt.Errorf(
+				"source not found for %q: %s%s",
+				a.Name,
+				filepath.Join(opts.RepoRoot, a.Source),
+				hint,
+			)
+		}
+		return nil, false, fmt.Errorf("rendering %q: %w", a.Name, err)
 	}
-	return res, nil
+	if validate != nil {
+		// Validation is observational. Give the callback its own copy so a
+		// buggy validator cannot mutate or retain the bytes that will be made
+		// live after it returns.
+		if err := validate(bytes.Clone(content)); err != nil {
+			return nil, false, fmt.Errorf("validating %q: %w", a.Name, err)
+		}
+	}
+	return content, false, nil
 }
 
 // atomicWrite performs the stage → verify → activate write of content to path.
@@ -238,7 +307,9 @@ type StatusResult struct {
 	// into the installed binary vs the repo HEAD it should match.
 	DeployedVersion string `json:"deployed_version,omitempty"`
 	SourceVersion   string `json:"source_version,omitempty"`
-	// Detail sub-classifies a binary drift ("stale ..." vs "divergent ...").
+	// Detail carries sub-artifact context while Name remains a manifest selector.
+	// Binary status uses it for "stale ..." vs "divergent ..."; aggregate
+	// artifact checks may use it for the exact nested items requiring action.
 	Detail string `json:"detail,omitempty"`
 }
 

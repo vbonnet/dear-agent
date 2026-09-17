@@ -484,6 +484,19 @@ func validatePulseConfigBytes(raw []byte, label string) error {
 	return nil
 }
 
+// ValidateRequiredPulseConfigRendered validates an exact-source pulse registry
+// before generic deployment. Unlike the absent-only merge path, a normal
+// artifact replaces the live registry wholesale, so the rendered source itself
+// must be runtime-loadable and define every pulse required by the selected job
+// registry before either artifact is activated.
+func ValidateRequiredPulseConfigRendered(raw []byte, required map[string]bool) error {
+	doc, err := parsePulseDefaults(raw, "rendered pulse config")
+	if err != nil {
+		return err
+	}
+	return validateRequiredPulseDefinitions(doc, required, "rendered pulse config")
+}
+
 func defaultRequiredPulseNames() map[string]bool {
 	required := make(map[string]bool)
 	for _, j := range recoveryloop.DefaultJobs() {
