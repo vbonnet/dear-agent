@@ -464,6 +464,24 @@ harness routing compatibility.
 path. Its fallback and first-match behavior must remain explicit while the
 newer harness and model-family parity registries evolve.
 
+### AI Review Semantic Owner Capacity
+
+**File:** [`ai_review_capacity_guardrails.feature`](../test/bdd/features/ai_review_capacity_guardrails.feature)
+
+**Drives:** the bounded semantic-owner candidate, shard, index, concurrency,
+wave, and prompt contract in `cmd/ai-review`.
+
+**Key scenarios:**
+- The capacity contract retains explicit 192-KiB candidate and 304-KiB shard
+  bounds.
+- The authority-sized path remains limited to eight shards, four concurrent
+  calls, two request waves, one spare shard, and the existing 640-KiB prompt
+  ceiling.
+
+**Why this matters:** A large normative owner must remain reviewable without
+truncating evidence or silently expanding the model-call, cost, concurrency,
+or workflow-time envelopes.
+
 ### Model Family Parity
 
 **File:** [`model_family_parity.feature`](../test/bdd/features/model_family_parity.feature)

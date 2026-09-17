@@ -78,12 +78,12 @@ const (
 	maxSpecFindings            = 4
 	maxSpecPolicyBytes         = 64 * 1024
 	maxChangedContractBytes    = 256 * 1024
-	maxSemanticCandidateBytes  = 128 * 1024
+	maxSemanticCandidateBytes  = 192 * 1024
 	maxSemanticCandidates      = 1024
 	maxSemanticShardCandidates = 128
 	maxSemanticShards          = 8
-	maxSemanticShardBytes      = 256 * 1024
-	maxSemanticIndexBytes      = 2 * 1024 * 1024
+	maxSemanticShardBytes      = 304 * 1024
+	maxSemanticIndexBytes      = maxSemanticShards * maxSemanticShardBytes
 	maxSemanticVerdictBytes    = 64 * 1024
 	maxSemanticRationaleBytes  = 64
 	maxConcurrentSemanticCalls = 4

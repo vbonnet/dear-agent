@@ -16,6 +16,9 @@ import (
 
 func TestReviewDeadlineBudgetsFitWorkflowTimeout(t *testing.T) {
 	ownerWaves := (maxSemanticShards + maxConcurrentSemanticCalls - 1) / maxConcurrentSemanticCalls
+	if ownerWaves != 2 {
+		t.Fatalf("semantic owner review waves = %d, want exactly two", ownerWaves)
+	}
 	if reviewWorkflowTimeout != 70*time.Minute || reviewPipelineTimeout >= reviewWorkflowDeadlineOffset {
 		t.Fatalf("workflow/cutoff/pipeline deadlines = %s/%s/%s, want a bounded pipeline below the trusted cutoff", reviewWorkflowTimeout, reviewWorkflowDeadlineOffset, reviewPipelineTimeout)
 	}
@@ -28,6 +31,39 @@ func TestReviewDeadlineBudgetsFitWorkflowTimeout(t *testing.T) {
 	sequentialModelBudget := semanticOwnerSearchStageTimeout + finalSpecReviewStageTimeout + dimensionReviewStageTimeout + synthesisStageTimeout
 	if sequentialModelBudget > reviewPipelineTimeout-time.Minute {
 		t.Fatalf("sequential model budget = %s, want at least one minute inside pipeline %s", sequentialModelBudget, reviewPipelineTimeout)
+	}
+}
+
+func TestSemanticOwnerCapacityBoundsAreInternallyConsistent(t *testing.T) {
+	if maxSemanticShards != 8 {
+		t.Fatalf("semantic shard count bound = %d, want 8", maxSemanticShards)
+	}
+	if maxConcurrentSemanticCalls != 4 {
+		t.Fatalf("semantic concurrency bound = %d, want 4", maxConcurrentSemanticCalls)
+	}
+	if maxSpecPromptBytes != 640*1024 {
+		t.Fatalf("SPEC prompt bound = %d, want 640 KiB", maxSpecPromptBytes)
+	}
+	if maxSemanticCandidateBytes != 192*1024 {
+		t.Fatalf("semantic candidate bound = %d, want 192 KiB", maxSemanticCandidateBytes)
+	}
+	if maxSemanticShardBytes != 304*1024 {
+		t.Fatalf("semantic shard bound = %d, want 304 KiB", maxSemanticShardBytes)
+	}
+	if maxSemanticIndexBytes != maxSemanticShards*maxSemanticShardBytes {
+		t.Fatalf(
+			"semantic index bound = %d, want %d shards * %d bytes",
+			maxSemanticIndexBytes,
+			maxSemanticShards,
+			maxSemanticShardBytes,
+		)
+	}
+	if maxSemanticCandidateBytes >= maxSemanticShardBytes {
+		t.Fatalf(
+			"semantic candidate bound %d leaves no shard-envelope room below %d",
+			maxSemanticCandidateBytes,
+			maxSemanticShardBytes,
+		)
 	}
 }
 

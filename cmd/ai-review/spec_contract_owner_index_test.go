@@ -283,8 +283,8 @@ func TestCurrentSPECCorpusFitsSemanticOwnerShardBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if digest == "" || len(reasons) != 0 || len(shards) == 0 || len(shards) > maxSemanticShards {
-		t.Fatalf("current %d-SPEC corpus requires %d shards: digest=%q reasons=%v", len(corpus), len(shards), digest, reasons)
+	if digest == "" || len(reasons) != 0 || len(shards) == 0 || len(shards) >= maxSemanticShards {
+		t.Fatalf("current %d-SPEC corpus requires %d shards: digest=%q reasons=%v; want one-shard reserve below %d", len(corpus), len(shards), digest, reasons, maxSemanticShards)
 	}
 	t.Logf("current corpus projects %d SPECs, including bounded legacy telemetry promises, into %d shards", len(index), len(shards))
 }

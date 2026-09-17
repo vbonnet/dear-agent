@@ -66,6 +66,7 @@ func RegisterScenarioDefinitions(ctx *godog.ScenarioContext) {
 	// state. Godog copies those hooks with the base suite and invokes them for
 	// each scenario.
 	steps.RegisterAGMControlSurfaceGuardrailSteps(ctx)
+	steps.RegisterAIReviewCapacityGuardrailSteps(ctx)
 	steps.RegisterAGMConversationDiscoveryGuardrailSteps(ctx)
 	steps.RegisterAGMCapacityPlatformSteps(ctx)
 	steps.RegisterAGMRuntimePackageGuardrailSteps(ctx)

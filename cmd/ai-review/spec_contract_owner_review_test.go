@@ -32,13 +32,13 @@ func TestSemanticOwnerIndexFailsClosedAtCandidateAndShardBounds(t *testing.T) {
 		t.Fatalf("candidate overflow index=%d reasons=%v", len(index), reasons)
 	}
 
-	largeIndex := make([]semanticOwnerCandidate, 0, 65)
-	for ordinal := range 65 {
+	largeIndex := make([]semanticOwnerCandidate, 0, maxSemanticShards+1)
+	for ordinal := range maxSemanticShards + 1 {
 		largeIndex = append(largeIndex, semanticOwnerCandidate{
 			Ordinal:         ordinal,
 			Path:            fmt.Sprintf("domains/large-%02d/SPEC.md", ordinal),
 			RequirementIDs:  []string{fmt.Sprintf("LARGE-%02d", ordinal)},
-			VisibleContract: strings.Repeat("x", 30*1024),
+			VisibleContract: strings.Repeat("x", maxSemanticShardBytes/2),
 			FeaturePaths:    []string{},
 			Signals:         []string{},
 		})
