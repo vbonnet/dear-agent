@@ -349,6 +349,146 @@ func TestSandboxRootRejectsInvalidWorkspaceComponent(t *testing.T) {
 	}
 }
 
+func TestSandboxRootValidatesOnlyPhysicalPathsWithinStableWorkspace(t *testing.T) {
+	home := physicalPath(t, t.TempDir())
+	t.Setenv("HOME", home)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := sandboxRoot.Workspace("stable-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := makeAuthorityDir(t, filepath.Join(workspace, "merged", "repo"))
+
+	for _, candidate := range []string{workspace, filepath.Dir(inside), inside} {
+		got, err := sandboxRoot.ValidateWorkspacePath("stable-session", candidate)
+		if err != nil {
+			t.Fatalf("ValidateWorkspacePath(%q) error = %v", candidate, err)
+		}
+		if got != candidate {
+			t.Fatalf("ValidateWorkspacePath(%q) = %q", candidate, got)
+		}
+	}
+
+	outside := makeAuthorityDir(t, filepath.Join(filepath.Dir(workspace), "sibling", "merged"))
+	for _, candidate := range []string{
+		"",
+		"relative",
+		inside + string(filepath.Separator) + "..",
+		outside,
+	} {
+		if _, err := sandboxRoot.ValidateWorkspacePath("stable-session", candidate); err == nil {
+			t.Fatalf("ValidateWorkspacePath(%q) error = nil, want rejection", candidate)
+		}
+	}
+
+	linked := filepath.Join(workspace, "linked")
+	if err := os.Symlink(inside, linked); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got, err := sandboxRoot.ValidateWorkspacePath("stable-session", linked)
+	if err != nil {
+		t.Fatalf("ValidateWorkspacePath() rejected contained symlink: %v", err)
+	}
+	if got != inside {
+		t.Fatalf("ValidateWorkspacePath() = %q, want physical target %q", got, inside)
+	}
+	escape := filepath.Join(workspace, "escape")
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sandboxRoot.ValidateWorkspacePath("stable-session", escape); err == nil {
+		t.Fatal("ValidateWorkspacePath() accepted a symlink escaping the stable workspace")
+	}
+	if _, err := sandboxRoot.ValidateWorkspacePath("other-session", inside); err == nil {
+		t.Fatal("ValidateWorkspacePath() accepted a sibling session path")
+	}
+}
+
+func TestSandboxRootAcceptsAPFSMergedSymlinkWithinStableWorkspace(t *testing.T) {
+	home := physicalPath(t, t.TempDir())
+	t.Setenv("HOME", home)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := sandboxRoot.Workspace("stable-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upperRepo := makeAuthorityDir(t, filepath.Join(workspace, "upper", "repo"))
+	merged := filepath.Join(workspace, "merged")
+	if err := os.Symlink(filepath.Join(workspace, "upper"), merged); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	for candidate, want := range map[string]string{
+		merged:                        filepath.Join(workspace, "upper"),
+		filepath.Join(merged, "repo"): upperRepo,
+	} {
+		got, err := sandboxRoot.ValidateWorkspacePath("stable-session", candidate)
+		if err != nil {
+			t.Fatalf("ValidateWorkspacePath(%q) error = %v", candidate, err)
+		}
+		if got != want {
+			t.Fatalf("ValidateWorkspacePath(%q) = %q, want %q", candidate, got, want)
+		}
+	}
+}
+
+func TestSandboxRootExistingWorkspaceDirectoryRejectsMissingAndFiles(t *testing.T) {
+	home := physicalPath(t, t.TempDir())
+	t.Setenv("HOME", home)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := sandboxRoot.Workspace("stable-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := makeAuthorityDir(t, filepath.Join(workspace, "merged", "repo"))
+	if got, err := sandboxRoot.ValidateExistingWorkspaceDirectory("stable-session", existing); err != nil || got != existing {
+		t.Fatalf("ValidateExistingWorkspaceDirectory(existing) = (%q, %v), want (%q, nil)", got, err, existing)
+	}
+	if _, err := sandboxRoot.ValidateExistingWorkspaceDirectory("stable-session", filepath.Join(workspace, "missing")); err == nil {
+		t.Fatal("ValidateExistingWorkspaceDirectory() accepted a missing path")
+	}
+	file := filepath.Join(workspace, "ordinary-file")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sandboxRoot.ValidateExistingWorkspaceDirectory("stable-session", file); err == nil {
+		t.Fatal("ValidateExistingWorkspaceDirectory() accepted an ordinary file")
+	}
+}
+
 func assertRuntimeAuthorityPaths(
 	t *testing.T,
 	authority RuntimeAuthority,

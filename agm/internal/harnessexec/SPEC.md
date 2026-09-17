@@ -65,7 +65,16 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-21** When the private executor receives the cold-remote-resume marker from AGM's Codex resume lifecycle, the system shall pass the documented `model_reasoning_effort="xhigh"` configuration override so a persisted unsupported effort value cannot prevent the resumed worker from receiving its first provider turn; fresh remote controller attachments and local Codex launches shall not receive that override.
 
+**HEXEC-23** When a private Claude Code or Codex CLI launch supplies a per-session sandbox-workspace snapshot, the system shall carry it through the owner-only handoff, replace the inherited `FSGUARD_SANDBOX_WORKSPACE` value in the child, omit the stale inherited value from generated tmux command text, and encode neither a `FSGUARD_SANDBOX_WORKSPACE` assignment nor a disk-root or sandbox-workspace authority flag in that command text.
+
+**HEXEC-24** When a private Claude Code or Codex CLI launch omits a sandbox workspace, the system shall remove inherited `FSGUARD_SANDBOX_WORKSPACE` from the child instead of recreating stale pane or tmux authority.
+
+**HEXEC-25** When the private Claude Code or Codex CLI executor finishes executable preparation for a launch handoff, the system shall repeat the disk-only headroom gate using the retained configured parent sandbox root when present and the default disk reader when that root is omitted, plus the caller's explicit finite non-negative minimum-free-disk snapshot (including zero), before any optional override-proof commitment or process replacement; the proof-bearing full admission recheck shall use that same carried disk threshold, and either check shall refuse further launch processing if it fails or cannot be evaluated instead of consulting a stale pane threshold.
+
+**HEXEC-26** When AGM prepares an ordinary Codex CLI private handoff, the system shall bind the exact requested launch arguments even when no override proof is present; when a managed Claude Code or Codex CLI executor consumes a handoff with an exact sandbox workspace, the system shall require the workspace itself to retain its exact physical spelling, physically re-resolve the effective working directory immediately before launch, and reject either a retargeted workspace authority or a working directory that no longer remains within it.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/private_sandbox_launch_authority.feature`
 - Package tests: `agm/internal/harnessexec/*_test.go`

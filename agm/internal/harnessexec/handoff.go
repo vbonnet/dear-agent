@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	handoffVersion  = 1
+	handoffVersion  = 2
 	handoffMaxAge   = 10 * time.Minute
 	handoffMaxSize  = 64 << 10
 	expiryHelperEnv = "AGM_PRIVATE_HANDOFF_EXPIRY_HELPER"
@@ -124,6 +124,9 @@ type launchHandoff struct {
 	OverrideProofs            []override.AuthorizationProof `json:"override_proofs,omitempty"`
 	RecordSpawn               bool                          `json:"record_spawn,omitempty"`
 	LaunchCapabilityID        string                        `json:"launch_capability_id,omitempty"`
+	DiskRoot                  string                        `json:"disk_root,omitempty"`
+	MinFreeDiskGB             *float64                      `json:"min_free_disk_gb,omitempty"`
+	SandboxWorkspace          string                        `json:"sandbox_workspace,omitempty"`
 	CodexHookRoot             string                        `json:"codex_hook_root,omitempty"`
 	CodexLaunch               *codexLaunchBinding           `json:"codex_launch,omitempty"`
 	ClaudeLaunch              *claudeLaunchBinding          `json:"claude_launch,omitempty"`
@@ -174,6 +177,9 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 	if err := validateCodexPastedValues(launch); err != nil {
 		return PreparedCommand{}, err
 	}
+	if err := validatePrivateFilesystemAuthority(CodexProtocol, launch.DiskRoot, launch.SandboxWorkspace); err != nil {
+		return PreparedCommand{}, fmt.Errorf("validate Codex filesystem authority: %w", err)
+	}
 	executable, err := resolvePrivateExecutable()
 	if err != nil {
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
@@ -185,13 +191,12 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 	if err := validateTrustedHandoffIsolation(launch); err != nil {
 		return PreparedCommand{}, err
 	}
-	var binding *codexLaunchBinding
-	if launch.BypassHookTrust {
-		bound := bindCodexLaunch(launch)
-		binding = &bound
-	}
+	bound := bindCodexLaunch(launch)
+	binding := &bound
+	diskAdmission := snapshotDiskAdmissionPolicy(launch.DiskRoot)
 	handoffPath, err := stageHandoff(
-		CodexProtocol, snapshot, launch.DeferUntilProducerExit, launch.HookRoot, binding,
+		CodexProtocol, snapshot, launch.DeferUntilProducerExit,
+		&diskAdmission, launch.SandboxWorkspace, launch.HookRoot, binding,
 	)
 	if err != nil {
 		return PreparedCommand{}, err
@@ -226,6 +231,9 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	if err := validateClaudePastedValues(launch); err != nil {
 		return PreparedCommand{}, err
 	}
+	if err := validatePrivateFilesystemAuthority(ClaudeProtocol, launch.DiskRoot, launch.SandboxWorkspace); err != nil {
+		return PreparedCommand{}, fmt.Errorf("validate Claude filesystem authority: %w", err)
+	}
 	executable, err := resolvePrivateExecutable()
 	if err != nil {
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
@@ -252,8 +260,9 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 		}
 	}
 	claudeBinding := bindClaudeLaunch(launch)
+	diskAdmission := snapshotDiskAdmissionPolicy(launch.DiskRoot)
 	handoffPath, err := stageClaudeHandoff(
-		forward, launch.DeferUntilProducerExit, &claudeBinding,
+		forward, launch.DeferUntilProducerExit, &diskAdmission, launch.SandboxWorkspace, &claudeBinding,
 	)
 	if err != nil {
 		return PreparedCommand{}, err
@@ -343,7 +352,7 @@ func PrepareAgyCommand(launch AgyLaunch, parent []string) (PreparedCommand, erro
 		return PreparedCommand{}, fmt.Errorf("validate AGY pane command: %w", err)
 	}
 	snapshot := removeEnvironment(AgyEnvironment(parent, launch.SessionName), paneRuntimeEnvironment)
-	handoffPath, err := stageHandoff(AgyProtocol, snapshot, launch.DeferUntilProducerExit, "")
+	handoffPath, err := stageHandoff(AgyProtocol, snapshot, launch.DeferUntilProducerExit, nil, "", "")
 	if err != nil {
 		return PreparedCommand{}, err
 	}
@@ -628,6 +637,29 @@ func (binding codexLaunchBinding) matches(other codexLaunchBinding) bool {
 		binding.Remote == other.Remote &&
 		binding.RemoteResume == other.RemoteResume &&
 		binding.HookRoot == other.HookRoot
+}
+
+func (binding codexLaunchBinding) launch() CodexLaunch {
+	return CodexLaunch{
+		SessionName:           binding.SessionName,
+		Model:                 binding.Model,
+		WorkDir:               binding.WorkDir,
+		Sandbox:               binding.Sandbox,
+		Approval:              binding.Approval,
+		AddDirs:               append([]string(nil), binding.AddDirs...),
+		ResumeID:              binding.ResumeID,
+		Remote:                binding.Remote,
+		RemoteResume:          binding.RemoteResume,
+		BypassHookTrust:       binding.HookRoot != "",
+		HookRoot:              binding.HookRoot,
+		HookTrustReason:       binding.HookTrustReason,
+		HookTrustActor:        binding.HookTrustActor,
+		HookTrustSubject:      binding.HookTrustProof.Subject,
+		HookTrustSourceRepo:   binding.HookTrustSourceRepo,
+		HookTrustSourceCommit: binding.HookTrustSourceCommit,
+		HookTrustDigest:       binding.HookTrustDigest,
+		HookTrustProof:        binding.HookTrustProof,
+	}
 }
 
 func validateAgyPastedValues(launch AgyLaunch) error {
@@ -977,6 +1009,8 @@ func stageHandoff(
 	protocol string,
 	environment []string,
 	deferred bool,
+	diskAdmission *diskAdmissionPolicy,
+	sandboxWorkspace string,
 	codexHookRoot string,
 	codexLaunch ...*codexLaunchBinding,
 ) (string, error) {
@@ -992,7 +1026,7 @@ func stageHandoff(
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
 	}
 	return writeHandoff(
-		root, protocol, environment, deferred, codexHookRoot,
+		root, protocol, environment, deferred, diskAdmission, sandboxWorkspace, codexHookRoot,
 		binding, nil, "", "",
 	)
 }
@@ -1000,6 +1034,8 @@ func stageHandoff(
 func stageClaudeHandoff(
 	environment []string,
 	deferred bool,
+	diskAdmission *diskAdmissionPolicy,
+	sandboxWorkspace string,
 	binding *claudeLaunchBinding,
 ) (string, error) {
 	root, err := resolvedHandoffRoot(false)
@@ -1007,7 +1043,7 @@ func stageClaudeHandoff(
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
 	}
 	return writeHandoff(
-		root, ClaudeProtocol, environment, deferred, "",
+		root, ClaudeProtocol, environment, deferred, diskAdmission, sandboxWorkspace, "",
 		nil, binding, "", "",
 	)
 }
@@ -1021,7 +1057,7 @@ func stageHarnessHandoff(
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
 	}
 	return writeHandoff(
-		root, HarnessProtocol, nil, deferred, "", nil, nil, sessionName, command,
+		root, HarnessProtocol, nil, deferred, nil, "", "", nil, nil, sessionName, command,
 	)
 }
 
@@ -1036,7 +1072,7 @@ func stagedCodexBinding(
 	if len(codexLaunch) == 1 {
 		binding = codexLaunch[0]
 	}
-	if (codexHookRoot == "") != (binding == nil) {
+	if codexHookRoot != "" && binding == nil {
 		return nil, errors.New("private Codex hook capability requires an exact launch binding")
 	}
 	return binding, nil
@@ -1046,6 +1082,8 @@ func writeHandoff(
 	root, protocol string,
 	environment []string,
 	deferred bool,
+	diskAdmission *diskAdmissionPolicy,
+	sandboxWorkspace string,
 	codexHookRoot string,
 	binding *codexLaunchBinding,
 	claudeLaunch *claudeLaunchBinding,
@@ -1053,6 +1091,11 @@ func writeHandoff(
 ) (string, error) {
 	if err := validateText("private handoff directory", root); err != nil {
 		return "", err
+	}
+	if diskAdmission != nil {
+		if err := validateDiskAdmissionPolicy(*diskAdmission); err != nil {
+			return "", fmt.Errorf("validate private launch disk policy: %w", err)
+		}
 	}
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return "", fmt.Errorf("create private launch handoff directory: %w", err)
@@ -1083,11 +1126,17 @@ func writeHandoff(
 		CreatedAt:                 time.Now().UTC().Format(time.RFC3339Nano),
 		DeferredUntilProducerExit: deferred,
 		Environment:               append([]string(nil), environment...),
+		SandboxWorkspace:          sandboxWorkspace,
 		CodexHookRoot:             codexHookRoot,
 		CodexLaunch:               binding,
 		ClaudeLaunch:              claudeLaunch,
 		HarnessSessionName:        harnessSessionName,
 		HarnessCommand:            harnessCommand,
+	}
+	if diskAdmission != nil {
+		threshold := diskAdmission.minFreeGB
+		payload.DiskRoot = diskAdmission.root
+		payload.MinFreeDiskGB = &threshold
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -1121,7 +1170,7 @@ func consumeHandoff(
 	if len(expectedCodexLaunch) == 1 {
 		expectedBinding = expectedCodexLaunch[0]
 	}
-	if (expectedCodexHookRoot == "") != (expectedBinding == nil) {
+	if expectedCodexHookRoot != "" && expectedBinding == nil {
 		return launchHandoff{}, errors.New("private Codex hook capability requires an exact launch binding")
 	}
 	file, err := openPrivateHandoff(path, expectedCodexHookRoot != "")
@@ -1275,6 +1324,9 @@ func validateHandoffState(
 	if err := validateHandoffOverrideProofs(handoff); err != nil {
 		return err
 	}
+	if err := validateHandoffSandboxWorkspace(handoff, protocol); err != nil {
+		return err
+	}
 	if err := validateCodexHandoffCapability(handoff, protocol); err != nil {
 		return err
 	}
@@ -1288,6 +1340,68 @@ func validateHandoffState(
 		return err
 	}
 	return validateLaunchCapabilityReference(handoff, requireCapability)
+}
+
+func validateHandoffSandboxWorkspace(handoff launchHandoff, protocol string) error {
+	privateHarness := protocol == CodexProtocol || protocol == ClaudeProtocol
+	if !privateHarness {
+		if handoff.MinFreeDiskGB != nil {
+			return errors.New("private launch handoff contains unrelated disk admission policy")
+		}
+	} else {
+		if handoff.MinFreeDiskGB == nil {
+			return errors.New("private launch handoff omits its disk admission threshold")
+		}
+		policy := diskAdmissionPolicy{root: handoff.DiskRoot, minFreeGB: *handoff.MinFreeDiskGB}
+		if err := validateDiskAdmissionPolicy(policy); err != nil {
+			return fmt.Errorf("private launch handoff contains invalid disk admission policy: %w", err)
+		}
+	}
+	if err := validatePrivateFilesystemAuthority(protocol, handoff.DiskRoot, handoff.SandboxWorkspace); err != nil {
+		return fmt.Errorf("private launch handoff contains invalid filesystem authority: %w", err)
+	}
+	return nil
+}
+
+func validatePrivateFilesystemAuthority(protocol, diskRoot, sandboxWorkspace string) error {
+	if diskRoot == "" && sandboxWorkspace == "" {
+		return nil
+	}
+	if protocol != CodexProtocol && protocol != ClaudeProtocol {
+		return errors.New("filesystem authority is unrelated to this protocol")
+	}
+	if err := validatePrivateRoot("disk root", diskRoot); err != nil {
+		return err
+	}
+	if sandboxWorkspace == "" {
+		return nil
+	}
+	if err := validatePrivateRoot("sandbox workspace", sandboxWorkspace); err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(diskRoot, sandboxWorkspace)
+	if err != nil || relative == "." || relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator)) ||
+		filepath.Dir(relative) != "." {
+		return errors.New("sandbox workspace must be one exact child subtree of the disk root")
+	}
+	return nil
+}
+
+func validatePrivateRoot(name, path string) error {
+	if path == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if err := validateText(name, path); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return fmt.Errorf("%s must be a clean absolute path", name)
+	}
+	if filepath.Dir(path) == path {
+		return fmt.Errorf("%s must not be the filesystem root", name)
+	}
+	return nil
 }
 
 func validateHandoffIdentity(
@@ -1314,16 +1428,30 @@ func validateCodexHandoffCapability(
 	handoff launchHandoff,
 	protocol string,
 ) error {
-	if handoff.CodexHookRoot == "" {
-		if handoff.CodexLaunch != nil {
-			return errors.New("private launch handoff contains a Codex launch binding without a hook capability")
+	if protocol != CodexProtocol {
+		if handoff.CodexHookRoot != "" || handoff.CodexLaunch != nil {
+			return errors.New("private launch handoff contains unrelated Codex launch state")
 		}
 		return nil
 	}
-	if protocol != CodexProtocol ||
-		!filepath.IsAbs(handoff.CodexHookRoot) ||
+	if handoff.CodexLaunch == nil {
+		return errors.New("private Codex handoff omits its exact launch binding")
+	}
+	if err := validateCodexPastedValues(handoff.CodexLaunch.launch()); err != nil {
+		return err
+	}
+	if handoff.CodexHookRoot == "" {
+		binding := handoff.CodexLaunch
+		if binding.HookRoot != "" || binding.HookTrustReason != "" ||
+			binding.HookTrustActor != "" || binding.HookTrustSourceRepo != "" ||
+			binding.HookTrustSourceCommit != "" || binding.HookTrustDigest != "" ||
+			binding.HookTrustProof.Kind != "" || binding.HookTrustProof.AuthorizationID != "" {
+			return errors.New("ordinary private Codex handoff contains hook capability state")
+		}
+		return nil
+	}
+	if !filepath.IsAbs(handoff.CodexHookRoot) ||
 		filepath.Clean(handoff.CodexHookRoot) != handoff.CodexHookRoot ||
-		handoff.CodexLaunch == nil ||
 		handoff.CodexLaunch.HookRoot != handoff.CodexHookRoot {
 		return errors.New("private launch handoff contains an invalid Codex hook capability")
 	}
@@ -1502,7 +1630,7 @@ func validateHandoffOverrideProofs(handoff launchHandoff) error {
 			return errors.New("private launch handoff contains incomplete override proof")
 		}
 	}
-	if handoff.CodexLaunch != nil && !hookProofFound {
+	if handoff.CodexHookRoot != "" && !hookProofFound {
 		return errors.New("private launch handoff omits the Codex hook-trust proof")
 	}
 	return nil

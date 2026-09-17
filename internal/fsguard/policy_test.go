@@ -38,6 +38,10 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if filepath.Base(cfg.Policy.WorktreesDir) != "worktrees" {
 		t.Errorf("WorktreesDir=%q, want .../worktrees", cfg.Policy.WorktreesDir)
 	}
+	wantSandboxWorkspace := filepath.Join(filepath.Dir(cfg.Policy.WorktreesDir), ".agm", "sandboxes")
+	if got := cfg.Policy.SandboxWorkspace; got != wantSandboxWorkspace {
+		t.Errorf("SandboxWorkspace=%q, want compatibility default %q", got, wantSandboxWorkspace)
+	}
 	if filepath.Base(cfg.LogPath) != "violations.jsonl" {
 		t.Errorf("LogPath=%q, want .../violations.jsonl", cfg.LogPath)
 	}
@@ -50,6 +54,7 @@ func TestLoadConfigEnvOverrides(t *testing.T) {
 	t.Setenv(EnvProtected, "~/golden:/opt/ref")
 	t.Setenv(EnvWritable, "/scratch,/cache")
 	t.Setenv(EnvWorktreesDir, "/work")
+	t.Setenv(EnvSandboxWorkspace, "/srv/agm/sandboxes/session-a")
 	t.Setenv(EnvLog, "/var/log/fsguard.jsonl")
 
 	cfg, err := LoadConfig()
@@ -58,6 +63,9 @@ func TestLoadConfigEnvOverrides(t *testing.T) {
 	}
 	if cfg.Policy.WorktreesDir != "/work" {
 		t.Errorf("WorktreesDir=%q, want /work", cfg.Policy.WorktreesDir)
+	}
+	if cfg.Policy.SandboxWorkspace != "/srv/agm/sandboxes/session-a" {
+		t.Errorf("SandboxWorkspace=%q, want /srv/agm/sandboxes/session-a", cfg.Policy.SandboxWorkspace)
 	}
 	if cfg.LogPath != "/var/log/fsguard.jsonl" {
 		t.Errorf("LogPath=%q", cfg.LogPath)
@@ -71,6 +79,123 @@ func TestLoadConfigEnvOverrides(t *testing.T) {
 	}
 	if !contains(cfg.Policy.Writable, "/scratch") || !contains(cfg.Policy.Writable, "/cache") {
 		t.Errorf("Writable=%v, want /scratch and /cache", cfg.Policy.Writable)
+	}
+}
+
+func TestConfiguredSandboxWorkspaceReplacesParentWideDefault(t *testing.T) {
+	clearFSGuardEnv(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvSandboxWorkspace, "/srv/agm/sandboxes/session-a")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	g := &Guard{Home: home, policy: &cfg.Policy}
+
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/srv/agm/sandboxes/session-a", true},
+		{"/srv/agm/sandboxes/session-a/upper/file", true},
+		{"/srv/agm/sandboxes/session-b/file", false},
+		{"/srv/agm/sandboxes/session-a-sibling/file", false},
+		{"/srv/agm/sandboxes/session-a/../session-b/file", false},
+		{filepath.Join(home, ".agm", "sandboxes", "legacy", "file"), false},
+	}
+	for _, tt := range tests {
+		allowed, _ := g.Classify(tt.path, home)
+		if allowed != tt.want {
+			t.Errorf("Classify(%q) allowed=%v, want %v", tt.path, allowed, tt.want)
+		}
+	}
+}
+
+func TestExactSandboxWorkspaceShadowsGenericWritableParents(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, parent := range []string{
+		filepath.Join(home, "worktrees", "centralized-sandboxes"),
+		filepath.Join(tempRoot, "centralized-sandboxes"),
+	} {
+		t.Run(parent, func(t *testing.T) {
+			workspace := filepath.Join(parent, "session-a")
+			sibling := filepath.Join(parent, "session-b")
+			for _, dir := range []string{workspace, sibling} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			policy := DefaultPolicy(home)
+			policy.SandboxWorkspace = workspace
+			guard := &Guard{Home: home, policy: &policy, resolveSymlinks: true}
+
+			if allowed, message := guard.Classify(filepath.Join(workspace, "file"), home); !allowed {
+				t.Fatalf("exact workspace under generic writable parent was blocked: %s", message)
+			}
+			if allowed, _ := guard.Classify(filepath.Join(sibling, "file"), home); allowed {
+				t.Fatalf("sibling workspace under generic writable parent %q was allowed", parent)
+			}
+		})
+	}
+}
+
+func TestInvalidConfiguredSandboxWorkspaceFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		root string
+	}{
+		{"empty", ""},
+		{"relative", "relative/sandboxes"},
+		{"unclean parent", "/srv/agm/../sandboxes"},
+		{"unclean trailing separator", "/srv/agm/sandboxes/"},
+		{"filesystem root", string(filepath.Separator)},
+		{"control character", "/srv/agm/sandboxes\nother"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearFSGuardEnv(t)
+			t.Setenv(EnvSandboxWorkspace, tt.root)
+
+			cfg, err := LoadConfig()
+			if err == nil {
+				t.Fatal("LoadConfig returned nil error for invalid sandbox workspace")
+			}
+			if cfg.Policy.SandboxWorkspace != "" {
+				t.Fatalf("SandboxWorkspace=%q, want empty fail-closed allowance", cfg.Policy.SandboxWorkspace)
+			}
+			g := &Guard{Home: "/home/tester", policy: &cfg.Policy}
+			if allowed, _ := g.Classify("/home/tester/.agm/sandboxes/session/file", "/home/tester"); allowed {
+				t.Fatal("invalid configured sandbox workspace retained the default sandbox allowance")
+			}
+		})
+	}
+}
+
+func TestInvalidSandboxWorkspaceDoesNotRemoveExplicitWritablePaths(t *testing.T) {
+	clearFSGuardEnv(t)
+	t.Setenv(EnvSandboxWorkspace, "/")
+	t.Setenv(EnvWritable, "/explicit/scratch")
+
+	cfg, err := LoadConfig()
+	if err == nil {
+		t.Fatal("LoadConfig returned nil error for invalid sandbox workspace")
+	}
+	g := &Guard{Home: "/home/tester", policy: &cfg.Policy}
+	if allowed, msg := g.Classify("/explicit/scratch/file", "/home/tester"); !allowed {
+		t.Fatalf("explicit writable path was removed by invalid sandbox workspace: %s", msg)
 	}
 }
 
@@ -175,7 +300,7 @@ func contains(haystack []string, needle string) bool {
 func clearFSGuardEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		EnvConfig, EnvProtected, EnvWritable, EnvWorktreesDir, EnvLog, EnvDisableLog,
+		EnvConfig, EnvProtected, EnvWritable, EnvWorktreesDir, EnvSandboxWorkspace, EnvLog, EnvDisableLog,
 	} {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)

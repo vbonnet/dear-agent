@@ -199,9 +199,17 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-98** When `ArchiveSession` reloads sandbox ownership metadata, the system shall authorize sandbox cleanup only for a complete valid record whose ID matches the stable session ID and whose merged boundary is the current host sandbox base's identified `merged` child; a recorded boundary spelled differently from that child shall be authorized only when both spellings are proven to be one existing host directory, and shall then be addressed in the host cleanup base's spelling so every downstream allowlist gate and reaper validates the same path; incomplete, mismatched, unresolvable, legacy, or out-of-base metadata shall preserve every sandbox path.
 
-**OPS-107** When archive sandbox cleanup receives a live-process refusal for a specific process immediately after owned session shutdown, the system shall retry only before an absolute bounded process-grace deadline while re-running every path, process, unmount, and mount safety gate in that order without any caller-side pre-unmount; the system shall propagate the remaining shared budget into each in-flight process and mount scan and re-check it before removal, and persistent holders, expired or unreadable process state, bad paths, or surviving mounts shall preserve the sandbox.
+**OPS-122** When archive sandbox cleanup receives a live-process refusal for a specific process immediately after owned session shutdown, the system shall retry only before an absolute bounded process-grace deadline while re-running every path, process, unmount, and mount safety gate in that order without any caller-side pre-unmount; the system shall propagate the remaining shared budget into each in-flight process and mount scan and re-check it before removal, and persistent holders, expired or unreadable process state, bad paths, or surviving mounts shall preserve the sandbox.
 
-**OPS-108** When archive sandbox cleanup retries after a live holder, the system shall refresh the owned upper-layer settings snapshot before every safety attempt so permission rules written during shutdown survive a later successful removal.
+**OPS-123** When archive sandbox cleanup retries after a live holder, the system shall refresh the owned upper-layer settings snapshot before every safety attempt so permission rules written during shutdown survive a later successful removal.
+
+**OPS-124** When AGM prepares a managed sandboxed Claude Code or Codex CLI launch for session creation or cold resume, the system shall select that session's sandbox workspace from the loaded configuration's retained sandbox-root authority and stable AGM session ID, require the effective launch directory to remain within that workspace, and prevent later process or tmux environment state from replacing the selection.
+
+**OPS-125** When AGM performs pre-provision disk admission for a new managed session, the system shall evaluate the filesystem containing the loaded configuration's retained sandbox root and shall refuse submission when that target-volume gate fails or cannot be evaluated.
+
+**OPS-126** When a sandbox provider returns a newly created sandbox, AGM shall validate its stable AGM session identity, require the provider-spelled merged path to name the exact retained per-session workspace cleanup boundary, and require every returned nonempty filesystem path to resolve to an existing directory within that workspace before applying onboarding or permission state; it shall preserve the provider-spelled merged and working paths as a structurally valid durable ownership record while returning the physical working directory separately for the live launch and its host-side onboarding key; on validation failure it shall destroy the provider sandbox through the original provider instance by stable AGM session ID without writing to any returned outside or unmaterialized path, and any later create-lifecycle rollback shall retain that same identity-checked provider instance and detach cleanup from caller cancellation.
+
+**OPS-127** When AGM prepares a fresh or cold-resumed managed sandbox launch, the system shall require its effective and nonempty persisted launch paths to resolve to existing directories within the stable AGM session workspace, accept provider symlink spellings only when they remain there, and reject containment drift, missing provider paths, or a missing transcript-derived Claude resume directory before Codex remote setup, tmux creation, or command submission.
 
 ### Shared Session Resume Lifecycle
 
@@ -307,6 +315,8 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 - Feature: `agm/test/bdd/features/trust_protocol.feature`
 - Feature: `agm/test/bdd/features/scan_loop.feature`
 - Feature: `agm/test/bdd/features/stall_detection.feature`
+- Feature: `agm/test/bdd/features/sandbox_launch_authority.feature`
+- Feature: `agm/test/bdd/features/sandbox_volume_admission.feature`
 - Test consequence: the OPS-98 sandbox-ownership boundary is verified by deterministic unit tests rather than new scenarios — `agm/internal/ops/sandbox_ownership_test.go` covers the centralized-storage and symlinked-HOME spellings, the exact spelling, and the foreign, absent, wrong-session and out-of-base paths that stay disowned.
 
 ## Package Test Traceability

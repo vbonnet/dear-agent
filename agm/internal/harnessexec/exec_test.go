@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
+	"github.com/vbonnet/dear-agent/internal/fsguard"
 )
 
 const helperMarker = "AGM_HARNESSEXEC_HELPER"
@@ -442,6 +443,7 @@ func TestEnvironmentContracts(t *testing.T) {
 
 func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	t.Setenv("AGM_CODEX_HOOK_ROOT", "/attacker/controlled")
+	t.Setenv(fsguard.EnvSandboxWorkspace, "/stale/pane/workspace")
 	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalResolveClaudeOAuth := resolveClaudeOAuth
@@ -477,6 +479,9 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	if got := environmentMap(gotEnv)["AGM_CODEX_HOOK_ROOT"]; got != "" {
 		t.Fatalf("ordinary Codex replacement inherited untrusted hook root %q", got)
 	}
+	if got, ok := environmentMap(gotEnv)[fsguard.EnvSandboxWorkspace]; ok {
+		t.Fatalf("ordinary Codex replacement inherited stale sandbox workspace %q", got)
+	}
 	resolveClaudeOAuth = func() string { return "resolved-oauth" }
 	err = Run(ClaudeProtocol, []string{
 		"--session", "claude-session", "--model", "claude-test", "--auto-mode",
@@ -489,6 +494,9 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	}
 	if got := environmentMap(gotEnv)["CLAUDE_CODE_OAUTH_TOKEN"]; got != "resolved-oauth" {
 		t.Fatalf("Claude replacement OAuth = %q", got)
+	}
+	if got, ok := environmentMap(gotEnv)[fsguard.EnvSandboxWorkspace]; ok {
+		t.Fatalf("ordinary Claude replacement inherited stale sandbox workspace %q", got)
 	}
 
 	lookPathInEnvironment = func(string, []string) (string, error) { return "", errors.New("not found") }

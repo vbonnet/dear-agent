@@ -393,7 +393,11 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	var admission *circuitBreakerAdmission
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
-		admission, admissionErr = enforceCircuitBreakers(supervisorID)
+		sandboxRoot, rootErr := configuredSandboxRoot()
+		if rootErr != nil {
+			return rootErr
+		}
+		admission, admissionErr = enforceCircuitBreakers(supervisorID, sandboxRoot)
 		return admissionErr
 	})
 	if err != nil {
@@ -420,7 +424,7 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		"agm supervisor: id=%q primary-for=%q tertiary-for=%q binary=%q\n",
 		supervisorID, supervisorPrimaryFor, supervisorTertiaryFor, bin)
 
-	prepared, err := harnessexec.PrepareClaudeCommand(buildSupervisorClaudeLaunch(
+	launch := buildSupervisorClaudeLaunch(
 		bin,
 		supervisorClaudeModel,
 		supervisorLoadDevChannels,
@@ -429,7 +433,12 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		// the existing behavior of forwarding a fresh token when one is
 		// available.
 		false,
-	), os.Environ())
+	)
+	launch.DiskRoot, err = admission.sandboxRoot.Path()
+	if err != nil {
+		return fmt.Errorf("supervisor: project sandbox-volume authority: %w", err)
+	}
+	prepared, err := harnessexec.PrepareClaudeCommand(launch, os.Environ())
 	if err != nil {
 		return fmt.Errorf("supervisor: prepare private Claude executor: %w", err)
 	}

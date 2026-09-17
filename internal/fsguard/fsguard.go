@@ -15,6 +15,7 @@
 package fsguard
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,26 +94,26 @@ func (g *Guard) resolve(p string) string {
 // resolveTarget resolves symlinks in p. If p itself does not exist (a new file
 // or dir), it resolves the deepest existing ancestor and re-appends the missing
 // components, so a write into a symlinked directory is still seen through the
-// link. On any failure it returns p unchanged (fail safe to lexical form).
+// link. It ascends only through literal non-existence: an existing object that
+// EvalSymlinks cannot resolve (notably a dangling symlink) returns an empty
+// fail-closed sentinel instead of falling back to an allowed lexical spelling.
 func resolveTarget(p string) string {
 	if !filepath.IsAbs(p) {
-		return p
-	}
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
+		return ""
 	}
 	rest := ""
-	cur := p
-	for {
+	for cur := p; ; cur = filepath.Dir(cur) {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		if _, err := os.Lstat(cur); err == nil || !errors.Is(err, os.ErrNotExist) {
+			return ""
+		}
 		parent := filepath.Dir(cur)
 		rest = filepath.Join(filepath.Base(cur), rest)
 		if parent == cur { // reached the root without resolving
-			return p
+			return ""
 		}
-		if r, err := filepath.EvalSymlinks(parent); err == nil {
-			return filepath.Join(r, rest)
-		}
-		cur = parent
 	}
 }
 
@@ -127,6 +128,21 @@ func (g *Guard) Resolve(path, cwd string) string {
 // path. cwd is used to anchor relative paths (defaulting to Home when empty).
 func (g *Guard) expand(path, cwd string) string {
 	if path == "" {
+		return ""
+	}
+	// Cleaning a parent component before symlink resolution changes kernel path
+	// semantics. For example, workspace/link/../escape resolves through link
+	// before applying "..", while filepath.Clean would erase both components
+	// and make the spelling appear contained. Refuse parent traversal at this
+	// authority boundary; callers can provide the equivalent clean real path.
+	if hasParentPathComponent(path) {
+		return ""
+	}
+	// Bash expands ~user, ~+, and ~- before invoking a write. Treat every
+	// leading-tilde spelling except the supported current-home forms as
+	// unresolved; otherwise a shell target such as ~user/sibling would be
+	// misclassified as a relative child of the authorized workspace.
+	if strings.HasPrefix(path, "~") && path != "~" && !strings.HasPrefix(path, "~/") {
 		return ""
 	}
 	switch {
@@ -146,9 +162,26 @@ func (g *Guard) expand(path, cwd string) string {
 		if base == "" {
 			base = g.Home
 		}
+		if hasParentPathComponent(base) {
+			return ""
+		}
 		path = filepath.Join(base, path)
 	}
 	return filepath.Clean(path)
+}
+
+func hasParentPathComponent(path string) bool {
+	componentStart := 0
+	for i := 0; i <= len(path); i++ {
+		if i != len(path) && !os.IsPathSeparator(path[i]) {
+			continue
+		}
+		if path[componentStart:i] == ".." {
+			return true
+		}
+		componentStart = i + 1
+	}
+	return false
 }
 
 // under reports whether path is base itself or lives somewhere beneath it.
@@ -212,9 +245,26 @@ func (g *Guard) Classify(path, cwd string) (allowed bool, message string) {
 // its verdict — e.g. to log the resolved target on a block — use Resolve +
 // ClassifyResolved to avoid resolving (and hitting the disk) twice.
 func (g *Guard) ClassifyResolved(p string) (allowed bool, message string) {
+	if p == "" {
+		return false, "The write target could not be safely resolved. Use a real path inside ~/worktrees/ instead of an unresolved filesystem alias."
+	}
 	pol := g.pol()
 	src := filepath.Join(g.Home, "src")
 
+	if pol.SandboxWorkspace != "" {
+		if under(p, pol.SandboxWorkspace) {
+			return true, ""
+		}
+		// A managed launch replaces the compatibility parent with one exact
+		// per-session child. Shadow generic writable carveouts inside that
+		// child's parent so /tmp, /var/folders, ~/worktrees, or ~/beads cannot
+		// accidentally re-authorize sibling sandboxes. The historical default
+		// remains parent-wide and therefore does not install this shadow.
+		defaultSandboxParent := filepath.Join(g.Home, ".agm", "sandboxes")
+		if pol.SandboxWorkspace != defaultSandboxParent && under(p, filepath.Dir(pol.SandboxWorkspace)) {
+			return false, "The write target is outside this session's exact sandbox workspace. Use the current session workspace instead of a sibling sandbox."
+		}
+	}
 	if g.isWritableCarveout(p) {
 		return true, ""
 	}

@@ -140,6 +140,114 @@ func TestSymlinkEscapeBlocked(t *testing.T) {
 	}
 }
 
+func TestDanglingSymlinkEscapeBlockedForWritableRoots(t *testing.T) {
+	t.Parallel()
+
+	for _, rootKind := range []string{"sandbox workspace", "worktrees"} {
+		t.Run(rootKind, func(t *testing.T) {
+			home, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			worktrees := filepath.Join(home, "worktrees")
+			sandboxWorkspace := filepath.Join(home, ".agm", "sandboxes", "session-a")
+			writableRoot := worktrees
+			if rootKind == "sandbox workspace" {
+				writableRoot = sandboxWorkspace
+			}
+			outsideDir := filepath.Join(home, "src", "protected")
+			for _, dir := range []string{writableRoot, outsideDir} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			outsideTarget := filepath.Join(outsideDir, "new-file")
+			escape := filepath.Join(writableRoot, "escape")
+			if err := os.Symlink(outsideTarget, escape); err != nil {
+				t.Fatal(err)
+			}
+			policy := Policy{
+				WorktreesDir:     worktrees,
+				SandboxWorkspace: sandboxWorkspace,
+				Protected:        []string{filepath.Join(home, "src")},
+			}
+			guard := &Guard{Home: home, policy: &policy, resolveSymlinks: true}
+
+			if allowed, _ := guard.Classify(escape, home); allowed {
+				t.Fatalf("dangling symlink escape from %s was allowed", rootKind)
+			}
+			if allowed, message := guard.Classify(filepath.Join(writableRoot, "ordinary-new-file"), home); !allowed {
+				t.Fatalf("ordinary absent path under %s was blocked: %s", rootKind, message)
+			}
+		})
+	}
+}
+
+func TestSymlinkParentTraversalBlockedForFileAndBashHooks(t *testing.T) {
+	t.Parallel()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(home, ".agm", "sandboxes", "session-a")
+	outsideSubdir := filepath.Join(home, "outside", "subdir")
+	for _, dir := range []string{workspace, outsideSubdir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(workspace, "link")
+	if err := os.Symlink(outsideSubdir, link); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := Policy{
+		WorktreesDir:     filepath.Join(home, "worktrees"),
+		SandboxWorkspace: workspace,
+	}
+	interceptor := NewInterceptorWith(
+		&Guard{Home: home, policy: &policy, resolveSymlinks: true},
+		&recordingRecorder{},
+	)
+	escape := link + string(filepath.Separator) + ".." + string(filepath.Separator) + "escape"
+	if decision := interceptor.CheckWrite("Write", escape, workspace); decision.Allowed {
+		t.Fatalf("file-hook symlink parent traversal was allowed: %q", escape)
+	}
+	if decision := interceptor.CheckCommand("touch "+escape, workspace); decision.Allowed {
+		t.Fatalf("Bash symlink parent traversal was allowed: %q", escape)
+	}
+}
+
+func TestUnhandledTildeExpansionBlockedForBashHook(t *testing.T) {
+	t.Parallel()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(home, ".agm", "sandboxes", "session-a")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	policy := Policy{
+		WorktreesDir:     filepath.Join(home, "worktrees"),
+		SandboxWorkspace: workspace,
+	}
+	interceptor := NewInterceptorWith(
+		&Guard{Home: home, policy: &policy, resolveSymlinks: true},
+		&recordingRecorder{},
+	)
+	for _, target := range []string{
+		"~another-user/.agm/sandboxes/sibling/file",
+		"~+/.agm/sandboxes/sibling/file",
+		"~-/.agm/sandboxes/sibling/file",
+	} {
+		if decision := interceptor.CheckCommand("touch "+target, workspace); decision.Allowed {
+			t.Fatalf("Bash unhandled tilde expansion was allowed: %q", target)
+		}
+	}
+}
+
 func TestDecisionEnforcementField(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

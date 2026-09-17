@@ -2,23 +2,29 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
 
-// MockProvider is a fake implementation for testing.
-// It doesn't actually create sandboxes, just tracks state in memory.
+// MockProvider is a fake implementation for testing. It materializes the
+// provider-owned directory shape but does not mount, clone, or isolate any
+// repository content.
 type MockProvider struct {
-	mu         sync.Mutex
-	sandboxes  map[string]*Sandbox
-	createErr  error // Inject error for Create
-	destroyErr error // Inject error for Destroy
+	mu          sync.Mutex
+	sandboxes   map[string]*Sandbox
+	directories map[string][]string
+	createErr   error // Inject error for Create
+	destroyErr  error // Inject error for Destroy
 }
 
 // NewMockProvider creates a new MockProvider instance.
 func NewMockProvider() *MockProvider {
 	return &MockProvider{
-		sandboxes: make(map[string]*Sandbox),
+		sandboxes:   make(map[string]*Sandbox),
+		directories: make(map[string][]string),
 	}
 }
 
@@ -31,6 +37,18 @@ func (m *MockProvider) Create(ctx context.Context, req SandboxRequest) (*Sandbox
 
 	if m.createErr != nil {
 		return nil, m.createErr
+	}
+	if req.SessionID == "" {
+		return nil, NewInvalidConfigError("SessionID", "must not be empty")
+	}
+	if len(req.LowerDirs) == 0 {
+		return nil, NewInvalidConfigError("LowerDirs", "at least one lower directory is required")
+	}
+	if req.WorkspaceDir == "" {
+		return nil, NewInvalidConfigError("WorkspaceDir", "must not be empty")
+	}
+	if !filepath.IsAbs(req.WorkspaceDir) || filepath.Clean(req.WorkspaceDir) != req.WorkspaceDir {
+		return nil, NewInvalidConfigError("WorkspaceDir", "must be a clean absolute path")
 	}
 
 	m.mu.Lock()
@@ -51,8 +69,14 @@ func (m *MockProvider) Create(ctx context.Context, req SandboxRequest) (*Sandbox
 		Type:       "mock",
 		CreatedAt:  time.Now(),
 	}
+	for _, dir := range []string{sb.MergedPath, sb.WorkingDir, sb.UpperPath, sb.WorkPath} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("materialize mock sandbox directory %s: %w", dir, err)
+		}
+	}
 
 	m.sandboxes[sb.ID] = sb
+	m.directories[sb.ID] = []string{sb.MergedPath, sb.UpperPath, sb.WorkPath}
 	return sb, nil
 }
 
@@ -65,7 +89,23 @@ func (m *MockProvider) Destroy(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	_, exists := m.sandboxes[id]
+	if !exists {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, dir := range m.directories[id] {
+		clean := filepath.Clean(dir)
+		if _, duplicate := seen[clean]; duplicate {
+			continue
+		}
+		seen[clean] = struct{}{}
+		if err := os.RemoveAll(clean); err != nil {
+			return fmt.Errorf("remove mock sandbox directory %s: %w", clean, err)
+		}
+	}
 	delete(m.sandboxes, id)
+	delete(m.directories, id)
 	return nil
 }
 

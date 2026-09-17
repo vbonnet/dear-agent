@@ -14,6 +14,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -114,6 +115,15 @@ type createTestRuntime struct {
 type createTestAgyBootstrapRuntime struct {
 	*createTestRuntime
 	bootstrap func(context.Context, AgyCreateIdentityBootstrap) error
+}
+
+type createTestPreparingRuntime struct {
+	*createTestRuntime
+	prepare func(context.Context, CreateSessionPreparation) (CreateSessionPreparation, error)
+}
+
+func (r *createTestPreparingRuntime) Prepare(ctx context.Context, preparation CreateSessionPreparation) (CreateSessionPreparation, error) {
+	return r.prepare(ctx, preparation)
 }
 
 func (r *createTestAgyBootstrapRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input AgyCreateIdentityBootstrap) error {
@@ -1586,6 +1596,159 @@ func TestCreateSession_CodexRejectsUnsafeLaunchInputBeforeRemoteOrTmuxMutation(t
 	}
 	if tmuxMock.Sessions["prevalidate"] {
 		t.Fatal("unsafe Codex request created a tmux session")
+	}
+}
+
+func TestCreateSession_SandboxedCodexRejectsPreparedCwdOutsideAuthorityBeforeRemoteOrTmuxMutation(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("AGM_CODEX_REMOTE_CONTROL", "1")
+	t.Setenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL", "1")
+	const sessionID = "stable-sandbox-session"
+	sandboxRoot, _, _, initialCwd := testPrivateLaunchSandboxRoot(t, sessionID)
+	outsideCwd := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	remoteCalls := 0
+	launchCalls := 0
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launchCalls++
+			return CreateSessionLaunchResult{}, nil
+		}},
+		prepare: func(_ context.Context, preparation CreateSessionPreparation) (CreateSessionPreparation, error) {
+			preparation.Cwd = outsideCwd
+			return preparation, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock,
+		CodexThreadCreator: func(context.Context, string, string, string) (*manifest.Codex, error) {
+			remoteCalls++
+			return &manifest.Codex{SessionID: "must-not-exist"}, nil
+		},
+		CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: initialCwd, Title: "sandbox-preflight", Model: "5.4", Harness: "codex-cli",
+		SessionID: sessionID, SandboxRoot: sandboxRoot, AllowEmptyPrompt: true,
+		Metadata: CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{Enabled: true}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "sandbox.create-authority") {
+		t.Fatalf("CreateSessionWithContext error = %v, want sandbox authority rejection", err)
+	}
+	if remoteCalls != 0 {
+		t.Fatalf("Codex remote thread creations = %d, want 0", remoteCalls)
+	}
+	if launchCalls != 0 {
+		t.Fatalf("runtime launches = %d, want 0", launchCalls)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 || tmuxMock.Sessions["sandbox-preflight"] {
+		t.Fatalf("out-of-authority preparation mutated tmux: created=%v sessions=%v", tmuxMock.CreatedSessions, tmuxMock.Sessions)
+	}
+}
+
+func TestCreateSession_SandboxedCodexRejectsMissingPreparedCwdBeforeRemoteOrTmuxMutation(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("AGM_CODEX_REMOTE_CONTROL", "1")
+	t.Setenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL", "1")
+	const sessionID = "stable-sandbox-session"
+	sandboxRoot, _, workspace, initialCwd := testPrivateLaunchSandboxRoot(t, sessionID)
+	missingCwd := filepath.Join(workspace, "missing")
+	tmuxMock := session.NewMockTmux()
+	remoteCalls := 0
+	launchCalls := 0
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launchCalls++
+			return CreateSessionLaunchResult{}, nil
+		}},
+		prepare: func(_ context.Context, preparation CreateSessionPreparation) (CreateSessionPreparation, error) {
+			preparation.Cwd = missingCwd
+			return preparation, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock,
+		CodexThreadCreator: func(context.Context, string, string, string) (*manifest.Codex, error) {
+			remoteCalls++
+			return &manifest.Codex{SessionID: "must-not-exist"}, nil
+		},
+		CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: initialCwd, Title: "sandbox-preflight-missing", Model: "5.4", Harness: "codex-cli",
+		SessionID: sessionID, SandboxRoot: sandboxRoot, AllowEmptyPrompt: true,
+		Metadata: CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{Enabled: true}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Working directory does not exist") {
+		t.Fatalf("CreateSessionWithContext error = %v, want missing-directory rejection", err)
+	}
+	if remoteCalls != 0 {
+		t.Fatalf("Codex remote thread creations = %d, want 0", remoteCalls)
+	}
+	if launchCalls != 0 {
+		t.Fatalf("runtime launches = %d, want 0", launchCalls)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 || tmuxMock.Sessions["sandbox-preflight-missing"] {
+		t.Fatalf("missing preparation mutated tmux: created=%v sessions=%v", tmuxMock.CreatedSessions, tmuxMock.Sessions)
+	}
+}
+
+func TestValidateFreshSandboxCreateAuthorityNormalizesInternalWorkspaceSymlink(t *testing.T) {
+	const sessionID = "apfs-shaped-session"
+	sandboxRoot, _, workspace, merged := testPrivateLaunchSandboxRoot(t, sessionID)
+	if err := os.Remove(merged); err != nil {
+		t.Fatal(err)
+	}
+	upperWorkDir := filepath.Join(workspace, "upper", "repo")
+	if err := os.MkdirAll(upperWorkDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(workspace, "upper"), merged); err != nil {
+		t.Fatal(err)
+	}
+	requestedWorkDir := filepath.Join(merged, "repo")
+	req := &CreateSessionRequest{
+		Cwd:         requestedWorkDir,
+		SandboxRoot: sandboxRoot,
+		Metadata:    CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{Enabled: true}},
+	}
+
+	got, err := validateFreshSandboxCreateAuthority(req, &createSessionParams{harness: "claude-code"}, sessionID)
+	if err != nil {
+		t.Fatalf("validateFreshSandboxCreateAuthority() error = %v", err)
+	}
+	if got.Cwd != upperWorkDir {
+		t.Fatalf("normalized cwd = %q, want physical APFS workdir %q", got.Cwd, upperWorkDir)
+	}
+	if req.Cwd != requestedWorkDir {
+		t.Fatalf("input request cwd mutated = %q, want original spelling %q", req.Cwd, requestedWorkDir)
+	}
+}
+
+func TestValidateFreshSandboxCreateAuthorityRejectsMissingAuthority(t *testing.T) {
+	req := &CreateSessionRequest{
+		Cwd:      t.TempDir(),
+		Metadata: CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{Enabled: true}},
+	}
+
+	_, err := validateFreshSandboxCreateAuthority(req, &createSessionParams{harness: "codex-cli"}, "stable-session")
+	if !errors.Is(err, config.ErrRuntimeAuthorityUnavailable) {
+		t.Fatalf("validateFreshSandboxCreateAuthority() error = %v, want runtime authority unavailable", err)
+	}
+}
+
+func TestValidateFreshSandboxCreateAuthorityRejectsMissingWorkspaceDirectory(t *testing.T) {
+	const sessionID = "stable-session"
+	sandboxRoot, _, workspace, _ := testPrivateLaunchSandboxRoot(t, sessionID)
+	req := &CreateSessionRequest{
+		Cwd:         filepath.Join(workspace, "deleted-after-preparation"),
+		SandboxRoot: sandboxRoot,
+		Metadata:    CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{Enabled: true}},
+	}
+
+	_, err := validateFreshSandboxCreateAuthority(req, &createSessionParams{harness: "codex-cli"}, sessionID)
+	if err == nil || !strings.Contains(err.Error(), "workspace directory") {
+		t.Fatalf("validateFreshSandboxCreateAuthority() error = %v, want missing workspace directory", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
@@ -784,9 +785,27 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 type circuitBreakerAdmission struct {
 	beforeSpawn        func(...*override.Reservation) ([]*override.Reservation, error)
 	afterAuthorization func()
+	sandboxRoot        config.SandboxRoot
 }
 
-func enforceCircuitBreakers(sessionName string) (*circuitBreakerAdmission, error) {
+var (
+	newCircuitBreakerDiskReader      = circuitbreaker.NewDiskReader
+	defaultCircuitBreakerProcCounter = circuitbreaker.DefaultProcCounter
+)
+
+func configuredSandboxRoot() (config.SandboxRoot, error) {
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		return config.SandboxRoot{}, fmt.Errorf("resolve runtime authority for launch: %w", err)
+	}
+	root, err := authority.Sandboxes()
+	if err != nil {
+		return config.SandboxRoot{}, fmt.Errorf("resolve sandbox authority for launch: %w", err)
+	}
+	return root, nil
+}
+
+func enforceCircuitBreakers(sessionName string, sandboxRoot config.SandboxRoot) (*circuitBreakerAdmission, error) {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
 	// The worker cap defaults to disabled. Do not open session storage merely to
@@ -798,8 +817,15 @@ func enforceCircuitBreakers(sessionName string) (*circuitBreakerAdmission, error
 	}
 	st := circuitbreaker.NewFileSpawnTimer()
 	mr := circuitbreaker.DefaultMemReader()
-	dr := circuitbreaker.DefaultDiskReader()
-	pc := circuitbreaker.DefaultProcCounter()
+	sandboxRootPath, err := sandboxRoot.Path()
+	if err != nil {
+		return nil, fmt.Errorf("project sandbox authority for disk admission: %w", err)
+	}
+	dr, err := newCircuitBreakerDiskReader(sandboxRootPath)
+	if err != nil {
+		return nil, fmt.Errorf("prepare sandbox-volume disk admission: %w", err)
+	}
+	pc := defaultCircuitBreakerProcCounter()
 	br := circuitbreaker.DefaultBrakeReader()
 
 	checkOpts := []circuitbreaker.CheckOption{
@@ -832,7 +858,7 @@ func enforceCircuitBreakers(sessionName string) (*circuitBreakerAdmission, error
 		mu       sync.Mutex
 		consumed bool
 	)
-	admission := &circuitBreakerAdmission{}
+	admission := &circuitBreakerAdmission{sandboxRoot: sandboxRoot}
 	admission.beforeSpawn = func(additionalReservations ...*override.Reservation) ([]*override.Reservation, error) {
 		mu.Lock()
 		if consumed {

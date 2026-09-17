@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -170,6 +171,7 @@ type CreateSessionRequest struct {
 	Persistent bool   `json:"persistent,omitempty"`
 
 	SessionID              string                `json:"-"`
+	SandboxRoot            config.SandboxRoot    `json:"-"`
 	Caller                 CreateSessionCaller   `json:"-"`
 	Metadata               CreateSessionMetadata `json:"-"`
 	PermissionMode         string                `json:"-"`
@@ -431,6 +433,10 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, prepareErr
 	}
 	req, params = preparedRequest, preparedParams
+	req, err = validateFreshSandboxCreateAuthority(req, params, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	if params.harness == "pi-cli" {
 		prepared, prepareErr := preparePiCreateRequest(req, sessionID)
 		if prepareErr != nil {
@@ -579,6 +585,34 @@ func prepareCreateSessionAfterReservation(
 		return nil, nil, ErrStorageError("prepare harness launch", err)
 	}
 	return &preparedRequest, preparedParams, nil
+}
+
+// validateFreshSandboxCreateAuthority closes the gap between a surface's
+// sandbox preparation and the first provider or terminal side effect. Managed
+// Claude and Codex sessions may launch only from the exact stable AGM session
+// workspace selected by the configured sandbox authority. The physical path
+// returned by the authority replaces provider-facing symlink spellings (for
+// example, APFS merged -> upper) before any downstream consumer sees them.
+func validateFreshSandboxCreateAuthority(
+	req *CreateSessionRequest,
+	params *createSessionParams,
+	sessionID string,
+) (*CreateSessionRequest, error) {
+	if req == nil || params == nil || req.Metadata.Sandbox == nil || !req.Metadata.Sandbox.Enabled {
+		return req, nil
+	}
+	switch params.harness {
+	case "claude-code", "codex-cli":
+	default:
+		return req, nil
+	}
+	physicalCwd, err := req.SandboxRoot.ValidateExistingWorkspaceDirectory(sessionID, req.Cwd)
+	if err != nil {
+		return nil, ErrStorageError("sandbox.create-authority", err)
+	}
+	normalized := *req
+	normalized.Cwd = physicalCwd
+	return &normalized, nil
 }
 
 func verifyCreateCodexHookTrust(ctx context.Context, req *CreateSessionRequest, params *createSessionParams) error {
@@ -769,6 +803,8 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		Model:            params.model,
 		SessionName:      params.name,
 		SessionID:        sessionID,
+		SandboxRoot:      req.SandboxRoot,
+		SandboxEnabled:   req.Metadata.Sandbox != nil && req.Metadata.Sandbox.Enabled,
 		WorkDir:          req.Cwd,
 		Persistent:       params.persistent,
 		PermissionMode:   req.PermissionMode,

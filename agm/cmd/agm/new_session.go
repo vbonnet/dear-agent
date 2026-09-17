@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
@@ -206,11 +208,13 @@ func runCreateSessionLifecycle(
 		return err
 	}
 	var sandboxInfo *manifest.SandboxConfig
+	var sandboxRollback *sandboxCleanup
 	var extraAddDirs []string
 	var trustPreConfigured bool
 	var bypassCodexHookTrust bool
 	runtime := newCLICreateSessionRuntime(sessionName, exists, false, admission)
 	runtime.launch = func(launchCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+		spec = applyCreateLifecycleAdmission(spec, admission)
 		return launchCLICreateSession(launchCtx, spec, exists, trustPreConfigured)
 	}
 	runtime.prepare = func(prepareCtx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
@@ -218,8 +222,9 @@ func runCreateSessionLifecycle(
 		if prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
-		preparedSandbox, preparedWorkDir, prepareErr := maybeProvisionSandbox(prepareCtx, input.SessionID, input.Cwd)
+		preparedSandbox, preparedWorkDir, preparedCleanup, prepareErr := maybeProvisionSandbox(prepareCtx, input.SessionID, input.Cwd)
 		sandboxInfo = preparedSandbox
+		sandboxRollback = preparedCleanup
 		if prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
@@ -242,8 +247,15 @@ func runCreateSessionLifecycle(
 		}, nil
 	}
 	defer func() {
-		if retErr != nil && sandboxInfo != nil {
-			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
+		if retErr == nil || sandboxRollback == nil {
+			return
+		}
+		debug.Log("Cleaning up sandbox after failed create: %s", sandboxRollback.sessionID)
+		if cleanupErr := sandboxRollback.rollback(ctx); cleanupErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("cleanup sandbox %s: %w", sandboxRollback.sessionID, cleanupErr))
+			debug.Log("Failed to cleanup sandbox: %v", cleanupErr)
+		} else {
+			debug.Log("Sandbox cleaned up successfully")
 		}
 	}()
 	opCtx := &ops.OpContext{
@@ -257,6 +269,10 @@ func runCreateSessionLifecycle(
 			return adapter, func() { _ = adapter.Close() }, nil
 		},
 	}
+	var sandboxRoot config.SandboxRoot
+	if admission != nil {
+		sandboxRoot = admission.sandboxRoot
+	}
 	_, err = ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
 		Cwd:                  workDir,
 		Prompt:               createPrompt,
@@ -265,6 +281,7 @@ func runCreateSessionLifecycle(
 		Harness:              harnessName,
 		Persistent:           persistent,
 		SessionID:            sessionID,
+		SandboxRoot:          sandboxRoot,
 		Caller:               ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
 		PermissionMode:       modeFlagValue,
 		DisableAutoMode:      noAutoMode,
@@ -293,6 +310,19 @@ func runCreateSessionLifecycle(
 		},
 	})
 	return err
+}
+
+// applyCreateLifecycleAdmission preserves the live circuit-breaker callbacks
+// when the CLI replaces the runtime's default launch adapter to add sandbox
+// trust preparation. Dropping them would leave the earlier preflight check as
+// a stale snapshot and skip the one-shot launch-boundary recheck.
+func applyCreateLifecycleAdmission(spec ops.HarnessLaunchSpec, admission *circuitBreakerAdmission) ops.HarnessLaunchSpec {
+	if admission == nil {
+		return spec
+	}
+	spec.BeforeSpawn = admission.beforeSpawn
+	spec.AfterAuthorization = admission.afterAuthorization
+	return spec
 }
 
 // prepareCodexHookTrustBypass validates and attests a requested hook-trust
@@ -367,13 +397,17 @@ func preflight(sessionName string) (*circuitBreakerAdmission, error) {
 	if err := rebindAuthorityAfterTestEnvironment(hostHome); err != nil {
 		return nil, err
 	}
+	sandboxRoot, err := configuredSandboxRoot()
+	if err != nil {
+		return nil, err
+	}
 	if testMode {
-		return nil, nil
+		return &circuitBreakerAdmission{sandboxRoot: sandboxRoot}, nil
 	}
 	if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 		return nil, dupErr
 	}
-	admission, err := enforceCircuitBreakers(sessionName)
+	admission, err := enforceCircuitBreakers(sessionName, sandboxRoot)
 	if err != nil {
 		return nil, err
 	}

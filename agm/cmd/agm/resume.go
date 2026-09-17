@@ -295,11 +295,16 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	if err := configureWorkerWriteBoundary(m.Harness, manifestRole(m), guardPath, writeRoots); err != nil {
 		return err
 	}
+	sandboxRoot, err := configuredSandboxRoot()
+	if err != nil {
+		return err
+	}
 	tmuxAdapter := session.NewRealTmux()
 	req := &ops.ResumeSessionRequest{
 		SessionID:       sessionID,
 		ManifestPath:    manifestPath,
 		Prompt:          prompt,
+		SandboxRoot:     sandboxRoot,
 		CurrentAddDirs:  currentAddDirs,
 		ExcludedAddDirs: append([]string{}, cfg.Sandbox.Repos...),
 		OnEvent:         presentResumeEvent,

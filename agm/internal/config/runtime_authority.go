@@ -140,6 +140,50 @@ func (r SandboxRoot) Workspace(sessionID string) (string, error) {
 	return resolved, nil
 }
 
+// ValidateWorkspacePath proves that candidate physically resolves to the
+// retained workspace itself or one of its descendants for the stable AGM
+// session ID. Internal symlink spellings are permitted because the APFS
+// provider exposes merged as a link to upper; links that resolve outside the
+// exact session workspace are rejected. The returned path is the current
+// physical resolution, not a stable filesystem handle.
+func (r SandboxRoot) ValidateWorkspacePath(sessionID, candidate string) (string, error) {
+	workspace, err := r.Workspace(sessionID)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(candidate) || filepath.Clean(candidate) != candidate {
+		return "", fmt.Errorf("sandbox workspace path %q must be a clean absolute path", candidate)
+	}
+	resolved, err := resolvePhysicalDirectory(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve sandbox workspace path %q: %w", candidate, err)
+	}
+	relative, err := filepath.Rel(workspace, resolved)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("sandbox workspace path %q is outside %q", resolved, workspace)
+	}
+	return resolved, nil
+}
+
+// ValidateExistingWorkspaceDirectory proves the same physical containment as
+// ValidateWorkspacePath and additionally requires the resolved target to
+// exist as a directory. Use it for provider results and persisted launch state;
+// keep ValidateWorkspacePath for prospective workspace paths before creation.
+func (r SandboxRoot) ValidateExistingWorkspaceDirectory(sessionID, candidate string) (string, error) {
+	resolved, err := r.ValidateWorkspacePath(sessionID, candidate)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("inspect sandbox workspace directory %q: %w", resolved, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("sandbox workspace path %q is not a directory", resolved)
+	}
+	return resolved, nil
+}
+
 func (a RuntimeAuthority) valid() bool {
 	return validRetainedRoot(a.home.path) &&
 		validRetainedRoot(a.storage.path) &&

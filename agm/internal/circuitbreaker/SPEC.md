@@ -3,6 +3,7 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Feature: `agm/test/bdd/features/sandbox_volume_admission.feature`
 
 <!-- Last audited at: 2026-07-03 -->
 
@@ -45,3 +46,5 @@ machine state without false positives that would block healthy agent sessions.
 **CBRK-15** When the provider-quota gate cannot obtain a usable reading, the system shall pass that gate, inverting the fail-closed behaviour of the resource gates because a missing quota reading is not evidence that a budget is spent.
 
 **CBRK-16** When the provider-quota gate refuses a spawn, the system shall report the constraining provider, the reason, the window reset time when known, and the documented override.
+
+**CBRK-17** When disk headroom admission receives a planned sandbox path, the system shall measure free space on the filesystem containing that path instead of the filesystem containing HOME and shall return a failed disk gate when the target volume cannot be prepared or measured.

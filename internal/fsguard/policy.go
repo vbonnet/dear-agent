@@ -2,16 +2,20 @@ package fsguard
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Environment variables that configure the policy at runtime. They let an
 // operator widen or tighten the sandbox without recompiling — e.g. to protect
 // an additional source tree on a different host, or to redirect the violation
-// log. All path values support ~ and $HOME expansion and may be separated by
-// the OS path-list separator (":" on Unix) or commas.
+// log. Path values support ~ and $HOME expansion. The plural path variables
+// accept the OS path-list separator (":" on Unix) or commas; the scalar
+// sandbox workspace does not.
 const (
 	// EnvConfig points at a JSON config file (see Config). Loaded first; env
 	// vars below layer on top of it.
@@ -22,6 +26,10 @@ const (
 	EnvWritable = "FSGUARD_WRITABLE_PATHS"
 	// EnvWorktreesDir overrides the writable worktree root (default ~/worktrees).
 	EnvWorktreesDir = "FSGUARD_WORKTREES_DIR"
+	// EnvSandboxWorkspace replaces the single writable sandbox subtree for a
+	// managed launch. When unset, the historical ~/.agm/sandboxes parent remains
+	// writable for compatibility. Unlike EnvWritable, this is authoritative.
+	EnvSandboxWorkspace = "FSGUARD_SANDBOX_WORKSPACE"
 	// EnvLog overrides the violation log path (default ~/.fsguard/violations.jsonl).
 	EnvLog = "FSGUARD_LOG"
 	// EnvDisableLog, when non-empty, disables violation logging entirely.
@@ -32,12 +40,18 @@ const (
 // and which are protected. A zero Policy is invalid; build one with
 // DefaultPolicy and (optionally) layer config/env on top via LoadConfig.
 //
-// Classification precedence (see Guard.Classify) is: Writable carve-outs win
-// over everything, then WorktreesDir is allowed, then Protected roots are
+// Classification precedence (see Guard.Classify) is: the exact
+// SandboxWorkspace wins and shadows sibling paths below its parent, then
+// Writable carve-outs and WorktreesDir are allowed, then Protected roots are
 // blocked, then the home-dotfile rule, then a default deny.
 type Policy struct {
 	// WorktreesDir is the writable root for all agent work (default ~/worktrees).
 	WorktreesDir string `json:"worktrees_dir"`
+	// SandboxWorkspace is the one authoritative writable sandbox subtree. Its
+	// default is the historical parent-wide ~/.agm/sandboxes allowance; managed
+	// launches replace it with their exact per-session child. An empty value
+	// allows no sandbox subtree after an invalid explicit override.
+	SandboxWorkspace string `json:"-"`
 	// Protected roots block writes beneath them (default: ~/src). The ~/src
 	// entry receives bespoke "create a worktree" guidance; other entries get a
 	// generic protected-path message.
@@ -72,8 +86,9 @@ type Config struct {
 // agents can run `bd`/`dolt` against the canonical Beads DB.
 func DefaultPolicy(home string) Policy {
 	return Policy{
-		WorktreesDir: filepath.Join(home, "worktrees"),
-		Protected:    []string{filepath.Join(home, "src")},
+		WorktreesDir:     filepath.Join(home, "worktrees"),
+		SandboxWorkspace: filepath.Join(home, ".agm", "sandboxes"),
+		Protected:        []string{filepath.Join(home, "src")},
 		Writable: []string{
 			"/dev",
 			filepath.Join(home, ".auto-memory"),
@@ -82,7 +97,6 @@ func DefaultPolicy(home string) Policy {
 			"/sessions",
 			filepath.Join(home, "beads"),
 			filepath.Join(home, ".agm", "vroom"),
-			filepath.Join(home, ".agm", "sandboxes"),
 		},
 	}
 }
@@ -120,8 +134,8 @@ func LoadConfig() (Config, error) {
 			loadErr = fileErr
 		}
 	}
-	applyEnvOverrides(&cfg, home)
-	return cfg, loadErr
+	envErr := applyEnvOverrides(&cfg, home)
+	return cfg, errors.Join(loadErr, envErr)
 }
 
 // mergeConfigFile reads a JSON config file and layers it onto cfg: list fields
@@ -150,10 +164,23 @@ func mergeConfigFile(cfg *Config, path, home string) error {
 	return nil
 }
 
-// applyEnvOverrides layers FSGUARD_* environment variables onto cfg.
-func applyEnvOverrides(cfg *Config, home string) {
+// applyEnvOverrides layers FSGUARD_* environment variables onto cfg. An
+// explicitly set but invalid sandbox workspace clears that allowance and
+// returns an error; the other overrides are still applied so their independent
+// semantics are preserved.
+func applyEnvOverrides(cfg *Config, home string) error {
+	var sandboxWorkspaceErr error
 	if v := os.Getenv(EnvWorktreesDir); v != "" {
 		cfg.Policy.WorktreesDir = expandHome(v, home)
+	}
+	if v, configured := os.LookupEnv(EnvSandboxWorkspace); configured {
+		cfg.Policy.SandboxWorkspace = ""
+		workspace, err := validateSandboxWorkspace(v, home)
+		if err != nil {
+			sandboxWorkspaceErr = err
+		} else {
+			cfg.Policy.SandboxWorkspace = workspace
+		}
 	}
 	cfg.Policy.Protected = append(cfg.Policy.Protected, expandAll(splitList(os.Getenv(EnvProtected)), home)...)
 	cfg.Policy.Writable = append(cfg.Policy.Writable, expandAll(splitList(os.Getenv(EnvWritable)), home)...)
@@ -168,6 +195,43 @@ func applyEnvOverrides(cfg *Config, home string) {
 			cfg.Policy.Enforcement = level
 		}
 	}
+	return sandboxWorkspaceErr
+}
+
+// validateSandboxWorkspace accepts exactly one clean absolute subtree. Rejecting
+// control characters, lexical traversal, and the filesystem root prevents a
+// malformed launch handoff from widening the guard; callers retain an empty
+// sandbox allowance on error.
+func validateSandboxWorkspace(value, home string) (string, error) {
+	if value == "" {
+		return "", fmt.Errorf("%s must not be empty", EnvSandboxWorkspace)
+	}
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("%s must not contain control characters", EnvSandboxWorkspace)
+	}
+
+	expanded := value
+	switch {
+	case value == "~" || value == "$HOME" || value == "${HOME}":
+		expanded = home
+	case strings.HasPrefix(value, "~/"):
+		expanded = home + value[1:]
+	case strings.HasPrefix(value, "$HOME/"):
+		expanded = home + value[len("$HOME"):]
+	case strings.HasPrefix(value, "${HOME}/"):
+		expanded = home + value[len("${HOME}"):]
+	}
+	if !filepath.IsAbs(expanded) {
+		return "", fmt.Errorf("%s must be an absolute path", EnvSandboxWorkspace)
+	}
+	clean := filepath.Clean(expanded)
+	if clean != expanded {
+		return "", fmt.Errorf("%s must be a clean path", EnvSandboxWorkspace)
+	}
+	if filepath.Dir(clean) == clean {
+		return "", fmt.Errorf("%s must not be the filesystem root", EnvSandboxWorkspace)
+	}
+	return clean, nil
 }
 
 // splitList splits a path list on the OS list separator, commas, and newlines,

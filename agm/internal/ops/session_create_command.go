@@ -1,11 +1,13 @@
 package ops
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -21,6 +23,8 @@ type HarnessLaunchSpec struct {
 	Model           string
 	SessionName     string
 	SessionID       string
+	SandboxRoot     config.SandboxRoot
+	SandboxEnabled  bool
 	ResumeID        string
 	WorkDir         string
 	Persistent      bool
@@ -163,6 +167,13 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 	switch agent.NormalizeHarnessName(spec.Harness) {
 	case "claude-code":
 		launch, modeApplied := claudeLaunch(spec)
+		authority, err := projectPrivateLaunchAuthority(spec)
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		launch.DiskRoot = authority.diskRoot
+		launch.SandboxWorkspace = authority.sandboxWorkspace
+		launch.WorkDir = authority.workDir
 		prepared, err := harnessexec.PrepareClaudeCommand(launch, os.Environ())
 		if err != nil {
 			return HarnessLaunchCommand{}, err
@@ -173,6 +184,13 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 		}, nil
 	case "codex-cli":
 		launch, modeApplied := codexLaunch(spec)
+		authority, err := projectPrivateLaunchAuthority(spec)
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		launch.DiskRoot = authority.diskRoot
+		launch.SandboxWorkspace = authority.sandboxWorkspace
+		launch.WorkDir = authority.workDir
 		launch, reservations, err := reserveCodexLaunch(launch)
 		if err != nil {
 			return HarnessLaunchCommand{}, err
@@ -220,6 +238,45 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 		launch.BindOverrideReservations = prepared.BindOverrideReservations
 		return launch, nil
 	}
+}
+
+type privateLaunchAuthority struct {
+	diskRoot         string
+	sandboxWorkspace string
+	workDir          string
+}
+
+// projectPrivateLaunchAuthority materializes the configured parent only for
+// disk-volume admission and, for a genuinely provisioned sandbox, derives its
+// exact per-session child for FSGUARD. Authorizing the parent for writes would
+// let one session mutate sibling sandboxes. For a managed sandbox, workDir is
+// returned in its current physical spelling so the private handoff does not
+// preserve a mutable provider alias.
+func projectPrivateLaunchAuthority(spec HarnessLaunchSpec) (privateLaunchAuthority, error) {
+	diskRoot, err := spec.SandboxRoot.Path()
+	if errors.Is(err, config.ErrRuntimeAuthorityUnavailable) {
+		if spec.SandboxEnabled {
+			return privateLaunchAuthority{}, fmt.Errorf("project sandbox workspace authority: %w", err)
+		}
+		return privateLaunchAuthority{workDir: spec.WorkDir}, nil
+	}
+	if err != nil {
+		return privateLaunchAuthority{}, fmt.Errorf("project sandbox disk authority: %w", err)
+	}
+	if !spec.SandboxEnabled {
+		return privateLaunchAuthority{diskRoot: diskRoot, workDir: spec.WorkDir}, nil
+	}
+	workspace, err := spec.SandboxRoot.Workspace(spec.SessionID)
+	if err != nil {
+		return privateLaunchAuthority{}, fmt.Errorf("project sandbox workspace authority: %w", err)
+	}
+	workDir, err := spec.SandboxRoot.ValidateWorkspacePath(spec.SessionID, spec.WorkDir)
+	if err != nil {
+		return privateLaunchAuthority{}, fmt.Errorf("validate sandbox launch working directory: %w", err)
+	}
+	return privateLaunchAuthority{
+		diskRoot: diskRoot, sandboxWorkspace: workspace, workDir: workDir,
+	}, nil
 }
 
 func reserveCodexLaunch(

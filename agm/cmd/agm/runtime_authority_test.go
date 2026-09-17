@@ -6,8 +6,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
+
+type ampleDiskReader struct{}
+
+func (ampleDiskReader) FreeDiskGB() (float64, error) { return 1_000_000, nil }
+
+type zeroAgentProcCounter struct{}
+
+func (zeroAgentProcCounter) CountAgentProcs() (int, error) { return 0, nil }
 
 func TestLoadConfigWithFlagsFailsClosedWhenCentralizedBootstrapFails(t *testing.T) {
 	root := t.TempDir()
@@ -139,6 +150,94 @@ func TestPreflightRebindsRuntimeAuthorityToIsolatedHome(t *testing.T) {
 	}
 	if strings.HasPrefix(sandboxPath, physicalHostHome+string(filepath.Separator)) {
 		t.Fatalf("sandbox root %q still lives under the host HOME %q", sandboxPath, physicalHostHome)
+	}
+}
+
+func TestEnforceCircuitBreakersUsesConfiguredSandboxVolume(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
+	t.Setenv("AGM_MAX_WORKERS", "0")
+	t.Setenv("AGM_MAX_LOAD5", "1000000")
+	t.Setenv("AGM_MIN_FREE_MEM_PCT", "0")
+	t.Setenv("AGM_MIN_FREE_DISK_GB", "1")
+	t.Setenv("AGM_MAX_AGENT_PROCS", "1000000")
+	t.Setenv("AGM_ADMISSION_ALLOW_UNVERIFIED", "1")
+
+	loaded, err := config.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxRoot, err := mustAuthority(t, loaded).Sandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath, err := sandboxRoot.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalDiskReader := newCircuitBreakerDiskReader
+	originalProcCounter := defaultCircuitBreakerProcCounter
+	t.Cleanup(func() {
+		newCircuitBreakerDiskReader = originalDiskReader
+		defaultCircuitBreakerProcCounter = originalProcCounter
+	})
+	defaultCircuitBreakerProcCounter = func() circuitbreaker.ProcCounter { return zeroAgentProcCounter{} }
+	calls := 0
+	newCircuitBreakerDiskReader = func(path string) (circuitbreaker.DiskReader, error) {
+		calls++
+		if path != wantPath {
+			t.Fatalf("NewDiskReader path = %q, want configured sandbox volume %q", path, wantPath)
+		}
+		return ampleDiskReader{}, nil
+	}
+
+	admission, err := enforceCircuitBreakers("sandbox-volume-probe", sandboxRoot)
+	if err != nil {
+		t.Fatalf("enforceCircuitBreakers() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("NewDiskReader calls = %d, want 1", calls)
+	}
+	gotPath, err := admission.sandboxRoot.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != wantPath {
+		t.Fatalf("admission sandbox root = %q, want %q", gotPath, wantPath)
+	}
+}
+
+func TestApplyCreateLifecycleAdmissionRestoresLaunchBoundaryCallbacks(t *testing.T) {
+	beforeCalls := 0
+	afterCalls := 0
+	admission := &circuitBreakerAdmission{
+		beforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
+			beforeCalls++
+			return nil, nil
+		},
+		afterAuthorization: func() { afterCalls++ },
+	}
+
+	spec := applyCreateLifecycleAdmission(ops.HarnessLaunchSpec{}, admission)
+	if spec.BeforeSpawn == nil || spec.AfterAuthorization == nil {
+		t.Fatal("applyCreateLifecycleAdmission() dropped launch-boundary callbacks")
+	}
+	if _, err := spec.BeforeSpawn(); err != nil {
+		t.Fatal(err)
+	}
+	spec.AfterAuthorization()
+	if beforeCalls != 1 || afterCalls != 1 {
+		t.Fatalf("callback calls = before %d after %d, want 1 each", beforeCalls, afterCalls)
+	}
+
+	untouched := applyCreateLifecycleAdmission(ops.HarnessLaunchSpec{}, nil)
+	if untouched.BeforeSpawn != nil || untouched.AfterAuthorization != nil {
+		t.Fatal("nil admission installed callbacks")
 	}
 }
 

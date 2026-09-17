@@ -22,6 +22,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/internal/fsguard"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
@@ -74,14 +75,48 @@ var (
 type reserveOverrideClaim func(override.Request) (*override.Reservation, error)
 type checkLaunchAdmission func() circuitbreaker.CheckResult
 
+// diskAdmissionPolicy is the caller-side disk policy snapshot carried through
+// an owner-only handoff. The root selects the probed volume; minFreeGB retains
+// the caller's validated threshold so a stale tmux/pane environment cannot
+// weaken the final executor check. A zero threshold is valid and therefore
+// must be represented explicitly in the serialized handoff.
+type diskAdmissionPolicy struct {
+	root      string
+	minFreeGB float64
+}
+
+func snapshotDiskAdmissionPolicy(root string) diskAdmissionPolicy {
+	return diskAdmissionPolicy{
+		root:      root,
+		minFreeGB: circuitbreaker.DefaultConfig().MinFreeDiskGB,
+	}
+}
+
+func validateDiskAdmissionPolicy(policy diskAdmissionPolicy) error {
+	if math.IsNaN(policy.minFreeGB) || math.IsInf(policy.minFreeGB, 0) || policy.minFreeGB < 0 {
+		return fmt.Errorf("minimum free disk threshold must be finite and non-negative")
+	}
+	return nil
+}
+
+func circuitBreakerConfigForDiskPolicy(policy diskAdmissionPolicy) circuitbreaker.Config {
+	cfg := circuitbreaker.DefaultConfig()
+	cfg.MinFreeDiskGB = policy.minFreeGB
+	return cfg
+}
+
 func commitAuthenticatedLaunchOverrideProofs(
 	sessionName string,
+	diskPolicy diskAdmissionPolicy,
 	proofs ...override.AuthorizationProof,
 ) error {
+	if err := validateDiskAdmissionPolicy(diskPolicy); err != nil {
+		return fmt.Errorf("validate private launch disk policy: %w", err)
+	}
 	reservations, err := reserveExecutorLaunchOverrides(
 		sessionName,
 		proofs,
-		currentLaunchAdmission,
+		func() circuitbreaker.CheckResult { return currentLaunchAdmission(diskPolicy) },
 		override.Reserve,
 	)
 	if err != nil {
@@ -186,17 +221,106 @@ func validateExecutorAdmissionResult(result circuitbreaker.CheckResult) error {
 	)
 }
 
-var currentLaunchAdmission = func() circuitbreaker.CheckResult {
+var currentLaunchAdmission = func(diskPolicy diskAdmissionPolicy) circuitbreaker.CheckResult {
+	cfg := circuitBreakerConfigForDiskPolicy(diskPolicy)
+	diskReader := circuitbreaker.DefaultDiskReader()
+	if diskPolicy.root != "" {
+		configuredReader, err := circuitbreaker.NewDiskReader(diskPolicy.root)
+		if err != nil {
+			return circuitbreaker.CheckResult{
+				Allowed: false,
+				Gates: []circuitbreaker.GateResult{{
+					Gate: "disk", Passed: false,
+					Message: fmt.Sprintf("could not prepare sandbox-volume disk check: %v (failing closed — refusing spawn)", err),
+				}},
+			}
+		}
+		diskReader = configuredReader
+	}
 	return circuitbreaker.Check(
-		circuitbreaker.DefaultConfig(),
+		cfg,
 		circuitbreaker.DefaultLoadReader(),
 		circuitbreaker.TmuxWorkerCounter{},
 		circuitbreaker.NewFileSpawnTimer(),
 		circuitbreaker.DefaultMemReader(),
-		circuitbreaker.WithDiskReader(circuitbreaker.DefaultDiskReader()),
+		circuitbreaker.WithDiskReader(diskReader),
 		circuitbreaker.WithProcCounter(circuitbreaker.DefaultProcCounter()),
 		circuitbreaker.WithBrakeReader(circuitbreaker.DefaultBrakeReader()),
 	)
+}
+
+func checkSandboxDiskAdmission(diskPolicy diskAdmissionPolicy) error {
+	if err := validateDiskAdmissionPolicy(diskPolicy); err != nil {
+		return err
+	}
+	reader := circuitbreaker.DefaultDiskReader()
+	if diskPolicy.root != "" {
+		configuredReader, err := circuitbreaker.NewDiskReader(diskPolicy.root)
+		if err != nil {
+			return fmt.Errorf("prepare sandbox-volume disk check: %w", err)
+		}
+		reader = configuredReader
+	}
+	cfg := circuitBreakerConfigForDiskPolicy(diskPolicy)
+	result := circuitbreaker.CheckDiskHeadroom(cfg, reader)
+	if !result.Passed {
+		return errors.New(result.Message)
+	}
+	return nil
+}
+
+var currentSandboxDiskAdmission = checkSandboxDiskAdmission
+
+// resolvePrivateSandboxWorkDir re-resolves the command-bound working
+// directory at the private executor. A managed workspace may expose an
+// internal provider symlink (APFS merged -> upper), but its physical target
+// must remain inside the exact handoff workspace. The returned spelling is
+// physical so later argv/chdir use does not retain that mutable alias. This is
+// a path snapshot, not an open directory handle; same-UID races after this
+// check remain a separate hardening problem.
+func resolvePrivateSandboxWorkDir(workDir, sandboxWorkspace string) (string, error) {
+	if sandboxWorkspace == "" {
+		return workDir, nil
+	}
+	for _, field := range []struct{ name, value string }{
+		{name: "sandbox workspace", value: sandboxWorkspace},
+		{name: "workdir", value: workDir},
+	} {
+		if !filepath.IsAbs(field.value) || filepath.Clean(field.value) != field.value {
+			return "", fmt.Errorf("%s must be a clean absolute path", field.name)
+		}
+	}
+	physicalWorkspace, err := filepath.EvalSymlinks(sandboxWorkspace)
+	if err != nil {
+		return "", fmt.Errorf("resolve sandbox workspace: %w", err)
+	}
+	if physicalWorkspace != sandboxWorkspace {
+		return "", fmt.Errorf(
+			"sandbox workspace %q no longer resolves to its exact physical authority (resolved %q)",
+			sandboxWorkspace, physicalWorkspace,
+		)
+	}
+	physicalWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve sandbox workdir: %w", err)
+	}
+	for label, path := range map[string]string{
+		"sandbox workspace": physicalWorkspace,
+		"sandbox workdir":   physicalWorkDir,
+	} {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return "", fmt.Errorf("inspect %s: %w", label, statErr)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("%s %q is not a directory", label, path)
+		}
+	}
+	relative, err := filepath.Rel(physicalWorkspace, physicalWorkDir)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("sandbox workdir %q is outside workspace %q", physicalWorkDir, physicalWorkspace)
+	}
+	return filepath.Clean(physicalWorkDir), nil
 }
 
 var codexAllowedEnvironment = []string{
@@ -245,6 +369,7 @@ var paneRuntimeEnvironment = map[string]bool{
 var claudeHandoffEnvironment = map[string]bool{
 	auth.OAuthEnvVar: true, "ANTHROPIC_API_KEY": true,
 	"OTEL_EXPORTER_OTLP_ENDPOINT": true, "OTEL_EXPORTER_OTLP_HEADERS": true,
+	fsguard.EnvSandboxWorkspace: true,
 }
 
 // CodexLaunch contains the non-secret metadata AGM may place in a tmux launch
@@ -253,6 +378,8 @@ type CodexLaunch struct {
 	Executable             string
 	HandoffPath            string
 	SessionName            string
+	DiskRoot               string
+	SandboxWorkspace       string
 	Model                  string
 	WorkDir                string
 	Sandbox                string
@@ -282,6 +409,8 @@ type ClaudeLaunch struct {
 	HandoffPath            string
 	SessionName            string
 	SessionID              string
+	DiskRoot               string
+	SandboxWorkspace       string
 	ResumeID               string
 	WorkDir                string
 	Model                  string
@@ -541,6 +670,7 @@ func runHarness(args []string) error {
 	}
 	if err := commitLaunchOverrideProofs(
 		request.SessionName,
+		snapshotDiskAdmissionPolicy(""),
 		handoff.OverrideProofs...,
 	); err != nil {
 		return fmt.Errorf("commit harness launch override transaction: %w", err)
@@ -604,18 +734,15 @@ func runCodex(args []string) error {
 	if err != nil {
 		return err
 	}
+	request.DiskPolicy = snapshotDiskAdmissionPolicy("")
 	environ := CodexEnvironment(os.Environ(), request.SessionName)
 	if request.BypassHooks && request.HandoffPath == "" {
 		return errors.New("invalid Codex launch request: hook-trust bypass requires a prepared private handoff")
 	}
 	if request.HandoffPath != "" {
-		var binding *codexLaunchBinding
-		if request.BypassHooks {
-			bound := bindCodexLaunch(request.launch())
-			binding = &bound
-		}
+		bound := bindCodexLaunch(request.launch())
 		handoff, handoffErr := consumeHandoff(
-			request.HandoffPath, CodexProtocol, request.HookRoot, binding,
+			request.HandoffPath, CodexProtocol, request.HookRoot, &bound,
 		)
 		if handoffErr != nil {
 			return handoffErr
@@ -632,6 +759,17 @@ func runCodex(args []string) error {
 		request.RecordSpawn = handoff.RecordSpawn
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
 		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
+		if handoff.SandboxWorkspace != "" {
+			environ = overlayEnvironment(environ, []string{fsguard.EnvSandboxWorkspace + "=" + handoff.SandboxWorkspace})
+		}
+		request.DiskPolicy = diskAdmissionPolicy{
+			root: handoff.DiskRoot, minFreeGB: *handoff.MinFreeDiskGB,
+		}
+		request.SandboxWorkspace = handoff.SandboxWorkspace
+	}
+	request.WorkDir, err = resolvePrivateSandboxWorkDir(request.WorkDir, request.SandboxWorkspace)
+	if err != nil {
+		return fmt.Errorf("validate private Codex working directory: %w", err)
 	}
 	// The caller snapshot can come from a process outside the target pane.
 	// Keep the child's logical working directory aligned with the validated
@@ -660,11 +798,22 @@ func runCodex(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve codex executable: %w", err)
 	}
+	request.WorkDir, err = resolvePrivateSandboxWorkDir(request.WorkDir, request.SandboxWorkspace)
+	if err != nil {
+		return fmt.Errorf("revalidate private Codex working directory at executable boundary: %w", err)
+	}
+	environ = overlayEnvironment(environ, []string{"PWD=" + request.WorkDir})
 	argv := append([]string{"codex"}, request.argv()...)
+	// Repeat the narrow disk gate after every fallible preparation step. This is
+	// the final live sandbox-volume observation before launch effects commit and
+	// the executor replaces itself, including for launches with no override proof.
+	if err := currentSandboxDiskAdmission(request.DiskPolicy); err != nil {
+		return fmt.Errorf("private Codex launch denied by sandbox-volume disk admission: %w", err)
+	}
 	// Commit every prepared launch override as one transaction only after all
 	// fallible attestation, helper, configuration, and executable checks have
 	// succeeded. This is the final userspace boundary before exec.
-	if err := commitLaunchOverrideProofs(request.SessionName, request.OverrideProofs...); err != nil {
+	if err := commitLaunchOverrideProofs(request.SessionName, request.DiskPolicy, request.OverrideProofs...); err != nil {
 		return fmt.Errorf("commit Codex launch override transaction: %w", err)
 	}
 	if request.RecordSpawn {
@@ -683,7 +832,10 @@ func runClaude(args []string) error {
 	if err != nil {
 		return err
 	}
-	parent := os.Environ()
+	request.DiskPolicy = snapshotDiskAdmissionPolicy("")
+	// A direct private invocation must not inherit authority left in a long-lived
+	// pane either. Handoff launches may add back only their validated snapshot.
+	parent := removeEnvironment(os.Environ(), map[string]bool{fsguard.EnvSandboxWorkspace: true})
 	token := ""
 	if request.HandoffPath != "" {
 		handoff, handoffErr := consumeHandoff(request.HandoffPath, ClaudeProtocol, "")
@@ -697,6 +849,13 @@ func runClaude(args []string) error {
 		}
 		parent = removeEnvironment(parent, claudeHandoffEnvironment)
 		parent = overlayEnvironment(parent, handoff.Environment)
+		if handoff.SandboxWorkspace != "" {
+			parent = overlayEnvironment(parent, []string{fsguard.EnvSandboxWorkspace + "=" + handoff.SandboxWorkspace})
+		}
+		request.DiskPolicy = diskAdmissionPolicy{
+			root: handoff.DiskRoot, minFreeGB: *handoff.MinFreeDiskGB,
+		}
+		request.SandboxWorkspace = handoff.SandboxWorkspace
 		token = environmentMap(handoff.Environment)[auth.OAuthEnvVar]
 		request.OverrideProofs = append([]override.AuthorizationProof(nil), handoff.OverrideProofs...)
 		request.RecordSpawn = handoff.RecordSpawn
@@ -709,6 +868,10 @@ func runClaude(args []string) error {
 	argv := append([]string{"claude"}, request.argv()...)
 	env := ClaudeEnvironment(parent, request.launch(), token)
 	if request.WorkDir != "" {
+		request.WorkDir, err = resolvePrivateSandboxWorkDir(request.WorkDir, request.SandboxWorkspace)
+		if err != nil {
+			return fmt.Errorf("validate private Claude working directory: %w", err)
+		}
 		if err := changeDirectory(request.WorkDir); err != nil {
 			return fmt.Errorf("enter Claude working directory: %w", err)
 		}
@@ -723,7 +886,12 @@ func runClaude(args []string) error {
 		return fmt.Errorf("resolve claude executable: %w", err)
 	}
 	argv[0] = binary
-	if err := commitLaunchOverrideProofs(request.SessionName, request.OverrideProofs...); err != nil {
+	// Keep this probe at the same final boundary as Codex so workdir and binary
+	// preparation cannot create a stale gap before the sandbox-volume decision.
+	if err := currentSandboxDiskAdmission(request.DiskPolicy); err != nil {
+		return fmt.Errorf("private Claude launch denied by sandbox-volume disk admission: %w", err)
+	}
+	if err := commitLaunchOverrideProofs(request.SessionName, request.DiskPolicy, request.OverrideProofs...); err != nil {
 		return fmt.Errorf("commit Claude launch override transaction: %w", err)
 	}
 	if request.RecordSpawn {
@@ -792,7 +960,7 @@ func runAgy(args []string) error {
 		return fmt.Errorf("resolve agy executable: %w", err)
 	}
 	argv := append([]string{"agy"}, request.argv()...)
-	if err := commitLaunchOverrideProofs(request.SessionName, handoff.OverrideProofs...); err != nil {
+	if err := commitLaunchOverrideProofs(request.SessionName, snapshotDiskAdmissionPolicy(""), handoff.OverrideProofs...); err != nil {
 		return fmt.Errorf("commit AGY launch override transaction: %w", err)
 	}
 	if handoff.RecordSpawn {
@@ -817,6 +985,8 @@ func (s *stringList) Set(value string) error {
 type codexRequest struct {
 	HandoffPath           string
 	SessionName           string
+	DiskPolicy            diskAdmissionPolicy
+	SandboxWorkspace      string
 	Model                 string
 	WorkDir               string
 	Sandbox               string
@@ -955,6 +1125,8 @@ type claudeRequest struct {
 	Binary           string
 	SessionName      string
 	SessionID        string
+	DiskPolicy       diskAdmissionPolicy
+	SandboxWorkspace string
 	ResumeID         string
 	WorkDir          string
 	Model            string

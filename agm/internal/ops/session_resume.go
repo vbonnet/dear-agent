@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/claude"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	gitmanifest "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
@@ -70,6 +71,7 @@ type ResumeSessionRequest struct {
 	SessionID       string                   `json:"session_id"`
 	ManifestPath    string                   `json:"manifest_path,omitempty"`
 	Prompt          string                   `json:"prompt,omitempty"`
+	SandboxRoot     config.SandboxRoot       `json:"-"`
 	CurrentAddDirs  []string                 `json:"-"`
 	ExcludedAddDirs []string                 `json:"-"`
 	OnEvent         func(ResumeSessionEvent) `json:"-"`
@@ -192,6 +194,12 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 	if err := migrateResumeAgyModel(store, m, harnessName); err != nil {
 		return result, ErrStorageError("session/resume.migrate-agy-model", err)
 	}
+	health, err = preflightPrivateSandboxResume(store, m, harnessName, health, req.SandboxRoot)
+	result.Health = health
+	result.WorktreePath = health.WorktreePath
+	if err != nil {
+		return result, err
+	}
 
 	created, err := ensureResumeTmux(ctx, tmuxAdapter, &health, req)
 	result.Health = health
@@ -216,7 +224,7 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 	piLaunchID := ""
 	if sendCommand {
 		launchManifest := resumeLaunchManifest(m, harnessName, req.CurrentAddDirs, req.ExcludedAddDirs)
-		launch, launchID, warnings, prepareErr := prepareResumeLaunch(store, launchManifest, harnessName, health)
+		launch, launchID, warnings, prepareErr := prepareResumeLaunch(store, launchManifest, harnessName, health, req.SandboxRoot)
 		for _, warning := range warnings {
 			addResumeWarning(result, req, warning)
 		}
@@ -772,69 +780,28 @@ func isAmbiguousLegacyAgyModel(model string) bool {
 	}
 }
 
-func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName string, health ResumeSessionHealth) (HarnessLaunchCommand, string, []string, error) {
+func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName string, health ResumeSessionHealth, sandboxRoot config.SandboxRoot) (HarnessLaunchCommand, string, []string, error) {
 	spec := HarnessLaunchSpec{
 		Harness:        harnessName,
 		Model:          m.Model,
 		SessionName:    health.TmuxSessionName,
 		SessionID:      m.SessionID,
+		SandboxRoot:    sandboxRoot,
+		SandboxEnabled: m.Sandbox != nil && m.Sandbox.Enabled,
 		WorkDir:        health.WorktreePath,
 		PermissionMode: m.PermissionMode,
 		Codex:          m.Codex,
 		CodexRemoteResume: harnessName == "codex-cli" && m.Codex != nil &&
 			m.Codex.SessionID != "",
 	}
+	if err := validatePrivateResumeLaunchPaths(harnessName, sandboxRoot, m, health); err != nil {
+		return HarnessLaunchCommand{}, "", nil, err
+	}
 	switch harnessName {
 	case "claude-code":
-		launch, warnings := resumeClaudeLaunch(store, m, health)
-		prepared, err := harnessexec.PrepareClaudeCommand(launch, os.Environ())
-		if err != nil {
-			return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("prepare Claude resume launch: %w", err)
-		}
-		return HarnessLaunchCommand{Command: prepared.Command, Cancel: prepared.Cancel}, "", warnings, nil
+		return prepareClaudeResumeCommand(store, m, health, spec)
 	case "codex-cli":
-		warnings := []string{}
-		if m.Sandbox != nil && m.Sandbox.Enabled {
-			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
-			// Attestation re-runs here and fails closed. Command preparation
-			// reserves authorization bound to the exact source identity and
-			// seals the prepared claim into the private handoff. The executor
-			// revalidates and commits it only after every other fallible launch
-			// check. A persisted launch policy therefore cannot become
-			// "approve once, resume forever".
-			if m.Sandbox.BypassCodexHookTrust {
-				reason, reasonErr := override.ValidateReason(m.Sandbox.BypassCodexHookTrustReason)
-				if reasonErr != nil {
-					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook-trust reason before resume: %w", reasonErr)
-				}
-				if err := codexhooks.Verify(context.Background(), codexhooks.Attestation{
-					SourceRepo:   m.Sandbox.CodexHookSourceRepo,
-					SourceCommit: m.Sandbox.CodexHookSourceCommit,
-					Digest:       m.Sandbox.CodexHookDigest,
-					HookRoot:     m.Sandbox.CodexHookRoot,
-				}, health.WorktreePath); err != nil {
-					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
-				}
-				spec.BypassCodexHookTrust = true
-				spec.CodexHookRoot = m.Sandbox.CodexHookRoot
-				spec.CodexHookTrustReason = reason
-				spec.CodexHookTrustActor = OverrideActor()
-				spec.CodexHookSourceRepo = m.Sandbox.CodexHookSourceRepo
-				spec.CodexHookSourceCommit = m.Sandbox.CodexHookSourceCommit
-				spec.CodexHookDigest = m.Sandbox.CodexHookDigest
-			}
-		}
-		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
-			warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))
-		}
-		if spec.Model == "" {
-			spec.Model = agent.HarnessDefaults["codex-cli"]
-		}
-		launch, err := PrepareHarnessLaunchCommand(spec)
-		if err != nil {
-			return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("prepare Codex resume launch: %w", err)
-		}
-		return launch, "", warnings, nil
+		return prepareCodexResumeCommand(m, health, spec)
 	case "agy":
 		// AGY cold resume enters the workspace through its native
 		// conversation route, so retain the workspace as an explicitly
@@ -863,6 +830,148 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		launch, err := PrepareFallbackResumeCommand(health.WorktreePath)
 		return launch, "", []string{fmt.Sprintf("Harness %q does not support resume; starting in its working directory", harnessName)}, err
 	}
+}
+
+func validatePrivateResumeLaunchPaths(
+	harnessName string,
+	sandboxRoot config.SandboxRoot,
+	m *manifest.Manifest,
+	health ResumeSessionHealth,
+) error {
+	if harnessName != "claude-code" && harnessName != "codex-cli" {
+		return nil
+	}
+	return validateSandboxResumePaths(sandboxRoot, m, health)
+}
+
+func prepareClaudeResumeCommand(
+	store dolt.Storage,
+	m *manifest.Manifest,
+	health ResumeSessionHealth,
+	spec HarnessLaunchSpec,
+) (HarnessLaunchCommand, string, []string, error) {
+	launch, warnings := resumeClaudeLaunch(store, m, health)
+	authoritySpec := spec
+	authoritySpec.WorkDir = launch.WorkDir
+	authority, err := projectPrivateLaunchAuthority(authoritySpec)
+	if err != nil {
+		return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("project effective Claude resume authority: %w", err)
+	}
+	launch.DiskRoot = authority.diskRoot
+	launch.SandboxWorkspace = authority.sandboxWorkspace
+	launch.WorkDir = authority.workDir
+	prepared, err := harnessexec.PrepareClaudeCommand(launch, os.Environ())
+	if err != nil {
+		return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("prepare Claude resume launch: %w", err)
+	}
+	return HarnessLaunchCommand{Command: prepared.Command, Cancel: prepared.Cancel}, "", warnings, nil
+}
+
+func prepareCodexResumeCommand(
+	m *manifest.Manifest,
+	health ResumeSessionHealth,
+	spec HarnessLaunchSpec,
+) (HarnessLaunchCommand, string, []string, error) {
+	warnings := []string{}
+	if m.Sandbox != nil && m.Sandbox.Enabled {
+		spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
+		// Attestation re-runs here and fails closed. Command preparation
+		// reserves authorization bound to the exact source identity and seals the
+		// prepared claim into the private handoff. The executor revalidates and
+		// commits it only after every other fallible launch check. A persisted
+		// policy therefore cannot become "approve once, resume forever".
+		if m.Sandbox.BypassCodexHookTrust {
+			reason, reasonErr := override.ValidateReason(m.Sandbox.BypassCodexHookTrustReason)
+			if reasonErr != nil {
+				return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook-trust reason before resume: %w", reasonErr)
+			}
+			if err := codexhooks.Verify(context.Background(), codexhooks.Attestation{
+				SourceRepo:   m.Sandbox.CodexHookSourceRepo,
+				SourceCommit: m.Sandbox.CodexHookSourceCommit,
+				Digest:       m.Sandbox.CodexHookDigest,
+				HookRoot:     m.Sandbox.CodexHookRoot,
+			}, health.WorktreePath); err != nil {
+				return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
+			}
+			spec.BypassCodexHookTrust = true
+			spec.CodexHookRoot = m.Sandbox.CodexHookRoot
+			spec.CodexHookTrustReason = reason
+			spec.CodexHookTrustActor = OverrideActor()
+			spec.CodexHookSourceRepo = m.Sandbox.CodexHookSourceRepo
+			spec.CodexHookSourceCommit = m.Sandbox.CodexHookSourceCommit
+			spec.CodexHookDigest = m.Sandbox.CodexHookDigest
+		}
+	}
+	if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
+		warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))
+	}
+	if spec.Model == "" {
+		spec.Model = agent.HarnessDefaults["codex-cli"]
+	}
+	launch, err := PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("prepare Codex resume launch: %w", err)
+	}
+	return launch, "", warnings, nil
+}
+
+func validateSandboxResumePaths(sandboxRoot config.SandboxRoot, m *manifest.Manifest, health ResumeSessionHealth) error {
+	if m == nil || m.Sandbox == nil || !m.Sandbox.Enabled {
+		return nil
+	}
+	paths := []struct {
+		name string
+		path string
+	}{
+		{name: "persisted sandbox merged path", path: m.Sandbox.MergedPath},
+		{name: "persisted sandbox working directory", path: m.Sandbox.WorkingDir},
+		{name: "classified resume working directory", path: health.WorktreePath},
+	}
+	if m.WorkingDirectory != "" {
+		paths = append(paths, struct {
+			name string
+			path string
+		}{name: "persisted session working directory", path: m.WorkingDirectory})
+	}
+	for _, candidate := range paths {
+		if _, err := sandboxRoot.ValidateExistingWorkspaceDirectory(m.SessionID, candidate.path); err != nil {
+			return fmt.Errorf("validate %s: %w", candidate.name, err)
+		}
+	}
+	return nil
+}
+
+// preflightPrivateSandboxResume performs the path-only portion of private
+// sandbox resume before tmux creation. It normalizes the tmux working
+// directory to its physical spelling and rejects persisted or effective
+// provider paths that no longer resolve inside the stable AGM workspace.
+// The private executor repeats containment at the final process boundary.
+func preflightPrivateSandboxResume(
+	store dolt.Storage,
+	m *manifest.Manifest,
+	harnessName string,
+	health ResumeSessionHealth,
+	sandboxRoot config.SandboxRoot,
+) (ResumeSessionHealth, error) {
+	if (harnessName != "claude-code" && harnessName != "codex-cli") ||
+		m == nil || m.Sandbox == nil || !m.Sandbox.Enabled {
+		return health, nil
+	}
+	if err := validateSandboxResumePaths(sandboxRoot, m, health); err != nil {
+		return health, err
+	}
+	physicalWorktree, err := sandboxRoot.ValidateExistingWorkspaceDirectory(m.SessionID, health.WorktreePath)
+	if err != nil {
+		return health, fmt.Errorf("normalize classified resume working directory: %w", err)
+	}
+	health.WorktreePath = physicalWorktree
+	if harnessName == "claude-code" {
+		launch, _ := resumeClaudeLaunch(store, m, health)
+		if _, err := sandboxRoot.ValidateExistingWorkspaceDirectory(m.SessionID, launch.WorkDir); err != nil {
+			return health, fmt.Errorf("validate effective Claude resume directory before tmux creation: %w", err)
+		}
+	}
+	return health, nil
 }
 
 func resumeClaudeLaunch(store dolt.Storage, m *manifest.Manifest, health ResumeSessionHealth) (harnessexec.ClaudeLaunch, []string) {

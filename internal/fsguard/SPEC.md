@@ -3,6 +3,7 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Feature: `agm/test/bdd/features/fsguard_sandbox_workspace_authority.feature`
 
 <!-- Last audited at: 2026-07-03 -->
 
@@ -179,16 +180,29 @@ state why.
 
 **FSG-40** When a write is allowed through a writable carveout or `WorktreesDir`, the system shall set `Decision.Enforcement` to `EnforceDeny` (the zero value), since enforcement level is irrelevant for allowed writes.
 
-**FSG-41** When a path falls under `~/.agm/vroom/` or `~/.agm/sandboxes/`, the system shall allow the write because these are VROOM supervisor runtime-state directories (heartbeat files, trail logs, dispatch ledger, worker sandbox trees), and the carveout shall remain namespaced so `~/.agm/vroomX/` or `~/.agm/sandboxesX/` prefix lookalikes are still blocked.
+**FSG-41** When a path falls under `~/.agm/vroom/`, or when no authoritative sandbox-workspace root is supplied and a path falls under `~/.agm/sandboxes/`, the system shall allow the write as a default VROOM runtime-state carveout while withholding that carveout from component-boundary prefix lookalikes.
+
+**FSG-79** When `FSGUARD_SANDBOX_WORKSPACE` contains one valid authoritative sandbox-workspace root, the system shall replace the default `~/.agm/sandboxes/` carveout with that root and allow writes to the exact root and its descendants, including dot-prefixed components that would otherwise be subject to the home-dotfile rule.
+
+**FSG-80** When a target is a sibling of the authoritative sandbox-workspace root, escapes it through parent traversal, or merely shares its lexical prefix, the system shall grant no write authority from that root.
+
+**FSG-81** When `FSGUARD_SANDBOX_WORKSPACE` is explicitly present but invalid, the system shall report the configuration error and leave sandbox-root write authority empty instead of restoring the default carveout.
+
+**FSG-82** When a write target is an existing symlink whose target cannot be resolved, including a dangling symlink under an otherwise writable workspace or worktree root, the system shall deny the write while continuing to allow an ordinary nonexistent descendant reached without such a symlink.
+
+**FSG-83** When a write target contains a parent-traversal component or begins with an unsupported Bash tilde expansion such as `~user`, `~+`, or `~-`, the system shall deny it before lexical cleaning or relative anchoring can make the spelling appear to be inside an authorized workspace.
+
+**FSG-84** When an exact configured sandbox workspace is nested beneath an otherwise writable root, including `WorktreesDir` or a temporary-directory carveout, the system shall allow the exact workspace and its descendants while denying paths beneath its parent that fall outside that workspace; the unset historical `~/.agm/sandboxes/` compatibility allowance shall remain parent-wide.
 
 ---
 
 ## Key Invariants
 
-- **Fail open, always.** Parse errors, unterminated quotes, shell-depth
-  exhaustion, and unrecognised inputs all return `(allowed=true, "")`. The
-  guard is defence-in-depth; `settings.json` deny rules remain the
-  authoritative backstop.
+- **Parser fail-open, path authority fail-closed.** Parse errors, unterminated
+  quotes, shell-depth exhaustion, and unrecognised shell syntax return
+  `(allowed=true, "")`, but a recognized write target whose path cannot be
+  resolved without ambiguity is denied. The guard remains defence-in-depth;
+  `settings.json` deny rules remain the authoritative backstop.
 - **Positive-guidance messages.** Every block message must tell the agent
   what to do (worktree creation command, chezmoi workflow) and why, not just
   "access denied".

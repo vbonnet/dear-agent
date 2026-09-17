@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/internal/fsguard"
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
@@ -246,13 +248,15 @@ func TestReserveExecutorLaunchOverridesRejectsBrakeEngagedAfterReservation(t *te
 func TestMain(m *testing.M) {
 	original := scheduleHandoffExpiry
 	originalAdmission := currentLaunchAdmission
+	originalDiskAdmission := currentSandboxDiskAdmission
 	originalIssueCapability := issueLaunchCapability
 	originalLoadCapability := loadLaunchCapability
 	originalConsumeCapability := consumeLaunchCapability
 	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) { return nil, nil }
-	currentLaunchAdmission = func() circuitbreaker.CheckResult {
+	currentLaunchAdmission = func(diskAdmissionPolicy) circuitbreaker.CheckResult {
 		return circuitbreaker.CheckResult{Allowed: true}
 	}
+	currentSandboxDiskAdmission = func(diskAdmissionPolicy) error { return nil }
 	issueLaunchCapability = func(
 		claim override.LaunchCapabilityClaim,
 	) (override.LaunchCapability, error) {
@@ -301,10 +305,697 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	scheduleHandoffExpiry = original
 	currentLaunchAdmission = originalAdmission
+	currentSandboxDiskAdmission = originalDiskAdmission
 	issueLaunchCapability = originalIssueCapability
 	loadLaunchCapability = originalLoadCapability
 	consumeLaunchCapability = originalConsumeCapability
 	os.Exit(code)
+}
+
+func TestValidatePrivateFilesystemAuthorityRequiresImmediateChild(t *testing.T) {
+	physicalBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskRoot := filepath.Join(physicalBase, "sandboxes")
+	rootParent := filepath.Dir(diskRoot)
+	filesystemRoot := filepath.VolumeName(diskRoot) + string(filepath.Separator)
+
+	tests := []struct {
+		name             string
+		protocol         string
+		diskRoot         string
+		sandboxWorkspace string
+		wantErr          bool
+	}{
+		{
+			name:     "empty legacy authority",
+			protocol: CodexProtocol,
+		},
+		{
+			name:     "disk root without sandbox workspace",
+			protocol: CodexProtocol,
+			diskRoot: diskRoot,
+		},
+		{
+			name:             "missing disk root",
+			protocol:         CodexProtocol,
+			sandboxWorkspace: filepath.Join(diskRoot, "session-a"),
+			wantErr:          true,
+		},
+		{
+			name:             "filesystem root",
+			protocol:         CodexProtocol,
+			diskRoot:         filesystemRoot,
+			sandboxWorkspace: filepath.Join(filesystemRoot, "session-a"),
+			wantErr:          true,
+		},
+		{
+			name:             "workspace equals disk root",
+			protocol:         CodexProtocol,
+			diskRoot:         diskRoot,
+			sandboxWorkspace: diskRoot,
+			wantErr:          true,
+		},
+		{
+			name:             "outside disk root",
+			protocol:         CodexProtocol,
+			diskRoot:         diskRoot,
+			sandboxWorkspace: filepath.Join(rootParent, "outside", "session-a"),
+			wantErr:          true,
+		},
+		{
+			name:             "sibling of disk root",
+			protocol:         CodexProtocol,
+			diskRoot:         diskRoot,
+			sandboxWorkspace: filepath.Join(rootParent, "session-a"),
+			wantErr:          true,
+		},
+		{
+			name:             "disk root prefix lookalike",
+			protocol:         CodexProtocol,
+			diskRoot:         diskRoot,
+			sandboxWorkspace: filepath.Join(diskRoot+"-other", "session-a"),
+			wantErr:          true,
+		},
+		{
+			name:             "nested child",
+			protocol:         CodexProtocol,
+			diskRoot:         diskRoot,
+			sandboxWorkspace: filepath.Join(diskRoot, "session-a", "merged"),
+			wantErr:          true,
+		},
+		{
+			name:             "valid immediate child",
+			protocol:         ClaudeProtocol,
+			diskRoot:         diskRoot,
+			sandboxWorkspace: filepath.Join(diskRoot, "session-a"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePrivateFilesystemAuthority(tt.protocol, tt.diskRoot, tt.sandboxWorkspace)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validatePrivateFilesystemAuthority(%q, %q, %q) error = %v, wantErr %v",
+					tt.protocol, tt.diskRoot, tt.sandboxWorkspace, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestPrivateFilesystemAuthorityUsesHandoffWithoutCommandLeakage(t *testing.T) {
+	originalExecutablePath := executablePath
+	t.Cleanup(func() { executablePath = originalExecutablePath })
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+	diskRoot := filepath.Join(t.TempDir(), "disk-authority-canary")
+	sandboxWorkspace := filepath.Join(diskRoot, "session-authority-canary")
+	workDir := filepath.Join(sandboxWorkspace, "merged", "repo")
+	staleWorkspaceAssignment := "FSGUARD_SANDBOX_WORKSPACE=/stale/pane/workspace"
+
+	tests := []struct {
+		name     string
+		protocol string
+		prepare  func() (PreparedCommand, error)
+	}{
+		{
+			name:     "Codex",
+			protocol: CodexProtocol,
+			prepare: func() (PreparedCommand, error) {
+				return PrepareCodexCommand(CodexLaunch{
+					SessionName: "authority-codex",
+					DiskRoot:    diskRoot, SandboxWorkspace: sandboxWorkspace,
+					WorkDir: workDir, Sandbox: "workspace-write",
+				}, []string{staleWorkspaceAssignment, "PATH=/usr/bin", "HOME=/tmp/home"})
+			},
+		},
+		{
+			name:     "Claude",
+			protocol: ClaudeProtocol,
+			prepare: func() (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "authority-claude",
+					DiskRoot:    diskRoot, SandboxWorkspace: sandboxWorkspace,
+					WorkDir: workDir, DisableOAuth: true,
+				}, []string{staleWorkspaceAssignment})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AGM_STATE_DIR", t.TempDir())
+			prepared, err := tt.prepare()
+			if err != nil {
+				t.Fatalf("prepare %s command: %v", tt.name, err)
+			}
+			t.Cleanup(func() { _ = prepared.Cancel() })
+
+			for _, leaked := range []string{
+				"--disk-root", "--sandbox-workspace", "FSGUARD_SANDBOX_WORKSPACE=",
+				"/stale/pane/workspace",
+			} {
+				if strings.Contains(prepared.Command, leaked) {
+					t.Fatalf("prepared %s command exposed private filesystem authority %q: %s",
+						tt.name, leaked, prepared.Command)
+				}
+			}
+			if !strings.Contains(prepared.Command, workDir) {
+				t.Fatalf("prepared %s command omitted its ordinary workdir %q: %s", tt.name, workDir, prepared.Command)
+			}
+
+			handoff, err := consumeHandoff(prepared.path, tt.protocol, "")
+			if err != nil {
+				t.Fatalf("consume %s handoff: %v", tt.name, err)
+			}
+			if handoff.DiskRoot != diskRoot || handoff.SandboxWorkspace != sandboxWorkspace {
+				t.Fatalf("%s filesystem authority round trip = (%q, %q), want (%q, %q)",
+					tt.name, handoff.DiskRoot, handoff.SandboxWorkspace, diskRoot, sandboxWorkspace)
+			}
+			for _, entry := range handoff.Environment {
+				if strings.HasPrefix(entry, "FSGUARD_SANDBOX_WORKSPACE=") {
+					t.Fatalf("%s handoff encoded filesystem authority as environment entry %q", tt.name, entry)
+				}
+			}
+		})
+	}
+}
+
+func TestOrdinaryCodexHandoffRejectsChangedLaunchArguments(t *testing.T) {
+	originalExecutablePath := executablePath
+	t.Cleanup(func() { executablePath = originalExecutablePath })
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	workDir := t.TempDir()
+	prepared, err := PrepareCodexCommand(CodexLaunch{
+		SessionName: "bound-codex", Model: "gpt-test",
+		WorkDir: workDir, Sandbox: "workspace-write",
+	}, nil)
+	if err != nil {
+		t.Fatalf("PrepareCodexCommand() error = %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+
+	err = Run(CodexProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "bound-codex",
+		"--model", "gpt-test",
+		"--workdir", t.TempDir(),
+		"--sandbox", "workspace-write",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not authorize the requested Codex launch") {
+		t.Fatalf("Run() error = %v, want exact ordinary-launch binding refusal", err)
+	}
+}
+
+func TestPrivateExecutorsRejectRetargetedSandboxWorkDir(t *testing.T) {
+	originalExecutablePath := executablePath
+	t.Cleanup(func() { executablePath = originalExecutablePath })
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+	for _, protocol := range []string{CodexProtocol, ClaudeProtocol} {
+		t.Run(protocol, func(t *testing.T) {
+			t.Setenv("AGM_STATE_DIR", t.TempDir())
+			physicalRoot, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			diskRoot := filepath.Join(physicalRoot, "sandboxes")
+			workspace := filepath.Join(diskRoot, "session-a")
+			upper := filepath.Join(workspace, "upper")
+			workDir := filepath.Join(workspace, "merged", "repo")
+			if err := os.MkdirAll(filepath.Join(upper, "repo"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			merged := filepath.Join(workspace, "merged")
+			if err := os.Symlink(upper, merged); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+
+			var prepared PreparedCommand
+			switch protocol {
+			case CodexProtocol:
+				prepared, err = PrepareCodexCommand(CodexLaunch{
+					SessionName: "retarget-codex", Model: "gpt-test",
+					DiskRoot: diskRoot, SandboxWorkspace: workspace,
+					WorkDir: workDir, Sandbox: "workspace-write",
+				}, nil)
+			case ClaudeProtocol:
+				prepared, err = PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "retarget-claude", DisableOAuth: true,
+					DiskRoot: diskRoot, SandboxWorkspace: workspace,
+					WorkDir: workDir,
+				}, nil)
+			}
+			if err != nil {
+				t.Fatalf("prepare %s: %v", protocol, err)
+			}
+			t.Cleanup(func() { _ = prepared.Cancel() })
+
+			external := filepath.Join(physicalRoot, "external")
+			if err := os.MkdirAll(filepath.Join(external, "repo"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(merged); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(external, merged); err != nil {
+				t.Fatal(err)
+			}
+
+			args := []string{"--handoff", prepared.path}
+			if protocol == CodexProtocol {
+				args = append(args,
+					"--session", "retarget-codex", "--model", "gpt-test",
+					"--workdir", workDir, "--sandbox", "workspace-write",
+				)
+			} else {
+				args = append(args,
+					"--session", "retarget-claude", "--workdir", workDir, "--disable-oauth",
+				)
+			}
+			err = Run(protocol, args)
+			if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+				t.Fatalf("Run(%s) error = %v, want retargeted-workdir refusal", protocol, err)
+			}
+		})
+	}
+}
+
+func TestResolvePrivateSandboxWorkDirRejectsRetargetedWorkspaceAuthority(t *testing.T) {
+	physicalRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(physicalRoot, "sandboxes", "session-a")
+	if err := os.MkdirAll(filepath.Join(workspace, "repo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	displaced := workspace + "-displaced"
+	if err := os.Rename(workspace, displaced); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(physicalRoot, "outside")
+	if err := os.MkdirAll(filepath.Join(outside, "repo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, workspace); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err = resolvePrivateSandboxWorkDir(filepath.Join(workspace, "repo"), workspace)
+	if err == nil || !strings.Contains(err.Error(), "exact physical authority") {
+		t.Fatalf("resolvePrivateSandboxWorkDir() error = %v, want retargeted workspace refusal", err)
+	}
+}
+
+func TestDefaultPrivateDiskAdmissionDoesNotSkipEmptyRoot(t *testing.T) {
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "missing-home"))
+	if err := checkSandboxDiskAdmission(snapshotDiskAdmissionPolicy("")); err == nil {
+		t.Fatal("currentSandboxDiskAdmission(\"\") error = nil, want default-volume probe failure")
+	}
+}
+
+func TestCarriedDiskThresholdOverridesStaleExecutorEnvironment(t *testing.T) {
+	t.Setenv("AGM_MIN_FREE_DISK_GB", "0")
+	policy := diskAdmissionPolicy{root: "/planned/sandboxes", minFreeGB: 73}
+	if got := circuitBreakerConfigForDiskPolicy(policy).MinFreeDiskGB; got != 73 {
+		t.Fatalf("proof-bearing admission threshold = %v, want carried threshold 73", got)
+	}
+	if err := validateDiskAdmissionPolicy(policy); err != nil {
+		t.Fatalf("validate carried disk policy: %v", err)
+	}
+}
+
+func TestHandoffDiskThresholdRequiresExplicitFinitePresence(t *testing.T) {
+	zero := 0.0
+	valid := launchHandoff{DiskRoot: "", MinFreeDiskGB: &zero}
+	if err := validateHandoffSandboxWorkspace(valid, CodexProtocol); err != nil {
+		t.Fatalf("explicit zero disk threshold rejected: %v", err)
+	}
+	if err := validateHandoffSandboxWorkspace(launchHandoff{}, CodexProtocol); err == nil ||
+		!strings.Contains(err.Error(), "omits its disk admission threshold") {
+		t.Fatalf("missing disk threshold error = %v", err)
+	}
+	for _, invalid := range []float64{-1, math.NaN(), math.Inf(1)} {
+		err := validateHandoffSandboxWorkspace(
+			launchHandoff{MinFreeDiskGB: &invalid}, CodexProtocol,
+		)
+		if err == nil || !strings.Contains(err.Error(), "finite and non-negative") {
+			t.Fatalf("invalid disk threshold %v error = %v", invalid, err)
+		}
+	}
+}
+
+func TestPrivateExecutorsRecheckSandboxDiskWithoutOverrideProofs(t *testing.T) {
+	originalExecutablePath := executablePath
+	originalSandboxDiskAdmission := currentSandboxDiskAdmission
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	originalReplaceProcess := replaceProcess
+	originalChangeDirectory := changeDirectory
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		currentSandboxDiskAdmission = originalSandboxDiskAdmission
+		lookPathInEnvironment = originalLookPathInEnvironment
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+		replaceProcess = originalReplaceProcess
+		changeDirectory = originalChangeDirectory
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+	physicalBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskRoot := filepath.Join(physicalBase, "sandboxes")
+	sandboxWorkspace := filepath.Join(diskRoot, "session-a")
+	workDir := filepath.Join(sandboxWorkspace, "merged", "repo")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	diskDenied := errors.New("sandbox volume is below the disk floor")
+
+	tests := []struct {
+		name     string
+		protocol string
+		prepare  func() (PreparedCommand, error)
+		args     func(string) []string
+	}{
+		{
+			name:     "Codex",
+			protocol: CodexProtocol,
+			prepare: func() (PreparedCommand, error) {
+				return PrepareCodexCommand(CodexLaunch{
+					SessionName: "disk-recheck-codex", Model: "gpt-test",
+					DiskRoot: diskRoot, SandboxWorkspace: sandboxWorkspace,
+					WorkDir: workDir, Sandbox: "workspace-write",
+				}, nil)
+			},
+			args: func(handoffPath string) []string {
+				return []string{
+					"--handoff", handoffPath,
+					"--session", "disk-recheck-codex",
+					"--model", "gpt-test",
+					"--workdir", workDir,
+					"--sandbox", "workspace-write",
+				}
+			},
+		},
+		{
+			name:     "Claude",
+			protocol: ClaudeProtocol,
+			prepare: func() (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "disk-recheck-claude",
+					DiskRoot:    diskRoot, SandboxWorkspace: sandboxWorkspace,
+					WorkDir: workDir, DisableOAuth: true,
+				}, nil)
+			},
+			args: func(handoffPath string) []string {
+				return []string{
+					"--handoff", handoffPath,
+					"--session", "disk-recheck-claude",
+					"--workdir", workDir,
+					"--disable-oauth",
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AGM_STATE_DIR", t.TempDir())
+			t.Setenv("AGM_MIN_FREE_DISK_GB", "73")
+			prepared, err := tt.prepare()
+			if err != nil {
+				t.Fatalf("prepare %s command: %v", tt.name, err)
+			}
+			t.Cleanup(func() { _ = prepared.Cancel() })
+
+			payload, err := os.ReadFile(prepared.path)
+			if err != nil {
+				t.Fatalf("read staged %s handoff: %v", tt.name, err)
+			}
+			var staged launchHandoff
+			if err := json.Unmarshal(payload, &staged); err != nil {
+				t.Fatalf("decode staged %s handoff: %v", tt.name, err)
+			}
+			if len(staged.OverrideProofs) != 0 || staged.LaunchCapabilityID != "" {
+				t.Fatalf("staged %s handoff unexpectedly has override authority: proofs=%d capability=%q",
+					tt.name, len(staged.OverrideProofs), staged.LaunchCapabilityID)
+			}
+			if staged.MinFreeDiskGB == nil || *staged.MinFreeDiskGB != 73 {
+				t.Fatalf("staged %s disk threshold = %v, want explicit caller snapshot 73", tt.name, staged.MinFreeDiskGB)
+			}
+			// Simulate a stale long-lived pane that would otherwise weaken the
+			// launch-boundary floor after the caller has queued the command.
+			t.Setenv("AGM_MIN_FREE_DISK_GB", "0")
+
+			var checkedPolicies []diskAdmissionPolicy
+			currentSandboxDiskAdmission = func(got diskAdmissionPolicy) error {
+				checkedPolicies = append(checkedPolicies, got)
+				return diskDenied
+			}
+			lookupCalls := 0
+			lookPathInEnvironment = func(name string, _ []string) (string, error) {
+				lookupCalls++
+				return "/fixed/" + name, nil
+			}
+			changeDirectory = func(string) error { return nil }
+			commitLaunchOverrideProofs = func(string, diskAdmissionPolicy, ...override.AuthorizationProof) error {
+				t.Fatal("disk-denied private launch reached override commitment")
+				return nil
+			}
+			replaceProcess = func(string, []string, []string) error {
+				t.Fatal("disk-denied private launch reached process replacement")
+				return nil
+			}
+
+			err = Run(tt.protocol, tt.args(prepared.path))
+			if !errors.Is(err, diskDenied) {
+				t.Fatalf("run disk-denied %s command error = %v, want %v", tt.name, err, diskDenied)
+			}
+			if len(checkedPolicies) != 1 || checkedPolicies[0].root != diskRoot || checkedPolicies[0].minFreeGB != 73 {
+				t.Fatalf("%s disk rechecks = %+v, want root %q with caller threshold 73", tt.name, checkedPolicies, diskRoot)
+			}
+			if lookupCalls != 1 {
+				t.Fatalf("%s executable lookups = %d, want preparation to finish before final disk recheck", tt.name, lookupCalls)
+			}
+		})
+	}
+}
+
+func TestSandboxDiskAdmissionFailsClosed(t *testing.T) {
+	t.Run("low disk", func(t *testing.T) {
+		t.Setenv("AGM_MIN_FREE_DISK_GB", "1e300")
+		diskRoot, resolveErr := filepath.EvalSymlinks(t.TempDir())
+		if resolveErr != nil {
+			t.Fatal(resolveErr)
+		}
+		err := checkSandboxDiskAdmission(snapshotDiskAdmissionPolicy(diskRoot))
+		if err == nil || !strings.Contains(err.Error(), "free disk too low") {
+			t.Fatalf("low-disk admission error = %v, want free-disk refusal", err)
+		}
+	})
+
+	t.Run("disk path reader error", func(t *testing.T) {
+		rootParent := t.TempDir()
+		diskRoot := filepath.Join(rootParent, "sandboxes")
+		if err := os.Symlink(t.TempDir(), diskRoot); err != nil {
+			t.Fatalf("create sandbox-root symlink: %v", err)
+		}
+
+		err := checkSandboxDiskAdmission(snapshotDiskAdmissionPolicy(diskRoot))
+		if err == nil ||
+			!strings.Contains(err.Error(), "prepare sandbox-volume disk check") ||
+			!strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("reader-error admission = %v, want fail-closed symlink refusal", err)
+		}
+	})
+}
+
+func TestPrivateExecutorsReplaceOrClearSandboxWorkspace(t *testing.T) {
+	originalExecutablePath := executablePath
+	originalSandboxDiskAdmission := currentSandboxDiskAdmission
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	originalReplaceProcess := replaceProcess
+	originalChangeDirectory := changeDirectory
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		currentSandboxDiskAdmission = originalSandboxDiskAdmission
+		lookPathInEnvironment = originalLookPathInEnvironment
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+		replaceProcess = originalReplaceProcess
+		changeDirectory = originalChangeDirectory
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+	physicalBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskRoot := filepath.Join(physicalBase, "sandboxes")
+	workspace := filepath.Join(diskRoot, "session-a")
+	staleWorkspace := filepath.Join(diskRoot, "stale-session")
+	workDir := filepath.Join(workspace, "merged", "repo")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	physicalWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name      string
+		protocol  string
+		workspace string
+		prepare   func(string) (PreparedCommand, error)
+		args      func(string) []string
+	}{
+		{
+			name: "Codex replaces stale workspace", protocol: CodexProtocol, workspace: workspace,
+			prepare: func(selected string) (PreparedCommand, error) {
+				return PrepareCodexCommand(CodexLaunch{
+					SessionName: "workspace-codex", Model: "gpt-test",
+					DiskRoot: diskRoot, SandboxWorkspace: selected,
+					WorkDir: workDir, Sandbox: "workspace-write",
+				}, []string{fsguard.EnvSandboxWorkspace + "=" + staleWorkspace})
+			},
+			args: func(handoffPath string) []string {
+				return []string{
+					"--handoff", handoffPath,
+					"--session", "workspace-codex",
+					"--model", "gpt-test",
+					"--workdir", workDir,
+					"--sandbox", "workspace-write",
+				}
+			},
+		},
+		{
+			name: "Codex clears stale workspace", protocol: CodexProtocol,
+			prepare: func(selected string) (PreparedCommand, error) {
+				return PrepareCodexCommand(CodexLaunch{
+					SessionName: "workspace-codex", Model: "gpt-test",
+					DiskRoot: diskRoot, SandboxWorkspace: selected,
+					WorkDir: workDir, Sandbox: "workspace-write",
+				}, []string{fsguard.EnvSandboxWorkspace + "=" + staleWorkspace})
+			},
+			args: func(handoffPath string) []string {
+				return []string{
+					"--handoff", handoffPath,
+					"--session", "workspace-codex",
+					"--model", "gpt-test",
+					"--workdir", workDir,
+					"--sandbox", "workspace-write",
+				}
+			},
+		},
+		{
+			name: "Claude replaces stale workspace", protocol: ClaudeProtocol, workspace: workspace,
+			prepare: func(selected string) (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "workspace-claude",
+					DiskRoot:    diskRoot, SandboxWorkspace: selected,
+					WorkDir: workDir, DisableOAuth: true,
+				}, []string{fsguard.EnvSandboxWorkspace + "=" + staleWorkspace})
+			},
+			args: func(handoffPath string) []string {
+				return []string{
+					"--handoff", handoffPath,
+					"--session", "workspace-claude",
+					"--workdir", workDir,
+					"--disable-oauth",
+				}
+			},
+		},
+		{
+			name: "Claude clears stale workspace", protocol: ClaudeProtocol,
+			prepare: func(selected string) (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "workspace-claude",
+					DiskRoot:    diskRoot, SandboxWorkspace: selected,
+					WorkDir: workDir, DisableOAuth: true,
+				}, []string{fsguard.EnvSandboxWorkspace + "=" + staleWorkspace})
+			},
+			args: func(handoffPath string) []string {
+				return []string{
+					"--handoff", handoffPath,
+					"--session", "workspace-claude",
+					"--workdir", workDir,
+					"--disable-oauth",
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AGM_STATE_DIR", t.TempDir())
+			t.Setenv(fsguard.EnvSandboxWorkspace, staleWorkspace)
+
+			var events []string
+			currentSandboxDiskAdmission = func(got diskAdmissionPolicy) error {
+				if got.root != diskRoot {
+					t.Fatalf("disk admission root = %q, want %q", got.root, diskRoot)
+				}
+				events = append(events, "disk")
+				return nil
+			}
+			lookPathInEnvironment = func(name string, _ []string) (string, error) {
+				events = append(events, "lookup")
+				return "/fixed/" + name, nil
+			}
+			commitLaunchOverrideProofs = func(_ string, got diskAdmissionPolicy, proofs ...override.AuthorizationProof) error {
+				if got.root != diskRoot || len(proofs) != 0 {
+					t.Fatalf("override commit = root %q proofs %v, want root %q and no proofs", got.root, proofs, diskRoot)
+				}
+				events = append(events, "commit")
+				return nil
+			}
+			changeDirectory = func(gotWorkDir string) error {
+				wantWorkDir := workDir
+				if tt.workspace != "" {
+					wantWorkDir = physicalWorkDir
+				}
+				if gotWorkDir != wantWorkDir {
+					t.Fatalf("Claude workdir = %q, want %q", gotWorkDir, wantWorkDir)
+				}
+				return nil
+			}
+			var childEnvironment []string
+			replaceProcess = func(_ string, _ []string, environment []string) error {
+				events = append(events, "exec")
+				childEnvironment = append([]string(nil), environment...)
+				return nil
+			}
+
+			prepared, err := tt.prepare(tt.workspace)
+			if err != nil {
+				t.Fatalf("prepare %s command: %v", tt.name, err)
+			}
+			t.Cleanup(func() { _ = prepared.Cancel() })
+
+			err = Run(tt.protocol, tt.args(prepared.path))
+			if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
+				t.Fatalf("run %s error = %v, want unexpected-return guard", tt.name, err)
+			}
+			childValues := environmentMap(childEnvironment)
+			gotWorkspace, workspacePresent := childValues[fsguard.EnvSandboxWorkspace]
+			if tt.workspace == "" && workspacePresent {
+				t.Fatalf("child retained omitted sandbox workspace entry %q", gotWorkspace)
+			}
+			if tt.workspace != "" && (!workspacePresent || gotWorkspace != tt.workspace) {
+				t.Fatalf("child sandbox workspace = %q (present %v), want %q", gotWorkspace, workspacePresent, tt.workspace)
+			}
+			if want := []string{"lookup", "disk", "commit", "exec"}; !slices.Equal(events, want) {
+				t.Fatalf("executor events = %q, want %q", events, want)
+			}
+		})
+	}
 }
 
 func TestResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testing.T) {
@@ -391,9 +1082,9 @@ func TestPreparedHarnessCommandCommitsBeforeExec(t *testing.T) {
 	}
 
 	var events []string
-	commitLaunchOverrideProofs = func(sessionName string, proofs ...override.AuthorizationProof) error {
-		if sessionName != "agy-worker" || len(proofs) != 0 {
-			t.Fatalf("commit launch = (%q, %v)", sessionName, proofs)
+	commitLaunchOverrideProofs = func(sessionName string, diskPolicy diskAdmissionPolicy, proofs ...override.AuthorizationProof) error {
+		if sessionName != "agy-worker" || diskPolicy.root != "" || len(proofs) != 0 {
+			t.Fatalf("commit launch = (%q, %+v, %v)", sessionName, diskPolicy, proofs)
 		}
 		events = append(events, "commit")
 		return nil
@@ -463,7 +1154,7 @@ func TestGenericHandoffRejectsSelfGeneratedOverrideProof(t *testing.T) {
 	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
 		t.Fatalf("write forged generic handoff: %v", err)
 	}
-	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(string, diskAdmissionPolicy, ...override.AuthorizationProof) error {
 		t.Fatal("self-generated proof reached override reauthorization")
 		return nil
 	}
@@ -533,7 +1224,7 @@ func TestGenericHandoffCapabilityRejectsPostIssueMutation(t *testing.T) {
 	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
 		t.Fatalf("write mutated generic handoff: %v", err)
 	}
-	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(string, diskAdmissionPolicy, ...override.AuthorizationProof) error {
 		t.Fatal("mutated handoff reached override reauthorization")
 		return nil
 	}
@@ -626,7 +1317,7 @@ func TestPreparedHarnessCommandRefusesExecWhenCommitFails(t *testing.T) {
 	}
 
 	refusal := errors.New("override ledger unavailable")
-	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(string, diskAdmissionPolicy, ...override.AuthorizationProof) error {
 		return refusal
 	}
 	recordLaunchSpawn = func() error {
@@ -785,7 +1476,7 @@ func TestPreparedClaudeDirectInvocationDoesNotCommitWhenBinaryDisappears(t *test
 	}
 	commits := 0
 	recordedSpawns := 0
-	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(string, diskAdmissionPolicy, ...override.AuthorizationProof) error {
 		commits++
 		return nil
 	}
@@ -842,7 +1533,7 @@ func TestPreparedClaudeDirectInvocationRejectsRequestSubstitution(t *testing.T) 
 		t.Fatal("substituted Claude request reached executable resolution")
 		return "", nil
 	}
-	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(string, diskAdmissionPolicy, ...override.AuthorizationProof) error {
 		t.Fatal("substituted Claude request committed launch effects")
 		return nil
 	}
@@ -994,7 +1685,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 	authorizedUses := 0
 	recordedSpawns := 0
-	commitLaunchOverrideProofs = func(sessionName string, proofs ...override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(sessionName string, _ diskAdmissionPolicy, proofs ...override.AuthorizationProof) error {
 		if !hookConfigurationPrepared || !executableResolved {
 			t.Fatal("hook-trust use recorded before launch preparation completed")
 		}
@@ -1759,7 +2450,7 @@ func TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled(t *testing
 
 func TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=deferred-expiry-canary"}, true, "")
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=deferred-expiry-canary"}, true, nil, "", "")
 	if err != nil {
 		t.Fatalf("stage deferred handoff: %v", err)
 	}
@@ -1814,7 +2505,7 @@ func TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires(t *testing.T) {
 
 func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"}, false, "")
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"}, false, nil, "", "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -1832,7 +2523,7 @@ func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 
 func TestDetachedExpiryHelperIsReapedAsynchronously(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, nil, false, "")
+	path, err := stageHandoff(CodexProtocol, nil, false, nil, "", "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -1859,7 +2550,7 @@ func TestDetachedExpiryHelperIsReapedAsynchronously(t *testing.T) {
 
 func TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"}, false, "")
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"}, false, nil, "", "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -1891,7 +2582,7 @@ func TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections(t *testing
 		"deferred": true,
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, err := stageHandoff(CodexProtocol, nil, deferred, "")
+			path, err := stageHandoff(AgyProtocol, nil, deferred, nil, "", "")
 			if err != nil {
 				t.Fatalf("stage handoff: %v", err)
 			}
@@ -1912,7 +2603,7 @@ func TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections(t *testing
 				t.Fatalf("rewrite handoff timestamp: %v", err)
 			}
 
-			_, consumeErr := consumeHandoff(path, CodexProtocol, "")
+			_, consumeErr := consumeHandoff(path, AgyProtocol, "")
 			if deferred && consumeErr != nil {
 				t.Fatalf("deferred handoff rejected recent producer lease freshness: %v", consumeErr)
 			}
@@ -2071,11 +2762,11 @@ func TestExecutorConsumesHandoffBeforeHarnessLookup(t *testing.T) {
 func TestConsumeHandoffRejectsCrossHarnessAndPublicState(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 
-	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}, false, ""); err == nil {
+	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}, false, nil, "", ""); err == nil {
 		t.Fatal("Codex staging accepted an Anthropic credential")
 	}
 
-	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil, false, "")
+	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil, false, nil, "", "")
 	if err != nil {
 		t.Fatalf("stage wrong-protocol handoff: %v", err)
 	}
@@ -2086,7 +2777,7 @@ func TestConsumeHandoffRejectsCrossHarnessAndPublicState(t *testing.T) {
 		t.Fatalf("rejected wrong-protocol handoff still exists: %v", err)
 	}
 
-	public, err := stageHandoff(CodexProtocol, nil, false, "")
+	public, err := stageHandoff(CodexProtocol, nil, false, nil, "", "")
 	if err != nil {
 		t.Fatalf("stage public-mode handoff: %v", err)
 	}
@@ -2141,7 +2832,7 @@ func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 		"oversized":     strings.Repeat(" ", handoffMaxSize),
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, err := stageHandoff(CodexProtocol, nil, false, "")
+			path, err := stageHandoff(CodexProtocol, nil, false, nil, "", "")
 			if err != nil {
 				t.Fatalf("stage handoff: %v", err)
 			}

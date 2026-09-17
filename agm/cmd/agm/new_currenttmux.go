@@ -20,13 +20,16 @@ import (
 
 // startClaudeInCurrentTmux starts a fresh Claude session in the current tmux session
 func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
-	var admission *circuitBreakerAdmission
+	sandboxRoot, err := configuredSandboxRoot()
+	if err != nil {
+		return err
+	}
+	admission := &circuitBreakerAdmission{sandboxRoot: sandboxRoot}
 	if !testMode {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
 		}
-		var err error
-		admission, err = enforceCircuitBreakers(sessionName)
+		admission, err = enforceCircuitBreakers(sessionName, sandboxRoot)
 		if err != nil {
 			return err
 		}
@@ -86,6 +89,7 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		Model:                  modelName,
 		Harness:                harnessName,
 		SessionID:              sessionID,
+		SandboxRoot:            sandboxRoot,
 		Caller:                 ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
 		PermissionMode:         modeFlagValue,
 		DisableAutoMode:        noAutoMode,

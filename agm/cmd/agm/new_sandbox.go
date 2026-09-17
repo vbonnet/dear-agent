@@ -14,37 +14,52 @@ import (
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
 
-// maybeProvisionSandbox provisions a sandbox if enabled, returning the new
-// SandboxConfig and the (possibly rewritten) workDir.
-func maybeProvisionSandbox(ctx context.Context, sessionID, workDir string) (*manifest.SandboxConfig, string, error) {
+// sandboxCleanup retains the exact provider instance that successfully
+// provisioned one identity-checked AGM session. Provider Name values are
+// display labels (for example, the "apfs" selector reports "apfs-reflink")
+// and are not safe reconstruction keys for rollback.
+type sandboxCleanup struct {
+	provider  sandbox.Provider
+	sessionID string
+}
+
+func (cleanup *sandboxCleanup) rollback(ctx context.Context) error {
+	if cleanup == nil {
+		return nil
+	}
+	return cleanup.provider.Destroy(context.WithoutCancel(ctx), cleanup.sessionID)
+}
+
+// maybeProvisionSandbox provisions a sandbox if enabled, returning the durable
+// provider-spelled SandboxConfig, the physically resolved live workDir, and the
+// provider-bound cleanup handle that must be retained until the complete create
+// lifecycle succeeds.
+func maybeProvisionSandbox(ctx context.Context, sessionID, workDir string) (*manifest.SandboxConfig, string, *sandboxCleanup, error) {
 	// Guard the whole sandbox decision, not just one of its readers: the very
 	// first thing this path does is consult cfg.Sandbox, so a missing snapshot
 	// has to be refused here rather than deeper in path resolution.
 	if cfg == nil {
-		return nil, workDir, errors.New("sandbox provisioning requires a loaded configuration")
+		return nil, workDir, nil, errors.New("sandbox provisioning requires a loaded configuration")
 	}
 	if !shouldEnableSandbox(enableSandbox, noSandbox) {
-		return nil, workDir, nil
+		return nil, workDir, nil, nil
 	}
 	authority, err := cfg.RuntimeAuthority()
 	if err != nil {
-		return nil, workDir, fmt.Errorf("resolve sandbox runtime authority: %w", err)
+		return nil, workDir, nil, fmt.Errorf("resolve sandbox runtime authority: %w", err)
 	}
-	sandboxInfo, err := provisionSandbox(ctx, authority, sandboxProvider, sessionID, workDir)
+	sandboxInfo, liveWorkDir, cleanup, err := provisionSandbox(ctx, authority, sandboxProvider, sessionID, workDir)
 	if err != nil {
 		ui.PrintError(err,
 			"Failed to provision sandbox",
 			"  • Check sandbox provider is available\n"+
 				"  • Use --no-sandbox to disable sandbox isolation\n"+
 				"  • Check the configured sandbox storage directory permissions")
-		return nil, workDir, err
+		return nil, workDir, nil, err
 	}
-	if sandboxInfo.WorkingDir == "" {
-		return nil, workDir, fmt.Errorf("sandbox provider %s returned an empty working directory", sandboxInfo.Provider)
-	}
-	workDir = sandboxInfo.WorkingDir
+	workDir = liveWorkDir
 	fmt.Printf("Using sandbox workspace: %s\n", workDir)
-	return sandboxInfo, workDir, nil
+	return sandboxInfo, workDir, cleanup, nil
 }
 
 // shouldEnableSandbox determines if sandbox should be enabled based on config and flags.
@@ -69,15 +84,15 @@ func provisionSandbox(
 	providerName string,
 	sessionID string,
 	workDir string,
-) (*manifest.SandboxConfig, error) {
+) (*manifest.SandboxConfig, string, *sandboxCleanup, error) {
 	debug.Phase("Provision Sandbox")
 	debug.Log("Provisioning sandbox for session: %s", sessionID)
 	debug.Log("Provider: %s", providerName)
 	debug.Log("WorkDir: %s", workDir)
 
-	sandboxWorkspace, homeDir, err := resolveSandboxProvisioningPaths(authority, sessionID)
+	sandboxRoot, sandboxWorkspace, homeDir, err := resolveSandboxProvisioningPaths(authority, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, "", nil, err
 	}
 
 	// Get provider only after the complete workspace authority is valid.
@@ -88,14 +103,14 @@ func provisionSandbox(
 		provider, err = sandbox.NewProviderForPlatform(providerName)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sandbox provider: %w", err)
+		return nil, "", nil, fmt.Errorf("failed to create sandbox provider: %w", err)
 	}
 
 	debug.Log("Using provider: %s", provider.Name())
 
 	lowerDirs, err := resolveSandboxLowerDirsAtHome(workDir, homeDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve sandbox lower directories: %w", err)
+		return nil, "", nil, fmt.Errorf("failed to resolve sandbox lower directories: %w", err)
 	}
 
 	// Determine the primary/target repo: the repository containing the requested
@@ -117,19 +132,25 @@ func provisionSandbox(
 		TargetRepo:   targetRepo,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sandbox: %w", err)
+		return nil, "", nil, fmt.Errorf("failed to create sandbox: %w", err)
 	}
+	sandboxInfo, liveWorkDir, contractErr := validateCreatedSandbox(sandboxRoot, sessionID, provider.Name(), sb)
+	if contractErr != nil {
+		contractErr = fmt.Errorf("sandbox provider %s violated its create contract: %w", provider.Name(), contractErr)
+		if cleanupErr := provider.Destroy(context.WithoutCancel(ctx), sessionID); cleanupErr != nil {
+			return nil, "", nil, errors.Join(contractErr, fmt.Errorf("cleanup failed: %w", cleanupErr))
+		}
+		return nil, "", nil, contractErr
+	}
+	// validateCreatedSandbox proved that the provider returned the stable AGM
+	// identity. Only after that proof may the exact instance become a retained
+	// rollback capability for later permission, authority, tmux, or launch
+	// failures.
+	cleanup := &sandboxCleanup{provider: provider, sessionID: sessionID}
 
 	debug.Log("Sandbox created successfully")
 	debug.Log("Merged path: %s", sb.MergedPath)
 	debug.Log("Working directory: %s", sb.WorkingDir)
-	if sb.WorkingDir == "" {
-		contractErr := fmt.Errorf("sandbox provider %s returned an empty working directory", provider.Name())
-		if cleanupErr := provider.Destroy(ctx, sb.ID); cleanupErr != nil {
-			return nil, errors.Join(contractErr, fmt.Errorf("cleanup failed: %w", cleanupErr))
-		}
-		return nil, contractErr
-	}
 	ui.PrintSuccess(fmt.Sprintf("Sandbox provisioned: %s", provider.Name()))
 
 	// Write onboarding CLAUDE.md with worktree instructions
@@ -145,42 +166,105 @@ func provisionSandbox(
 		}
 		if onboardErr != nil {
 			debug.Log("Warning: failed to generate onboarding content: %v", onboardErr)
-		} else if err := sandbox.WriteOnboardingClaudeMd(sb.WorkingDir, content); err != nil {
+		} else if err := sandbox.WriteOnboardingClaudeMd(liveWorkDir, content); err != nil {
 			debug.Log("Warning: failed to write onboarding CLAUDE.md: %v", err)
 		} else {
-			debug.Log("Wrote sandbox onboarding to ~/.claude/projects/ for %s", sb.WorkingDir)
+			debug.Log("Wrote sandbox onboarding to ~/.claude/projects/ for %s", liveWorkDir)
 		}
 	}
 
-	return &manifest.SandboxConfig{
-		Enabled:             true,
-		ID:                  sb.ID,
-		Provider:            provider.Name(),
-		MergedPath:          sb.MergedPath,
-		WorkingDir:          sb.WorkingDir,
-		CodexHookSourceRepo: targetRepo,
-		CreatedAt:           sb.CreatedAt,
-	}, nil
+	sandboxInfo.CodexHookSourceRepo = targetRepo
+	return sandboxInfo, liveWorkDir, cleanup, nil
 }
 
-func resolveSandboxProvisioningPaths(authority config.RuntimeAuthority, sessionID string) (string, string, error) {
+func resolveSandboxProvisioningPaths(authority config.RuntimeAuthority, sessionID string) (config.SandboxRoot, string, string, error) {
 	sandboxRoot, err := authority.Sandboxes()
 	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox root: %w", err)
+		return config.SandboxRoot{}, "", "", fmt.Errorf("resolve sandbox root: %w", err)
 	}
 	sandboxWorkspace, err := sandboxRoot.Workspace(sessionID)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox workspace: %w", err)
+		return config.SandboxRoot{}, "", "", fmt.Errorf("resolve sandbox workspace: %w", err)
 	}
 	homeRoot, err := authority.Home()
 	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox HOME: %w", err)
+		return config.SandboxRoot{}, "", "", fmt.Errorf("resolve sandbox HOME: %w", err)
 	}
 	homeDir, err := homeRoot.Path()
 	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox HOME path: %w", err)
+		return config.SandboxRoot{}, "", "", fmt.Errorf("resolve sandbox HOME path: %w", err)
 	}
-	return sandboxWorkspace, homeDir, nil
+	return sandboxRoot, sandboxWorkspace, homeDir, nil
+}
+
+// validateCreatedSandbox checks the provider adapter's result before any caller
+// consumes its paths. The stable AGM session ID selects the only workspace the
+// provider may return; a provider-native ID or path outside that workspace must
+// never become filesystem authority for onboarding, permissions, or launch.
+// It returns the physical working directory for live use without rewriting the
+// provider-spelled paths needed by durable ownership validation.
+func validateCreatedSandbox(
+	root config.SandboxRoot,
+	sessionID string,
+	providerName string,
+	sb *sandbox.Sandbox,
+) (*manifest.SandboxConfig, string, error) {
+	if sb == nil {
+		return nil, "", errors.New("returned a nil sandbox")
+	}
+	if sb.ID != sessionID {
+		return nil, "", fmt.Errorf("returned sandbox ID %q, want stable session ID %q", sb.ID, sessionID)
+	}
+	workspace, err := root.Workspace(sessionID)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve stable sandbox workspace: %w", err)
+	}
+
+	type providerPath struct {
+		name     string
+		value    string
+		required bool
+	}
+	paths := []providerPath{
+		{name: "merged path", value: sb.MergedPath, required: true},
+		{name: "working directory", value: sb.WorkingDir, required: true},
+		{name: "upper path", value: sb.UpperPath},
+		{name: "work path", value: sb.WorkPath},
+	}
+	var normalizedWorkingDir string
+	for _, path := range paths {
+		if path.value == "" {
+			if path.required {
+				return nil, "", fmt.Errorf("returned an empty %s", path.name)
+			}
+			continue
+		}
+		resolved, err := root.ValidateExistingWorkspaceDirectory(sessionID, path.value)
+		if err != nil {
+			return nil, "", fmt.Errorf("returned invalid %s %q (outside authority, not materialized, or not a directory): %w", path.name, path.value, err)
+		}
+		if path.name == "working directory" {
+			normalizedWorkingDir = resolved
+		}
+	}
+	if filepath.Dir(sb.MergedPath) != workspace {
+		return nil, "", fmt.Errorf(
+			"returned merged path %q is not rooted at the exact stable workspace %q",
+			sb.MergedPath, workspace,
+		)
+	}
+	sandboxInfo := &manifest.SandboxConfig{
+		Enabled:    true,
+		ID:         sb.ID,
+		Provider:   providerName,
+		MergedPath: sb.MergedPath,
+		WorkingDir: sb.WorkingDir,
+		CreatedAt:  sb.CreatedAt,
+	}
+	if err := manifest.ValidateSandboxOwnership(sessionID, sandboxInfo); err != nil {
+		return nil, "", fmt.Errorf("returned invalid durable sandbox ownership: %w", err)
+	}
+	return sandboxInfo, normalizedWorkingDir, nil
 }
 
 // resolveSandboxLowerDirs returns the provider lower directories for a new
@@ -326,31 +410,4 @@ func findPrimaryRepo(repoDirs []string, workDir string) string {
 		return repoDirs[0]
 	}
 	return ""
-}
-
-// cleanupSandbox destroys a sandbox on error
-func cleanupSandbox(ctx context.Context, sandboxID string, providerName string) {
-	if sandboxID == "" {
-		return
-	}
-
-	debug.Log("Cleaning up sandbox: %s", sandboxID)
-
-	var provider sandbox.Provider
-	var err error
-	if providerName == "auto" || providerName == "" {
-		provider, err = sandbox.NewProvider()
-	} else {
-		provider, err = sandbox.NewProviderForPlatform(providerName)
-	}
-	if err != nil {
-		debug.Log("Failed to get provider for cleanup: %v", err)
-		return
-	}
-
-	if err := provider.Destroy(ctx, sandboxID); err != nil {
-		debug.Log("Failed to cleanup sandbox: %v", err)
-	} else {
-		debug.Log("Sandbox cleaned up successfully")
-	}
 }

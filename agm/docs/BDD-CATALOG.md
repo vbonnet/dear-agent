@@ -516,6 +516,106 @@ Wayfinder. Provider-specific isolation, secrets, cleanup, and path-resolution
 contracts need executable traceability without requiring privileged mounts in
 BDD.
 
+### Sandbox Launch Authority
+
+**File:** [`sandbox_launch_authority.feature`](../test/bdd/features/sandbox_launch_authority.feature)
+
+**Drives:** managed Claude Code and Codex CLI launch selection in
+`agm/internal/ops`.
+
+**Key scenarios:**
+- Create and cold resume derive the writable child from the stable AGM session
+  ID, retain the configured sandbox parent for disk admission, and reject an
+  effective or persisted launch path outside that child.
+- APFS merged-directory symlinks that resolve within the stable session
+  workspace remain valid for both creation and cold resume.
+- Provider-returned identity and materialized directories are validated before
+  onboarding or permission writes; malicious output is cleaned by stable AGM
+  session ID without modifying the outside target. Contained provider symlinks
+  preserve the exact stable-workspace cleanup boundary and a structurally valid
+  provider-spelled durable ownership record, while the live launch and
+  host-side onboarding key receive a separately resolved physical working
+  directory.
+- A post-provision failure rolls back through the original provider instance
+  with an uncanceled cleanup context, rather than reconstructing a provider
+  from its display name.
+- Fresh creation rejects a prepared working directory outside the selected
+  workspace or a missing prepared directory before Codex remote or tmux
+  mutation; cold resume likewise rejects persisted containment drift and
+  missing effective directories before tmux creation.
+
+**Why this matters:** AGM session identity, not a provider-native conversation
+ID or inherited process state, selects the per-session workspace supplied to
+the private launch boundary.
+
+### FSGUARD Sandbox Workspace Authority
+
+**File:** [`fsguard_sandbox_workspace_authority.feature`](../test/bdd/features/fsguard_sandbox_workspace_authority.feature)
+
+**Drives:** exact-root write classification and invalid-override handling in
+`internal/fsguard`.
+
+**Key scenarios:**
+- An explicit sandbox workspace replaces the legacy default carveout and
+  allows only its exact root and descendants, not siblings, prefix lookalikes,
+  traversal escapes, or the old default tree; an invalid explicit value fails
+  closed.
+- An existing symlink with an unresolvable target, including a dangling escape
+  under a writable workspace or worktree, is denied while an ordinary
+  nonexistent descendant remains allowed.
+- Symlink-plus-parent traversal and unsupported leading-tilde shell forms fail
+  closed, and the exact configured workspace shadows generic writable-parent
+  carveouts so siblings remain denied even under temporary or worktree roots.
+
+**Why this matters:** A per-session grant must remain component-bounded while
+preserving the unset compatibility default and valid dot-prefixed workspace
+paths.
+
+### Private Sandbox Launch Authority
+
+**File:** [`private_sandbox_launch_authority.feature`](../test/bdd/features/private_sandbox_launch_authority.feature)
+
+**Drives:** private handoff consumption and the final executor disk recheck in
+`agm/internal/harnessexec`.
+
+**Key scenarios:**
+- Owner-only Claude Code and Codex CLI handoffs replace stale inherited
+  authority without encoding a FSGUARD assignment or disk-root or
+  sandbox-workspace authority flag in generated command text; the stale value
+  remains absent even though a legitimate workdir can share the selected
+  workspace path prefix.
+- Ordinary Codex handoffs bind the exact launch arguments without depending on
+  override proofs, and managed Claude and Codex executors physically re-resolve
+  both the workspace authority and working directory to reject a post-handoff
+  symlink retarget, including retargeting the workspace root itself.
+- After executable preparation, the private executor repeats the mandatory
+  disk-only gate before any optional proof commitment or process replacement,
+  using the configured sandbox root and caller-snapshotted minimum-free-space
+  threshold (or the default disk reader when the root is omitted), including
+  launches with no override proofs and proof-bearing launches.
+
+**Why this matters:** The private boundary must consume the selected child
+authority without reviving stale tmux state and must not let the optional
+override path bypass the final disk gate.
+
+### Sandbox Volume Admission
+
+**File:** [`sandbox_volume_admission.feature`](../test/bdd/features/sandbox_volume_admission.feature)
+
+**Drives:** configured-volume disk selection and fail-closed path resolution
+in `agm/internal/circuitbreaker`, plus the initial AGM command admission call
+specified by `agm/internal/ops`.
+
+**Key scenarios:**
+- Initial admission probes the configured parent sandbox volume before a
+  per-session workspace needs to exist.
+- Every probe re-resolves the planned path, selects its deepest existing
+  ancestor for a missing descendant, and rejects ambiguous or symlinked paths.
+
+**Why this matters:** The parent root chooses storage and disk headroom, but it
+must not accidentally become the child process's write grant; disk admission
+must observe the volume that will actually hold the workspace.
+
 ### Instruction Parity
 
 **File:** [`instruction_parity.feature`](../test/bdd/features/instruction_parity.feature)

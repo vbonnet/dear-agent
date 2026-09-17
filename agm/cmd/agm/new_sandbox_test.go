@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/config"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
@@ -125,12 +126,15 @@ func TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation
 	_, authority := loadSandboxRuntimeAuthority(t, testHome)
 
 	const sessionID = "retired-claudecode-provider"
-	got, err := provisionSandbox(context.Background(), authority, "claudecode-worktree", sessionID, testHome)
+	got, _, cleanup, err := provisionSandbox(context.Background(), authority, "claudecode-worktree", sessionID, testHome)
 	if err == nil {
 		t.Fatal("provisionSandbox() error = nil, want retired provider rejection")
 	}
 	if got != nil {
 		t.Fatalf("provisionSandbox() sandbox = %#v, want nil", got)
+	}
+	if cleanup != nil {
+		t.Fatalf("provisionSandbox() cleanup = %#v, want nil", cleanup)
 	}
 	var sandboxErr *sandbox.Error
 	if !errors.As(err, &sandboxErr) || sandboxErr.Code != sandbox.ErrCodeUnsupportedPlatform {
@@ -208,9 +212,12 @@ func TestProvisionSandboxUsesCapturedAuthority(t *testing.T) {
 			}
 
 			const sessionID = "captured-authority-session"
-			sandboxInfo, err := provisionSandbox(context.Background(), authority, "mock", sessionID, repoRoot)
+			sandboxInfo, _, cleanup, err := provisionSandbox(context.Background(), authority, "mock", sessionID, repoRoot)
 			if err != nil {
 				t.Fatalf("provisionSandbox() error = %v", err)
+			}
+			if cleanup == nil {
+				t.Fatal("provisionSandbox() cleanup = nil after successful provisioning")
 			}
 			sandboxRoot, err := authority.Sandboxes()
 			if err != nil {
@@ -243,7 +250,7 @@ func TestProvisionSandboxRejectsZeroAuthorityBeforeProviderLookup(t *testing.T) 
 	t.Cleanup(func() { cfg = originalCfg })
 	cfg = &config.Config{Sandbox: config.SandboxConfig{Repos: []string{t.TempDir()}}}
 
-	_, err := provisionSandbox(
+	_, _, _, err := provisionSandbox(
 		context.Background(),
 		config.RuntimeAuthority{},
 		"intentionally-unknown-provider",
@@ -278,7 +285,7 @@ func TestProvisionSandboxRejectsEscapingSessionBeforeProviderLookup(t *testing.T
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	_, err := provisionSandbox(
+	_, _, _, err := provisionSandbox(
 		context.Background(),
 		authority,
 		"intentionally-unknown-provider",
@@ -702,9 +709,12 @@ func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T
 	noSandbox = false
 	sandboxProvider = "mock"
 
-	sandboxInfo, workingDir, err := maybeProvisionSandbox(context.Background(), "mapped-session", requestedDir)
+	sandboxInfo, workingDir, cleanup, err := maybeProvisionSandbox(context.Background(), "mapped-session", requestedDir)
 	if err != nil {
 		t.Fatalf("maybeProvisionSandbox() error = %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("maybeProvisionSandbox() cleanup = nil after successful provisioning")
 	}
 	wantWorkingDir := filepath.Join(homeDir, ".agm", "sandboxes", "mapped-session", "merged", ".agents", "skills")
 	if workingDir != wantWorkingDir {
@@ -736,9 +746,13 @@ type emptyWorkingDirProvider struct {
 }
 
 func (p *emptyWorkingDirProvider) Create(_ context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
+	mergedPath := filepath.Join(req.WorkspaceDir, "merged")
+	if err := os.MkdirAll(mergedPath, 0o700); err != nil {
+		return nil, err
+	}
 	return &sandbox.Sandbox{
 		ID:         req.SessionID,
-		MergedPath: filepath.Join(req.WorkspaceDir, "merged"),
+		MergedPath: mergedPath,
 		CreatedAt:  time.Now(),
 	}, nil
 }
@@ -762,7 +776,7 @@ func TestProvisionSandboxPreservesContractAndCleanupFailures(t *testing.T) {
 	cfg = loaded
 	cfg.Sandbox = config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}
 
-	_, err := provisionSandbox(context.Background(), authority, "empty-working-dir-cleanup-failure-test", "contract-session", repoRoot)
+	_, _, _, err := provisionSandbox(context.Background(), authority, "empty-working-dir-cleanup-failure-test", "contract-session", repoRoot)
 	if err == nil || !errors.Is(err, cleanupErr) {
 		t.Fatalf("provisionSandbox() error = %v, want joined cleanup failure", err)
 	}
@@ -787,12 +801,375 @@ func TestProvisionSandboxCleansUpProviderThatViolatesWorkingDirectoryContract(t 
 	cfg = loaded
 	cfg.Sandbox = config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}
 
-	_, err := provisionSandbox(context.Background(), authority, "empty-working-dir-test", "contract-session", repoRoot)
+	_, _, _, err := provisionSandbox(context.Background(), authority, "empty-working-dir-test", "contract-session", repoRoot)
 	if err == nil {
 		t.Fatal("provisionSandbox() error = nil, want provider contract failure")
 	}
 	if !destroyed {
 		t.Fatal("provisionSandbox() did not clean up workspace after provider contract failure")
+	}
+}
+
+func TestValidateCreatedSandboxRejectsAuthorityWidening(t *testing.T) {
+	homeDir := mkdirPhysical(t, t.TempDir())
+	_, authority := loadSandboxRuntimeAuthority(t, homeDir)
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "provider-contract-session"
+	workspace, err := sandboxRoot.Workspace(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{
+		filepath.Join(workspace, "merged", "repo"),
+		filepath.Join(workspace, "upper"),
+		filepath.Join(workspace, "work"),
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := mkdirPhysical(t, t.TempDir())
+	nestedMerged := filepath.Join(workspace, "nested", sessionID, "merged")
+	if err := os.MkdirAll(filepath.Join(nestedMerged, "repo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	valid := func() *sandbox.Sandbox {
+		return &sandbox.Sandbox{
+			ID:         sessionID,
+			MergedPath: filepath.Join(workspace, "merged"),
+			WorkingDir: filepath.Join(workspace, "merged", "repo"),
+			UpperPath:  filepath.Join(workspace, "upper"),
+			WorkPath:   filepath.Join(workspace, "work"),
+			CreatedAt:  time.Now(),
+		}
+	}
+	tests := []struct {
+		name          string
+		mutate        func(*sandbox.Sandbox) *sandbox.Sandbox
+		emptyProvider bool
+		wantErr       string
+	}{
+		{name: "nil result", mutate: func(*sandbox.Sandbox) *sandbox.Sandbox { return nil }, wantErr: "nil sandbox"},
+		{name: "provider native ID", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.ID = "provider-native-id"; return sb }, wantErr: "stable session ID"},
+		{name: "empty merged path", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.MergedPath = ""; return sb }, wantErr: "empty merged path"},
+		{name: "empty working directory", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.WorkingDir = ""; return sb }, wantErr: "empty working directory"},
+		{name: "outside merged path", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.MergedPath = outside; return sb }, wantErr: "invalid merged path"},
+		{name: "outside working directory", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.WorkingDir = outside; return sb }, wantErr: "invalid working directory"},
+		{name: "outside optional upper path", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.UpperPath = outside; return sb }, wantErr: "invalid upper path"},
+		{name: "outside optional work path", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.WorkPath = outside; return sb }, wantErr: "invalid work path"},
+		{name: "nonexistent merged path", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox {
+			sb.MergedPath = filepath.Join(workspace, "missing-merged")
+			return sb
+		}, wantErr: "merged path"},
+		{name: "nonexistent working directory", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox {
+			sb.WorkingDir = filepath.Join(workspace, "merged", "missing-repo")
+			return sb
+		}, wantErr: "working directory"},
+		{name: "nonexistent optional upper path", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox {
+			sb.UpperPath = filepath.Join(workspace, "missing-upper")
+			return sb
+		}, wantErr: "upper path"},
+		{name: "nonexistent optional work path", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox {
+			sb.WorkPath = filepath.Join(workspace, "missing-work")
+			return sb
+		}, wantErr: "work path"},
+		{name: "empty durable provider", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { return sb }, emptyProvider: true, wantErr: "provider is required"},
+		{name: "zero durable creation time", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox { sb.CreatedAt = time.Time{}; return sb }, wantErr: "creation time is required"},
+		{name: "noncanonical durable merged boundary", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox {
+			sb.MergedPath = filepath.Join(workspace, "upper")
+			sb.WorkingDir = filepath.Join(workspace, "upper")
+			return sb
+		}, wantErr: "not the identified sandbox cleanup boundary"},
+		{name: "physical working path breaks durable merged relationship", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox {
+			sb.WorkingDir = filepath.Join(workspace, "upper")
+			return sb
+		}, wantErr: "outside merged path"},
+		{name: "nested repeated session cleanup boundary", mutate: func(sb *sandbox.Sandbox) *sandbox.Sandbox {
+			sb.MergedPath = nestedMerged
+			sb.WorkingDir = filepath.Join(nestedMerged, "repo")
+			return sb
+		}, wantErr: "exact stable workspace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			providerName := "test-provider"
+			if tt.emptyProvider {
+				providerName = ""
+			}
+			_, _, err := validateCreatedSandbox(sandboxRoot, sessionID, providerName, tt.mutate(valid()))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validateCreatedSandbox() error = %v, want context %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateCreatedSandboxSeparatesPhysicalLaunchPathFromDurableProviderSpelling(t *testing.T) {
+	homeDir := mkdirPhysical(t, t.TempDir())
+	_, authority := loadSandboxRuntimeAuthority(t, homeDir)
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "apfs-provider-contract-session"
+	workspace, err := sandboxRoot.Workspace(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upperRepo := mkdirPhysical(t, filepath.Join(workspace, "upper", "repo"))
+	merged := filepath.Join(workspace, "merged")
+	if err := os.Symlink(filepath.Join(workspace, "upper"), merged); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	sb := &sandbox.Sandbox{
+		ID:         sessionID,
+		MergedPath: merged,
+		WorkingDir: filepath.Join(merged, "repo"),
+		UpperPath:  filepath.Join(workspace, "upper"),
+		CreatedAt:  time.Now(),
+	}
+
+	persisted, physicalWorkingDir, err := validateCreatedSandbox(sandboxRoot, sessionID, "apfs-reflink", sb)
+	if err != nil {
+		t.Fatalf("validateCreatedSandbox() rejected contained provider symlink: %v", err)
+	}
+	if physicalWorkingDir != upperRepo {
+		t.Fatalf("physical working directory = %q, want %q", physicalWorkingDir, upperRepo)
+	}
+	providerWorkingDir := filepath.Join(merged, "repo")
+	if sb.WorkingDir != providerWorkingDir {
+		t.Fatalf("WorkingDir = %q, want preserved provider spelling %q", sb.WorkingDir, providerWorkingDir)
+	}
+	if sb.MergedPath != merged {
+		t.Fatalf("MergedPath = %q, want provider spelling %q", sb.MergedPath, merged)
+	}
+	if err := manifest.ValidateSandboxOwnership(sessionID, persisted); err != nil {
+		t.Fatalf("provider-spelled sandbox metadata is not durable ownership: %v", err)
+	}
+}
+
+type apfsSpellingProvider struct {
+	workspace string
+}
+
+func (p *apfsSpellingProvider) Create(_ context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
+	p.workspace = req.WorkspaceDir
+	upper := filepath.Join(req.WorkspaceDir, "upper")
+	upperRepo := filepath.Join(upper, "repo")
+	if err := os.MkdirAll(upperRepo, 0o700); err != nil {
+		return nil, err
+	}
+	merged := filepath.Join(req.WorkspaceDir, "merged")
+	if err := os.Symlink(upper, merged); err != nil {
+		return nil, err
+	}
+	return &sandbox.Sandbox{
+		ID:         req.SessionID,
+		MergedPath: merged,
+		WorkingDir: filepath.Join(merged, "repo"),
+		UpperPath:  upper,
+		CreatedAt:  time.Now(),
+	}, nil
+}
+
+func (p *apfsSpellingProvider) Destroy(_ context.Context, _ string) error {
+	return os.RemoveAll(p.workspace)
+}
+
+func (*apfsSpellingProvider) Validate(context.Context, string) error { return nil }
+func (*apfsSpellingProvider) Name() string                           { return "apfs-reflink-test" }
+
+func TestProvisionSandboxWritesOnboardingForPhysicalAPFSLaunchPath(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+	homeDir := mkdirPhysical(t, t.TempDir())
+	t.Setenv("HOME", homeDir)
+	loaded, authority := loadSandboxRuntimeAuthority(t, homeDir)
+	repoRoot := mkdirPhysical(t, t.TempDir())
+	provider := &apfsSpellingProvider{}
+	sandbox.RegisterProvider("apfs-spelling-onboarding-test", func() sandbox.Provider { return provider })
+	loaded.Sandbox = config.SandboxConfig{
+		Enabled:    true,
+		Repos:      []string{repoRoot},
+		Onboarding: config.OnboardingConfig{Enabled: true},
+	}
+	cfg = loaded
+	const sessionID = "apfs-onboarding-session"
+
+	sandboxInfo, liveWorkDir, cleanup, err := provisionSandbox(
+		context.Background(), authority, "apfs-spelling-onboarding-test", sessionID, repoRoot,
+	)
+	if err != nil {
+		t.Fatalf("provisionSandbox() error = %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("provisionSandbox() cleanup = nil")
+	}
+	t.Cleanup(func() { _ = cleanup.rollback(context.Background()) })
+	wantLiveWorkDir := filepath.Join(provider.workspace, "upper", "repo")
+	if liveWorkDir != wantLiveWorkDir {
+		t.Fatalf("liveWorkDir = %q, want physical APFS path %q", liveWorkDir, wantLiveWorkDir)
+	}
+	if err := manifest.ValidateSandboxOwnership(sessionID, sandboxInfo); err != nil {
+		t.Fatalf("durable sandbox ownership invalid: %v", err)
+	}
+	physicalProjectDir, err := sandbox.ClaudeProjectDir(liveWorkDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(physicalProjectDir, "CLAUDE.md")); err != nil {
+		t.Fatalf("physical launch onboarding missing: %v", err)
+	}
+	providerProjectDir, err := sandbox.ClaudeProjectDir(sandboxInfo.WorkingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(providerProjectDir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("provider-alias onboarding unexpectedly exists: %v", err)
+	}
+}
+
+type escapingWorkingDirProvider struct {
+	outside      string
+	workspace    string
+	destroyedIDs []string
+}
+
+func (p *escapingWorkingDirProvider) Create(_ context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
+	p.workspace = req.WorkspaceDir
+	for _, dir := range []string{"merged", "upper", "work"} {
+		if err := os.MkdirAll(filepath.Join(req.WorkspaceDir, dir), 0o700); err != nil {
+			return nil, err
+		}
+	}
+	return &sandbox.Sandbox{
+		ID:         req.SessionID,
+		MergedPath: filepath.Join(req.WorkspaceDir, "merged"),
+		WorkingDir: p.outside,
+		UpperPath:  filepath.Join(req.WorkspaceDir, "upper"),
+		WorkPath:   filepath.Join(req.WorkspaceDir, "work"),
+		CreatedAt:  time.Now(),
+	}, nil
+}
+
+func (p *escapingWorkingDirProvider) Destroy(_ context.Context, id string) error {
+	p.destroyedIDs = append(p.destroyedIDs, id)
+	return os.RemoveAll(p.workspace)
+}
+
+func (*escapingWorkingDirProvider) Validate(context.Context, string) error { return nil }
+func (*escapingWorkingDirProvider) Name() string                           { return "escaping-working-dir-test" }
+
+type nonMaterializingProvider struct {
+	workingDir   string
+	destroyedIDs []string
+}
+
+func (p *nonMaterializingProvider) Create(_ context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
+	p.workingDir = filepath.Join(req.WorkspaceDir, "merged", "repo")
+	return &sandbox.Sandbox{
+		ID:         req.SessionID,
+		MergedPath: filepath.Join(req.WorkspaceDir, "merged"),
+		WorkingDir: p.workingDir,
+		UpperPath:  filepath.Join(req.WorkspaceDir, "upper"),
+		WorkPath:   filepath.Join(req.WorkspaceDir, "work"),
+		CreatedAt:  time.Now(),
+	}, nil
+}
+
+func (p *nonMaterializingProvider) Destroy(_ context.Context, id string) error {
+	p.destroyedIDs = append(p.destroyedIDs, id)
+	return nil
+}
+
+func (*nonMaterializingProvider) Validate(context.Context, string) error { return nil }
+func (*nonMaterializingProvider) Name() string                           { return "non-materializing-test" }
+
+func TestProvisionSandboxRejectsUnmaterializedProviderPathsBeforeOnboardingWrite(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+	homeDir := mkdirPhysical(t, t.TempDir())
+	loaded, authority := loadSandboxRuntimeAuthority(t, homeDir)
+	repoRoot := mkdirPhysical(t, t.TempDir())
+	provider := &nonMaterializingProvider{}
+	sandbox.RegisterProvider("non-materializing-test", func() sandbox.Provider { return provider })
+	loaded.Sandbox = config.SandboxConfig{
+		Enabled:    true,
+		Repos:      []string{repoRoot},
+		Onboarding: config.OnboardingConfig{Enabled: true},
+	}
+	cfg = loaded
+	const sessionID = "non-materializing-session"
+
+	got, _, cleanup, err := provisionSandbox(context.Background(), authority, "non-materializing-test", sessionID, repoRoot)
+	if err == nil || !strings.Contains(err.Error(), "not materialized") {
+		t.Fatalf("provisionSandbox() = (%+v, %v), want unmaterialized-path rejection", got, err)
+	}
+	if cleanup != nil {
+		t.Fatalf("provisionSandbox() cleanup = %#v, want nil after provider contract rejection", cleanup)
+	}
+	if len(provider.destroyedIDs) != 1 || provider.destroyedIDs[0] != sessionID {
+		t.Fatalf("Destroy IDs = %v, want stable session ID %q", provider.destroyedIDs, sessionID)
+	}
+	if _, err := os.Stat(provider.workingDir); !os.IsNotExist(err) {
+		t.Fatalf("provider working directory was materialized by validation: %v", err)
+	}
+	projectDir, err := sandbox.ClaudeProjectDir(provider.workingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(projectDir); !os.IsNotExist(err) {
+		t.Fatalf("onboarding host tree was created before provider materialization validation: %v", err)
+	}
+}
+
+func TestProvisionSandboxRejectsEscapingProviderBeforeOutsideOnboardingWriteAndCleansStableSession(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+	homeDir := mkdirPhysical(t, t.TempDir())
+	loaded, authority := loadSandboxRuntimeAuthority(t, homeDir)
+	repoRoot := mkdirPhysical(t, t.TempDir())
+	outside := mkdirPhysical(t, t.TempDir())
+	sentinel := filepath.Join(outside, "preserve")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider := &escapingWorkingDirProvider{outside: outside}
+	sandbox.RegisterProvider("escaping-working-dir-test", func() sandbox.Provider { return provider })
+	loaded.Sandbox = config.SandboxConfig{
+		Enabled:    true,
+		Repos:      []string{repoRoot},
+		Onboarding: config.OnboardingConfig{Enabled: true},
+	}
+	cfg = loaded
+	const sessionID = "escaping-provider-session"
+	projectDir, err := sandbox.ClaudeProjectDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, _, cleanup, err := provisionSandbox(context.Background(), authority, "escaping-working-dir-test", sessionID, repoRoot)
+	if err == nil || !strings.Contains(err.Error(), "invalid working directory") {
+		t.Fatalf("provisionSandbox() = (%+v, %v), want provider authority rejection", got, err)
+	}
+	if cleanup != nil {
+		t.Fatalf("provisionSandbox() cleanup = %#v, want nil after provider contract rejection", cleanup)
+	}
+	if len(provider.destroyedIDs) != 1 || provider.destroyedIDs[0] != sessionID {
+		t.Fatalf("Destroy IDs = %v, want stable session ID %q", provider.destroyedIDs, sessionID)
+	}
+	if _, err := os.Stat(provider.workspace); !os.IsNotExist(err) {
+		t.Fatalf("stable workspace still exists after contract cleanup: %v", err)
+	}
+	if contents, err := os.ReadFile(sentinel); err != nil || string(contents) != "preserve" {
+		t.Fatalf("outside sentinel changed: contents=%q err=%v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("outside-derived onboarding was written before provider validation: %v", err)
 	}
 }
 
@@ -861,7 +1238,7 @@ func TestMaybeProvisionSandboxRefusesMissingConfiguration(t *testing.T) {
 	t.Cleanup(func() { cfg = originalCfg })
 	cfg = nil
 
-	sandboxInfo, workDir, err := maybeProvisionSandbox(context.Background(), "session-id", "/tmp/work")
+	sandboxInfo, workDir, cleanup, err := maybeProvisionSandbox(context.Background(), "session-id", "/tmp/work")
 	if err == nil {
 		t.Fatal("maybeProvisionSandbox() error = nil, want a refusal without a loaded configuration")
 	}
@@ -873,6 +1250,9 @@ func TestMaybeProvisionSandboxRefusesMissingConfiguration(t *testing.T) {
 	}
 	if workDir != "/tmp/work" {
 		t.Fatalf("maybeProvisionSandbox() workDir = %q, want the request preserved", workDir)
+	}
+	if cleanup != nil {
+		t.Fatalf("maybeProvisionSandbox() cleanup = %#v, want nil", cleanup)
 	}
 }
 
@@ -888,7 +1268,7 @@ func TestMaybeProvisionSandboxRefusesConfigWithoutRuntimeAuthority(t *testing.T)
 	cfg.Sandbox.Enabled = true
 	noSandbox = false
 
-	if _, _, err := maybeProvisionSandbox(context.Background(), "session-id", "/tmp/work"); err == nil {
+	if _, _, _, err := maybeProvisionSandbox(context.Background(), "session-id", "/tmp/work"); err == nil {
 		t.Fatal("maybeProvisionSandbox() error = nil, want a runtime-authority refusal")
 	} else if !errors.Is(err, config.ErrRuntimeAuthorityUnavailable) {
 		t.Fatalf("maybeProvisionSandbox() error = %v, want %v", err, config.ErrRuntimeAuthorityUnavailable)

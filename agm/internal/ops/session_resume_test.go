@@ -13,6 +13,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -460,6 +461,7 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 			TmuxSessionName: "legacy-codex",
 			WorktreePath:    t.TempDir(),
 		},
+		config.SandboxRoot{},
 	)
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)
@@ -492,14 +494,18 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	}
 	configDir := t.TempDir()
 	t.Setenv("AGM_CONFIG_DIR", configDir)
-	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	const sessionID = "sandbox-codex-session"
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, sessionID)
+	worktreePath, hookTrust := resumeCodexHookFixture(t, filepath.Join(mergedPath, "repo"))
 	extraAddDir := filepath.Join(t.TempDir(), "real worktree")
 	m := &manifest.Manifest{
-		SessionID: "sandbox-codex-session",
+		SessionID: sessionID,
 		Harness:   "codex-cli",
 		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
 		Sandbox: &manifest.SandboxConfig{
 			Enabled:                    true,
+			MergedPath:                 mergedPath,
+			WorkingDir:                 worktreePath,
 			ExtraAddDirs:               []string{extraAddDir},
 			BypassCodexHookTrust:       true,
 			BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
@@ -517,6 +523,7 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 			TmuxSessionName: "sandbox-codex",
 			WorktreePath:    worktreePath,
 		},
+		sandboxRoot,
 	)
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)
@@ -536,13 +543,17 @@ func TestPrepareResumeLaunchRejectsInvalidCodexHookTrustReason(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	configDir := t.TempDir()
 	t.Setenv("AGM_CONFIG_DIR", configDir)
-	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	const sessionID = "sandbox-codex-session"
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, sessionID)
+	worktreePath, hookTrust := resumeCodexHookFixture(t, filepath.Join(mergedPath, "repo"))
 	m := &manifest.Manifest{
-		SessionID: "sandbox-codex-session",
+		SessionID: sessionID,
 		Harness:   "codex-cli",
 		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
 		Sandbox: &manifest.SandboxConfig{
 			Enabled:               true,
+			MergedPath:            mergedPath,
+			WorkingDir:            worktreePath,
 			BypassCodexHookTrust:  true,
 			CodexHookSourceRepo:   hookTrust.SourceRepo,
 			CodexHookSourceCommit: hookTrust.SourceCommit,
@@ -556,6 +567,7 @@ func TestPrepareResumeLaunchRejectsInvalidCodexHookTrustReason(t *testing.T) {
 			TmuxSessionName: "sandbox-codex",
 			WorktreePath:    worktreePath,
 		},
+		sandboxRoot,
 	)
 	if err == nil || !strings.Contains(err.Error(), "revalidate Codex hook-trust reason before resume") {
 		t.Fatalf("prepareResumeLaunch() error = %v, want invalid reason refusal", err)
@@ -564,16 +576,20 @@ func TestPrepareResumeLaunchRejectsInvalidCodexHookTrustReason(t *testing.T) {
 
 func TestPrepareResumeLaunchRejectsChangedSandboxCodexHooks(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	const sessionID = "sandbox-codex-session"
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, sessionID)
+	worktreePath, hookTrust := resumeCodexHookFixture(t, filepath.Join(mergedPath, "repo"))
 	if err := os.WriteFile(filepath.Join(worktreePath, ".codex", "hooks", "guard"), []byte("#!/bin/sh\nexit 99\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	m := &manifest.Manifest{
-		SessionID: "sandbox-codex-session",
+		SessionID: sessionID,
 		Harness:   "codex-cli",
 		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
 		Sandbox: &manifest.SandboxConfig{
 			Enabled:                    true,
+			MergedPath:                 mergedPath,
+			WorkingDir:                 worktreePath,
 			BypassCodexHookTrust:       true,
 			BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
 			CodexHookSourceRepo:        hookTrust.SourceRepo,
@@ -590,14 +606,19 @@ func TestPrepareResumeLaunchRejectsChangedSandboxCodexHooks(t *testing.T) {
 			TmuxSessionName: "sandbox-codex",
 			WorktreePath:    worktreePath,
 		},
+		sandboxRoot,
 	)
 	if err == nil || !strings.Contains(err.Error(), "revalidate Codex hook trust before resume") {
 		t.Fatalf("prepareResumeLaunch() error = %v, want hook revalidation failure", err)
 	}
 }
 
-func resumeCodexHookFixture(t *testing.T) (string, codexhooks.Attestation) {
+func resumeCodexHookFixture(t *testing.T, sandboxPaths ...string) (string, codexhooks.Attestation) {
 	t.Helper()
+	sandbox := filepath.Join(t.TempDir(), "sandbox")
+	if len(sandboxPaths) > 0 {
+		sandbox = sandboxPaths[0]
+	}
 	source := gittest.NewRepo(t)
 	hooksDir := filepath.Join(source, ".codex", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
@@ -613,7 +634,9 @@ func resumeCodexHookFixture(t *testing.T) (string, codexhooks.Attestation) {
 	gittest.Run(t, source, "add", ".codex")
 	gittest.Run(t, source, "commit", "-m", "add reviewed hooks")
 
-	sandbox := filepath.Join(t.TempDir(), "sandbox")
+	if err := os.MkdirAll(filepath.Dir(sandbox), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	gittest.Run(t, filepath.Dir(sandbox), "clone", "--no-hardlinks", source, sandbox)
 	gittest.HardenRepo(t, sandbox)
 	attestation, err := codexhooks.Attest(
@@ -636,6 +659,244 @@ func resumeCodexHookFixture(t *testing.T) (string, codexhooks.Attestation) {
 	return sandbox, attestation
 }
 
+func resumeSandboxRoot(t *testing.T, sessionID string) (config.SandboxRoot, string) {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := sandboxRoot.Workspace(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedPath := filepath.Join(workspace, "merged")
+	if err := os.MkdirAll(mergedPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return sandboxRoot, mergedPath
+}
+
+func TestValidateSandboxResumePathsRejectsPersistedAuthorityDrift(t *testing.T) {
+	const sessionID = "stable-agm-session"
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, sessionID)
+	workingDir := filepath.Join(mergedPath, "repo")
+	if err := os.MkdirAll(workingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "foreign-session", "merged")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name         string
+		mergedPath   string
+		workingDir   string
+		healthPath   string
+		sessionPath  string
+		wantRejected bool
+	}{
+		{name: "valid", mergedPath: mergedPath, workingDir: workingDir, healthPath: workingDir, sessionPath: workingDir},
+		{name: "foreign merged path", mergedPath: outside, workingDir: workingDir, healthPath: workingDir, wantRejected: true},
+		{name: "foreign sandbox working directory", mergedPath: mergedPath, workingDir: outside, healthPath: workingDir, wantRejected: true},
+		{name: "foreign classified directory", mergedPath: mergedPath, workingDir: workingDir, healthPath: outside, wantRejected: true},
+		{name: "foreign persisted session directory", mergedPath: mergedPath, workingDir: workingDir, healthPath: workingDir, sessionPath: outside, wantRejected: true},
+		{name: "missing merged path", mergedPath: filepath.Join(filepath.Dir(mergedPath), "missing-merged"), workingDir: workingDir, healthPath: workingDir, wantRejected: true},
+		{name: "missing sandbox working directory", mergedPath: mergedPath, workingDir: filepath.Join(mergedPath, "missing-workdir"), healthPath: workingDir, wantRejected: true},
+		{name: "missing classified directory", mergedPath: mergedPath, workingDir: workingDir, healthPath: filepath.Join(mergedPath, "missing-health"), wantRejected: true},
+		{name: "missing persisted session directory", mergedPath: mergedPath, workingDir: workingDir, healthPath: workingDir, sessionPath: filepath.Join(mergedPath, "missing-session"), wantRejected: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := &manifest.Manifest{
+				SessionID:        sessionID,
+				WorkingDirectory: test.sessionPath,
+				Sandbox: &manifest.SandboxConfig{
+					Enabled:    true,
+					MergedPath: test.mergedPath,
+					WorkingDir: test.workingDir,
+				},
+			}
+			err := validateSandboxResumePaths(sandboxRoot, m, ResumeSessionHealth{WorktreePath: test.healthPath})
+			if test.wantRejected && err == nil {
+				t.Fatal("validateSandboxResumePaths() error = nil, want fail-closed rejection")
+			}
+			if !test.wantRejected && err != nil {
+				t.Fatalf("validateSandboxResumePaths() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateSandboxResumePathsAcceptsAPFSMergedSymlink(t *testing.T) {
+	const sessionID = "stable-agm-session"
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, sessionID)
+	workspacePath := filepath.Dir(mergedPath)
+	if err := os.Remove(mergedPath); err != nil {
+		t.Fatal(err)
+	}
+	upperWorkDir := filepath.Join(workspacePath, "upper", "repo")
+	if err := os.MkdirAll(upperWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(workspacePath, "upper"), mergedPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	workingDir := filepath.Join(mergedPath, "repo")
+	m := &manifest.Manifest{
+		SessionID:        sessionID,
+		WorkingDirectory: workingDir,
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:    true,
+			MergedPath: mergedPath,
+			WorkingDir: workingDir,
+		},
+	}
+
+	if err := validateSandboxResumePaths(sandboxRoot, m, ResumeSessionHealth{WorktreePath: workingDir}); err != nil {
+		t.Fatalf("validateSandboxResumePaths() rejected APFS provider layout: %v", err)
+	}
+}
+
+func TestResumeSessionRejectsSandboxPathDriftBeforeTmuxCreation(t *testing.T) {
+	adapter, m, fakeTmux := setupResumeOperation(t, "codex-cli", false)
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, m.SessionID)
+	inside := filepath.Join(mergedPath, "repo")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	m.Context.Project = outside
+	m.WorkingDirectory = inside
+	m.Sandbox = &manifest.SandboxConfig{
+		Enabled:    true,
+		ID:         m.SessionID,
+		Provider:   "mock",
+		MergedPath: mergedPath,
+		WorkingDir: inside,
+		CreatedAt:  time.Now(),
+	}
+	if err := adapter.UpdateSession(m); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ResumeSession(
+		&OpContext{Storage: adapter, Tmux: fakeTmux},
+		&ResumeSessionRequest{SessionID: m.SessionID, SandboxRoot: sandboxRoot},
+	)
+	if err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("ResumeSession() error = %v, want out-of-authority refusal", err)
+	}
+	if result == nil {
+		t.Fatal("ResumeSession() result = nil, want preflight result")
+	}
+	if fakeTmux.created != 0 || len(fakeTmux.commands) != 0 {
+		t.Fatalf("sandbox path drift reached tmux: created=%d commands=%v", fakeTmux.created, fakeTmux.commands)
+	}
+}
+
+func TestResumeSessionRejectsMissingClaudeTranscriptDirectoryBeforeTmuxCreation(t *testing.T) {
+	const claudeID = "11111111-2222-3333-4444-555555555555"
+	adapter, m, fakeTmux := setupResumeOperation(t, "claude-code", false)
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, m.SessionID)
+	workingDir := filepath.Join(mergedPath, "repo")
+	if err := os.MkdirAll(workingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missingTranscriptCwd := filepath.Join(mergedPath, "missing-transcript-cwd")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcriptDir := filepath.Join(home, ".claude", "projects", "sandbox")
+	if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte(`{"type":"user","cwd":"` + missingTranscriptCwd + `"}` + "\n")
+	if err := os.WriteFile(filepath.Join(transcriptDir, claudeID+".jsonl"), transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.Context.Project = workingDir
+	m.WorkingDirectory = workingDir
+	m.Claude.UUID = claudeID
+	m.Sandbox = &manifest.SandboxConfig{
+		Enabled: true, ID: m.SessionID, Provider: "mock",
+		MergedPath: mergedPath, WorkingDir: workingDir, CreatedAt: time.Now(),
+	}
+	if err := adapter.UpdateSession(m); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ResumeSession(
+		&OpContext{Storage: adapter, Tmux: fakeTmux},
+		&ResumeSessionRequest{SessionID: m.SessionID, SandboxRoot: sandboxRoot},
+	)
+	if err == nil || !strings.Contains(err.Error(), "effective Claude resume directory") {
+		t.Fatalf("ResumeSession() error = %v, want missing transcript-directory refusal", err)
+	}
+	if result == nil {
+		t.Fatal("ResumeSession() result = nil, want preflight result")
+	}
+	if fakeTmux.created != 0 || len(fakeTmux.commands) != 0 {
+		t.Fatalf("missing transcript directory reached tmux: created=%d commands=%v", fakeTmux.created, fakeTmux.commands)
+	}
+}
+
+func TestPrepareResumeLaunchRejectsClaudeTranscriptOutsideStableSessionWorkspace(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	const (
+		sessionID = "stable-agm-session"
+		claudeID  = "11111111-2222-3333-4444-555555555555"
+	)
+	sandboxRoot, mergedPath := resumeSandboxRoot(t, sessionID)
+	workingDir := filepath.Join(mergedPath, "repo")
+	if err := os.MkdirAll(workingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcriptDir := filepath.Join(home, ".claude", "projects", "sandbox")
+	if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte(`{"type":"user","cwd":"` + outside + `"}` + "\n")
+	if err := os.WriteFile(filepath.Join(transcriptDir, claudeID+".jsonl"), transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{
+		SessionID: sessionID,
+		Harness:   "claude-code",
+		Claude:    manifest.Claude{UUID: claudeID},
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:    true,
+			MergedPath: mergedPath,
+			WorkingDir: workingDir,
+		},
+	}
+	_, _, _, err = prepareResumeLaunch(nil, m, "claude-code", ResumeSessionHealth{
+		TmuxSessionName: "sandbox-claude",
+		WorktreePath:    workingDir,
+	}, sandboxRoot)
+	if err == nil || !strings.Contains(err.Error(), "effective Claude resume authority") {
+		t.Fatalf("prepareResumeLaunch() error = %v, want transcript cwd authority rejection", err)
+	}
+}
+
 func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	m := &manifest.Manifest{
@@ -655,6 +916,7 @@ func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *te
 			TmuxSessionName: "unsandboxed-codex",
 			WorktreePath:    t.TempDir(),
 		},
+		config.SandboxRoot{},
 	)
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)
@@ -758,6 +1020,7 @@ func TestPrepareResumeLaunchAuthorizesAgyWorktree(t *testing.T) {
 			TmuxSessionName: "agy-session",
 			WorktreePath:    worktreePath,
 		},
+		config.SandboxRoot{},
 	)
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)

@@ -384,7 +384,7 @@ func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemRea
 
 	// Gate 5: disk headroom (fails closed; runs only when a reader is wired)
 	if o.dr != nil {
-		diskGate := checkDisk(cfg, o.dr)
+		diskGate := CheckDiskHeadroom(cfg, o.dr)
 		result.Gates = append(result.Gates, diskGate)
 		if !diskGate.Passed {
 			result.Allowed = false
@@ -576,6 +576,20 @@ func checkSpawnStagger(cfg Config, st SpawnTimer) GateResult {
 		Passed:  true,
 		Message: fmt.Sprintf("last spawn: %s ago", formatDuration(elapsed)),
 	}
+}
+
+// CheckDiskHeadroom runs only the disk gate. Private launch executors can use
+// this narrow seam to recheck the planned sandbox volume without reapplying the
+// CPU, memory, worker-count, or spawn-stagger gates from the earlier admission.
+func CheckDiskHeadroom(cfg Config, dr DiskReader) GateResult {
+	if dr == nil {
+		return GateResult{
+			Gate:    "disk",
+			Passed:  false,
+			Message: "could not read free disk: disk reader is not configured (failing closed — refusing spawn)",
+		}
+	}
+	return checkDisk(cfg, dr)
 }
 
 // checkDisk refuses a spawn when free disk on the agent working volume is

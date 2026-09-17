@@ -2,13 +2,163 @@ package ops
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
+
+func TestProjectPrivateLaunchAuthorityUsesStableSessionIDAcrossCreateAndColdResume(t *testing.T) {
+	sandboxRoot, rootPath, workspacePath, workDir := testPrivateLaunchSandboxRoot(t, "stable-agm-session")
+
+	for _, lifecycle := range []string{"create", "cold-resume"} {
+		for _, harness := range []string{"claude-code", "codex-cli"} {
+			t.Run(lifecycle+"/"+harness, func(t *testing.T) {
+				spec := HarnessLaunchSpec{
+					Harness:        harness,
+					SessionID:      "stable-agm-session",
+					SandboxRoot:    sandboxRoot,
+					SandboxEnabled: true,
+					WorkDir:        workDir,
+				}
+				if lifecycle == "cold-resume" {
+					spec.ResumeID = "provider-native-conversation-id"
+				}
+
+				authority, err := projectPrivateLaunchAuthority(spec)
+				if err != nil {
+					t.Fatalf("projectPrivateLaunchAuthority() error = %v", err)
+				}
+				if authority.diskRoot != rootPath {
+					t.Fatalf("disk root = %q, want configured parent %q", authority.diskRoot, rootPath)
+				}
+				if authority.sandboxWorkspace != workspacePath {
+					t.Fatalf("sandbox workspace = %q, want stable AGM session workspace %q", authority.sandboxWorkspace, workspacePath)
+				}
+				if authority.workDir != workDir {
+					t.Fatalf("workdir = %q, want physical %q", authority.workDir, workDir)
+				}
+				if strings.Contains(authority.sandboxWorkspace, spec.ResumeID) && spec.ResumeID != "" {
+					t.Fatalf("sandbox workspace %q was derived from provider identity %q", authority.sandboxWorkspace, spec.ResumeID)
+				}
+			})
+		}
+	}
+}
+
+func TestProjectPrivateLaunchAuthorityRejectsWorkDirOutsideWorkspace(t *testing.T) {
+	sandboxRoot, _, _, _ := testPrivateLaunchSandboxRoot(t, "stable-agm-session")
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := projectPrivateLaunchAuthority(HarnessLaunchSpec{
+		Harness:        "codex-cli",
+		SessionID:      "stable-agm-session",
+		SandboxRoot:    sandboxRoot,
+		SandboxEnabled: true,
+		WorkDir:        outside,
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("projectPrivateLaunchAuthority() error = %v, want outside-workspace rejection", err)
+	}
+}
+
+func TestProjectPrivateLaunchAuthorityAcceptsAPFSMergedWorkDir(t *testing.T) {
+	sandboxRoot, rootPath, workspacePath, _ := testPrivateLaunchSandboxRoot(t, "stable-agm-session")
+	mergedPath := filepath.Join(workspacePath, "merged")
+	if err := os.Remove(mergedPath); err != nil {
+		t.Fatal(err)
+	}
+	upperWorkDir := filepath.Join(workspacePath, "upper", "repo")
+	if err := os.MkdirAll(upperWorkDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(workspacePath, "upper"), mergedPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	workDir := filepath.Join(mergedPath, "repo")
+
+	authority, err := projectPrivateLaunchAuthority(HarnessLaunchSpec{
+		Harness:        "codex-cli",
+		SessionID:      "stable-agm-session",
+		SandboxRoot:    sandboxRoot,
+		SandboxEnabled: true,
+		WorkDir:        workDir,
+	})
+	if err != nil {
+		t.Fatalf("projectPrivateLaunchAuthority() error = %v", err)
+	}
+	if authority.diskRoot != rootPath || authority.sandboxWorkspace != workspacePath || authority.workDir != upperWorkDir {
+		t.Fatalf("authority = (%q, %q, %q), want (%q, %q, %q)",
+			authority.diskRoot, authority.sandboxWorkspace, authority.workDir,
+			rootPath, workspacePath, upperWorkDir)
+	}
+}
+
+func TestProjectPrivateLaunchAuthorityRequiresRootOnlyForSandboxWorkspace(t *testing.T) {
+	if _, err := projectPrivateLaunchAuthority(HarnessLaunchSpec{
+		SessionID: "stable-agm-session", SandboxEnabled: true, WorkDir: "/tmp/work",
+	}); !errors.Is(err, config.ErrRuntimeAuthorityUnavailable) {
+		t.Fatalf("sandboxed zero authority error = %v, want fail-closed authority error", err)
+	}
+
+	authority, err := projectPrivateLaunchAuthority(HarnessLaunchSpec{})
+	if err != nil {
+		t.Fatalf("legacy unsandboxed zero authority error = %v", err)
+	}
+	if authority.diskRoot != "" || authority.sandboxWorkspace != "" || authority.workDir != "" {
+		t.Fatalf("legacy unsandboxed zero authority = (%q, %q, %q), want empty compatibility projection",
+			authority.diskRoot, authority.sandboxWorkspace, authority.workDir)
+	}
+
+	sandboxRoot, rootPath, _, workDir := testPrivateLaunchSandboxRoot(t, "stable-agm-session")
+	authority, err = projectPrivateLaunchAuthority(HarnessLaunchSpec{
+		SessionID: "stable-agm-session", SandboxRoot: sandboxRoot, WorkDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("unsandboxed configured authority error = %v", err)
+	}
+	if authority.diskRoot != rootPath || authority.sandboxWorkspace != "" || authority.workDir != workDir {
+		t.Fatalf("unsandboxed configured authority = (%q, %q, %q), want (%q, empty, %q)",
+			authority.diskRoot, authority.sandboxWorkspace, authority.workDir, rootPath, workDir)
+	}
+}
+
+func testPrivateLaunchSandboxRoot(t *testing.T, sessionID string) (config.SandboxRoot, string, string, string) {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve synthetic home: %v", err)
+	}
+	rootPath := filepath.Join(home, ".agm", "sandboxes")
+	workspacePath := filepath.Join(rootPath, sessionID)
+	workDir := filepath.Join(workspacePath, "merged")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		t.Fatalf("RuntimeAuthority() error = %v", err)
+	}
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		t.Fatalf("Sandboxes() error = %v", err)
+	}
+	return sandboxRoot, rootPath, workspacePath, workDir
+}
 
 func TestResolveHarnessLaunchSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testing.T) {
 	cases := []struct {
