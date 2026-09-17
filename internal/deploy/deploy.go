@@ -16,7 +16,8 @@ type Action string
 const (
 	// ActionInstalled means the artifact was written where nothing existed.
 	ActionInstalled Action = "installed"
-	// ActionUpdated means an existing, differing deployed file was replaced.
+	// ActionUpdated means managed state for an existing artifact changed. This
+	// can be the deployed file itself or an owned sidecar such as a pulse ledger.
 	ActionUpdated Action = "updated"
 	// ActionUnchanged means the deployed file already matched the source; sync
 	// skipped it. (install always rewrites, so it never reports this.)
@@ -32,6 +33,9 @@ type Result struct {
 	Action       Action
 	// SHA256 is the hash of the bytes now installed (empty on skip).
 	SHA256 string
+	// Detail identifies sidecar-only or recovery work while preserving the
+	// historical top-level result array and action values.
+	Detail string `json:"detail,omitempty"`
 }
 
 // Options configures a deploy run.
@@ -127,6 +131,9 @@ func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, erro
 		return res, err
 	}
 	if skipped {
+		if err := confirmOptionalTargetDirectory(deployedPath, syncDirectory); err != nil {
+			return res, err
+		}
 		res.Action = ActionSkipped
 		return res, nil
 	}
@@ -148,12 +155,36 @@ func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, erro
 	return res, nil
 }
 
+func confirmOptionalTargetDirectory(deployedPath string, syncDir func(string) error) error {
+	if _, err := os.Lstat(deployedPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("inspecting optional deployed target %s: %w", deployedPath, err)
+	}
+	if err := syncDir(filepath.Dir(deployedPath)); err != nil {
+		return fmt.Errorf("confirming optional deployed directory %s: %w", filepath.Dir(deployedPath), err)
+	}
+	return nil
+}
+
 func prepareDeploymentTarget(
 	a Artifact,
 	opts Options,
 	home string,
 	deployedPath string,
 	wantHash string,
+) (Action, bool, error) {
+	return prepareDeploymentTargetWithDirSync(a, opts, home, deployedPath, wantHash, syncDirectory)
+}
+
+func prepareDeploymentTargetWithDirSync(
+	a Artifact,
+	opts Options,
+	home string,
+	deployedPath string,
+	wantHash string,
+	syncDir func(string) error,
 ) (Action, bool, error) {
 	for _, d := range a.CreateDirs {
 		target := expandPath(d, home)
@@ -167,9 +198,21 @@ func prepareDeploymentTarget(
 	switch {
 	case statErr == nil && a.AbsentOnly:
 		// Absent-only: already deployed, preserve operator edits unconditionally,
-		// taking precedence over generic force installs.
+		// taking precedence over generic force installs. Still confirm the parent
+		// namespace: a first-seed rename may have succeeded just before its
+		// directory sync failed, and a retry must not call that state durable
+		// without completing the barrier.
+		if err := syncDir(filepath.Dir(deployedPath)); err != nil {
+			return "", false, fmt.Errorf("confirming deployed directory %s: %w", filepath.Dir(deployedPath), err)
+		}
 		return ActionUnchanged, false, nil
 	case statErr == nil && sha256hex(existing) == wantHash && !opts.Force:
+		// A prior activation may have renamed these exact bytes into place but
+		// returned an error because its parent-directory sync failed. Confirm the
+		// namespace update before a retry reports the artifact unchanged.
+		if err := syncDir(filepath.Dir(deployedPath)); err != nil {
+			return "", false, fmt.Errorf("confirming deployed directory %s: %w", filepath.Dir(deployedPath), err)
+		}
 		return ActionUnchanged, false, nil
 	case statErr == nil:
 		return ActionUpdated, true, nil
@@ -218,6 +261,16 @@ func renderForDeploy(
 
 // atomicWrite performs the stage → verify → activate write of content to path.
 func atomicWrite(path string, content []byte, mode os.FileMode, wantHash string) error {
+	return atomicWriteWithDirSync(path, content, mode, wantHash, syncDirectory)
+}
+
+func atomicWriteWithDirSync(
+	path string,
+	content []byte,
+	mode os.FileMode,
+	wantHash string,
+	syncDir func(string) error,
+) error {
 	dir := filepath.Dir(path)
 	// Parent dir is created up front: a first-time install of a launchd plist or
 	// a hook lands in a directory that may not exist yet on a fresh machine.
@@ -247,17 +300,19 @@ func atomicWrite(path string, content []byte, mode os.FileMode, wantHash string)
 		tmp.Close()
 		return fmt.Errorf("staging write: %w", err)
 	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return fmt.Errorf("staging chmod: %w", err)
+	}
 	// fsync before rename so the bytes are durable on disk, not just in the page
-	// cache, when we make the file live.
+	// cache, and the intended mode is part of that staged file state when we
+	// make it live.
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return fmt.Errorf("staging sync: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("staging close: %w", err)
-	}
-	if err := os.Chmod(tmpPath, mode); err != nil {
-		return fmt.Errorf("staging chmod: %w", err)
 	}
 
 	// --- verify ------------------------------------------------------------
@@ -274,6 +329,42 @@ func atomicWrite(path string, content []byte, mode os.FileMode, wantHash string)
 		return fmt.Errorf("activate (rename): %w", err)
 	}
 	staged = false
+	// The staged file sync does not make the directory-entry replacement
+	// durable. A transaction that journals one rename before another must not
+	// report success until each namespace update has reached its own parent
+	// directory, including a resolved symlink target in a different directory.
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("activate parent directory sync %s: %w", dir, err)
+	}
+	return nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open directory: %w", err)
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return fmt.Errorf("sync directory: %w", err)
+	}
+	if err := dir.Close(); err != nil {
+		return fmt.Errorf("close directory: %w", err)
+	}
+	return nil
+}
+
+func durableRemove(path string) error {
+	return durableRemoveWithDirSync(path, syncDirectory)
+}
+
+func durableRemoveWithDirSync(path string, syncDir func(string) error) error {
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("sync parent directory after remove: %w", err)
+	}
 	return nil
 }
 

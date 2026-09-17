@@ -326,6 +326,95 @@ func TestNormalPulseValidationPrecedesJobsRegardlessOfManifestOrder(t *testing.T
 	}
 }
 
+func TestTargetedNormalPulseSyncValidatesUnselectedLiveJobs(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"),
+		`{"pulses":[{"name":"source-tick","type":"file_mtime","path":"~/source","window":"1h"}]}`)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"),
+		`{"jobs":[{"name":"source-job","pulse":"source-tick"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+`)
+
+	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	pulseBefore := `{"pulses":[{"name":"live-tick","type":"file_mtime","path":"~/live","window":"1h"}]}`
+	jobsBefore := `{"jobs":[{"name":"live-job","pulse":"live-tick"}]}`
+	mustWrite(t, pulsePath, pulseBefore)
+	mustWrite(t, jobsPath, jobsBefore)
+
+	for _, args := range [][]string{
+		{"sync", pulseArtifactName, "--dry-run"},
+		{"sync", pulseArtifactName},
+	} {
+		code, out, errs := invoke(t, repo, home, args...)
+		if code != 1 || !strings.Contains(errs, "live-tick") {
+			t.Fatalf("%v exit=%d stdout=%s stderr=%s; want live-job dependency failure", args, code, out, errs)
+		}
+		for path, want := range map[string]string{pulsePath: pulseBefore, jobsPath: jobsBefore} {
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != want {
+				t.Fatalf("%v changed %s: got %s want %s", args, path, got, want)
+			}
+		}
+	}
+}
+
+func TestTargetedNormalPulseSyncFailsClosedWhenLiveJobsCannotBeRead(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	pulseSource := `{"pulses":[{"name":"source-tick","type":"file_mtime","path":"~/source","window":"1h"}]}`
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), pulseSource)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"),
+		`{"jobs":[{"name":"source-job","pulse":"source-tick"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+`)
+
+	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	pulseBefore := `{"pulses":[{"name":"operator-tick","type":"file_mtime","path":"~/operator","window":"1h"}]}`
+	mustWrite(t, pulsePath, pulseBefore)
+	if err := os.MkdirAll(jobsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"sync", pulseArtifactName, "--dry-run"},
+		{"sync", pulseArtifactName},
+	} {
+		code, out, errs := invoke(t, repo, home, args...)
+		if code != 1 || !strings.Contains(errs, "read live recovery job registry") {
+			t.Fatalf("%v exit=%d stdout=%s stderr=%s; want live observation failure", args, code, out, errs)
+		}
+		got, err := os.ReadFile(pulsePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != pulseBefore {
+			t.Fatalf("%v changed pulse registry: got %s want %s", args, got, pulseBefore)
+		}
+	}
+}
+
 func TestJobsOnlyPublishRequiresNormalPulseArtifactCurrent(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -401,5 +490,229 @@ func TestStatusKeepsDependencyErrorOnDeclaredSelectorWhenPulseArtifactMissing(t 
 	}
 	if code, out, errs := invoke(t, repo, home, "list", rows[0].Name); code != 0 {
 		t.Fatalf("reported dependency name is not selectable: exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+}
+
+func TestPulseLedgerAdoptionIsVisibleNonMutatingInPreviewAndIdempotent(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	pulseRaw := `{"pulses":[{"name":"existing","type":"file_mtime","path":"~/existing","window":"1h"}]}`
+	jobsRaw := `{"jobs":[{"name":"existing-job","pulse":"existing"}]}`
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), pulseRaw)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"), jobsRaw)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    absent-only: true
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+    absent-only: true
+`)
+	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	mustWrite(t, pulsePath, pulseRaw)
+	mustWrite(t, jobsPath, jobsRaw)
+
+	// Ledger-only debt belongs to the pulse artifact. It must not block a
+	// jobs-only preview whose runtime pulse definitions are already complete.
+	if code, out, errs := invoke(t, repo, home, "sync", jobsArtifactName, "--dry-run", "--json"); code != 0 {
+		t.Fatalf("jobs-only dry-run exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	if code, out, errs := invoke(t, repo, home, "status", jobsArtifactName, "--json"); code != 0 {
+		t.Fatalf("jobs-only status exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	if code, out, errs := invoke(t, repo, home, "sync", jobsArtifactName, "--json"); code != 0 {
+		t.Fatalf("jobs-only sync exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	for _, path := range []string{pulsePath + ".offered", pulsePath + ".offered.pending"} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("jobs-only command wrote %s: %v", path, err)
+		}
+	}
+
+	code, out, errs := invoke(t, repo, home, "status", pulseArtifactName, "--json")
+	if code != 2 {
+		t.Fatalf("status exit=%d stdout=%s stderr=%s, want ledger drift", code, out, errs)
+	}
+	var statusRows []deploy.StatusResult
+	if err := json.Unmarshal([]byte(out), &statusRows); err != nil {
+		t.Fatalf("decode status: %v\n%s", err, out)
+	}
+	if len(statusRows) != 1 || statusRows[0].Name != pulseArtifactName ||
+		statusRows[0].State != deploy.StateDrift ||
+		!strings.Contains(statusRows[0].Detail, "pulse-ledger update") {
+		t.Fatalf("status rows=%+v, want pulse-ledger update drift", statusRows)
+	}
+
+	code, out, errs = invoke(t, repo, home, "sync", pulseArtifactName, "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("pulse dry-run exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	var plans []deployPlan
+	if err := json.Unmarshal([]byte(out), &plans); err != nil {
+		t.Fatalf("decode dry-run: %v\n%s", err, out)
+	}
+	if len(plans) != 1 || plans[0].Name != pulseArtifactName || plans[0].WouldDo != "update pulse ledger" {
+		t.Fatalf("dry-run plans=%+v, want ledger update", plans)
+	}
+	for _, path := range []string{pulsePath + ".offered", pulsePath + ".offered.pending"} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("preview wrote %s: %v", path, err)
+		}
+	}
+	if current, err := os.ReadFile(pulsePath); err != nil || string(current) != pulseRaw {
+		t.Fatalf("preview changed pulse registry: got=%q err=%v", current, err)
+	}
+
+	code, out, errs = invoke(t, repo, home, "sync", pulseArtifactName, "--json")
+	if code != 0 {
+		t.Fatalf("pulse sync exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	var results []deploy.Result
+	if err := json.Unmarshal([]byte(out), &results); err != nil {
+		t.Fatalf("decode sync results: %v\n%s", err, out)
+	}
+	if len(results) != 1 || results[0].Name != pulseArtifactName || results[0].Action != deploy.ActionUpdated {
+		t.Fatalf("sync results=%+v, want one updated pulse artifact", results)
+	}
+	if !strings.Contains(results[0].Detail, "ledger state reconciled") {
+		t.Fatalf("sync result detail=%q, want ledger reconciliation receipt", results[0].Detail)
+	}
+	if current, err := os.ReadFile(pulsePath); err != nil || string(current) != pulseRaw {
+		t.Fatalf("ledger adoption changed pulse registry: got=%q err=%v", current, err)
+	}
+	ledger, err := os.ReadFile(pulsePath + ".offered")
+	if err != nil || string(ledger) != `["existing"]` {
+		t.Fatalf("ledger=%q err=%v, want canonical existing name", ledger, err)
+	}
+	if _, err := os.Lstat(pulsePath + ".offered.pending"); !os.IsNotExist(err) {
+		t.Fatalf("pending transaction survived successful adoption: %v", err)
+	}
+
+	if code, out, errs := invoke(t, repo, home, "status", pulseArtifactName, "--json"); code != 0 {
+		t.Fatalf("repeat status exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	code, out, errs = invoke(t, repo, home, "sync", pulseArtifactName, "--json")
+	if code != 0 {
+		t.Fatalf("repeat sync exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	results = nil
+	if err := json.Unmarshal([]byte(out), &results); err != nil {
+		t.Fatalf("decode repeat sync: %v\n%s", err, out)
+	}
+	if len(results) != 1 || results[0].Action != deploy.ActionUnchanged {
+		t.Fatalf("repeat results=%+v, want unchanged", results)
+	}
+}
+
+func TestMissingPulseRegistryDryRunAndMergeCommandReportSeed(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"),
+		`{"pulses":[{"name":"required","type":"file_mtime","path":"~/required","window":"1h"}]}`)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"),
+		`{"jobs":[{"name":"required-job","pulse":"required"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    absent-only: true
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+    absent-only: true
+`)
+	host := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+
+	code, out, errs := invoke(t, repo, home, "sync", pulseArtifactName, "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("dry-run exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	var plans []deployPlan
+	if err := json.Unmarshal([]byte(out), &plans); err != nil {
+		t.Fatalf("decode dry-run: %v\n%s", err, out)
+	}
+	if len(plans) != 1 || plans[0].WouldDo != "install" ||
+		!strings.Contains(plans[0].Detail, "seed pulse registry") {
+		t.Fatalf("dry-run plans=%+v, want install/seed receipt", plans)
+	}
+	for _, path := range []string{host, host + ".offered", host + ".offered.pending"} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("dry-run wrote %s: %v", path, err)
+		}
+	}
+
+	code, out, errs = invoke(t, repo, home, "merge-pulses", "--json")
+	if code != 0 {
+		t.Fatalf("merge-pulses exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	var receipt struct {
+		Added         []string `json:"added"`
+		Created       bool     `json:"created"`
+		LedgerChanged bool     `json:"ledger_changed"`
+	}
+	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
+		t.Fatalf("decode merge-pulses receipt: %v\n%s", err, out)
+	}
+	if !receipt.Created || !receipt.LedgerChanged || len(receipt.Added) != 1 || receipt.Added[0] != "required" {
+		t.Fatalf("merge-pulses receipt=%+v, want created seed", receipt)
+	}
+}
+
+func TestPulseSyncReportsMarkerOnlyReconciliation(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	base := `{"pulses":[{"name":"existing","type":"file_mtime","path":"~/existing","window":"1h"}]}`
+	target := `{"pulses":[{"name":"existing","type":"file_mtime","path":"~/existing","window":"1h"},{"name":"new","type":"file_mtime","path":"~/new","window":"1h"}]}`
+	jobs := `{"jobs":[{"name":"existing-job","pulse":"existing"}]}`
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), base)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"), jobs)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    absent-only: true
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+    absent-only: true
+`)
+	host := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	mustWrite(t, host, base)
+	mustWrite(t, host+".offered", `["existing"]`)
+	mustWrite(t, filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json"), jobs)
+	baseHash := fmt.Sprintf("%x", sha256.Sum256([]byte(base)))
+	targetHash := fmt.Sprintf("%x", sha256.Sum256([]byte(target)))
+	mustWrite(t, host+".offered.pending", fmt.Sprintf(
+		`{"version":1,"base_registry_sha256":%q,"registry_sha256":%q,"offered":["existing","new"]}`,
+		baseHash,
+		targetHash,
+	))
+
+	code, out, errs := invoke(t, repo, home, "sync", pulseArtifactName, "--json")
+	if code != 0 {
+		t.Fatalf("sync exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	var results []deploy.Result
+	if err := json.Unmarshal([]byte(out), &results); err != nil {
+		t.Fatalf("decode sync: %v\n%s", err, out)
+	}
+	if len(results) != 1 || results[0].Action != deploy.ActionUpdated ||
+		!strings.Contains(results[0].Detail, "ledger state reconciled") {
+		t.Fatalf("results=%+v, want marker reconciliation update", results)
+	}
+	if _, err := os.Lstat(host + ".offered.pending"); !os.IsNotExist(err) {
+		t.Fatalf("pending marker survived reconciliation: %v", err)
+	}
+	if current, err := os.ReadFile(host); err != nil || string(current) != base {
+		t.Fatalf("marker reconciliation changed registry: got=%q err=%v", current, err)
 	}
 }

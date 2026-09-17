@@ -246,10 +246,15 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	// A required pulse that a sync would merge is real drift, even though the
 	// absent-only registry itself compares clean. Reporting OK here is how a
 	// missed migration stays invisible to a deployment audit.
-	pendingPulses, _, pulseErr := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
+	pendingPulses, pulseMergeSelected, ledgerChanged, pulseErr := pendingPulseNames(
+		selected, manifestArtifacts, opts, stderr,
+	)
 	pulseIndex := statusResultIndex(results, pulseArtifactName)
-	if len(pendingPulses) > 0 {
-		detail := "pending required pulses: " + strings.Join(pendingPulses, ", ")
+	if len(pendingPulses) > 0 || pulseMergeSelected && ledgerChanged {
+		detail := "pending pulse-ledger update"
+		if len(pendingPulses) > 0 {
+			detail = "pending required pulses: " + strings.Join(pendingPulses, ", ")
+		}
 		if pulseIndex >= 0 {
 			// Absent-only status is normally OK once the operator registry exists.
 			// Pending required pulses are real artifact drift, but the artifact's
@@ -439,7 +444,7 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	pulseHandled := false
 	if a, ok := artifactNamed(selected, pulseArtifactName); ok {
 		pulseHandled = true
-		result, err := deployPulseDuringDeploy(a, manifestArtifacts, opts, c.asJSON, stdout)
+		result, err := deployPulseDuringDeploy(a, selected, manifestArtifacts, opts, c.asJSON, stdout)
 		if err != nil {
 			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
 			failures = append(failures, a.Name)
@@ -448,7 +453,7 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 			pulseResult = &result
 		}
 	} else if _, ok := artifactNamed(selected, jobsArtifactName); ok {
-		preview, _, err := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
+		preview, _, _, err := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
 		switch {
 		case err != nil:
 			pulseDependencyErr = err
@@ -477,9 +482,11 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 		}
 		r, err := deploy.Deploy(a, opts)
 		if err != nil {
-			// One bad artifact is reported but does not abort the rest: a
-			// Deploy error occurs before that artifact's atomic activation, so
-			// its target is untouched and continuing cannot corrupt it.
+			// One bad artifact is reported but does not abort independent work.
+			// Activation is an atomic replace: an error leaves either the prior
+			// bytes or the complete intended bytes, never a partial artifact. A
+			// post-rename durability error is retried before "unchanged" can be
+			// reported on the next sync.
 			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
 			failures = append(failures, a.Name)
 			continue
@@ -524,7 +531,9 @@ func dryRunDeploy(
 	plans := make([]deployPlan, 0, len(selected))
 	// An absent-only registry always reports "unchanged", so without this a
 	// preview would show nothing while a real sync merged required pulses.
-	pendingPulses, pulseMergeSelected, pulsePreviewErr := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
+	pendingPulses, pulseMergeSelected, ledgerChanged, pulsePreviewErr := pendingPulseNames(
+		selected, manifestArtifacts, opts, stderr,
+	)
 	if pulsePreviewErr != nil {
 		return 1
 	}
@@ -532,10 +541,7 @@ func dryRunDeploy(
 	hasErrors := false
 	for _, a := range selected {
 		p, artifactErr := planArtifact(a, opts, force, jobsBlocked)
-		if a.Name == pulseArtifactName && pulseMergeSelected && len(pendingPulses) > 0 {
-			p.WouldDo = "merge pulses"
-			p.Detail = "pending required pulses: " + strings.Join(pendingPulses, ", ")
-		}
+		p = planPulsePreview(a, p, pulseMergeSelected, pendingPulses, ledgerChanged)
 		plans = append(plans, p)
 		hasErrors = hasErrors || artifactErr
 	}
@@ -605,9 +611,11 @@ func planArtifact(a deploy.Artifact, opts deploy.Options, force, jobsBlocked boo
 
 // pendingPulseNames reports the required pulses a real sync would merge and
 // also checks that a jobs-only selection is safe to publish against the live
-// registry. The bool reports whether this command selected an absent-only
-// pulse artifact and can therefore perform the pending merge itself. A normal
-// pulse artifact is validated as an exact replacement and emits no merge plan.
+// registry. The first bool reports whether this command selected an absent-
+// only pulse artifact and can therefore perform the pending merge itself. The
+// second reports a ledger-only adoption that is actionable only for that pulse
+// selection. A normal pulse artifact is validated as an exact replacement and
+// emits no merge plan.
 //
 // The registry is absent-only, so Status and dry-run both classify it OK on
 // any host that has one. A preview that cannot see a pending migration is a
@@ -617,51 +625,51 @@ func pendingPulseNames(
 	selected, manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
 	stderr io.Writer,
-) ([]string, bool, error) {
+) ([]string, bool, bool, error) {
 	a, pulseSelected := artifactNamed(selected, pulseArtifactName)
 	if pulseSelected && !a.AbsentOnly {
-		if err := validateNormalPulseArtifact(a, manifestArtifacts, opts); err != nil {
+		if err := validateNormalPulseArtifact(a, selected, manifestArtifacts, opts); err != nil {
 			fmt.Fprintf(stderr, "  ERROR     cannot validate pulse artifact: %v\n", err)
-			return nil, false, err
+			return nil, false, false, err
 		}
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	if !pulseSelected {
 		if _, jobsSelected := artifactNamed(selected, jobsArtifactName); !jobsSelected {
-			return nil, false, nil
+			return nil, false, false, nil
 		}
 		var ok bool
 		a, ok = artifactNamed(manifestArtifacts, pulseArtifactName)
 		if !ok {
 			err := fmt.Errorf("manifest declares %s without %s", jobsArtifactName, pulseArtifactName)
 			fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
-			return nil, false, err
+			return nil, false, false, err
 		}
 		if !a.AbsentOnly {
-			if err := validateNormalPulseArtifactCurrent(a, manifestArtifacts, opts); err != nil {
+			if err := validateNormalPulseArtifactCurrent(a, selected, manifestArtifacts, opts); err != nil {
 				fmt.Fprintf(stderr, "  ERROR     cannot publish %s: %v\n", jobsArtifactName, err)
-				return nil, false, err
+				return nil, false, false, err
 			}
-			return nil, false, nil
+			return nil, false, false, nil
 		}
 	}
 	hostPath := pulseHostPath(a, opts)
-	required, err := requiredPulsesFor(manifestArtifacts, opts)
+	required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
-		return nil, pulseSelected, err
+		return nil, pulseSelected, false, err
 	}
 	rendered, err := a.Render(opts.RepoRoot, opts.Home)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot render pulse defaults: %v\n", err)
-		return nil, pulseSelected, err
+		return nil, pulseSelected, false, err
 	}
-	pending, err := deploy.PendingPulseMergesRendered(hostPath, rendered, required)
+	preview, err := deploy.PendingPulseMergePreviewRendered(hostPath, rendered, required)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot compute pending pulse merges: %v\n", err)
-		return nil, pulseSelected, err
+		return nil, pulseSelected, false, err
 	}
-	return pending, pulseSelected, nil
+	return preview.Added, pulseSelected, preview.LedgerChanged, nil
 }
 
 func formatDeploy(cmd string, results []deploy.Result, w io.Writer) {
@@ -814,7 +822,7 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	}
 	hostPath := pulseHostPath(a, opts)
 
-	required, err := requiredPulsesFor(manifestArtifacts, opts)
+	required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: resolve required pulses: %v\n", err)
 		return 1
@@ -829,30 +837,12 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "dear-deploy: resolve pulse registry mode: %v\n", err)
 		return 1
 	}
-	added, err := deploy.MergeRequiredPulsesRendered(hostPath, rendered, mode, required)
+	outcome, err := deploy.MergeRequiredPulsesRenderedResult(hostPath, rendered, mode, required)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: merge pulses: %v\n", err)
 		return 1
 	}
-
-	if c.asJSON {
-		// --json is advertised as common to every subcommand, so it must
-		// produce a document here too rather than prose a decoder chokes on.
-		return emitJSON(struct {
-			Registry string   `json:"registry"`
-			Added    []string `json:"added"`
-		}{Registry: hostPath, Added: added}, stdout, stderr)
-	}
-	if len(added) == 0 {
-		fmt.Fprintf(stdout, "absence-alarm pulses: already current (%s)\n", hostPath)
-		return 0
-	}
-	fmt.Fprintf(stdout, "absence-alarm pulses: added %d to %s\n", len(added), hostPath)
-	for _, n := range added {
-		fmt.Fprintf(stdout, "  + %s\n", n)
-	}
-	fmt.Fprintln(stdout, "Restart absence-alarm for these to take effect.")
-	return 0
+	return emitMergePulsesOutcome(outcome, hostPath, c.asJSON, stdout, stderr)
 }
 
 // pulseArtifactName is the manifest entry whose deployed copy is the host's
@@ -880,13 +870,14 @@ func pulseHostPath(a deploy.Artifact, opts deploy.Options) string {
 // keeps the registry it has and makes the deploy fail loud.
 func mergePulsesDuringDeploy(
 	a deploy.Artifact,
+	selected []deploy.Artifact,
 	manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
 	asJSON bool,
 	stdout io.Writer,
 ) (deploy.PulseMergeResult, error) {
 	hostPath := pulseHostPath(a, opts)
-	required, err := requiredPulsesFor(manifestArtifacts, opts)
+	required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
 	if err != nil {
 		return deploy.PulseMergeResult{}, err
 	}
@@ -903,6 +894,9 @@ func mergePulsesDuringDeploy(
 		return deploy.PulseMergeResult{}, err
 	}
 	if len(outcome.Added) == 0 {
+		if (outcome.LedgerChanged || outcome.Reconciled) && !asJSON {
+			fmt.Fprintln(stdout, "  RECONCILED absence-alarm pulse offer ledger")
+		}
 		return outcome, nil
 	}
 	// In JSON mode the caller folds these names into the document it emits, so
@@ -921,12 +915,18 @@ func mergePulsesDuringDeploy(
 // jobsArtifactName is the manifest entry holding the recovery job registry.
 const jobsArtifactName = "recovery-loop-jobs"
 
-// requiredPulsesFor resolves the job registry through the manifest when it is
-// available, so a --manifest override that relocates or customises the registry
-// decides which pulses are required, rather than a hard-coded repository path.
-func requiredPulsesFor(manifestArtifacts []deploy.Artifact, opts deploy.Options) (map[string]bool, error) {
+// requiredPulsesFor resolves the job registry through the manifest and command
+// selection. A selected normal job registry is about to be replaced from
+// source; an unselected or absent-only registry remains live and authoritative.
+// This also keeps --manifest relocation authoritative instead of consulting a
+// hard-coded repository path.
+func requiredPulsesFor(
+	selected, manifestArtifacts []deploy.Artifact,
+	opts deploy.Options,
+) (map[string]bool, error) {
 	if a, ok := artifactNamed(manifestArtifacts, jobsArtifactName); ok {
-		registry, err := requiredPulseJobRegistry(a, opts)
+		_, jobsSelected := artifactNamed(selected, jobsArtifactName)
+		registry, err := requiredPulseJobRegistry(a, jobsSelected, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -935,14 +935,17 @@ func requiredPulsesFor(manifestArtifacts []deploy.Artifact, opts deploy.Options)
 	return deploy.RequiredPulseNames(opts.RepoRoot)
 }
 
-// requiredPulseJobRegistry returns the bytes the recovery-loop runtime is
-// authoritative over. An existing absent-only registry is operator-owned and
-// generic sync/install deliberately preserve it, so deriving requirements from
-// repository defaults would validate a different job set from the one that
-// actually runs. A missing live registry falls back to the rendered source that
-// this deployment will seed. Other observation failures are not absence.
-func requiredPulseJobRegistry(a deploy.Artifact, opts deploy.Options) ([]byte, error) {
-	if a.AbsentOnly {
+// requiredPulseJobRegistry returns the bytes the recovery-loop runtime will be
+// authoritative over after this command. An unselected live registry remains
+// deployed, while a selected normal registry will be replaced from source.
+// Absent-only registries remain operator-owned even when selected. A missing
+// live registry falls back to the rendered source that would seed it; other
+// observation failures are not absence.
+func requiredPulseJobRegistry(a deploy.Artifact, jobsSelected bool, opts deploy.Options) ([]byte, error) {
+	// An unselected registry remains the runtime authority after this command,
+	// regardless of whether it is normally source-owned. Absent-only registries
+	// are always operator-owned and likewise remain live even when selected.
+	if a.AbsentOnly || !jobsSelected {
 		livePath := a.DeployedPath(opts.Home)
 		// #nosec G703 -- livePath is the manifest-selected deployed artifact;
 		// observing that exact runtime input is the purpose of this boundary.

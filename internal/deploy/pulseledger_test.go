@@ -109,6 +109,241 @@ func TestMergeRequiredPulses_CurrentLedgerWritesNothing(t *testing.T) {
 	requirePathMissing(t, pulseLedgerTransactionPath(host))
 }
 
+func TestPulseLedgerTransactionSyncsEachRenameOwningDirectoryInOrder(t *testing.T) {
+	dir := t.TempDir()
+	logicalDir := filepath.Join(dir, "logical")
+	targetDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(logicalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host := filepath.Join(logicalDir, "pulses.json")
+	target := filepath.Join(targetDir, "pulses.json")
+	if err := os.WriteFile(target, validPulseConfig("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, host); err != nil {
+		t.Fatal(err)
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var events []string
+	ops := pulseFileOps{
+		atomicWrite: func(path string, content []byte, mode os.FileMode, wantHash string) error {
+			return atomicWriteWithDirSync(path, content, mode, wantHash, func(parent string) error {
+				events = append(events, "write "+path+" sync "+parent)
+				return nil
+			})
+		},
+		remove: func(path string) error {
+			return durableRemoveWithDirSync(path, func(parent string) error {
+				events = append(events, "remove "+path+" sync "+parent)
+				return nil
+			})
+		},
+		syncDir: syncDirectory,
+	}
+	result, err := mergeRequiredPulsesResultWithOps(
+		host,
+		validPulseConfig("existing", "new"),
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		ops,
+	)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	requireNames(t, result.Added, "new")
+	want := []string{
+		"write " + pulseLedgerTransactionPath(host) + " sync " + logicalDir,
+		"write " + resolvedTarget + " sync " + filepath.Dir(resolvedTarget),
+		"write " + pulseLedgerPath(host) + " sync " + logicalDir,
+		"remove " + pulseLedgerTransactionPath(host) + " sync " + logicalDir,
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("durability events:\n got: %v\nwant: %v", events, want)
+	}
+}
+
+func TestPulseLedgerTransactionRecoversPostRegistryRenameSyncFailure(t *testing.T) {
+	dir := t.TempDir()
+	logicalDir := filepath.Join(dir, "logical")
+	targetDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(logicalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host := filepath.Join(logicalDir, "pulses.json")
+	target := filepath.Join(targetDir, "pulses.json")
+	base := validPulseConfig("existing")
+	defaults := validPulseConfig("existing", "new")
+	if err := os.WriteFile(target, base, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, host); err != nil {
+		t.Fatal(err)
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	injected := errors.New("injected registry directory sync failure")
+	ops := defaultPulseFileOps()
+	realWrite := ops.atomicWrite
+	failed := false
+	ops.atomicWrite = func(path string, content []byte, mode os.FileMode, wantHash string) error {
+		if path == resolvedTarget && !failed {
+			failed = true
+			return atomicWriteWithDirSync(path, content, mode, wantHash, func(string) error {
+				return injected
+			})
+		}
+		return realWrite(path, content, mode, wantHash)
+	}
+	_, err = mergeRequiredPulsesResultWithOps(
+		host,
+		defaults,
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		ops,
+	)
+	if !errors.Is(err, injected) {
+		t.Fatalf("merge error = %v, want injected directory sync failure", err)
+	}
+	if !failed {
+		t.Fatal("registry directory sync failure was not injected")
+	}
+	requireNames(t, readPulseNames(t, host), "existing", "new")
+	requirePathMissing(t, pulseLedgerPath(host))
+	_ = readPulseLedgerTransaction(t, host)
+
+	confirmFailure := errors.New("injected registry confirmation failure")
+	retryOps := defaultPulseFileOps()
+	var confirmedDir string
+	retryOps.syncDir = func(path string) error {
+		confirmedDir = path
+		return confirmFailure
+	}
+	_, err = mergeRequiredPulsesResultWithOps(
+		host,
+		defaults,
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		retryOps,
+	)
+	if !errors.Is(err, confirmFailure) {
+		t.Fatalf("confirmation retry error = %v, want injected failure", err)
+	}
+	if confirmedDir != filepath.Dir(resolvedTarget) {
+		t.Fatalf("retry confirmed directory %q, want target directory %q", confirmedDir, filepath.Dir(resolvedTarget))
+	}
+	requirePathMissing(t, pulseLedgerPath(host))
+	_ = readPulseLedgerTransaction(t, host)
+
+	var events []string
+	retryOps = defaultPulseFileOps()
+	retryOps.syncDir = func(path string) error {
+		events = append(events, "confirm "+path)
+		return syncDirectory(path)
+	}
+	retryOps.atomicWrite = func(path string, content []byte, mode os.FileMode, wantHash string) error {
+		return atomicWriteWithDirSync(path, content, mode, wantHash, func(parent string) error {
+			events = append(events, "write "+path+" sync "+parent)
+			return syncDirectory(parent)
+		})
+	}
+	retryOps.remove = func(path string) error {
+		return durableRemoveWithDirSync(path, func(parent string) error {
+			events = append(events, "remove "+path+" sync "+parent)
+			return syncDirectory(parent)
+		})
+	}
+	result, err := mergeRequiredPulsesResultWithOps(
+		host,
+		defaults,
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		retryOps,
+	)
+	if err != nil {
+		t.Fatalf("successful retry: %v", err)
+	}
+	if len(result.Added) != 0 || result.Created || !result.LedgerChanged || !result.Reconciled {
+		t.Fatalf("retry result = %+v, want reconciled ledger update", result)
+	}
+	wantEvents := []string{
+		"confirm " + filepath.Dir(resolvedTarget),
+		"write " + pulseLedgerPath(host) + " sync " + logicalDir,
+		"remove " + pulseLedgerTransactionPath(host) + " sync " + logicalDir,
+		"confirm " + logicalDir,
+	}
+	if !slices.Equal(events, wantEvents) {
+		t.Fatalf("recovery durability events:\n got: %v\nwant: %v", events, wantEvents)
+	}
+	requireNames(t, readPulseLedgerNames(t, host), "existing", "new")
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
+}
+
+func TestPulseLedgerTransactionReportsPostRemoveSyncFailureAndRetriesSafely(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "pulses.json")
+	defaults := validPulseConfig("existing", "new")
+	if err := os.WriteFile(host, validPulseConfig("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	injected := errors.New("injected pending removal directory sync failure")
+	ops := defaultPulseFileOps()
+	ops.remove = func(path string) error {
+		return durableRemoveWithDirSync(path, func(string) error { return injected })
+	}
+	_, err := mergeRequiredPulsesResultWithOps(
+		host,
+		defaults,
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		ops,
+	)
+	if !errors.Is(err, injected) {
+		t.Fatalf("merge error = %v, want injected directory sync failure", err)
+	}
+	requireNames(t, readPulseNames(t, host), "existing", "new")
+	requireNames(t, readPulseLedgerNames(t, host), "existing", "new")
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
+
+	retryOps := defaultPulseFileOps()
+	realSync := retryOps.syncDir
+	var confirmedDir string
+	retryOps.syncDir = func(path string) error {
+		confirmedDir = path
+		return realSync(path)
+	}
+	result, err := mergeRequiredPulsesResultWithOps(
+		host,
+		defaults,
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		retryOps,
+	)
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if len(result.Added) != 0 || result.Created || result.LedgerChanged || result.Reconciled {
+		t.Fatalf("retry result = %+v, want unchanged", result)
+	}
+	if confirmedDir != filepath.Dir(host) {
+		t.Fatalf("retry confirmed directory %q, want %q", confirmedDir, filepath.Dir(host))
+	}
+}
+
 func TestMergeRequiredPulses_RecoversExistingHostAfterLedgerWriteFailure(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
@@ -293,6 +528,44 @@ func TestMergeRequiredPulses_DiscardsTransactionBeforeRegistryActivation(t *test
 	requireNames(t, readPulseNames(t, host), "existing", "new")
 	requireNames(t, readPulseLedgerNames(t, host), "existing", "new")
 	requirePathMissing(t, pulseLedgerTransactionPath(host))
+}
+
+func TestMergeRequiredPulses_ReportsMarkerOnlyReconciliation(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	baseRaw := validPulseConfig("existing")
+	targetRaw := validPulseConfig("existing", "new")
+	if err := os.WriteFile(host, baseRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pulseLedgerPath(host), []byte(`["existing"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preparePulseLedgerTransaction(
+		host,
+		sha256hex(baseRaw),
+		targetRaw,
+		[]string{"existing", "new"},
+		defaultPulseFileOps(),
+	); err != nil {
+		t.Fatalf("prepare transaction: %v", err)
+	}
+
+	result, err := MergeRequiredPulsesRenderedResult(
+		host,
+		baseRaw,
+		0o644,
+		map[string]bool{"existing": true},
+	)
+	if err != nil {
+		t.Fatalf("marker-only reconciliation: %v", err)
+	}
+	if len(result.Added) != 0 || result.Created || result.LedgerChanged || !result.Reconciled {
+		t.Fatalf("result = %+v, want marker-only reconciliation", result)
+	}
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
+	requireNames(t, readPulseLedgerNames(t, host), "existing")
+	requireNames(t, readPulseNames(t, host), "existing")
 }
 
 func TestMergeRequiredPulses_CompletesTransactionAfterRegistryActivation(t *testing.T) {

@@ -453,6 +453,10 @@ func TestPulseCommandsAcceptRuntimeValidOperatorJobAndPulsePair(t *testing.T) {
 	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
 	mustWrite(t, pulsesPath,
 		`{"pulses":[{"name":"operator-tick","type":"file_mtime","path":"~/operator","window":"1h"}]}`)
+	// The operator-only pulse is not one of this repository's defaults, so the
+	// canonical offer ledger is intentionally empty. Seed it to keep this test
+	// focused on the runtime-valid operator pair rather than first adoption.
+	mustWrite(t, pulsesPath+".offered", `[]`)
 	mustWrite(t, jobsPath,
 		`{"jobs":[{"name":"operator-job","pulse":"operator-tick"}]}`)
 

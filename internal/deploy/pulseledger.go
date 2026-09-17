@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"sort"
 )
 
@@ -21,10 +23,11 @@ const pulsePreviewSnapshotAttempts = 3
 type pulseFileOps struct {
 	atomicWrite func(path string, content []byte, mode os.FileMode, wantHash string) error
 	remove      func(path string) error
+	syncDir     func(path string) error
 }
 
 func defaultPulseFileOps() pulseFileOps {
-	return pulseFileOps{atomicWrite: atomicWrite, remove: os.Remove}
+	return pulseFileOps{atomicWrite: atomicWrite, remove: durableRemove, syncDir: syncDirectory}
 }
 
 // pulseLedgerTransaction records the exact ledger projection that belongs to
@@ -36,6 +39,11 @@ type pulseLedgerTransaction struct {
 	BaseRegistrySHA256 string   `json:"base_registry_sha256,omitempty"`
 	RegistrySHA256     string   `json:"registry_sha256"`
 	Offered            []string `json:"offered"`
+}
+
+type pulseReconcileResult struct {
+	LedgerChanged bool
+	Reconciled    bool
 }
 
 // pulseLedgerPath is a sidecar next to the registry recording every default
@@ -83,6 +91,8 @@ func decodePulseLedger(raw []byte) map[string]bool {
 type pulseMergeSnapshot struct {
 	registryRaw    []byte
 	registryExists bool
+	ledgerRaw      []byte
+	ledgerExists   bool
 	ledger         map[string]bool
 }
 
@@ -127,6 +137,8 @@ func readPulseMergeSnapshot(hostPath, registryPath string) (pulseMergeSnapshot, 
 			return pulseMergeSnapshot{
 				registryRaw:    registryCheck.raw,
 				registryExists: registryCheck.exists,
+				ledgerRaw:      ledgerCheck.raw,
+				ledgerExists:   ledgerCheck.exists,
 				ledger:         decodePulseLedger(ledgerCheck.raw),
 			}, nil
 		}
@@ -174,15 +186,32 @@ func nextPulseLedgerNames(hostPath string, offered []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	names, _, err := pulseLedgerProjection(seen, offered)
+	return names, err
+}
+
+// pulseLedgerProjection returns the canonical ledger union and its exact JSON
+// encoding without mutating the observed ledger map. Preview and publication
+// share this calculation so status cannot call a ledger adoption clean while a
+// real sync would write a sidecar.
+func pulseLedgerProjection(seen map[string]bool, offered []string) ([]string, []byte, error) {
+	projected := make(map[string]bool, len(seen)+len(offered))
+	maps.Copy(projected, seen)
 	for _, n := range offered {
-		seen[n] = true
+		projected[n] = true
 	}
-	names := make([]string, 0, len(seen))
-	for n := range seen {
-		names = append(names, n)
+	names := make([]string, 0, len(projected))
+	for name, present := range projected {
+		if present {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
-	return names, nil
+	raw, err := json.Marshal(names)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode pulse ledger projection: %w", err)
+	}
+	return names, raw, nil
 }
 
 // advancePulseLedger journals a ledger-only projection against an unchanged
@@ -193,21 +222,23 @@ func advancePulseLedger(
 	registryRaw []byte,
 	offered []string,
 	ops pulseFileOps,
-) error {
-	names, err := nextPulseLedgerNames(hostPath, offered)
+) (bool, error) {
+	current, err := readOptionalPulseFile(pulseLedgerPath(hostPath))
 	if err != nil {
-		return err
+		return false, fmt.Errorf("read current pulse ledger projection: %w", err)
 	}
-	projectedRaw, err := json.Marshal(names)
+	names, projectedRaw, err := pulseLedgerProjection(decodePulseLedger(current.raw), offered)
 	if err != nil {
-		return fmt.Errorf("encode pulse ledger projection: %w", err)
+		return false, err
 	}
-	currentRaw, err := os.ReadFile(pulseLedgerPath(hostPath))
-	if err == nil && bytes.Equal(currentRaw, projectedRaw) {
-		return nil
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read current pulse ledger projection: %w", err)
+	if current.exists && bytes.Equal(current.raw, projectedRaw) {
+		// A prior pending-marker removal may have succeeded before its parent
+		// directory sync failed. Confirm the logical ledger namespace before a
+		// no-op retry reports the transaction current.
+		if err := ops.syncDir(filepath.Dir(hostPath)); err != nil {
+			return false, fmt.Errorf("confirm pulse ledger directory: %w", err)
+		}
+		return false, nil
 	}
 	registrySHA256 := sha256hex(registryRaw)
 	txn, err := preparePulseLedgerTransaction(
@@ -218,9 +249,12 @@ func advancePulseLedger(
 		ops,
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return commitPulseLedgerTransaction(hostPath, txn, ops)
+	if err := commitPulseLedgerTransaction(hostPath, txn, ops); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // preparePulseLedgerTransaction persists the exact ledger projection before
@@ -275,43 +309,62 @@ func commitPulseLedgerTransaction(
 // interruption and the intent is discarded; out-of-band ABA edits cannot be
 // distinguished with two artifacts. Any third state is ambiguous operator
 // drift and fails loud without destroying the recovery evidence.
-func reconcilePulseLedgerTransaction(hostPath, registryPath string, ops pulseFileOps) error {
+func reconcilePulseLedgerTransaction(
+	hostPath, registryPath string,
+	ops pulseFileOps,
+) (pulseReconcileResult, error) {
 	raw, err := os.ReadFile(pulseLedgerTransactionPath(hostPath))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return pulseReconcileResult{}, nil
 		}
-		return fmt.Errorf("read pulse ledger transaction: %w", err)
+		return pulseReconcileResult{}, fmt.Errorf("read pulse ledger transaction: %w", err)
 	}
 	var txn pulseLedgerTransaction
 	if err := json.Unmarshal(raw, &txn); err != nil {
-		return fmt.Errorf("parse pulse ledger transaction: %w", err)
+		return pulseReconcileResult{}, fmt.Errorf("parse pulse ledger transaction: %w", err)
 	}
 	if err := validatePulseLedgerTransaction(txn); err != nil {
-		return err
+		return pulseReconcileResult{}, err
 	}
 
 	registryRaw, err := os.ReadFile(registryPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if txn.BaseRegistrySHA256 == "" {
-				return removePulseLedgerTransaction(hostPath, ops)
+				if err := removePulseLedgerTransaction(hostPath, ops); err != nil {
+					return pulseReconcileResult{}, err
+				}
+				return pulseReconcileResult{Reconciled: true}, nil
 			}
-			return fmt.Errorf(
+			return pulseReconcileResult{}, fmt.Errorf(
 				"pulse registry changed from the pending transaction base; preserving %s for manual reconciliation",
 				pulseLedgerTransactionPath(hostPath),
 			)
 		}
-		return fmt.Errorf("read registry for pulse ledger transaction: %w", err)
+		return pulseReconcileResult{}, fmt.Errorf("read registry for pulse ledger transaction: %w", err)
 	}
 	registrySHA256 := sha256hex(registryRaw)
 	if registrySHA256 == txn.RegistrySHA256 {
-		return commitPulseLedgerTransaction(hostPath, txn, ops)
+		// A previous registry activation can expose the target bytes before its
+		// parent-directory sync succeeds. Reconfirm the actual registry target
+		// directory (which may differ from hostPath through a leaf symlink)
+		// before making the corresponding ledger/pending cleanup durable.
+		if err := ops.syncDir(filepath.Dir(registryPath)); err != nil {
+			return pulseReconcileResult{}, fmt.Errorf("confirm activated pulse registry directory: %w", err)
+		}
+		if err := commitPulseLedgerTransaction(hostPath, txn, ops); err != nil {
+			return pulseReconcileResult{}, err
+		}
+		return pulseReconcileResult{LedgerChanged: true, Reconciled: true}, nil
 	}
 	if txn.BaseRegistrySHA256 != "" && registrySHA256 == txn.BaseRegistrySHA256 {
-		return removePulseLedgerTransaction(hostPath, ops)
+		if err := removePulseLedgerTransaction(hostPath, ops); err != nil {
+			return pulseReconcileResult{}, err
+		}
+		return pulseReconcileResult{Reconciled: true}, nil
 	}
-	return fmt.Errorf(
+	return pulseReconcileResult{}, fmt.Errorf(
 		"pulse registry matches neither the pending transaction base nor target; preserving %s for manual reconciliation",
 		pulseLedgerTransactionPath(hostPath),
 	)

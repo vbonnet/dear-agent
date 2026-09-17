@@ -358,3 +358,220 @@ func TestStatus_CreateDirsMissingReportsDrift(t *testing.T) {
 		t.Fatalf("state = %q, want ok after reconcile", s.State)
 	}
 }
+
+func TestAtomicWriteSyncsParentAfterActivation(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "artifact")
+	content := []byte("durable content\n")
+	var synced string
+
+	err := atomicWriteWithDirSync(
+		target,
+		content,
+		0o600,
+		sha256hex(content),
+		func(path string) error {
+			synced = path
+			live, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("target was not activated before parent sync: %v", err)
+			}
+			if string(live) != string(content) {
+				t.Fatalf("live content during parent sync = %q, want %q", live, content)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("atomicWriteWithDirSync: %v", err)
+	}
+	if synced != dir {
+		t.Fatalf("synced directory = %q, want %q", synced, dir)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("target mode = %04o, want 0600", got)
+	}
+}
+
+func TestAtomicWriteReportsPostRenameDirectorySyncFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "artifact")
+	content := []byte("activated but not confirmed durable\n")
+	injected := errors.New("injected directory sync failure")
+
+	err := atomicWriteWithDirSync(
+		target,
+		content,
+		0o644,
+		sha256hex(content),
+		func(string) error { return injected },
+	)
+	if !errors.Is(err, injected) {
+		t.Fatalf("error = %v, want injected directory sync failure", err)
+	}
+	live, readErr := os.ReadFile(target)
+	if readErr != nil || string(live) != string(content) {
+		t.Fatalf("rename did not precede reported sync failure: content=%q err=%v", live, readErr)
+	}
+
+	var confirmed string
+	action, shouldWrite, err := prepareDeploymentTargetWithDirSync(
+		Artifact{Name: "artifact"},
+		Options{},
+		dir,
+		target,
+		sha256hex(content),
+		func(path string) error {
+			confirmed = path
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("retry durability confirmation: %v", err)
+	}
+	if action != ActionUnchanged || shouldWrite {
+		t.Fatalf("retry = (%q, %t), want unchanged without rewrite", action, shouldWrite)
+	}
+	if confirmed != dir {
+		t.Fatalf("retry confirmed directory %q, want %q", confirmed, dir)
+	}
+}
+
+func TestMatchingDeploymentDoesNotReportUnchangedWhenDirectorySyncFails(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "artifact")
+	content := []byte("matching content\n")
+	if err := os.WriteFile(target, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected confirmation sync failure")
+	action, shouldWrite, err := prepareDeploymentTargetWithDirSync(
+		Artifact{Name: "artifact"},
+		Options{},
+		dir,
+		target,
+		sha256hex(content),
+		func(string) error { return injected },
+	)
+	if !errors.Is(err, injected) {
+		t.Fatalf("error = %v, want injected confirmation failure", err)
+	}
+	if action != "" || shouldWrite {
+		t.Fatalf("failed confirmation = (%q, %t), want no success action", action, shouldWrite)
+	}
+}
+
+func TestAbsentOnlyRetryConfirmsDirectoryBeforePreservingLiveBytes(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "operator-owned")
+	if err := os.WriteFile(target, []byte("operator content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var confirmed string
+	action, shouldWrite, err := prepareDeploymentTargetWithDirSync(
+		Artifact{Name: "operator-owned", AbsentOnly: true},
+		Options{Force: true},
+		dir,
+		target,
+		sha256hex([]byte("different source\n")),
+		func(path string) error {
+			confirmed = path
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("absent-only confirmation: %v", err)
+	}
+	if action != ActionUnchanged || shouldWrite || confirmed != dir {
+		t.Fatalf("absent-only retry = (%q, %t, %q), want unchanged and confirmed %q", action, shouldWrite, confirmed, dir)
+	}
+
+	injected := errors.New("injected absent-only confirmation failure")
+	action, shouldWrite, err = prepareDeploymentTargetWithDirSync(
+		Artifact{Name: "operator-owned", AbsentOnly: true},
+		Options{},
+		dir,
+		target,
+		sha256hex([]byte("different source\n")),
+		func(string) error { return injected },
+	)
+	if !errors.Is(err, injected) || action != "" || shouldWrite {
+		t.Fatalf("failed absent-only confirmation = (%q, %t, %v), want propagated failure", action, shouldWrite, err)
+	}
+}
+
+func TestOptionalMissingRetryConfirmsExistingTargetDirectory(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "optional-artifact")
+	if err := os.WriteFile(target, []byte("prior activation\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var confirmed string
+	if err := confirmOptionalTargetDirectory(target, func(path string) error {
+		confirmed = path
+		return nil
+	}); err != nil {
+		t.Fatalf("confirm optional target: %v", err)
+	}
+	if confirmed != dir {
+		t.Fatalf("confirmed directory %q, want %q", confirmed, dir)
+	}
+
+	injected := errors.New("injected optional confirmation failure")
+	if err := confirmOptionalTargetDirectory(target, func(string) error { return injected }); !errors.Is(err, injected) {
+		t.Fatalf("error = %v, want injected confirmation failure", err)
+	}
+
+	called := false
+	if err := confirmOptionalTargetDirectory(filepath.Join(dir, "missing"), func(string) error {
+		called = true
+		return nil
+	}); err != nil {
+		t.Fatalf("missing optional target: %v", err)
+	}
+	if called {
+		t.Fatal("missing optional target attempted a directory sync")
+	}
+}
+
+func TestDurableRemoveSyncsParentAfterRemoval(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "pending")
+	if err := os.WriteFile(target, []byte("intent"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var synced string
+	err := durableRemoveWithDirSync(target, func(path string) error {
+		synced = path
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			t.Fatalf("target still present during parent sync: %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("durableRemoveWithDirSync: %v", err)
+	}
+	if synced != dir {
+		t.Fatalf("synced directory = %q, want %q", synced, dir)
+	}
+}
+
+func TestDurableRemoveReportsPostRemoveDirectorySyncFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "pending")
+	if err := os.WriteFile(target, []byte("intent"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected remove directory sync failure")
+	err := durableRemoveWithDirSync(target, func(string) error { return injected })
+	if !errors.Is(err, injected) {
+		t.Fatalf("error = %v, want injected directory sync failure", err)
+	}
+	if _, statErr := os.Lstat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("remove did not precede reported sync failure: %v", statErr)
+	}
+}
