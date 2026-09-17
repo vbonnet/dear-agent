@@ -1278,7 +1278,7 @@ an empty selected tree refuse.
 Expansion charges every directory reference and leaf occurrence, including a
 repeated tree or blob ID. Each materialized component is valid UTF-8. Its
 collision key is NFC, then full case fold, then NFC using the pinned
-`golang.org/x/text` v0.41.0 tables. Raw duplicates, equal collision keys in one
+`golang.org/x/text` v0.42.0 tables. Raw duplicates, equal collision keys in one
 directory, file/directory prefix conflicts, and a collision key equal to
 `.git` refuse. The expanded leaf inventory retains raw relative paths, modes,
 object IDs, sizes, and symlink text and is the custom value compared with the
