@@ -84,11 +84,10 @@ jobs:
   # unrelated work, the exact failure mode ce-lz9ny hit with govulncheck.
   #
   # The scoping: a PR that changes no dependency manifest or lockfile cannot
-  # introduce a dependency vulnerability. Such a PR gets the advisory scan
-  # (findings still land in the Security tab) but is not blocked by it. A PR
-  # that DOES touch go.mod / go.sum / package.json / *.lock is gated exactly as
-  # strictly as before — this weakens nothing for the changes that can actually
-  # cause the failure.
+  # introduce a dependency vulnerability. Such a PR gets the advisory scan and
+  # a retained SARIF artifact, but is not blocked by it. A PR that DOES touch
+  # go.mod / go.sum / package.json / *.lock is gated exactly as strictly as
+  # before — this weakens nothing for changes that can actually cause failure.
   #
   # The catch, stated plainly: this is manifest-scoping, not true baseline
   # diffing — Trivy has no --baseline-commit. A PR that bumps one dependency is
@@ -111,7 +110,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -142,11 +140,14 @@ jobs:
           output: 'trivy-results.sarif'
           severity: ${{ steps.vulnerability-policy.outputs.report-severities }}
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
+      - name: Stage Trivy results
+        uses: actions/upload-artifact@v7
         if: always()
         with:
-          sarif_file: 'trivy-results.sarif'
+          name: trivy-results
+          path: trivy-results.sarif
+          retention-days: 1
+          if-no-files-found: error
 
       # Blocking pass. Runs unconditionally off pull_request (push to main,
       # release, daily schedule), on any PR that touches a dependency manifest
@@ -172,17 +173,47 @@ jobs:
         run: |
           echo "::notice ::Vulnerability Scan is advisory for this PR: no dependency"
           echo "::notice ::manifest or lockfile changed, so it cannot introduce a new"
-          echo "::notice ::dependency vulnerability. Findings above are recorded in the"
-          echo "::notice ::Security tab. The full blocking scan runs on push to main,"
-          echo "::notice ::on release, and daily."
+          echo "::notice ::dependency vulnerability. The SARIF report is retained as a"
+          echo "::notice ::workflow artifact. Trusted non-PR runs publish SARIF to the"
+          echo "::notice ::Security tab and run the full blocking scan."
+
+  publish-vulnerability-sarif:
+    name: Publish Vulnerability SARIF
+    # Never place a GitHub write token in the job that runs PR-authored code.
+    # This job consumes only the staged SARIF data on trusted non-PR events.
+    needs: vulnerability-scan
+    if: >-
+      ${{ !cancelled()
+      && github.event_name != 'pull_request'
+      && (github.event_name == 'release'
+      || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Download Trivy results
+        uses: actions/download-artifact@v8
+        with:
+          name: trivy-results
+          path: ${{ runner.temp }}/trivy-results
+
+      - name: Publish Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ runner.temp }}/trivy-results/trivy-results.sarif
+          wait-for-processing: true
 
   provider-vulnerability-audit:
     name: Provider Vulnerability Policy Audit
     # Keep provider-read scope away from pull-request-authored code. This job
-    # runs only for trusted main, schedule, and manual-dispatch revisions.
-    needs: vulnerability-scan
+    # runs only for trusted main, schedule, and manual-dispatch revisions, and
+    # only after the current Trivy SARIF was published for provider retrieval.
+    needs: publish-vulnerability-sarif
     if: >-
       ${{ !cancelled()
+      && needs['publish-vulnerability-sarif'].result == 'success'
       && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
     runs-on: ubuntu-latest

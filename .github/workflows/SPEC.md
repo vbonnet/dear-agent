@@ -24,7 +24,7 @@
 
 **DECL-WORKFLOW-10** If either provider vulnerability-alert source is unavailable, malformed, or incomplete, then the system shall fail the provider audit without reporting policy compliance.
 
-**DECL-WORKFLOW-11** When repository vulnerability scanning runs, the system shall apply the canonical reporting-severity projection to security reporting and the canonical blocking-severity projection to the admission scan.
+**DECL-WORKFLOW-11** When repository vulnerability scanning runs, the system shall apply the canonical reporting-severity projection to staged SARIF and the canonical blocking-severity projection to the admission scan, while only a trusted non-pull-request publisher receives `security-events: write` to upload the staged report.
 
 **DECL-WORKFLOW-12** When a pull request changes no dependency input and change detection succeeds, the system shall publish the required vulnerability context without executing the blocking admission scan.
 
