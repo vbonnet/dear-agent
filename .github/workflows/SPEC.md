@@ -20,6 +20,20 @@
 
 **DECL-WORKFLOW-08** When the monthly cognitive-complexity audit evaluates the repository, the system shall report bounded findings from a complete trustworthy scan and shall fail without reporting clean whenever the scan is unavailable, invalid, incomplete, or violates its expected result protocol.
 
+**DECL-WORKFLOW-09** When the daily schedule, a dependency-path push to main, or a manual dispatch triggers the vulnerability workflow, the system shall retrieve every page of open dependency and Trivy code-scanning alerts before evaluating the repository vulnerability policy.
+
+**DECL-WORKFLOW-10** If either provider vulnerability-alert source is unavailable, malformed, or incomplete, then the system shall fail the provider audit without reporting policy compliance.
+
+**DECL-WORKFLOW-11** When repository vulnerability scanning runs, the system shall apply the canonical reporting-severity projection to security reporting and the canonical blocking-severity projection to the admission scan.
+
+**DECL-WORKFLOW-12** When a pull request changes no dependency input and change detection succeeds, the system shall publish the required vulnerability context without executing the blocking admission scan.
+
+**DECL-WORKFLOW-13** When a scheduled, dependency-path push, or manually dispatched provider audit evaluates vulnerability alerts, the system shall verify the deterministic policy failure and liveness canaries before evaluating live alerts.
+
+**DECL-WORKFLOW-14** The provider vulnerability audit shall not mutate provider alerts or repository issues.
+
+**DECL-WORKFLOW-15** While a scheduled or manually dispatched vulnerability sweep is running, the system shall use a distinct non-cancellable concurrency group that push and pull-request activity cannot cancel.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/declarative_runtime_guardrails.feature`
@@ -29,7 +43,10 @@
 
 - Monthly cognitive-complexity scanner and workflow contract:
   `tests/bats/monthly-audit-complexity.bats`.
+- Vulnerability policy projection, provider-evidence, failure, and pull-request
+  liveness contract:
+  `cmd/vulnerability-policy/workflow_contract_test.go`.
 - BDD consequence: No new BDD feature is required because the scheduled GitHub
-  Actions runner and external scanner are not exposed by the repository BDD
-  harness; deterministic Bats fixtures and workflow-source checks exercise the
-  observable result protocol.
+  Actions runner, external scanner, and provider alert APIs are not exposed by
+  the repository BDD harness; deterministic command fixtures, Bats fixtures,
+  and workflow-source checks exercise the observable result protocols.

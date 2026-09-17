@@ -18,16 +18,22 @@ on:
   release:
     types: [created]
   schedule:
-    # Weekly scan on Mondays at 00:00 UTC
-    - cron: '0 0 * * 1'
+    # Daily alert reconciliation and full repository scan, offset from the
+    # start-of-hour congestion window documented by GitHub Actions.
+    - cron: '41 0 * * *'
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A routine main push must not cancel the only daily provider-alert audit.
+  group: >-
+    ${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        && 'sweep' || (github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
   security-events: write
+  vulnerability-alerts: read
 
 jobs:
   changes:
@@ -38,7 +44,7 @@ jobs:
     name: Generate SBOM
     # SBOM artifacts are consumed for release/compliance, not per-PR review.
     # Skip on pull_request to save a Trivy run on every PR; still generated
-    # on push to main, on release, and on the weekly schedule.
+    # on push to main, on release, and on the daily schedule.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -91,7 +97,7 @@ jobs:
   # still blocked by an unrelated pre-existing CRITICAL elsewhere in the tree.
   # Closing that gap needs a checked-in baseline; tracked separately. What
   # catches the debt in the meantime is the unchanged full blocking scan on
-  # push-to-main, on release, and on the weekly schedule, plus the main-health
+  # push-to-main, on release, and on the daily schedule, plus the main-health
   # watchdog that files a retro when main goes red.
   vulnerability-scan:
     name: Vulnerability Scan
@@ -109,6 +115,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+
+      - name: Build vulnerability policy
+        run: go build -o "$RUNNER_TEMP/vulnerability-policy" ./cmd/vulnerability-policy
+        env:
+          GOWORK: "off"
+
+      - name: Project vulnerability policy
+        id: vulnerability-policy
+        run: '"$RUNNER_TEMP/vulnerability-policy" project >> "$GITHUB_OUTPUT"'
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -116,7 +137,7 @@ jobs:
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
+          severity: ${{ steps.vulnerability-policy.outputs.report-severities }}
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
@@ -125,7 +146,7 @@ jobs:
           sarif_file: 'trivy-results.sarif'
 
       # Blocking pass. Runs unconditionally off pull_request (push to main,
-      # release, weekly schedule), on any PR that touches a dependency manifest
+      # release, daily schedule), on any PR that touches a dependency manifest
       # or lockfile, and on any PR where the detector did not succeed — an
       # unknowable change set means "scan", never "skip".
       - name: Run Trivy with exit code
@@ -138,8 +159,7 @@ jobs:
           scan-type: 'fs'
           scan-ref: '.'
           exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
+          severity: ${{ steps.vulnerability-policy.outputs.block-severities }}
 
       - name: Explain non-blocking pass
         if: >-
@@ -151,13 +171,41 @@ jobs:
           echo "::notice ::manifest or lockfile changed, so it cannot introduce a new"
           echo "::notice ::dependency vulnerability. Findings above are recorded in the"
           echo "::notice ::Security tab. The full blocking scan runs on push to main,"
-          echo "::notice ::on release, and weekly."
+          echo "::notice ::on release, and daily."
+
+      - name: Fetch provider vulnerability alerts
+        id: provider_alerts
+        if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/${REPO}/dependabot/alerts?state=open&per_page=100" \
+            > "$RUNNER_TEMP/dependabot-alerts.json"
+          gh api --paginate --slurp \
+            "repos/${REPO}/code-scanning/alerts?state=open&tool_name=Trivy&per_page=100" \
+            > "$RUNNER_TEMP/code-scanning-alerts.json"
+
+      - name: Run vulnerability policy canary
+        id: policy_canary
+        if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.provider_alerts.outcome == 'success' }}
+        run: '"$RUNNER_TEMP/vulnerability-policy" self-test'
+
+      - name: Audit provider vulnerability alerts
+        if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.provider_alerts.outcome == 'success' && steps.policy_canary.outcome == 'success' }}
+        run: |
+          "$RUNNER_TEMP/vulnerability-policy" audit \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --dependabot "$RUNNER_TEMP/dependabot-alerts.json" \
+            --code-scanning "$RUNNER_TEMP/code-scanning-alerts.json"
 
   go-vulnerability-check:
     name: Go Vulnerability Check
     # On pull_request this is fully redundant with the required `govulncheck`
     # job in ci.yml (identical -scan package invocation + allowlist). Run it
-    # only off-PR so the weekly schedule still catches vulns disclosed against
+    # only off-PR so the daily schedule still catches vulns disclosed against
     # unchanged dependencies, without paying for a third govulncheck per PR.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
