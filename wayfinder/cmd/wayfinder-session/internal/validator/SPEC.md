@@ -23,6 +23,10 @@
 
 **WFVALID-08** When code verification runs, the system shall contain paths, bound file sizes and execution time, and require successful applicable commands.
 
+**WFVALID-15** When a gate runs an external command, the system shall detach standard input, bound the wall-clock duration such that the bound holds even when a descendant process keeps the output pipes open, and report progress while the command runs.
+
+**WFVALID-16** When a phase produces no code deliverables, the system shall not run the project build and test commands for that phase.
+
 **WFVALID-09** When unresolved clarification markers, required unchecked assumptions, or pending questions exist, the system shall reject completion.
 
 **WFVALID-10** When a skipped phase precedes the requested phase, the system shall gate on the nearest preceding non-skipped phase.
@@ -37,7 +41,8 @@
 
 Only exact `~` and `~` followed by a platform path separator are home-relative. Other leading-tilde path components are project-relative.
 
-## Traceability
+## BDD Traceability
 
-- Tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`
-- Cross-surface BDD: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`
+- Feature: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`
+- Package tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`
+- Bounded execution: `wayfinder/cmd/wayfinder-session/internal/boundedexec/`
