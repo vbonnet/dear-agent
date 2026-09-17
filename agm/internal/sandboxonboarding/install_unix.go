@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"golang.org/x/sys/unix"
 )
@@ -20,8 +21,8 @@ const (
 )
 
 type fileIdentity struct {
-	device uint64
-	inode  uint64
+	device string
+	inode  string
 }
 
 type directoryHandle struct {
@@ -222,8 +223,8 @@ func validateDirectory(label string, stat *unix.Stat_t, exactMode bool) error {
 	if uint32(stat.Mode)&unix.S_IFMT != unix.S_IFDIR {
 		return fmt.Errorf("onboarding directory %q is not a real directory", label)
 	}
-	if stat.Uid != uint32(os.Geteuid()) {
-		return fmt.Errorf("onboarding directory %q is owned by uid %d, want effective uid %d", label, stat.Uid, os.Geteuid())
+	if err := validateEffectiveOwner("onboarding directory", label, stat.Uid); err != nil {
+		return err
 	}
 	permissions := uint32(stat.Mode) & 0o777
 	if permissions&0o022 != 0 {
@@ -274,71 +275,129 @@ func readTarget(parent *directoryHandle) (targetSnapshot, error) {
 
 func readRegular(parent *directoryHandle, name string, exactPrivateMode bool) (targetSnapshot, error) {
 	label := parent.label + "/" + name
+	before, exists, err := inspectRegularEntry(parent, name, label, exactPrivateMode)
+	if err != nil {
+		return targetSnapshot{}, err
+	}
+	if !exists {
+		return targetSnapshot{}, nil
+	}
+	file, err := openRegularEntry(parent, name, label, &before, exactPrivateMode)
+	if err != nil {
+		return targetSnapshot{}, err
+	}
+	content, openedAfter, visible, err := readOpenedRegular(parent, name, label, file)
+	if err != nil {
+		return targetSnapshot{}, err
+	}
+	if err := validateReadRegular(label, &before, &openedAfter, &visible, content, exactPrivateMode); err != nil {
+		return targetSnapshot{}, err
+	}
+	return snapshotFromStat(&before, content), nil
+}
+
+func inspectRegularEntry(
+	parent *directoryHandle,
+	name, label string,
+	exactPrivateMode bool,
+) (unix.Stat_t, bool, error) {
 	var before unix.Stat_t
 	if err := unix.Fstatat(int(parent.file.Fd()), name, &before, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		if errors.Is(err, unix.ENOENT) {
-			return targetSnapshot{}, nil
+			return unix.Stat_t{}, false, nil
 		}
-		return targetSnapshot{}, fmt.Errorf("inspect onboarding file %q: %w", label, err)
+		return unix.Stat_t{}, false, fmt.Errorf("inspect onboarding file %q: %w", label, err)
 	}
 	if err := validateRegular(label, &before, exactPrivateMode); err != nil {
-		return targetSnapshot{}, err
+		return unix.Stat_t{}, false, err
 	}
+	return before, true, nil
+}
+
+func openRegularEntry(
+	parent *directoryHandle,
+	name, label string,
+	before *unix.Stat_t,
+	exactPrivateMode bool,
+) (*os.File, error) {
 	fd, err := unix.Openat(
 		int(parent.file.Fd()), name,
 		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK,
 		0,
 	)
 	if err != nil {
-		return targetSnapshot{}, fmt.Errorf("open onboarding file %q without following links: %w", label, err)
+		return nil, fmt.Errorf("open onboarding file %q without following links: %w", label, err)
 	}
 	file := os.NewFile(uintptr(fd), label)
 	if file == nil {
 		_ = unix.Close(fd)
-		return targetSnapshot{}, fmt.Errorf("open onboarding file %q: create file handle", label)
+		return nil, fmt.Errorf("open onboarding file %q: create file handle", label)
 	}
 	var opened unix.Stat_t
 	if err := unix.Fstat(fd, &opened); err != nil {
-		return targetSnapshot{}, errors.Join(fmt.Errorf("inspect opened onboarding file %q: %w", label, err), file.Close())
+		return nil, errors.Join(fmt.Errorf("inspect opened onboarding file %q: %w", label, err), file.Close())
 	}
 	if err := validateRegular(label, &opened, exactPrivateMode); err != nil {
-		return targetSnapshot{}, errors.Join(err, file.Close())
+		return nil, errors.Join(err, file.Close())
 	}
-	if !sameRegularState(&before, &opened) {
-		return targetSnapshot{}, errors.Join(fmt.Errorf("onboarding file %q changed while it was opened", label), file.Close())
+	if !sameRegularState(before, &opened) {
+		return nil, errors.Join(fmt.Errorf("onboarding file %q changed while it was opened", label), file.Close())
 	}
+	return file, nil
+}
+
+func readOpenedRegular(
+	parent *directoryHandle,
+	name, label string,
+	file *os.File,
+) ([]byte, unix.Stat_t, unix.Stat_t, error) {
 	content, readErr := io.ReadAll(file)
 	var openedAfter, visible unix.Stat_t
-	openedErr := unix.Fstat(fd, &openedAfter)
+	openedErr := unix.Fstat(int(file.Fd()), &openedAfter)
 	visibleErr := unix.Fstatat(int(parent.file.Fd()), name, &visible, unix.AT_SYMLINK_NOFOLLOW)
 	closeErr := file.Close()
-	if readErr != nil || openedErr != nil || visibleErr != nil || closeErr != nil {
-		return targetSnapshot{}, errors.Join(
-			wrapError("read onboarding file "+label, readErr),
-			wrapError("reinspect opened onboarding file "+label, openedErr),
-			wrapError("reinspect visible onboarding file "+label, visibleErr),
-			closeErr,
-		)
+	err := errors.Join(
+		wrapError("read onboarding file "+label, readErr),
+		wrapError("reinspect opened onboarding file "+label, openedErr),
+		wrapError("reinspect visible onboarding file "+label, visibleErr),
+		closeErr,
+	)
+	if err != nil {
+		return nil, unix.Stat_t{}, unix.Stat_t{}, err
 	}
-	if err := validateRegular(label, &openedAfter, exactPrivateMode); err != nil {
-		return targetSnapshot{}, err
+	return content, openedAfter, visible, nil
+}
+
+func validateReadRegular(
+	label string,
+	before, openedAfter, visible *unix.Stat_t,
+	content []byte,
+	exactPrivateMode bool,
+) error {
+	if err := validateRegular(label, openedAfter, exactPrivateMode); err != nil {
+		return err
 	}
-	if err := validateRegular(label, &visible, exactPrivateMode); err != nil {
-		return targetSnapshot{}, err
+	if err := validateRegular(label, visible, exactPrivateMode); err != nil {
+		return err
 	}
-	if !sameRegularState(&before, &openedAfter) || !sameRegularState(&before, &visible) ||
-		before.Size != int64(len(content)) {
-		return targetSnapshot{}, fmt.Errorf("onboarding file %q changed while it was read", label)
+	if !sameRegularState(before, openedAfter) {
+		return fmt.Errorf("onboarding file %q changed while it was read", label)
 	}
-	return snapshotFromStat(&before, content), nil
+	if !sameRegularState(before, visible) {
+		return fmt.Errorf("onboarding file %q changed while it was read", label)
+	}
+	if before.Size != int64(len(content)) {
+		return fmt.Errorf("onboarding file %q changed while it was read", label)
+	}
+	return nil
 }
 
 func validateRegular(label string, stat *unix.Stat_t, exactPrivateMode bool) error {
 	if uint32(stat.Mode)&unix.S_IFMT != unix.S_IFREG {
 		return fmt.Errorf("onboarding file %q is not a regular file", label)
 	}
-	if stat.Uid != uint32(os.Geteuid()) {
-		return fmt.Errorf("onboarding file %q is owned by uid %d, want effective uid %d", label, stat.Uid, os.Geteuid())
+	if err := validateEffectiveOwner("onboarding file", label, stat.Uid); err != nil {
+		return err
 	}
 	if uint64(stat.Nlink) != 1 {
 		return fmt.Errorf("onboarding file %q has %d hard links, want 1", label, stat.Nlink)
@@ -394,6 +453,21 @@ func (transaction *outputTransaction) authenticateTemporary(
 	file *os.File,
 	content []byte,
 ) error {
+	if err := transaction.registerTemporary(parent, name, file, content); err != nil {
+		return err
+	}
+	if err := writeTemporary(file, content); err != nil {
+		return errors.Join(err, file.Close())
+	}
+	return transaction.finishTemporary(parent, name, file, content)
+}
+
+func (transaction *outputTransaction) registerTemporary(
+	parent *directoryHandle,
+	name string,
+	file *os.File,
+	content []byte,
+) error {
 	fd := int(file.Fd())
 	var opened, visible unix.Stat_t
 	if err := unix.Fstat(fd, &opened); err != nil {
@@ -417,26 +491,40 @@ func (transaction *outputTransaction) authenticateTemporary(
 	if !sameRegularState(&opened, &visible) {
 		return errors.Join(fmt.Errorf("onboarding temporary file changed while it was created"), file.Close())
 	}
+	return nil
+}
 
-	if err := unix.Fchmod(fd, privateFileMode); err != nil {
-		return errors.Join(fmt.Errorf("set onboarding temporary file mode: %w", err), file.Close())
+func writeTemporary(file *os.File, content []byte) error {
+	if err := unix.Fchmod(int(file.Fd()), privateFileMode); err != nil {
+		return fmt.Errorf("set onboarding temporary file mode: %w", err)
 	}
 	if err := writeAll(file, content); err != nil {
-		return errors.Join(err, file.Close())
+		return err
 	}
 	if err := file.Sync(); err != nil {
-		return errors.Join(fmt.Errorf("sync onboarding temporary file: %w", err), file.Close())
+		return fmt.Errorf("sync onboarding temporary file: %w", err)
 	}
+	return nil
+}
+
+func (transaction *outputTransaction) finishTemporary(
+	parent *directoryHandle,
+	name string,
+	file *os.File,
+	content []byte,
+) error {
+	fd := int(file.Fd())
 	var finalOpened, finalVisible unix.Stat_t
 	openedErr := unix.Fstat(fd, &finalOpened)
 	visibleErr := unix.Fstatat(int(parent.file.Fd()), name, &finalVisible, unix.AT_SYMLINK_NOFOLLOW)
 	closeErr := file.Close()
-	if openedErr != nil || visibleErr != nil || closeErr != nil {
-		return errors.Join(
-			wrapError("reinspect opened onboarding temporary file", openedErr),
-			wrapError("reinspect visible onboarding temporary file", visibleErr),
-			closeErr,
-		)
+	err := errors.Join(
+		wrapError("reinspect opened onboarding temporary file", openedErr),
+		wrapError("reinspect visible onboarding temporary file", visibleErr),
+		closeErr,
+	)
+	if err != nil {
+		return err
 	}
 	if err := validateRegular("temporary "+name, &finalOpened, true); err != nil {
 		return err
@@ -444,8 +532,13 @@ func (transaction *outputTransaction) authenticateTemporary(
 	if err := validateRegular("temporary "+name, &finalVisible, true); err != nil {
 		return err
 	}
-	if identityFromStat(&finalOpened) != transaction.temporary.identity ||
-		!sameRegularState(&finalOpened, &finalVisible) || finalOpened.Size != int64(len(content)) {
+	if identityFromStat(&finalOpened) != transaction.temporary.identity {
+		return fmt.Errorf("onboarding temporary file changed while it was written")
+	}
+	if !sameRegularState(&finalOpened, &finalVisible) {
+		return fmt.Errorf("onboarding temporary file changed while it was written")
+	}
+	if finalOpened.Size != int64(len(content)) {
 		return fmt.Errorf("onboarding temporary file changed while it was written")
 	}
 	return nil
@@ -529,7 +622,21 @@ func sameRegularState(left, right *unix.Stat_t) bool {
 }
 
 func identityFromStat(stat *unix.Stat_t) fileIdentity {
-	return fileIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}
+	return fileIdentity{device: fmt.Sprint(stat.Dev), inode: fmt.Sprint(stat.Ino)}
+}
+
+func effectiveUID() uint32 {
+	// #nosec G115 -- Geteuid carries the platform uid_t bits through int; on
+	// 32-bit Unix, valid high UIDs appear negative and must retain those bits.
+	return uint32(os.Geteuid())
+}
+
+func validateEffectiveOwner(kind, label string, actual uint32) error {
+	expected := effectiveUID()
+	if actual != expected {
+		return fmt.Errorf("%s %q is owned by uid %d, want effective uid %d", kind, label, actual, expected)
+	}
+	return nil
 }
 
 func wrapError(action string, err error) error {
@@ -544,8 +651,8 @@ func (transaction *outputTransaction) cleanup() error {
 	if transaction.temporary != nil {
 		cleanupErr = errors.Join(cleanupErr, transaction.cleanupTemporary())
 	}
-	for i := len(transaction.created) - 1; i >= 0; i-- {
-		cleanupErr = errors.Join(cleanupErr, cleanupCreatedDirectory(transaction.created[i]))
+	for _, directory := range slices.Backward(transaction.created) {
+		cleanupErr = errors.Join(cleanupErr, cleanupCreatedDirectory(directory))
 	}
 	return cleanupErr
 }
@@ -561,8 +668,7 @@ func (transaction *outputTransaction) cleanupTemporary() error {
 		}
 		return fmt.Errorf("cleanup onboarding temporary file: inspect: %w", err)
 	}
-	if identityFromStat(&visible) != temporary.identity ||
-		uint32(visible.Mode)&unix.S_IFMT != unix.S_IFREG || visible.Uid != uint32(os.Geteuid()) {
+	if !matchesCreatedEntry(&visible, temporary.identity, unix.S_IFREG) {
 		return fmt.Errorf("cleanup onboarding temporary file: visible entry no longer matches the created file")
 	}
 	if err := unix.Unlinkat(int(temporary.parent.file.Fd()), temporary.name, 0); err != nil {
@@ -582,8 +688,7 @@ func cleanupCreatedDirectory(directory *directoryHandle) error {
 		}
 		return fmt.Errorf("cleanup onboarding directory %q: inspect: %w", directory.label, err)
 	}
-	if identityFromStat(&visible) != directory.identity ||
-		uint32(visible.Mode)&unix.S_IFMT != unix.S_IFDIR || visible.Uid != uint32(os.Geteuid()) {
+	if !matchesCreatedEntry(&visible, directory.identity, unix.S_IFDIR) {
 		return fmt.Errorf("cleanup onboarding directory %q: visible entry no longer matches the created directory", directory.label)
 	}
 	if err := unix.Unlinkat(int(directory.parent.file.Fd()), directory.name, unix.AT_REMOVEDIR); err != nil {
@@ -594,10 +699,15 @@ func cleanupCreatedDirectory(directory *directoryHandle) error {
 
 func (transaction *outputTransaction) close() error {
 	var closeErr error
-	for i := len(transaction.directories) - 1; i >= 0; i-- {
-		if transaction.directories[i].file != nil {
-			closeErr = errors.Join(closeErr, transaction.directories[i].file.Close())
+	for _, directory := range slices.Backward(transaction.directories) {
+		if directory.file != nil {
+			closeErr = errors.Join(closeErr, directory.file.Close())
 		}
 	}
 	return closeErr
+}
+
+func matchesCreatedEntry(stat *unix.Stat_t, identity fileIdentity, fileType uint32) bool {
+	return identityFromStat(stat) == identity &&
+		uint32(stat.Mode)&unix.S_IFMT == fileType && stat.Uid == effectiveUID()
 }
