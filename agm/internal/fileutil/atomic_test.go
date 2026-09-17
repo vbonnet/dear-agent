@@ -1,8 +1,10 @@
 package fileutil
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -142,5 +144,98 @@ func TestAtomicWrite_DifferentPermissions(t *testing.T) {
 		if info.Mode().Perm() != tt.perm {
 			t.Errorf("Wrong permissions: got %o, want %o", info.Mode().Perm(), tt.perm)
 		}
+	}
+}
+
+func TestAtomicWritePublishesFinalModeBeforeDirectorySync(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "ordered.txt")
+	wantData := []byte("durable contents")
+	wantMode := os.FileMode(0o640)
+	wantErr := errors.New("directory sync failed")
+	called := false
+
+	err := atomicWrite(testFile, wantData, wantMode, func(dir string) error {
+		called = true
+		if dir != tmpDir {
+			t.Fatalf("sync directory = %q, want %q", dir, tmpDir)
+		}
+		data, readErr := os.ReadFile(testFile)
+		if readErr != nil {
+			t.Fatalf("published file was not readable before directory sync: %v", readErr)
+		}
+		if string(data) != string(wantData) {
+			t.Fatalf("published data = %q, want %q", data, wantData)
+		}
+		info, statErr := os.Stat(testFile)
+		if statErr != nil {
+			t.Fatalf("stat published file: %v", statErr)
+		}
+		if info.Mode().Perm() != wantMode {
+			t.Fatalf("published mode = %o, want %o", info.Mode().Perm(), wantMode)
+		}
+		return wantErr
+	})
+	if !called {
+		t.Fatal("AtomicWrite did not sync the containing directory")
+	}
+	if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), "sync parent directory") {
+		t.Fatalf("AtomicWrite error = %v, want directory-sync failure", err)
+	}
+}
+
+func TestSyncDirRejectsMissingDirectory(t *testing.T) {
+	err := SyncDir(filepath.Join(t.TempDir(), "missing"))
+	if err == nil || !strings.Contains(err.Error(), "open directory for sync") {
+		t.Fatalf("SyncDir error = %v, want missing-directory error", err)
+	}
+}
+
+func TestMkdirAllDurableSyncsEveryCreatedParentInOrder(t *testing.T) {
+	baseDir := t.TempDir()
+	first := filepath.Join(baseDir, "first")
+	nested := filepath.Join(first, "nested")
+	var synced []string
+
+	err := mkdirAllDurable(nested, 0o700, func(path string) error {
+		synced = append(synced, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("mkdirAllDurable() error = %v", err)
+	}
+	want := []string{baseDir, first}
+	if len(synced) != len(want) {
+		t.Fatalf("synced parents = %v, want %v", synced, want)
+	}
+	for i := range want {
+		if synced[i] != want[i] {
+			t.Fatalf("synced parents = %v, want %v", synced, want)
+		}
+	}
+	if info, statErr := os.Stat(nested); statErr != nil || !info.IsDir() {
+		t.Fatalf("created directory stat = (%v, %v), want directory", info, statErr)
+	}
+
+	synced = nil
+	if err := mkdirAllDurable(nested, 0o700, func(path string) error {
+		synced = append(synced, path)
+		return nil
+	}); err != nil {
+		t.Fatalf("mkdirAllDurable(existing) error = %v", err)
+	}
+	if len(synced) != 0 {
+		t.Fatalf("existing directory synced unexpected parents: %v", synced)
+	}
+}
+
+func TestMkdirAllDurableFailsWhenCreatedParentCannotSync(t *testing.T) {
+	baseDir := t.TempDir()
+	wantErr := errors.New("directory sync failed")
+	err := mkdirAllDurable(filepath.Join(baseDir, "first", "nested"), 0o700, func(string) error {
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), "sync parent of created directory") {
+		t.Fatalf("mkdirAllDurable() error = %v, want parent-sync failure", err)
 	}
 }
