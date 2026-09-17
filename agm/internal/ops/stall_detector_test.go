@@ -12,6 +12,17 @@ import (
 // mockStorage implements dolt.Storage for testing.
 type mockStorage struct {
 	sessions []*manifest.Manifest
+	// listErr, when set, is returned by ListSessions instead of a result, so
+	// tests can exercise callers' handling of a storage failure (as opposed
+	// to an empty or not-found result).
+	listErr error
+	// listCalls counts ListSessions invocations, so tests can assert a
+	// caller fetches the session list once rather than once per lookup.
+	listCalls int
+	// lastFilter captures the filter passed to the most recent ListSessions
+	// call, so tests can assert callers do not impose an artificial page
+	// limit on a search that must see the complete active set.
+	lastFilter *dolt.SessionFilter
 }
 
 func (m *mockStorage) GetSession(identifier string) (*manifest.Manifest, error) {
@@ -24,6 +35,11 @@ func (m *mockStorage) GetSession(identifier string) (*manifest.Manifest, error) 
 }
 
 func (m *mockStorage) ListSessions(filter *dolt.SessionFilter) ([]*manifest.Manifest, error) {
+	m.listCalls++
+	m.lastFilter = filter
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	var result []*manifest.Manifest
 	for _, s := range m.sessions {
 		// Check exclude archived
