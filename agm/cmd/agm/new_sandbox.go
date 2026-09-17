@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/sandboxonboarding"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
@@ -75,9 +77,13 @@ func provisionSandbox(
 	debug.Log("Provider: %s", providerName)
 	debug.Log("WorkDir: %s", workDir)
 
-	sandboxWorkspace, homeDir, err := resolveSandboxProvisioningPaths(authority, sessionID)
+	sandboxWorkspace, homeRoot, err := resolveSandboxProvisioningPaths(authority, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	homeDir, err := homeRoot.Path()
+	if err != nil {
+		return nil, fmt.Errorf("resolve sandbox HOME path: %w", err)
 	}
 
 	// Get provider only after the complete workspace authority is valid.
@@ -120,37 +126,30 @@ func provisionSandbox(
 		return nil, fmt.Errorf("failed to create sandbox: %w", err)
 	}
 
-	debug.Log("Sandbox created successfully")
 	debug.Log("Merged path: %s", sb.MergedPath)
 	debug.Log("Working directory: %s", sb.WorkingDir)
 	if sb.WorkingDir == "" {
 		contractErr := fmt.Errorf("sandbox provider %s returned an empty working directory", provider.Name())
-		if cleanupErr := provider.Destroy(ctx, sb.ID); cleanupErr != nil {
-			return nil, errors.Join(contractErr, fmt.Errorf("cleanup failed: %w", cleanupErr))
-		}
-		return nil, contractErr
+		return nil, rollbackCreatedSandbox(ctx, provider, sb.ID, contractErr)
 	}
-	ui.PrintSuccess(fmt.Sprintf("Sandbox provisioned: %s", provider.Name()))
 
-	// Write onboarding CLAUDE.md with worktree instructions
 	if cfg.Sandbox.Onboarding.Enabled {
-		var content string
-		var onboardErr error
-		if cfg.Sandbox.Onboarding.TemplatePath != "" {
-			content, onboardErr = sandbox.GenerateOnboardingContentFromFile(
-				cfg.Sandbox.Onboarding.TemplatePath, sessionID, sb.MergedPath, lowerDirs,
-			)
-		} else {
-			content, onboardErr = sandbox.GenerateOnboardingContent(sessionID, sb.MergedPath, lowerDirs)
+		if err := sandboxonboarding.Install(sandboxonboarding.Request{
+			Home:         homeRoot,
+			SessionID:    sessionID,
+			MergedPath:   sb.MergedPath,
+			WorkingDir:   sb.WorkingDir,
+			Repos:        lowerDirs,
+			TemplatePath: cfg.Sandbox.Onboarding.TemplatePath,
+		}); err != nil {
+			onboardingErr := fmt.Errorf("install sandbox onboarding: %w", err)
+			return nil, rollbackCreatedSandbox(ctx, provider, sb.ID, onboardingErr)
 		}
-		if onboardErr != nil {
-			debug.Log("Warning: failed to generate onboarding content: %v", onboardErr)
-		} else if err := sandbox.WriteOnboardingClaudeMd(sb.WorkingDir, content); err != nil {
-			debug.Log("Warning: failed to write onboarding CLAUDE.md: %v", err)
-		} else {
-			debug.Log("Wrote sandbox onboarding to ~/.claude/projects/ for %s", sb.WorkingDir)
-		}
+		debug.Log("Wrote sandbox onboarding below retained HOME for %s", sb.WorkingDir)
 	}
+
+	debug.Log("Sandbox created successfully")
+	ui.PrintSuccess(fmt.Sprintf("Sandbox provisioned: %s", provider.Name()))
 
 	return &manifest.SandboxConfig{
 		Enabled:             true,
@@ -163,24 +162,37 @@ func provisionSandbox(
 	}, nil
 }
 
-func resolveSandboxProvisioningPaths(authority config.RuntimeAuthority, sessionID string) (string, string, error) {
+func resolveSandboxProvisioningPaths(
+	authority config.RuntimeAuthority,
+	sessionID string,
+) (string, config.HomeRoot, error) {
 	sandboxRoot, err := authority.Sandboxes()
 	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox root: %w", err)
+		return "", config.HomeRoot{}, fmt.Errorf("resolve sandbox root: %w", err)
 	}
 	sandboxWorkspace, err := sandboxRoot.Workspace(sessionID)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox workspace: %w", err)
+		return "", config.HomeRoot{}, fmt.Errorf("resolve sandbox workspace: %w", err)
 	}
 	homeRoot, err := authority.Home()
 	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox HOME: %w", err)
+		return "", config.HomeRoot{}, fmt.Errorf("resolve sandbox HOME: %w", err)
 	}
-	homeDir, err := homeRoot.Path()
-	if err != nil {
-		return "", "", fmt.Errorf("resolve sandbox HOME path: %w", err)
+	return sandboxWorkspace, homeRoot, nil
+}
+
+func rollbackCreatedSandbox(
+	ctx context.Context,
+	provider sandbox.Provider,
+	sandboxID string,
+	primary error,
+) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if cleanupErr := provider.Destroy(cleanupCtx, sandboxID); cleanupErr != nil {
+		return errors.Join(primary, fmt.Errorf("cleanup sandbox %q: %w", sandboxID, cleanupErr))
 	}
-	return sandboxWorkspace, homeDir, nil
+	return primary
 }
 
 // resolveSandboxLowerDirs returns the provider lower directories for a new

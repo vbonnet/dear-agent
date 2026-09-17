@@ -716,10 +716,12 @@ func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T
 	if sandboxInfo.MergedPath == sandboxInfo.WorkingDir {
 		t.Fatalf("merged root %q must remain distinct from nested working directory", sandboxInfo.MergedPath)
 	}
-	projectDir, err := sandbox.ClaudeProjectDir(wantWorkingDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	projectDir := filepath.Join(
+		homeDir,
+		".claude",
+		"projects",
+		strings.ReplaceAll(wantWorkingDir, string(filepath.Separator), "-"),
+	)
 	onboarding, err := os.ReadFile(filepath.Join(projectDir, "CLAUDE.md"))
 	if err != nil {
 		t.Fatal(err)

@@ -121,7 +121,7 @@ Provide a production-ready CLI that:
 
 **CLI-41** When `agm session new` provisions a sandbox for any harness, the system shall start the shared harness lifecycle from the provider-mapped counterpart of the requested project directory and shall persist both that directory and the sandbox workspace root.
 
-**CLI-42** When sandbox onboarding is enabled for a nested harness working directory, the system shall render onboarding template workspace-root data from the provider's merged path while writing the generated instructions to the harness working directory's project-scoped configuration.
+**CLI-42** When sandbox onboarding is enabled for a nested harness working directory, the system shall render onboarding template workspace-root data from the provider's merged path and atomically install the generated instructions at mode `0600` in the working directory's Claude project configuration through an authenticated no-follow traversal beneath the retained `HomeRoot`; an unsafe directory or final node, rendering failure, or installation failure shall be fatal after provider creation, destroy that exact provider sandbox once with bounded cancellation-independent cleanup, and return any cleanup failure with the primary error before printing provisioning success.
 
 **CLI-43** When automatic workspace discovery finds repositories that do not contain the requested project directory, the system shall retain those repositories, prepend the nearest Git repository containing the requested directory, and reject sandbox creation if the requested directory has no safe containing Git repository.
 
