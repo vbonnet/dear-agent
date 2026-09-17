@@ -1,8 +1,12 @@
 package testcontext_test
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +19,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
+	llmauth "github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 func TestForwardAuthRoutesSelectedHomeMutations(t *testing.T) {
@@ -68,6 +73,112 @@ func TestForwardAuthRoutesSelectedHomeMutations(t *testing.T) {
 	hostOnboardingData, err := os.ReadFile(hostOnboarding)
 	require.NoError(t, err)
 	assert.Equal(t, "host-onboarding-sentinel", string(hostOnboardingData))
+}
+
+func TestForwardAuthProjectionClaudeRefreshUsesCanonicalHostLeaf(t *testing.T) {
+	hostHome := t.TempDir()
+	hostClaudeDir := filepath.Join(hostHome, ".claude")
+	require.NoError(t, os.MkdirAll(hostClaudeDir, 0700))
+	hostCredential := filepath.Join(hostClaudeDir, ".credentials.json")
+	initialCredential := `{
+  "claudeAiOauth": {
+    "accessToken": "synthetic-access-before",
+    "expiresAt": 1,
+    "refreshToken": "synthetic-refresh-before",
+    "scopes": ["user:inference"]
+  }
+}`
+	require.NoError(t, os.WriteFile(hostCredential, []byte(initialCredential), 0600))
+	hostBefore, err := os.Lstat(hostCredential)
+	require.NoError(t, err)
+
+	tc := testcontext.New()
+	require.NoError(t, tc.EnsureDirs())
+	t.Cleanup(func() {
+		require.NoError(t, tc.Cleanup())
+	})
+	require.NoError(t, tc.ForwardAuth(hostHome, testcontext.AuthModeInherit))
+
+	selectedCredential := filepath.Join(tc.HomeDir, ".claude", ".credentials.json")
+	selectedBefore, err := os.Lstat(selectedCredential)
+	require.NoError(t, err)
+	require.NotZero(t, selectedBefore.Mode()&os.ModeSymlink)
+	targetBefore, err := os.Readlink(selectedCredential)
+	require.NoError(t, err)
+	assert.Equal(t, hostCredential, targetBefore)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "cannot parse synthetic refresh request", http.StatusBadRequest)
+			return
+		}
+		if got := r.FormValue("refresh_token"); got != "synthetic-refresh-before" {
+			http.Error(w, "unexpected synthetic refresh token", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "synthetic-access-after",
+			"expires_in":    3600,
+			"refresh_token": "synthetic-refresh-after",
+			"token_type":    "Bearer",
+		}); err != nil {
+			t.Errorf("encode synthetic refresh response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	t.Setenv("HOME", tc.HomeDir)
+	resolver := llmauth.OAuthResolver{
+		HTTPClient:    server.Client(),
+		TokenEndpoint: server.URL,
+	}
+	token, err := resolver.Refresh(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "synthetic-access-after", token)
+
+	selectedAfter, err := os.Lstat(selectedCredential)
+	require.NoError(t, err)
+	require.NotZero(t, selectedAfter.Mode()&os.ModeSymlink)
+	assert.True(t, os.SameFile(selectedBefore, selectedAfter), "selected credential link identity changed")
+	targetAfter, err := os.Readlink(selectedCredential)
+	require.NoError(t, err)
+	assert.Equal(t, targetBefore, targetAfter)
+
+	var persisted struct {
+		ClaudeAIOAuth struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"claudeAiOauth"`
+	}
+	hostData, err := os.ReadFile(hostCredential)
+	require.NoError(t, err)
+	hostAfter, err := os.Lstat(hostCredential)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(hostBefore, hostAfter), "host credential was not atomically replaced")
+	require.NoError(t, json.Unmarshal(hostData, &persisted))
+	assert.Equal(t, "synthetic-access-after", persisted.ClaudeAIOAuth.AccessToken)
+	assert.Equal(t, "synthetic-refresh-after", persisted.ClaudeAIOAuth.RefreshToken)
+	selectedData, err := os.ReadFile(selectedCredential)
+	require.NoError(t, err)
+	assert.Equal(t, hostData, selectedData)
+
+	backupData, err := os.ReadFile(hostCredential + ".bak")
+	require.NoError(t, err)
+	assert.JSONEq(t, initialCredential, string(backupData))
+	_, err = os.Stat(filepath.Join(hostClaudeDir, ".credentials.lock"))
+	require.NoError(t, err)
+	for _, selectedSibling := range []string{
+		filepath.Join(tc.HomeDir, ".claude", ".credentials.lock"),
+		selectedCredential + ".bak",
+	} {
+		_, err = os.Lstat(selectedSibling)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+	selectedEntries, err := os.ReadDir(filepath.Join(tc.HomeDir, ".claude"))
+	require.NoError(t, err)
+	require.Len(t, selectedEntries, 1)
+	assert.Equal(t, ".credentials.json", selectedEntries[0].Name())
 }
 
 func TestSyntheticProviderOnboardingProcess(t *testing.T) {

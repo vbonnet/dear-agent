@@ -15,7 +15,8 @@ import (
 
 func registerAuthProjectionGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates inherited test authentication isolation$`, agmValidatesInheritedAuthProjection)
-	ctx.Step(`^approved credential leaves should be exact refreshable links$`, approvedCredentialLeavesAreExactLinks)
+	ctx.Step(`^approved credential leaves should be exact links with host replacement visibility$`, approvedCredentialLeavesAreExactLinks)
+	ctx.Step(`^managed Claude refresh should preserve the selected credential link$`, managedClaudeRefreshPreservesSelectedCredentialLink)
 	ctx.Step(`^approved configuration leaves should be bounded private snapshots$`, approvedConfigurationLeavesAreBoundedSnapshots)
 	ctx.Step(`^missing approved sources should not create provider namespaces$`, missingAuthProjectionSourcesAreSkipped)
 	ctx.Step(`^non-allowlisted host provider state should not be projected$`, nonAllowlistedHostProviderStateIsNotProjected)
@@ -57,6 +58,10 @@ func agmValidatesInheritedAuthProjection(ctx context.Context) error {
 
 func approvedCredentialLeavesAreExactLinks(ctx context.Context) error {
 	return requireAuthProjectionTests(ctx, "TestForwardAuthProjectionExactAllowlist")
+}
+
+func managedClaudeRefreshPreservesSelectedCredentialLink(ctx context.Context) error {
+	return requireAuthProjectionTests(ctx, "TestForwardAuthProjectionClaudeRefreshUsesCanonicalHostLeaf")
 }
 
 func approvedConfigurationLeavesAreBoundedSnapshots(ctx context.Context) error {

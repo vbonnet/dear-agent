@@ -137,7 +137,8 @@ Feature: Test support package guardrails
 
   Scenario: Inherited test authentication exposes only approved state
     When AGM validates inherited test authentication isolation
-    Then approved credential leaves should be exact refreshable links
+    Then approved credential leaves should be exact links with host replacement visibility
+    And managed Claude refresh should preserve the selected credential link
     And approved configuration leaves should be bounded private snapshots
     And missing approved sources should not create provider namespaces
     And non-allowlisted host provider state should not be projected

@@ -214,8 +214,10 @@ When using `--test` flag:
 
 An isolated `--test` session requests inherited authentication when it creates
 its test home. `agm test-env create` also defaults to inherited authentication;
-test-environment creation can instead select environment-only or
-credential-free operation with its `--auth-mode` option.
+test-environment creation can instead disable file projection with its
+`--auth-mode` option. The `env` and `none` modes both leave ambient
+authentication environment variables unchanged; `none` is not yet a
+credential-free process-environment guarantee.
 
 Inherited authentication does not link or copy a provider directory. For each
 present approved leaf, AGM creates the needed real private provider directories
@@ -230,8 +232,13 @@ exact symbolic links to the host:
 Each link stays at the provider's native relative path. Replacing a credential
 at that exact host path is therefore visible to the test environment, but no
 sibling file or directory becomes reachable through the link. The link is not
-read-only: a later provider process can read or write that exact host credential
-leaf according to the provider's own behavior.
+read-only: ordinary reads and writes that follow it reach that exact host
+credential leaf. A provider that replaces the selected-home pathname instead
+can replace the link itself, so that behavior is provider-specific rather than
+a generic promise of the projection. Dear-agent's managed Claude OAuth resolver
+canonicalizes the link before taking its sibling lock, writing its backup, and
+atomically replacing the credential; the synthetic integration test verifies
+those operations remain beside the host leaf and preserve the selected link.
 
 The following optional compatibility configuration files are copied once as
 detached `0600` snapshots. AGM accepts at most 1 MiB of content per snapshot;
@@ -267,12 +274,14 @@ renames and deletes only a node that still matches that retained identity,
 preventing a removed inode from being reused as a false match. Cleanup errors
 after a successful apply are reported without removing the installed
 projection. This serializes cooperating AGM projectors. It does not make
-arbitrary code running as the same Unix user
-untrusted—the same user already controls the selected home—but such pathname
+arbitrary code running as the same Unix user untrusted—the same user already
+controls the selected home—but such pathname
 replacement still cannot escape the retained root. Projection itself never
-writes back to the host home. A later provider can still write through an
-approved credential link to that exact host leaf; sibling host state remains
-outside the projected capability.
+writes back to the host home. A later provider write that follows an approved
+credential link reaches that exact host leaf; sibling host state remains
+outside the projected capability. Pathname-replacing native or keychain-backed
+writers need their own compatibility evidence before AGM can claim the same
+write-through behavior for them.
 
 Tests for this boundary must use synthetic host and selected homes. Run a
 synthetic provider-onboarding helper process and the real Codex trust writer

@@ -54,7 +54,8 @@ const (
 	AuthModeInherit AuthMode = "inherit"
 	// AuthModeEnv relies on environment variables only (no file symlinks).
 	AuthModeEnv AuthMode = "env"
-	// AuthModeNone provides complete isolation with no auth forwarding.
+	// AuthModeNone disables file-based auth projection. Ambient authentication
+	// environment variables remain unchanged.
 	AuthModeNone AuthMode = "none"
 )
 
@@ -583,7 +584,7 @@ func pathSafeForCleanup(path string, requireDirectory bool) (bool, error) {
 //
 // In AuthModeInherit: links exact credential files and snapshots approved config files
 // In AuthModeEnv: no-op (credentials come from env vars in CI)
-// In AuthModeNone: no-op (complete isolation)
+// In AuthModeNone: no file projection; ambient authentication environment is unchanged
 //
 // Missing approved sources are silently skipped. The HostHome field is set to
 // hostHome for later reference.

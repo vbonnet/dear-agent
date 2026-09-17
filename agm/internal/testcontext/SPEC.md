@@ -45,7 +45,7 @@ The approved compatibility configuration leaves are exactly:
 - `.config/opencode/tui.json`
 - `.config/opencode/tui.jsonc`
 
-**TCTX-13** While inherited authentication is selected, the system shall expose each present approved credential leaf at the same relative path in the selected home through one exact symbolic link that can relay later provider reads or writes only to that host credential leaf.
+**TCTX-13** While inherited authentication is selected, the system shall expose each present approved credential leaf at the same relative path in the selected home through one exact symbolic link. Reads and ordinary writes that follow the link shall resolve only to that host credential leaf; pathname-replacing writers require a separate provider-specific contract.
 
 **TCTX-14** When the host replaces an approved credential leaf after successful projection, the system shall expose the replacement through the selected home's existing credential link without exposing sibling host state.
 
@@ -74,6 +74,8 @@ The approved compatibility configuration leaves are exactly:
 **TCTX-26** While a transaction-created node can still be compensated, the system shall retain its opened identity handle; when rollback begins, the system shall move each candidate through a no-replace rename into the opened selected-home root, verify it against that retained identity, delete only a matching node, and restore an identity-changed node without replacing another entry.
 
 **TCTX-27** The transaction's concurrency guarantee applies to cooperating inherited-authentication projectors. Arbitrary mutation by another process running as the same Unix user is outside that serialization boundary, but replacement of the selected-home pathname shall not redirect transaction writes outside the opened selected home.
+
+**TCTX-28** When dear-agent's managed OAuth resolver refreshes a projected Claude credential under the selected home, the system shall serialize with other cooperating managed-resolver refreshes of that host credential, persist the rotation to the host leaf, and preserve the selected-home credential link's identity.
 
 ## BDD Traceability
 
