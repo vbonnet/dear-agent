@@ -77,3 +77,5 @@ broken.
 **DEP-28** When required-pulse transaction state is renamed into place or its pending marker is removed, the system shall sync the directory that owns that namespace update before advancing to the next transaction phase or reporting success.
 
 **DEP-29** When normal pulse and recovery-job registries are selected together, the system shall validate prospective pulse bytes against requirements from both deployed jobs and the exact rendered prospective jobs before either registry changes, publish the same rendered job bytes used in validation, and keep every deployed-job pulse present if job publication later fails.
+
+**DEP-30** When a mutating selection includes a normal pulse registry or its recovery-job registry, the system shall hold the persistent logical pulse-registry lock from before observing live registry state through every selected publication attempt.

@@ -431,6 +431,27 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 		return dryRunDeploy(cmd, selected, manifestArtifacts, opts, c.asJSON, stdout, stderr)
 	}
 
+	// A normal pulse registry and its dependent recovery-job registry form one
+	// publication domain. Hold the same persistent host lock used by absent-only
+	// pulse merges before observing either live registry and until every selected
+	// artifact has had its publication attempt. This covers paired, pulse-only,
+	// and jobs-only mutations; absent-only pulse selection is not wrapped because
+	// its additive merger acquires this lock internally.
+	var unlockPulseRegistry func()
+	if pulse, ok := normalPulseMutationArtifact(selected, manifestArtifacts); ok {
+		var lockErr error
+		unlockPulseRegistry, lockErr = deploy.LockPulseRegistry(pulseHostPath(pulse, opts))
+		if lockErr != nil {
+			fmt.Fprintf(stderr, "  FAILED    %s publication lock — %v\n", pulse.Name, lockErr)
+			return 1
+		}
+		defer func() {
+			if unlockPulseRegistry != nil {
+				unlockPulseRegistry()
+			}
+		}()
+	}
+
 	results := make([]deploy.Result, 0, len(selected))
 	var failures []string
 
@@ -502,6 +523,10 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		results = append(results, r)
+	}
+	if unlockPulseRegistry != nil {
+		unlockPulseRegistry()
+		unlockPulseRegistry = nil
 	}
 
 	if c.asJSON {

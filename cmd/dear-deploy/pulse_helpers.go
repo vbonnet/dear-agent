@@ -259,6 +259,27 @@ func artifactNamed(selected []deploy.Artifact, name string) (deploy.Artifact, bo
 	return deploy.Artifact{}, false
 }
 
+// normalPulseMutationArtifact returns the manifest-declared normal pulse
+// registry whose host lock must cover this mutation. A targeted pulse write, a
+// targeted jobs write, and a paired write can each invalidate an observation
+// made by another concurrent deploy, so all three selections participate.
+// Absent-only pulse publication is additive and already locks inside its merge.
+func normalPulseMutationArtifact(
+	selected, manifestArtifacts []deploy.Artifact,
+) (deploy.Artifact, bool) {
+	pulse, ok := artifactNamed(manifestArtifacts, pulseArtifactName)
+	if !ok || pulse.AbsentOnly {
+		return deploy.Artifact{}, false
+	}
+	if _, ok := artifactNamed(selected, pulseArtifactName); ok {
+		return pulse, true
+	}
+	if _, ok := artifactNamed(selected, jobsArtifactName); ok {
+		return pulse, true
+	}
+	return deploy.Artifact{}, false
+}
+
 // pulseHostPath derives the live registry from the selected manifest artifact
 // rather than hard-coding the standard host location.
 func pulseHostPath(a deploy.Artifact, opts deploy.Options) string {

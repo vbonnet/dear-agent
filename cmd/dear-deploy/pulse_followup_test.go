@@ -60,10 +60,13 @@ func TestNormalPulseArtifactUsesValidatedExactSourceDeploy(t *testing.T) {
 	if string(got) != source {
 		t.Fatalf("normal pulse host = %s, want exact source %s", got, source)
 	}
-	for _, suffix := range []string{".offered", ".offered.txn", ".lock"} {
+	for _, suffix := range []string{".offered", ".offered.txn", ".offered.pending"} {
 		if _, err := os.Lstat(host + suffix); !os.IsNotExist(err) {
 			t.Fatalf("normal pulse deployment created merge artifact %s: %v", suffix, err)
 		}
+	}
+	if info, err := os.Lstat(host + ".lock"); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("normal pulse deployment lock: info=%v err=%v", info, err)
 	}
 	if code, out, errs := invoke(t, repo, home, "status", pulseArtifactName); code != 0 {
 		t.Fatalf("post-sync status exit=%d stdout=%s stderr=%s", code, out, errs)

@@ -49,7 +49,7 @@ func MergeRequiredPulses(
 	// both ledgers record the names as offered, so neither run would ever add
 	// them again: the pulses would be permanently missing and permanently
 	// believed installed. One exclusive lock covers both files.
-	unlock, err := lockPulseRegistry(hostPath)
+	unlock, err := LockPulseRegistry(hostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func MergeRequiredPulsesRenderedResult(
 	seedMode os.FileMode,
 	required map[string]bool,
 ) (PulseMergeResult, error) {
-	unlock, err := lockPulseRegistry(hostPath)
+	unlock, err := LockPulseRegistry(hostPath)
 	if err != nil {
 		return PulseMergeResult{}, err
 	}
@@ -709,9 +709,18 @@ func defaultNamesPresent(defaults pulseDoc, have map[string]bool) []string {
 	return names
 }
 
-// lockPulseRegistry takes an exclusive advisory lock covering the pulse
-// registry and its ledger, and returns the release function.
-func lockPulseRegistry(hostPath string) (func(), error) {
+// LockPulseRegistry takes the persistent exclusive advisory lock for a logical
+// pulse registry and returns its release function. In addition to serializing
+// the registry and its ledger, callers that publish a normal pulse/job pair
+// hold this same lock across live-state observation and both activations.
+//
+// The lock file is deliberately persistent: removing it on release would let a
+// third process lock a new inode while an earlier waiter still owns the old
+// one. The kernel releases the flock when the descriptor closes or its process
+// exits, so a crashed deploy does not leave a stale held lock.
+func LockPulseRegistry(hostPath string) (func(), error) {
+	// #nosec G703 -- hostPath is the manifest-resolved logical pulse target;
+	// its parent is the deployment namespace this lock is required to protect.
 	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir for pulse lock: %w", err)
 	}
