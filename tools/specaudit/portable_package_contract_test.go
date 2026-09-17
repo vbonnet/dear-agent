@@ -7,11 +7,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -132,20 +132,7 @@ func TestPortableSpecGovernancePackageRejectsSourceOverlapBeforeAllocation(t *te
 	defer cancel()
 	repositoryRoot := portablePackageRepositoryRoot(t)
 	artifact := buildPortableSpecaudit(t, ctx, repositoryRoot)
-	sourceRoot := filepath.Join(t.TempDir(), "source")
-	for _, relative := range payloadLayoutForTest {
-		content, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(relative)))
-		if err != nil {
-			t.Fatalf("read canonical package source %s: %v", relative, err)
-		}
-		absolute := filepath.Join(sourceRoot, filepath.FromSlash(relative))
-		if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
-			t.Fatalf("create copied package source directory: %v", err)
-		}
-		if err := os.WriteFile(absolute, content, 0o600); err != nil {
-			t.Fatalf("copy canonical package source %s: %v", relative, err)
-		}
-	}
+	sourceRoot := copyPortablePackageSources(t, repositoryRoot)
 	stagingParent := filepath.Join(sourceRoot, "nested-staging-parent")
 	if err := os.Mkdir(stagingParent, 0o700); err != nil {
 		t.Fatalf("create overlapping staging parent: %v", err)
@@ -172,18 +159,101 @@ func TestPortableSpecGovernancePackageRejectsSourceOverlapBeforeAllocation(t *te
 	}
 }
 
+func TestPortableSpecGovernancePackageRejectsUnapprovedExecutableReferencesAndRetainsPrivateRoot(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	repositoryRoot := portablePackageRepositoryRoot(t)
+	canonicalBefore := portablePackageSourceSnapshot(t, repositoryRoot)
+	tests := []struct {
+		name      string
+		addition  string
+		wantError string
+	}{
+		{name: "combined inline command", addition: "Run `make lint-specs`.", wantError: "approved content digest"},
+		{name: "split inline command", addition: "Run `make` `lint-specs`.", wantError: "approved content digest"},
+		{name: "executable HTTP code span", addition: "Run `https://example.test/specaudit;make`.", wantError: "nonportable inline specaudit reference"},
+		{name: "plain prose command", addition: "Use make lint-specs.", wantError: "approved content digest"},
+		{name: "decoded JSON command", addition: "```json\n{\"command\":\"go run ./tools/spec\\u0061udit\"}\n```", wantError: "unapproved specaudit reference"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sourceRoot := copyPortablePackageSources(t, repositoryRoot)
+			artifact := filepath.Join(t.TempDir(), "specaudit")
+			if err := os.WriteFile(artifact, []byte("portable-specaudit-fixture"), 0o700); err != nil {
+				t.Fatalf("write executable fixture: %v", err)
+			}
+			mutatedPath := filepath.Join(sourceRoot, "spec-governance", "skills", "audit-specs", "references", "audit-verdicts.md")
+			content, err := os.ReadFile(mutatedPath)
+			if err != nil {
+				t.Fatalf("read copied package source: %v", err)
+			}
+			content = append(content, []byte("\n"+test.addition+"\n")...)
+			if err := os.WriteFile(mutatedPath, content, 0o600); err != nil {
+				t.Fatalf("append unapproved executable reference: %v", err)
+			}
+			stagingParent := t.TempDir()
+
+			staged, stageErr := specpackage.Stage(ctx, sourceRoot, artifact, stagingParent)
+			if stageErr == nil || !strings.Contains(stageErr.Error(), test.wantError) {
+				t.Fatalf("Stage() = %#v, error = %v; want rejection containing %q", staged, stageErr, test.wantError)
+			}
+			if staged.Root != "" || staged.Receipt.SchemaVersion != "" ||
+				staged.Receipt.ManifestSHA256 != "" || len(staged.Receipt.Files) != 0 {
+				t.Fatalf("Stage() returned partial package %#v after portable-command rejection", staged)
+			}
+			var retained *specpackage.RetainedStagingRootError
+			if !errors.As(stageErr, &retained) {
+				t.Fatalf("Stage() error = %v; want retained-root receipt", stageErr)
+			}
+			if !retained.IdentityVerified || filepath.Dir(retained.Root) != stagingParent {
+				t.Fatalf("retained root = %#v, want verified child of %q", retained, stagingParent)
+			}
+			if info, err := os.Lstat(retained.Root); err != nil || !info.IsDir() {
+				t.Fatalf("retained failed root missing: info = %#v, error = %v", info, err)
+			}
+		})
+	}
+	if canonicalAfter := portablePackageSourceSnapshot(t, repositoryRoot); !slices.Equal(canonicalAfter, canonicalBefore) {
+		t.Fatal("canonical package source changed during rejected staging")
+	}
+}
+
 func portablePackageRepositoryRoot(t *testing.T) string {
 	t.Helper()
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve portable package test source")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
-	root, err := filepath.Abs(root)
+	root, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("resolve repository root: %v", err)
+		t.Fatalf("resolve portable package test working directory: %v", err)
 	}
-	return root
+	for {
+		module, readErr := os.ReadFile(filepath.Join(root, "go.mod"))
+		if readErr == nil && bytes.Contains(module, []byte("module github.com/vbonnet/dear-agent\n")) {
+			return root
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Fatal("find dear-agent repository root from portable package test working directory")
+		}
+		root = parent
+	}
+}
+
+func copyPortablePackageSources(t *testing.T, repositoryRoot string) string {
+	t.Helper()
+	sourceRoot := filepath.Join(t.TempDir(), "source")
+	for _, relative := range payloadLayoutForTest {
+		content, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatalf("read canonical package source %s: %v", relative, err)
+		}
+		absolute := filepath.Join(sourceRoot, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
+			t.Fatalf("create copied package source directory: %v", err)
+		}
+		if err := os.WriteFile(absolute, content, 0o600); err != nil {
+			t.Fatalf("copy canonical package source %s: %v", relative, err)
+		}
+	}
+	return sourceRoot
 }
 
 func buildPortableSpecaudit(t *testing.T, ctx context.Context, sourceRoot string) string {
