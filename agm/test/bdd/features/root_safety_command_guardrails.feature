@@ -7,6 +7,7 @@
 # RELATED-SPEC: cmd/log-rotate/SPEC.md
 # RELATED-SPEC: cmd/pretool-bash-write-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-fs-write-guard/SPEC.md
+# RELATED-SPEC: cmd/pretool-force-push-guard/SPEC.md
 # RELATED-SPEC: cmd/token-refresher/SPEC.md
 Feature: Root safety command guardrails
   Host safety commands and native harness adapters should keep executable SPEC
@@ -28,4 +29,5 @@ Feature: Root safety command guardrails
       | cmd/log-rotate                   |
       | cmd/pretool-bash-write-guard     |
       | cmd/pretool-fs-write-guard       |
+      | cmd/pretool-force-push-guard     |
       | cmd/token-refresher              |
