@@ -12,8 +12,9 @@ on:
       - "**/package.json"
   pull_request:
     # Keep this workflow triggered for every PR because the repository ruleset
-    # requires the "Vulnerability Scan" context. The expensive jobs skip below
-    # on pull_request, so this emits the required context without running Trivy.
+    # requires the "Vulnerability Scan" context. Non-required full-repository
+    # jobs skip below; the required job still runs its credential-free advisory
+    # Trivy scan so the context reflects an actual policy evaluation.
     branches: [main]
   release:
     types: [created]
