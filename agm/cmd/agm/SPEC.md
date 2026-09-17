@@ -1142,14 +1142,10 @@ agm 3.0.0 (/usr/local/bin/agm)
 - [x] Configuration management
 - [x] Test infrastructure
 
-## BDD Traceability
-
-- Feature: `agm/test/bdd/features/harness_parity.feature`
-- Test consequence: CLI-57 through CLI-60 are verified by deterministic unit tests rather than new scenarios — `runtime_authority_test.go` covers fail-closed centralized bootstrap and the isolated-HOME authority recapture through `preflight`, and `new_sandbox_test.go` covers authority-derived provisioning plus the missing-snapshot and no-authority refusals.
-- Test consequence: CLI-67 is verified by deterministic command-package tests rather than a scenario because its observable contract is filesystem authority selection, not command grammar or cross-harness behavior. `doctor_home_test.go` loads through a synthetic symlinked HOME, moves live HOME, and proves retained-path resolution plus install and sessions projections; `doctor_harness_test.go` proves the explicit home reaches harness reporting.
-
 ## Package Test Traceability
 
+- Test consequence: CLI-57 through CLI-60 are verified by deterministic unit tests rather than new scenarios — `runtime_authority_test.go` covers fail-closed centralized bootstrap and the isolated-HOME authority recapture through `preflight`, and `new_sandbox_test.go` covers authority-derived provisioning plus the missing-snapshot and no-authority refusals.
+- Test consequence: CLI-67 is verified by deterministic command-package tests rather than a scenario because its observable contract is filesystem authority selection, not command grammar or cross-harness behavior. `doctor_home_test.go` loads through a synthetic symlinked HOME, moves live HOME, and proves retained-path resolution plus install and sessions projections; `doctor_harness_test.go` proves the explicit home reaches harness reporting.
 - `agm/cmd/agm/new_sandbox_test.go`
 - `agm/cmd/agm/runtime_authority_test.go`
 - `agm/cmd/agm/doctor_home_test.go`

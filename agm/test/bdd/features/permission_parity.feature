@@ -2,7 +2,6 @@
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
 # RELATED-SPEC: agm/internal/rbac/SPEC.md
 # RELATED-SPEC: agm/internal/permissionparity/piadapter/SPEC.md
-# RELATED-SPEC: .pi/SPEC.md
 Feature: Agent permission parity
   AGM should resolve one agent permission policy and carry it through every
   active harness. Harnesses may enforce the policy through different native

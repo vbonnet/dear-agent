@@ -26,11 +26,9 @@
 # RELATED-SPEC: engram/mcp/src/SPEC.md
 # RELATED-SPEC: infra/SPEC.md
 # RELATED-SPEC: infra/modules/managed-repo/SPEC.md
-# RELATED-SPEC: pkg/workspace/dolt/testdata/migrations/SPEC.md
 # RELATED-SPEC: scripts/SPEC.md
 # RELATED-SPEC: tests/bats/SPEC.md
 # RELATED-SPEC: tools/devlog/diagrams/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat/SPEC.md
 Feature: Cross-language implementation guardrails
   Executable behavior outside Go packages is part of the same product and
   governance boundary. Its contracts must remain strict, executable, and
@@ -68,11 +66,9 @@ Feature: Cross-language implementation guardrails
       | engram/mcp/src                                                               |
       | infra                                                                        |
       | infra/modules/managed-repo                                                   |
-      | pkg/workspace/dolt/testdata/migrations                                       |
       | scripts                                                                      |
       | tests/bats                                                                   |
       | tools/devlog/diagrams                                                        |
-      | wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat    |
 
   Scenario Outline: Cross-language contracts are invariant across active routes
     Given cross-language coverage runs through "<harness>" with "<family>"

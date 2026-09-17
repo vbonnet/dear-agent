@@ -137,6 +137,12 @@ func ParitySurfaces() []Surface {
 			FeaturePath: "agm/test/bdd/features/config_directory_parity.feature",
 		},
 		{
+			Name:        "project resource parity",
+			PackagePath: "agm/internal/projectresourceparity",
+			SpecPath:    "agm/internal/projectresourceparity/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/project_resource_parity.feature",
+		},
+		{
 			Name:        "model family provider parity",
 			PackagePath: "pkg/llm/provider",
 			SpecPath:    "pkg/llm/provider/SPEC.md",

@@ -79,3 +79,4 @@ configuration, service, and executable sources.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature`
+- Feature: `agm/test/bdd/features/harness_config_surface_guardrails.feature`

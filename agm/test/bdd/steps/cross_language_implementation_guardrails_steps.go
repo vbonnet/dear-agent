@@ -41,11 +41,9 @@ var crossLanguageImplementationDirs = []string{
 	"engram/mcp/src",
 	"infra",
 	"infra/modules/managed-repo",
-	"pkg/workspace/dolt/testdata/migrations",
 	"scripts",
 	"tests/bats",
 	"tools/devlog/diagrams",
-	"wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat",
 }
 
 type crossLanguageGuardrailStateKey struct{}

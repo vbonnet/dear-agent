@@ -2,7 +2,6 @@
 # RELATED-SPEC: agm/internal/a2a/channel/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/config/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/wayfinder/SPEC.md
-# RELATED-SPEC: .pi/SPEC.md
 Feature: Wayfinder harness parity
   AGM should expose Wayfinder workflow discovery, execution, and status surfaces
   across every active harness.

@@ -730,6 +730,25 @@ behavior, but the directories themselves are supported integration surfaces.
 They need local contracts so harness-specific files do not drift into
 undocumented Claude-only assumptions.
 
+### Project Resource Surface Governance
+
+**File:** [`project_resource_parity.feature`](../test/bdd/features/project_resource_parity.feature)
+
+**Drives:** `agm/internal/projectresourceparity`, the neutral capability
+registry for harness-local project resources, and Pi's unique shared-root
+instruction invariant.
+
+**Key scenarios:**
+- Every active harness records explicit instruction, skill, configuration,
+  and hook dispositions without asserting uniform parity.
+- The Pi repository projection declares root `AGENTS.md` and rejects a
+  divergent `.pi/AGENTS.md` copy; native loading remains owned by `AGP-43`.
+
+**Why this matters:** Harness-local directories are implementation surfaces,
+not suitable normative owners. A neutral contract can record supported,
+adapted, unsupported, and not-applicable capabilities honestly while deeper
+modules retain behavioral ownership.
+
 ### Database Persistence Guardrails
 
 **File:** [`db_persistence_guardrails.feature`](../test/bdd/features/db_persistence_guardrails.feature)

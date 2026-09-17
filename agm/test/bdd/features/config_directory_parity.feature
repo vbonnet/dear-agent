@@ -6,7 +6,6 @@
 # RELATED-SPEC: .codex/SPEC.md
 # RELATED-SPEC: .gemini/SPEC.md
 # RELATED-SPEC: .opencode/SPEC.md
-# RELATED-SPEC: .pi/SPEC.md
 Feature: Harness configuration directory parity
   AGM should keep repo-local dot-directory configuration surfaces for every
   active harness, with Gemini retained as deprecated compatibility.
