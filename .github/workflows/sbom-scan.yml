@@ -96,7 +96,8 @@ jobs:
   # Closing that gap needs a checked-in baseline; tracked separately. What
   # catches the debt in the meantime is the unchanged full blocking scan on
   # push-to-main, on release, and on the daily schedule, plus the main-health
-  # watchdog that files a retro when main goes red.
+  # watchdog that files an incident brief when main goes red; that brief can
+  # later seed a DEAR retrospective.
   vulnerability-scan:
     name: Vulnerability Scan
     needs: changes
