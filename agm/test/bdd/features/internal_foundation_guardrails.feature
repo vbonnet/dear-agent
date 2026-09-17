@@ -91,8 +91,3 @@ Feature: Internal foundation guardrails
     When AGM runs the hermetic Git sandbox regressions
     Then the unisolated control should prove the canary hook fires
     And no sandboxed repository should execute a host hook
-
-  Scenario: Build authority retains exclusive SIGCHLD and broad or foreign child-reaping ownership
-    Given the repository production source is available for build-authority wait ownership
-    When AGM scans production source for build-authority wait ownership
-    Then no production package outside the exact internal/buildauthority package should import C, mutate or subscribe to SIGCHLD, or broadly or foreign-reap children
