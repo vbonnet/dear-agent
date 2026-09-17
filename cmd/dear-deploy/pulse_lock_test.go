@@ -22,6 +22,7 @@ func TestNormalRegistryPairHoldsPulseLockThroughJobsPublication(t *testing.T) {
 	liveJobs := `{"jobs":[{"name":"live-job","pulse":"live-tick"}]}`
 	nextJobs := `{"jobs":[{"name":"next-job","pulse":"next-tick"}]}`
 	mustWrite(t, filepath.Join(repo, "custom/jobs.json"), nextJobs)
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), transitionPulses)
 	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
   - name: recovery-loop-jobs
     source: custom/jobs.json
@@ -33,18 +34,13 @@ func TestNormalRegistryPairHoldsPulseLockThroughJobsPublication(t *testing.T) {
     mode: "0644"
 `)
 
-	pulseSource := filepath.Join(repo, "deploy/absence-alarm/pulses.json")
-	if err := os.MkdirAll(filepath.Dir(pulseSource), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := unix.Mkfifo(pulseSource, 0o600); err != nil {
-		t.Fatalf("mkfifo pulse source: %v", err)
-	}
 	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
 	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
 	mustWrite(t, pulsePath,
 		`{"pulses":[{"name":"live-tick","type":"file_mtime","path":"~/live","window":"1h"}]}`)
-	mustWrite(t, jobsPath, liveJobs)
+	if err := unix.Mkfifo(jobsPath, 0o600); err != nil {
+		t.Fatalf("mkfifo jobs target: %v", err)
+	}
 
 	type runResult struct {
 		code      int
@@ -56,27 +52,25 @@ func TestNormalRegistryPairHoldsPulseLockThroughJobsPublication(t *testing.T) {
 		done <- runResult{code: code, out: out, errs: errs}
 	}()
 
-	// Opening the source writer succeeds only after the deploy has rendered the
-	// prospective jobs, observed the live jobs, and reached pulse rendering.
-	pulseWriter := openFIFOWriterForReader(t, pulseSource)
-	if err := os.Remove(jobsPath); err != nil {
-		t.Fatalf("replace live jobs with publication barrier: %v", err)
+	// The first FIFO read is the live-job observation under the publication
+	// lock. Feed the valid old registry that must remain covered until jobs are
+	// replaced.
+	liveJobsWriter := openFIFOWriterForReader(t, jobsPath)
+	if _, err := io.WriteString(liveJobsWriter, liveJobs); err != nil {
+		t.Fatalf("feed live jobs: %v", err)
 	}
-	if err := unix.Mkfifo(jobsPath, 0o600); err != nil {
-		t.Fatalf("mkfifo jobs target: %v", err)
+	if err := liveJobsWriter.Close(); err != nil {
+		t.Fatalf("close live jobs writer: %v", err)
 	}
-	if _, err := io.WriteString(pulseWriter, transitionPulses); err != nil {
-		t.Fatalf("feed pulse source: %v", err)
-	}
-	if err := pulseWriter.Close(); err != nil {
-		t.Fatalf("close pulse source: %v", err)
-	}
+
+	// Pulse activation proves the live observation completed. DeployRendered
+	// then opens the same FIFO again while comparing the current jobs target.
+	deployedPulse := waitForFileContent(t, pulsePath, transitionPulses)
 
 	// DeployRendered reads the target before replacing it. Keep that read open
 	// so the test can probe the publication lock after pulse activation but
 	// before jobs activation.
 	jobsWriter := openFIFOWriterForReader(t, jobsPath)
-	deployedPulse, pulseReadErr := os.ReadFile(pulsePath)
 	lockFile, lockOpenErr := os.OpenFile(pulsePath+".lock", os.O_CREATE|os.O_RDWR, 0o644)
 	var lockErr error
 	if lockOpenErr == nil {
@@ -99,8 +93,8 @@ func TestNormalRegistryPairHoldsPulseLockThroughJobsPublication(t *testing.T) {
 		t.Fatal("normal registry pair did not finish after releasing jobs barrier")
 	}
 
-	if pulseReadErr != nil || string(deployedPulse) != transitionPulses {
-		t.Fatalf("pulse at jobs barrier: got=%s err=%v", deployedPulse, pulseReadErr)
+	if string(deployedPulse) != transitionPulses {
+		t.Fatalf("pulse at jobs barrier: got=%s want=%s", deployedPulse, transitionPulses)
 	}
 	if lockOpenErr != nil {
 		t.Fatalf("open publication lock: %v", lockOpenErr)
@@ -116,6 +110,24 @@ func TestNormalRegistryPairHoldsPulseLockThroughJobsPublication(t *testing.T) {
 	}
 	if got, err := os.ReadFile(jobsPath); err != nil || string(got) != nextJobs {
 		t.Fatalf("deployed jobs after barrier: got=%s err=%v want=%s", got, err, nextJobs)
+	}
+}
+
+func waitForFileContent(t *testing.T, path, want string) []byte {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, err := os.ReadFile(path)
+		if err == nil && string(got) == want {
+			return got
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s content: got=%s err=%v want=%s", path, got, err, want)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

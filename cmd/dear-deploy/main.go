@@ -431,6 +431,24 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 		return dryRunDeploy(cmd, selected, manifestArtifacts, opts, c.asJSON, stdout, stderr)
 	}
 
+	preparedPulse, normalPulseSelected, pulsePreflightErr := prepareNormalPulseSource(selected, opts)
+	var optionalPulseResult deploy.Result
+	optionalPulseSkipped := normalPulseSelected && preparedPulse.SourceMissing
+	if optionalPulseSkipped {
+		if _, _, err := requiredPulsesForNormalPulse(selected, manifestArtifacts, opts); err != nil {
+			pulsePreflightErr = fmt.Errorf("resolve required pulses: %w", err)
+		}
+		if _, jobsSelected := artifactNamed(selected, jobsArtifactName); pulsePreflightErr == nil && jobsSelected {
+			pulsePreflightErr = fmt.Errorf(
+				"pulse source is unavailable; refusing to publish %s",
+				jobsArtifactName,
+			)
+		}
+		if pulsePreflightErr == nil {
+			optionalPulseResult, pulsePreflightErr = deploy.SkipOptionalMissingSource(preparedPulse.Artifact, opts)
+		}
+	}
+
 	// A normal pulse registry and its dependent recovery-job registry form one
 	// publication domain. Hold the same persistent host lock used by absent-only
 	// pulse merges before observing either live registry and until every selected
@@ -438,12 +456,12 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	// and jobs-only mutations; absent-only pulse selection is not wrapped because
 	// its additive merger acquires this lock internally.
 	var unlockPulseRegistry func()
-	if pulse, ok := normalPulseMutationArtifact(selected, manifestArtifacts); ok {
+	if pulse, ok := normalPulseMutationArtifact(selected, manifestArtifacts); ok &&
+		!optionalPulseSkipped && pulsePreflightErr == nil {
 		var lockErr error
 		unlockPulseRegistry, lockErr = deploy.LockPulseRegistry(pulseHostPath(pulse, opts))
 		if lockErr != nil {
-			fmt.Fprintf(stderr, "  FAILED    %s publication lock — %v\n", pulse.Name, lockErr)
-			return 1
+			pulsePreflightErr = fmt.Errorf("publication lock: %w", lockErr)
 		}
 		defer func() {
 			if unlockPulseRegistry != nil {
@@ -466,28 +484,40 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	pulseHandled := false
 	if a, ok := artifactNamed(selected, pulseArtifactName); ok {
 		pulseHandled = true
-		result, renderedJobs, err := deployPulseDuringDeploy(
-			a, selected, manifestArtifacts, opts, c.asJSON, stdout,
-		)
-		if err != nil {
-			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
+		switch {
+		case pulsePreflightErr != nil:
+			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, pulsePreflightErr)
 			failures = append(failures, a.Name)
-			pulseDependencyErr = err
-		} else {
-			pulseResult = &result
-			preparedJobs = renderedJobs
+			pulseDependencyErr = pulsePreflightErr
+		case optionalPulseSkipped:
+			pulseResult = &optionalPulseResult
+		default:
+			result, renderedJobs, err := deployPulseDuringDeploy(
+				a, selected, manifestArtifacts, opts, c.asJSON, stdout, preparedPulse.Rendered,
+			)
+			if err != nil {
+				fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
+				failures = append(failures, a.Name)
+				pulseDependencyErr = err
+			} else {
+				pulseResult = &result
+				preparedJobs = renderedJobs
+			}
 		}
 	} else if _, ok := artifactNamed(selected, jobsArtifactName); ok {
-		preview, _, _, err := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
-		switch {
-		case err != nil:
-			pulseDependencyErr = err
-		case len(preview) > 0:
-			pulseDependencyErr = fmt.Errorf(
-				"required pulse state is not current (%s); sync %s first",
-				strings.Join(preview, ", "),
-				pulseArtifactName,
-			)
+		pulseDependencyErr = pulsePreflightErr
+		if pulseDependencyErr == nil {
+			preview, _, _, err := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
+			switch {
+			case err != nil:
+				pulseDependencyErr = err
+			case len(preview) > 0:
+				pulseDependencyErr = fmt.Errorf(
+					"required pulse state is not current (%s); sync %s first",
+					strings.Join(preview, ", "),
+					pulseArtifactName,
+				)
+			}
 		}
 	}
 
@@ -663,9 +693,21 @@ func pendingPulseNames(
 ) ([]string, bool, bool, error) {
 	a, pulseSelected := artifactNamed(selected, pulseArtifactName)
 	if pulseSelected && !a.AbsentOnly {
-		if err := validateNormalPulseArtifact(a, selected, manifestArtifacts, opts); err != nil {
+		sourceMissing, err := validateNormalPulseArtifact(a, selected, manifestArtifacts, opts)
+		if err != nil {
 			fmt.Fprintf(stderr, "  ERROR     cannot validate pulse artifact: %v\n", err)
 			return nil, false, false, err
+		}
+		if sourceMissing {
+			if _, jobsSelected := artifactNamed(selected, jobsArtifactName); jobsSelected {
+				err := fmt.Errorf(
+					"pulse source is unavailable; refusing to publish %s",
+					jobsArtifactName,
+				)
+				fmt.Fprintf(stderr, "  ERROR     cannot validate pulse artifact: %v\n", err)
+				return nil, false, false, err
+			}
+			return nil, false, false, nil
 		}
 		return nil, false, false, nil
 	}

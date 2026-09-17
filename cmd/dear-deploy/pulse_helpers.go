@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -132,9 +133,10 @@ func deployPulseDuringDeploy(
 	opts deploy.Options,
 	asJSON bool,
 	stdout io.Writer,
+	normalPulseSource []byte,
 ) (deploy.Result, []byte, error) {
 	if !a.AbsentOnly {
-		return deployNormalPulseDuringDeploy(a, selected, manifestArtifacts, opts)
+		return deployNormalPulseDuringDeploy(a, selected, manifestArtifacts, opts, normalPulseSource)
 	}
 
 	hostPath := pulseHostPath(a, opts)
@@ -174,6 +176,7 @@ func deployNormalPulseDuringDeploy(
 	selected []deploy.Artifact,
 	manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
+	renderedPulse []byte,
 ) (deploy.Result, []byte, error) {
 	required, renderedJobs, err := requiredPulsesForNormalPulse(
 		selected, manifestArtifacts, opts,
@@ -181,20 +184,12 @@ func deployNormalPulseDuringDeploy(
 	if err != nil {
 		return deploy.Result{}, nil, fmt.Errorf("resolve required pulses: %w", err)
 	}
-	result, err := deploy.DeployValidated(a, opts, func(rendered []byte) error {
-		if err := deploy.ValidateRequiredPulseConfigRendered(rendered, required); err != nil {
-			return fmt.Errorf("validate pulse config: %w", err)
-		}
-		return nil
-	})
+	if err := deploy.ValidateRequiredPulseConfigRendered(renderedPulse, required); err != nil {
+		return deploy.Result{}, nil, fmt.Errorf("validate pulse config: %w", err)
+	}
+	result, err := deploy.DeployRendered(a, opts, renderedPulse)
 	if err != nil {
 		return deploy.Result{}, nil, err
-	}
-	if renderedJobs != nil && result.Action == deploy.ActionSkipped {
-		return deploy.Result{}, nil, fmt.Errorf(
-			"pulse source is unavailable; refusing to publish %s",
-			jobsArtifactName,
-		)
 	}
 	return result, renderedJobs, nil
 }
@@ -204,19 +199,22 @@ func validateNormalPulseArtifact(
 	selected []deploy.Artifact,
 	manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
-) error {
+) (bool, error) {
 	required, _, err := requiredPulsesForNormalPulse(selected, manifestArtifacts, opts)
 	if err != nil {
-		return fmt.Errorf("resolve required pulses: %w", err)
+		return false, fmt.Errorf("resolve required pulses: %w", err)
 	}
 	rendered, err := a.Render(opts.RepoRoot, opts.Home)
 	if err != nil {
-		return fmt.Errorf("render pulse config: %w", err)
+		if a.Optional && errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, fmt.Errorf("render pulse config: %w", err)
 	}
 	if err := deploy.ValidateRequiredPulseConfigRendered(rendered, required); err != nil {
-		return fmt.Errorf("validate pulse config: %w", err)
+		return false, fmt.Errorf("validate pulse config: %w", err)
 	}
-	return nil
+	return false, nil
 }
 
 func validateNormalPulseArtifactCurrent(
@@ -225,7 +223,7 @@ func validateNormalPulseArtifactCurrent(
 	manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
 ) error {
-	if err := validateNormalPulseArtifact(a, selected, manifestArtifacts, opts); err != nil {
+	if _, err := validateNormalPulseArtifact(a, selected, manifestArtifacts, opts); err != nil {
 		return err
 	}
 	status := deploy.Status(a, opts)
@@ -278,6 +276,35 @@ func normalPulseMutationArtifact(
 		return pulse, true
 	}
 	return deploy.Artifact{}, false
+}
+
+type preparedNormalPulseSource struct {
+	Artifact      deploy.Artifact
+	Rendered      []byte
+	SourceMissing bool
+}
+
+// prepareNormalPulseSource pins the selected normal pulse source before the
+// publication decision. A present snapshot is later validated and deployed
+// verbatim under the host lock. An optional missing snapshot can remain a true
+// no-op without acquiring or creating that lock, even if the source changes
+// after this observation.
+func prepareNormalPulseSource(
+	selected []deploy.Artifact,
+	opts deploy.Options,
+) (preparedNormalPulseSource, bool, error) {
+	pulse, pulseSelected := artifactNamed(selected, pulseArtifactName)
+	if !pulseSelected || pulse.AbsentOnly {
+		return preparedNormalPulseSource{}, false, nil
+	}
+	rendered, err := pulse.Render(opts.RepoRoot, opts.Home)
+	if err == nil {
+		return preparedNormalPulseSource{Artifact: pulse, Rendered: rendered}, true, nil
+	}
+	if pulse.Optional && errors.Is(err, os.ErrNotExist) {
+		return preparedNormalPulseSource{Artifact: pulse, SourceMissing: true}, true, nil
+	}
+	return preparedNormalPulseSource{}, false, fmt.Errorf("render pulse config: %w", err)
 }
 
 // pulseHostPath derives the live registry from the selected manifest artifact
@@ -392,7 +419,12 @@ func requiredPulsesForNormalPulse(
 	}
 	liveRequired, err := deploy.RequiredPulseNamesRendered(live)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve pulses from live recovery job registry: %w", err)
+		// A readable registry rejected by the runtime parser has no functioning
+		// live job set to preserve. The paired normal selection may repair it
+		// from the already validated prospective snapshot. Observation errors
+		// above remain fail-closed, as do pulse-only and absent-only paths.
+		//nolint:nilerr // Parser rejection is the repair condition, not a success-path error leak.
+		return required, rendered, nil
 	}
 	for name := range liveRequired {
 		required[name] = true

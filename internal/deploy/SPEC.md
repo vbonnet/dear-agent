@@ -76,6 +76,10 @@ broken.
 
 **DEP-28** When required-pulse transaction state is renamed into place or its pending marker is removed, the system shall sync the directory that owns that namespace update before advancing to the next transaction phase or reporting success.
 
-**DEP-29** When normal pulse and recovery-job registries are selected together, the system shall validate prospective pulse bytes against requirements from both deployed jobs and the exact rendered prospective jobs before either registry changes, publish the same rendered job bytes used in validation, and keep every deployed-job pulse present if job publication later fails.
+**DEP-29** When normal pulse and recovery-job registries are selected together, the system shall validate prospective pulse bytes against the exact rendered prospective jobs and every runtime-loadable deployed job before either registry changes, permit those valid prospective snapshots to repair a readable deployed job registry rejected by the runtime parser, publish the same rendered job bytes used in validation, and keep every runtime-loadable deployed-job pulse present if job publication later fails.
 
 **DEP-30** When a mutating selection includes a normal pulse registry or its recovery-job registry, the system shall hold the persistent logical pulse-registry lock from before observing live registry state through every selected publication attempt.
+
+**DEP-31** When `install-recovery-loop-launchagent` preserves an existing recovery-job registry or would seed a missing one, the system shall complete the locked required-pulse merge from the live registry, or its rendered source when absent, before publishing a missing job registry or reporting staging success.
+
+**DEP-32** When a selected normal pulse registry is optional, its source is absent, and no recovery-job registry is selected, the system shall preserve skipped-artifact semantics without creating publication sidecars after resolving the applicable existing-job requirements; when a recovery-job registry is also selected, the system shall refuse its publication without the pulse source.

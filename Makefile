@@ -1172,6 +1172,9 @@ install-recovery-loop-launchagent: install-recovery-loop
 	@mkdir -p $(HOME)/Library/LaunchAgents
 	@mkdir -p $(HOME)/.local/state/dear-agent
 	@mkdir -p $(HOME)/.config/dear-agent
+	@# Merge pulse coverage before publishing jobs that depend on it.
+	@# The merger uses live jobs, or the rendered seed when none are deployed.
+	@go run ./cmd/dear-deploy merge-pulses
 	@[ -f $(HOME)/.config/dear-agent/recovery-loop-jobs.json ] || \
 		cp deploy/recovery-loop/jobs.json $(HOME)/.config/dear-agent/recovery-loop-jobs.json
 	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.recovery-loop.plist \

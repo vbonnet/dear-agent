@@ -126,6 +126,31 @@ func DeployRendered(a Artifact, opts Options, rendered []byte) (Result, error) {
 	return deployRendered(a, opts, home, deployedPath, res, mode, bytes.Clone(rendered))
 }
 
+// SkipOptionalMissingSource returns the generic skipped result for an optional
+// file source whose absence the caller already observed in a pinned source
+// snapshot. It does not re-render the source: doing so could turn a no-write
+// decision into an unlocked write if the source appeared concurrently. An
+// existing target's parent directory is still confirmed before success so a
+// retry cannot conceal an earlier post-rename durability failure.
+func SkipOptionalMissingSource(a Artifact, opts Options) (Result, error) {
+	if !a.Optional {
+		return Result{}, fmt.Errorf("skip optional missing source: artifact %q is not optional", a.Name)
+	}
+	if a.IsBinary() {
+		return Result{}, fmt.Errorf("skip optional missing source: binary artifact %q has no file source", a.Name)
+	}
+	home, err := resolveHome(opts)
+	if err != nil {
+		return Result{}, err
+	}
+	deployedPath := a.DeployedPath(home)
+	res := Result{Name: a.Name, DeployedPath: deployedPath, Action: ActionSkipped}
+	if err := confirmOptionalTargetDirectory(deployedPath, syncDirectory); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
 func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, error) {
 	if opts.RepoRoot == "" {
 		return Result{}, fmt.Errorf("deploy: RepoRoot is required")
