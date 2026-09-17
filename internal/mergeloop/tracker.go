@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
@@ -20,7 +21,16 @@ type PRRecord struct {
 	FirstSeenAt      time.Time `json:"first_seen_at"`
 	EscalatedAt      time.Time `json:"escalated_at,omitzero"`
 	EscalationReason string    `json:"escalation_reason,omitempty"`
-	LastRebaseAt     time.Time `json:"last_rebase_at,omitzero"`
+	// EscalationKind is the discriminator the escalation was recorded
+	// under. It is what lets a recovered gate refusal be cleared without
+	// also clearing an unrelated stall escalation.
+	EscalationKind string    `json:"escalation_kind,omitempty"`
+	LastRebaseAt   time.Time `json:"last_rebase_at,omitzero"`
+	// ActionableSinceAt is when the PR most recently ENTERED a state the loop
+	// can act on. It is cleared whenever the PR is not actionable (draft, CI
+	// pending, agent in flight), so time spent waiting on someone else never
+	// counts against the stall clock.
+	ActionableSinceAt time.Time `json:"actionable_since_at,omitzero"`
 }
 
 // Tracker persists per-PR attempt and timing state to a JSON file so the loop
@@ -151,8 +161,54 @@ func (t *Tracker) RecordAction(num int, state State, now time.Time) {
 	}
 }
 
+// NoteActionable records whether the loop can currently act on this PR.
+//
+// Entering an actionable state starts the stall clock; leaving one stops and
+// clears it. Anchoring the clock on FirstSeenAt instead made a PR that sat as a
+// draft, or behind slow CI, for longer than the threshold report as stalled the
+// instant it became actionable, before the loop had any chance to touch it.
+func (t *Tracker) NoteActionable(num int, actionable bool, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	r := t.records[num]
+	if r == nil {
+		r = &PRRecord{Number: num, FirstSeenAt: now}
+		t.records[num] = r
+	}
+	if !actionable {
+		r.ActionableSinceAt = time.Time{}
+		return
+	}
+	if r.ActionableSinceAt.IsZero() {
+		r.ActionableSinceAt = now
+	}
+}
+
 // RecordEscalation marks a PR as escalated to a human with a reason.
-func (t *Tracker) RecordEscalation(num int, reason string, now time.Time) {
+// ClearEscalation drops a PR's durable escalation.
+//
+// Escalations are deduplicated by reason so an unchanged finding is not
+// re-reported every tick. That dedup needs a reset: once the refusal clears,
+// an identical reason arriving later is a NEW escalation, not a duplicate of
+// the resolved one, and must not be suppressed.
+func (t *Tracker) ClearEscalation(num int, kinds ...string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	r := t.records[num]
+	if r == nil || r.EscalationReason == "" {
+		return
+	}
+	if len(kinds) > 0 && !slices.Contains(kinds, r.EscalationKind) {
+		// A different source owns this escalation; recovering one gate must
+		// not erase another's durable record.
+		return
+	}
+	r.EscalatedAt = time.Time{}
+	r.EscalationReason = ""
+	r.EscalationKind = ""
+}
+
+func (t *Tracker) RecordEscalation(num int, reason, kind string, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	r := t.records[num]
@@ -162,6 +218,7 @@ func (t *Tracker) RecordEscalation(num int, reason string, now time.Time) {
 	}
 	r.EscalatedAt = now
 	r.EscalationReason = reason
+	r.EscalationKind = kind
 }
 
 // Forget drops a PR's record (e.g. after it merges).
