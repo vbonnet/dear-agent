@@ -2,6 +2,7 @@ package agent
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -329,5 +330,49 @@ func TestOpenRouterProvidesRequestedOpenModelFamilies(t *testing.T) {
 		if !slices.Contains(got, family) {
 			t.Fatalf("openrouter model aliases missing family %q; got %v", family, got)
 		}
+	}
+}
+
+// TestCodexResolvesAstra pins the GPT-6 Astra registration. The identifier was
+// read from the provider catalog that codex itself fetches
+// (~/.codex/models_cache.json, slug "gpt-6-astra") and confirmed with a live
+// `codex exec -m gpt-6-astra`, not copied from an announcement.
+func TestCodexResolvesAstra(t *testing.T) {
+	cases := map[string]string{
+		"astra":       "gpt-6-astra",
+		"6-astra":     "gpt-6-astra",
+		"gpt-6-astra": "gpt-6-astra",
+	}
+	for alias, want := range cases {
+		if got := ResolveModelFullName("codex-cli", alias); got != want {
+			t.Errorf("ResolveModelFullName(codex-cli, %q) = %q, want %q", alias, got, want)
+		}
+	}
+}
+
+// TestAstraUltraIsAnEffortNotAModel guards the trap this registration exists to
+// avoid. "Astra Ultra" is the top reasoning-effort level of gpt-6-astra, not a
+// separate model id. `codex exec -m gpt-6-astra-ultra` returns HTTP 400
+// invalid_request_error, so no alias may ever resolve to that string.
+func TestAstraUltraIsAnEffortNotAModel(t *testing.T) {
+	for _, spec := range HarnessModels["codex-cli"] {
+		if strings.Contains(spec.FullName, "astra-ultra") {
+			t.Errorf("alias %q resolves to %q, but gpt-6-astra-ultra is not a real model id", spec.Alias, spec.FullName)
+		}
+	}
+	for alias, mapped := range CrossHarnessAliases["codex-cli"] {
+		if strings.Contains(mapped, "astra-ultra") {
+			t.Errorf("cross-harness alias %q maps to %q, which is not a real model id", alias, mapped)
+		}
+	}
+}
+
+// TestAstraCrossHarnessMapsToClaudeFrontier keeps the abstract-tier table total:
+// a spawn that crosses from codex to claude-code carrying the astra tier must
+// land on a frontier Claude model rather than falling through as a literal.
+func TestAstraCrossHarnessMapsToClaudeFrontier(t *testing.T) {
+	got := ResolveModelFullName("claude-code", "astra")
+	if got != "claude-opus-4-8[1m]" {
+		t.Errorf("ResolveModelFullName(claude-code, astra) = %q, want the opus frontier alias", got)
 	}
 }
