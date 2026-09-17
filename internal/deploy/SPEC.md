@@ -57,3 +57,9 @@ broken.
 **DEP-17** When the pulse registry is a valid leaf symlink, the system shall preserve the symlink and its target mode while merging; when that symlink is dangling, the system shall fail without modifying the link, its target, or required-pulse history.
 
 **DEP-18** When deployment cannot establish that the selected recovery-job registry and projected live pulse registry are runtime-loadable and that every declared job pulse is validly defined with current required-pulse state, the system shall fail without activating the recovery-job registry.
+
+**DEP-19** When an absent-only recovery-job registry exists on the host, the system shall derive required pulses from that live operator-owned registry and validate them against the projected live pulse registry rather than repository defaults alone.
+
+**DEP-20** When sync or install emits JSON, the system shall preserve the top-level array of artifact results used by existing automation.
+
+**DEP-21** When a required-pulse merge rewrites an existing registry, the system shall preserve the exact values of fields in operator-owned pulse entries.

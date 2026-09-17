@@ -408,7 +408,6 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	// lock before generic deployment: otherwise two fresh-host syncs can both
 	// observe a missing target and an older unlocked rename can overwrite the
 	// newer registry after its offered history has already committed.
-	var mergedPulses []string
 	var pulseResult *deploy.Result
 	var pulseDependencyErr error
 	if a, ok := artifactNamed(selected, pulseArtifactName); ok {
@@ -419,7 +418,6 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 			failures = append(failures, a.Name+" (pulse merge)")
 			pulseDependencyErr = err
 		} else {
-			mergedPulses = outcome.Added
 			// #nosec G703 -- hostPath is the manifest-selected deployment target;
 			// reading it back is required to report the lock-owned merge result.
 			live, readErr := os.ReadFile(hostPath)
@@ -486,10 +484,11 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	if c.asJSON {
-		if rc := emitJSON(struct {
-			Artifacts    []deploy.Result `json:"artifacts"`
-			MergedPulses []string        `json:"merged_pulses,omitempty"`
-		}{Artifacts: results, MergedPulses: mergedPulses}, stdout, stderr); rc != 0 {
+		// sync/install --json predates pulse migration and its top-level array is
+		// consumed by automation. The synthetic pulse Result above carries the
+		// compatible installed/updated/unchanged receipt without versioning the
+		// output contract underneath existing callers.
+		if rc := emitJSON(results, stdout, stderr); rc != 0 {
 			return rc
 		}
 	} else {
@@ -899,11 +898,43 @@ const jobsArtifactName = "recovery-loop-jobs"
 // decides which pulses are required, rather than a hard-coded repository path.
 func requiredPulsesFor(manifestArtifacts []deploy.Artifact, opts deploy.Options) (map[string]bool, error) {
 	if a, ok := artifactNamed(manifestArtifacts, jobsArtifactName); ok {
-		rendered, err := a.Render(opts.RepoRoot, opts.Home)
+		registry, err := requiredPulseJobRegistry(a, opts)
 		if err != nil {
-			return nil, fmt.Errorf("render recovery job registry: %w", err)
+			return nil, err
 		}
-		return deploy.RequiredPulseNamesRendered(rendered)
+		return deploy.RequiredPulseNamesRendered(registry)
 	}
 	return deploy.RequiredPulseNames(opts.RepoRoot)
+}
+
+// requiredPulseJobRegistry returns the bytes the recovery-loop runtime is
+// authoritative over. An existing absent-only registry is operator-owned and
+// generic sync/install deliberately preserve it, so deriving requirements from
+// repository defaults would validate a different job set from the one that
+// actually runs. A missing live registry falls back to the rendered source that
+// this deployment will seed. Other observation failures are not absence.
+func requiredPulseJobRegistry(a deploy.Artifact, opts deploy.Options) ([]byte, error) {
+	if a.AbsentOnly {
+		livePath := a.DeployedPath(opts.Home)
+		// #nosec G703 -- livePath is the manifest-selected deployed artifact;
+		// observing that exact runtime input is the purpose of this boundary.
+		_, err := os.Lstat(livePath)
+		switch {
+		case err == nil:
+			// #nosec G703 -- see the manifest-selected path justification above.
+			live, readErr := os.ReadFile(livePath)
+			if readErr != nil {
+				return nil, fmt.Errorf("read live recovery job registry %s: %w", livePath, readErr)
+			}
+			return live, nil
+		case !os.IsNotExist(err):
+			return nil, fmt.Errorf("inspect live recovery job registry %s: %w", livePath, err)
+		}
+	}
+
+	rendered, err := a.Render(opts.RepoRoot, opts.Home)
+	if err != nil {
+		return nil, fmt.Errorf("render recovery job registry: %w", err)
+	}
+	return rendered, nil
 }

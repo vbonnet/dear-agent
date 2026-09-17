@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -157,7 +158,7 @@ func mergeRequiredPulsesResultWithOps(
 	required map[string]bool,
 	ops pulseFileOps,
 ) (PulseMergeResult, error) {
-	defaults, err := parseRequiredPulseDefaults(defaultsRaw, required, "pulse defaults")
+	defaults, err := parsePulseDefaults(defaultsRaw, "pulse defaults")
 	if err != nil {
 		return PulseMergeResult{}, err
 	}
@@ -174,6 +175,9 @@ func mergeRequiredPulsesResultWithOps(
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return PulseMergeResult{}, fmt.Errorf("read host pulses %s: %w", hostPath, err)
+		}
+		if err := validateRequiredPulseDefinitions(defaults, required, "pulse defaults"); err != nil {
+			return PulseMergeResult{}, err
 		}
 		added, seedErr := seedPulseConfig(hostPath, registryPath, defaultsRaw, defaults, seedMode, ops)
 		if seedErr != nil {
@@ -215,7 +219,7 @@ func mergeRequiredPulsesResultWithOps(
 	}
 
 	if len(added) == 0 {
-		return PulseMergeResult{}, finishUnchangedPulseRegistry(hostPath, hostRaw, defaults, have, ops)
+		return PulseMergeResult{}, finishUnchangedPulseRegistry(hostPath, hostRaw, host, defaults, have, required, ops)
 	}
 
 	if err := activatePulseRegistryAdditions(
@@ -225,6 +229,7 @@ func mergeRequiredPulsesResultWithOps(
 		host,
 		hostMode,
 		defaults,
+		required,
 		ops,
 	); err != nil {
 		return PulseMergeResult{}, err
@@ -235,10 +240,15 @@ func mergeRequiredPulsesResultWithOps(
 func finishUnchangedPulseRegistry(
 	hostPath string,
 	hostRaw []byte,
+	host pulseDoc,
 	defaults pulseDoc,
 	have map[string]bool,
+	required map[string]bool,
 	ops pulseFileOps,
 ) error {
+	if err := validateRequiredPulseDefinitions(host, required, "live pulse registry"); err != nil {
+		return err
+	}
 	if err := validatePulseConfigBytes(hostRaw, "live pulse registry"); err != nil {
 		return err
 	}
@@ -255,11 +265,15 @@ func activatePulseRegistryAdditions(
 	host pulseDoc,
 	hostMode os.FileMode,
 	defaults pulseDoc,
+	required map[string]bool,
 	ops pulseFileOps,
 ) error {
 	merged, err := marshalPulseDoc(host)
 	if err != nil {
 		return fmt.Errorf("encode merged pulses: %w", err)
+	}
+	if err := validateRequiredPulseDefinitions(host, required, "projected pulse registry"); err != nil {
+		return err
 	}
 	if err := validatePulseConfigBytes(merged, "projected pulse registry"); err != nil {
 		return err
@@ -299,7 +313,9 @@ func (d *pulseDoc) UnmarshalJSON(data []byte) error {
 
 	var pulses []map[string]any
 	if raw, ok := fields["pulses"]; ok {
-		if err := json.Unmarshal(raw, &pulses); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if err := dec.Decode(&pulses); err != nil {
 			return fmt.Errorf("parse pulses member: %w", err)
 		}
 	}
@@ -435,8 +451,8 @@ func RequiredPulseNamesRendered(raw []byte) (map[string]bool, error) {
 // a pulse the selected defaults cannot publish. Silently ignoring such a name
 // would let the jobs registry deploy successfully while its recovery decision
 // can never receive evidence.
-func validateRequiredPulseDefinitions(defaults pulseDoc, required map[string]bool) error {
-	defined := pulseNameSet(defaults.Pulses)
+func validateRequiredPulseDefinitions(definitions pulseDoc, required map[string]bool, label string) error {
+	defined := pulseNameSet(definitions.Pulses)
 	missing := make([]string, 0)
 	for name, wanted := range required {
 		if wanted && !defined[name] {
@@ -447,18 +463,15 @@ func validateRequiredPulseDefinitions(defaults pulseDoc, required map[string]boo
 		return nil
 	}
 	sort.Strings(missing)
-	return fmt.Errorf("required recovery pulses are not defined in pulse defaults: %s", strings.Join(missing, ", "))
+	return fmt.Errorf("required recovery pulses are not defined in %s: %s", label, strings.Join(missing, ", "))
 }
 
-func parseRequiredPulseDefaults(raw []byte, required map[string]bool, label string) (pulseDoc, error) {
+func parsePulseDefaults(raw []byte, label string) (pulseDoc, error) {
 	var defaults pulseDoc
 	if err := json.Unmarshal(raw, &defaults); err != nil {
 		return pulseDoc{}, fmt.Errorf("parse %s: %w", label, err)
 	}
 	if err := validatePulseConfigBytes(raw, label); err != nil {
-		return pulseDoc{}, err
-	}
-	if err := validateRequiredPulseDefinitions(defaults, required); err != nil {
 		return pulseDoc{}, err
 	}
 	return defaults, nil
@@ -506,7 +519,7 @@ func PendingPulseMergesRendered(
 	defaultsRaw []byte,
 	required map[string]bool,
 ) ([]string, error) {
-	defaults, err := parseRequiredPulseDefaults(defaultsRaw, required, "rendered pulse defaults")
+	defaults, err := parsePulseDefaults(defaultsRaw, "rendered pulse defaults")
 	if err != nil {
 		return nil, err
 	}
@@ -520,6 +533,9 @@ func PendingPulseMergesRendered(
 		return nil, err
 	}
 	if !snapshot.registryExists {
+		if err := validateRequiredPulseDefinitions(defaults, required, "rendered pulse defaults"); err != nil {
+			return nil, err
+		}
 		return pulseNames(defaults.Pulses), nil
 	}
 	var host pulseDoc
@@ -540,6 +556,9 @@ func PendingPulseMergesRendered(
 		if err != nil {
 			return nil, fmt.Errorf("encode projected pulses: %w", err)
 		}
+	}
+	if err := validateRequiredPulseDefinitions(host, required, "projected pulse registry"); err != nil {
+		return nil, err
 	}
 	if err := validatePulseConfigBytes(projected, "projected pulse registry"); err != nil {
 		return nil, err

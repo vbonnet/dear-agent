@@ -173,7 +173,7 @@ func TestMergeRequiredPulses_RecoversExistingHostAfterLedgerWriteFailure(t *test
 		host,
 		defaultsRaw,
 		0o644,
-		map[string]bool{"existing": true, "new": true},
+		map[string]bool{"existing": true},
 	)
 	if err != nil {
 		t.Fatalf("merge after operator removal: %v", err)
@@ -250,7 +250,7 @@ func TestMergeRequiredPulses_RecoversAbsentHostAfterLedgerWriteFailure(t *testin
 		host,
 		defaultsRaw,
 		0o600,
-		map[string]bool{"a": true, "b": true},
+		map[string]bool{"a": true},
 	)
 	if err != nil {
 		t.Fatalf("merge after operator removal: %v", err)
@@ -339,7 +339,7 @@ func TestMergeRequiredPulses_CompletesTransactionAfterRegistryActivation(t *test
 		host,
 		targetRaw,
 		0o644,
-		map[string]bool{"existing": true, "new": true},
+		map[string]bool{"existing": true},
 	)
 	if err != nil {
 		t.Fatalf("merge after operator removal: %v", err)
@@ -485,7 +485,7 @@ func TestMergeRequiredPulses_RecoversLedgerOnlyAdvancement(t *testing.T) {
 		host,
 		registryRaw,
 		0o644,
-		map[string]bool{"existing": true},
+		map[string]bool{"operator-local": true},
 	)
 	if err != nil {
 		t.Fatalf("merge after operator removal: %v", err)

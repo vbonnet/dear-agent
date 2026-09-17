@@ -113,6 +113,55 @@ func TestMergeRequiredPulses_AddsMissingAndKeepsCustomisation(t *testing.T) {
 	}
 }
 
+func TestMergeRequiredPulses_PreservesExactNumbersInsidePulseEntries(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	const exact = "9007199254740993"
+	if err := os.WriteFile(host, []byte(`{"pulses":[{
+  "name":"existing","type":"file_mtime","path":"~/existing","window":"1h",
+  "operator_sequence":9007199254740993,
+  "metadata":{"nested_sequence":9007199254740993}
+}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaults, []byte(`{"pulses":[
+  {"name":"existing","type":"file_mtime","path":"~/existing","window":"1h"},
+  {"name":"new","type":"file_mtime","path":"~/new","window":"1h"}
+]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	added, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults))
+	if err != nil {
+		t.Fatalf("MergeRequiredPulses: %v", err)
+	}
+	requireNames(t, added, "new")
+
+	raw, err := os.ReadFile(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Pulses []map[string]any `json:"pulses"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := doc.Pulses[0]["operator_sequence"].(json.Number); !ok || got.String() != exact {
+		t.Fatalf("operator_sequence = %#v, want exact %s", doc.Pulses[0]["operator_sequence"], exact)
+	}
+	metadata, ok := doc.Pulses[0]["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %#v, want object", doc.Pulses[0]["metadata"])
+	}
+	if got, ok := metadata["nested_sequence"].(json.Number); !ok || got.String() != exact {
+		t.Fatalf("nested_sequence = %#v, want exact %s", metadata["nested_sequence"], exact)
+	}
+}
+
 // Running it twice must change nothing the second time.
 func TestMergeRequiredPulses_Idempotent(t *testing.T) {
 	dir := t.TempDir()
@@ -280,7 +329,7 @@ func TestMergeRequiredPulses_CorruptHostConfigRefuses(t *testing.T) {
 	}
 }
 
-// A pulse an operator deliberately removed must stay removed.
+// An unrequired pulse an operator deliberately removed must stay removed.
 //
 // Without a record of what was previously installed, "missing from the host"
 // is ambiguous: it means either "this host predates the pulse" or "the operator
@@ -304,8 +353,9 @@ func TestMergeRequiredPulses_DoesNotResurrectRemovedPulses(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	required := map[string]bool{"keep": true}
 	// First sync adopts the current defaults and records them.
-	if _, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults)); err != nil {
+	if _, err := MergeRequiredPulses(host, defaults, 0o644, required); err != nil {
 		t.Fatalf("first merge: %v", err)
 	}
 
@@ -316,7 +366,7 @@ func TestMergeRequiredPulses_DoesNotResurrectRemovedPulses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	added, err := MergeRequiredPulses(host, defaults, 0o644, allRequired(defaults))
+	added, err := MergeRequiredPulses(host, defaults, 0o644, required)
 	if err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
@@ -325,6 +375,42 @@ func TestMergeRequiredPulses_DoesNotResurrectRemovedPulses(t *testing.T) {
 	}
 	if got := readPulseNames(t, host); len(got) != 1 || got[0] != "keep" {
 		t.Errorf("host pulses = %v, want [keep]", got)
+	}
+}
+
+func TestMergeRequiredPulses_RefusesRemovedPulseStillRequiredByJob(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	defaultsRaw := []byte(`{"pulses":[
+  {"name":"keep","type":"file_mtime","path":"~/a","window":"1h"},
+  {"name":"required","type":"file_mtime","path":"~/b","window":"1h"}
+]}`)
+	if err := os.WriteFile(defaults, defaultsRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(host, defaultsRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	required := allRequired(defaults)
+	if _, err := MergeRequiredPulses(host, defaults, 0o644, required); err != nil {
+		t.Fatalf("adopt initial registry: %v", err)
+	}
+
+	removed := validPulseConfig("keep")
+	if err := os.WriteFile(host, removed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	added, err := MergeRequiredPulses(host, defaults, 0o644, required)
+	if err == nil || !strings.Contains(err.Error(), "live pulse registry: required") {
+		t.Fatalf("merge error = %v, added = %v; want missing required-pulse refusal", err, added)
+	}
+	after, readErr := os.ReadFile(host)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, removed) {
+		t.Fatalf("failed required-pulse check changed operator registry: got %s, want %s", after, removed)
 	}
 }
 
@@ -645,6 +731,29 @@ func TestMergeRequiredPulses_ConcurrentFirstSeedsConverge(t *testing.T) {
 	requireNames(t, registryNames, "new", "old")
 	requireNames(t, ledgerNames, "new", "old")
 	requirePathMissing(t, pulseLedgerTransactionPath(host))
+}
+
+func TestInstallAbsenceAlarmLaunchAgentUsesLockedPulseSeed(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	makefile := string(raw)
+	start := strings.Index(makefile, "install-absence-alarm-launchagent:")
+	if start < 0 {
+		t.Fatal("Makefile has no install-absence-alarm-launchagent target")
+	}
+	rest := makefile[start:]
+	target, _, found := strings.Cut(rest, "\nuninstall-absence-alarm-launchagent:")
+	if !found {
+		t.Fatal("cannot find end of install-absence-alarm-launchagent target")
+	}
+	if strings.Contains(target, "cp deploy/absence-alarm/pulses.json") {
+		t.Fatal("install target seeds the pulse registry outside the locked merger")
+	}
+	if got := strings.Count(target, "go run ./cmd/dear-deploy merge-pulses"); got != 1 {
+		t.Fatalf("install target delegates to locked merger %d times, want exactly once", got)
+	}
 }
 
 func TestMergeRequiredPulses_PreservesRegistrySymlinkAndTargetMode(t *testing.T) {

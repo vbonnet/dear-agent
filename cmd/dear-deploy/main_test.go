@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -157,6 +158,28 @@ func TestSync_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
+func TestDeployJSONPreservesTopLevelResultArray(t *testing.T) {
+	for _, command := range []string{"sync", "install"} {
+		t.Run(command, func(t *testing.T) {
+			repo, home := scaffold(t)
+			code, out, errs := invoke(t, repo, home, command, "--json")
+			if code != 0 {
+				t.Fatalf("%s --json exit = %d; stdout=%s stderr=%s", command, code, out, errs)
+			}
+			var results []struct {
+				Name   string
+				Action string
+			}
+			if err := json.Unmarshal([]byte(out), &results); err != nil {
+				t.Fatalf("%s --json no longer emits the result array: %v\n%s", command, err, out)
+			}
+			if len(results) == 0 || results[0].Name != "x.plist" {
+				t.Fatalf("%s --json results = %+v, want x.plist result", command, results)
+			}
+		})
+	}
+}
+
 func TestPulsePreviewRendersTokensAndMatchesSync(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -302,6 +325,7 @@ func TestMergePulsesUsesRenderedManifestJobRegistry(t *testing.T) {
     source: custom/jobs.json
     deployed: ~/.config/dear-agent/recovery-loop-jobs.json
     mode: "0644"
+    absent-only: true
     tokens:
       __PULSE__: custom-tick
 `)
@@ -314,6 +338,104 @@ func TestMergePulsesUsesRenderedManifestJobRegistry(t *testing.T) {
 	}
 	if got := pulseNamesAt(t, host); len(got) != 1 || got[0] != "custom-tick" {
 		t.Fatalf("merge-pulses added %v, want [custom-tick]", got)
+	}
+}
+
+func TestPulseCommandsUseLiveAbsentOnlyJobRegistry(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), `{"pulses":[
+  {"name":"source-tick","type":"file_mtime","path":"~/source","window":"1h"},
+  {"name":"operator-tick","type":"file_mtime","path":"~/operator","window":"1h"}
+]}`)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"),
+		`{"jobs":[{"name":"source-job","pulse":"source-tick"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    absent-only: true
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+    absent-only: true
+`)
+
+	pulsesPath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	mustWrite(t, pulsesPath,
+		`{"pulses":[{"name":"source-tick","type":"file_mtime","path":"~/source","window":"1h"}]}`)
+	mustWrite(t, jobsPath,
+		`{"jobs":[{"name":"operator-job","pulse":"operator-tick"}]}`)
+
+	code, out, errs := invoke(t, repo, home, "status", pulseArtifactName)
+	if code != 2 {
+		t.Fatalf("status exit = %d, want drift; stdout=%s stderr=%s", code, out, errs)
+	}
+	if !strings.Contains(out, pulseArtifactName+":operator-tick") ||
+		strings.Contains(out, pulseArtifactName+":source-tick") {
+		t.Fatalf("status did not follow live jobs registry: %s", out)
+	}
+
+	code, out, errs = invoke(t, repo, home, "sync", pulseArtifactName, "--json")
+	if code != 0 {
+		t.Fatalf("sync --json exit = %d; stdout=%s stderr=%s", code, out, errs)
+	}
+	var results []struct {
+		Name   string
+		Action string
+	}
+	if err := json.Unmarshal([]byte(out), &results); err != nil {
+		t.Fatalf("pulse sync broke result-array JSON contract: %v\n%s", err, out)
+	}
+	if len(results) != 1 || results[0].Name != pulseArtifactName || results[0].Action != "updated" {
+		t.Fatalf("pulse sync results = %+v, want one updated pulse artifact", results)
+	}
+	if got := pulseNamesAt(t, pulsesPath); !slices.Equal(got, []string{"source-tick", "operator-tick"}) {
+		t.Fatalf("pulse sync installed %v, want live-required operator pulse", got)
+	}
+}
+
+func TestPulseCommandsAcceptRuntimeValidOperatorJobAndPulsePair(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"),
+		`{"pulses":[{"name":"source-tick","type":"file_mtime","path":"~/source","window":"1h"}]}`)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"),
+		`{"jobs":[{"name":"source-job","pulse":"source-tick"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    absent-only: true
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+    absent-only: true
+`)
+
+	pulsesPath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	mustWrite(t, pulsesPath,
+		`{"pulses":[{"name":"operator-tick","type":"file_mtime","path":"~/operator","window":"1h"}]}`)
+	mustWrite(t, jobsPath,
+		`{"jobs":[{"name":"operator-job","pulse":"operator-tick"}]}`)
+
+	for _, args := range [][]string{
+		{"status", pulseArtifactName},
+		{"sync", pulseArtifactName, "--dry-run"},
+	} {
+		code, out, errs := invoke(t, repo, home, args...)
+		if code != 0 {
+			t.Fatalf("%v exit = %d; stdout=%s stderr=%s", args, code, out, errs)
+		}
+	}
+	if got := pulseNamesAt(t, pulsesPath); !slices.Equal(got, []string{"operator-tick"}) {
+		t.Fatalf("operator-owned pulse registry changed during observation: %v", got)
 	}
 }
 
