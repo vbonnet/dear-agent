@@ -134,21 +134,23 @@ func deployPulseDuringDeploy(
 	asJSON bool,
 	stdout io.Writer,
 	normalPulseSource []byte,
-) (deploy.Result, []byte, error) {
+) (deploy.Result, []byte, bool, error) {
 	if !a.AbsentOnly {
 		return deployNormalPulseDuringDeploy(a, selected, manifestArtifacts, opts, normalPulseSource)
 	}
 
 	hostPath := pulseHostPath(a, opts)
-	outcome, err := mergePulsesDuringDeploy(a, selected, manifestArtifacts, opts, asJSON, stdout)
+	outcome, renderedJobs, jobsSourceMissing, err := mergePulsesDuringDeploy(
+		a, selected, manifestArtifacts, opts, asJSON, stdout,
+	)
 	if err != nil {
-		return deploy.Result{}, nil, fmt.Errorf("pulse merge: %w", err)
+		return deploy.Result{}, nil, false, fmt.Errorf("pulse merge: %w", err)
 	}
 	// #nosec G703 -- hostPath is the manifest-selected deployment target;
 	// reading it back is required to report the lock-owned merge result.
 	live, err := os.ReadFile(hostPath)
 	if err != nil {
-		return deploy.Result{}, nil, fmt.Errorf("read merged pulse result: %w", err)
+		return deploy.Result{}, nil, false, fmt.Errorf("read merged pulse result: %w", err)
 	}
 	action := deploy.ActionUnchanged
 	switch {
@@ -168,7 +170,7 @@ func deployPulseDuringDeploy(
 		Action:       action,
 		SHA256:       fmt.Sprintf("%x", sum),
 		Detail:       detail,
-	}, nil, nil
+	}, renderedJobs, jobsSourceMissing, nil
 }
 
 func deployNormalPulseDuringDeploy(
@@ -177,21 +179,21 @@ func deployNormalPulseDuringDeploy(
 	manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
 	renderedPulse []byte,
-) (deploy.Result, []byte, error) {
-	required, renderedJobs, err := requiredPulsesForNormalPulse(
+) (deploy.Result, []byte, bool, error) {
+	required, renderedJobs, jobsSourceMissing, err := requiredPulsesForNormalPulse(
 		selected, manifestArtifacts, opts,
 	)
 	if err != nil {
-		return deploy.Result{}, nil, fmt.Errorf("resolve required pulses: %w", err)
+		return deploy.Result{}, nil, false, fmt.Errorf("resolve required pulses: %w", err)
 	}
 	if err := deploy.ValidateRequiredPulseConfigRendered(renderedPulse, required); err != nil {
-		return deploy.Result{}, nil, fmt.Errorf("validate pulse config: %w", err)
+		return deploy.Result{}, nil, false, fmt.Errorf("validate pulse config: %w", err)
 	}
 	result, err := deploy.DeployRendered(a, opts, renderedPulse)
 	if err != nil {
-		return deploy.Result{}, nil, err
+		return deploy.Result{}, nil, false, err
 	}
-	return result, renderedJobs, nil
+	return result, renderedJobs, jobsSourceMissing, nil
 }
 
 func validateNormalPulseArtifact(
@@ -199,22 +201,24 @@ func validateNormalPulseArtifact(
 	selected []deploy.Artifact,
 	manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
-) (bool, error) {
-	required, _, err := requiredPulsesForNormalPulse(selected, manifestArtifacts, opts)
+) (bool, []byte, bool, error) {
+	required, renderedJobs, jobsSourceMissing, err := requiredPulsesForNormalPulse(
+		selected, manifestArtifacts, opts,
+	)
 	if err != nil {
-		return false, fmt.Errorf("resolve required pulses: %w", err)
+		return false, nil, false, fmt.Errorf("resolve required pulses: %w", err)
 	}
 	rendered, err := a.Render(opts.RepoRoot, opts.Home)
 	if err != nil {
 		if a.Optional && errors.Is(err, os.ErrNotExist) {
-			return true, nil
+			return true, renderedJobs, jobsSourceMissing, nil
 		}
-		return false, fmt.Errorf("render pulse config: %w", err)
+		return false, nil, false, fmt.Errorf("render pulse config: %w", err)
 	}
 	if err := deploy.ValidateRequiredPulseConfigRendered(rendered, required); err != nil {
-		return false, fmt.Errorf("validate pulse config: %w", err)
+		return false, nil, false, fmt.Errorf("validate pulse config: %w", err)
 	}
-	return false, nil
+	return false, renderedJobs, jobsSourceMissing, nil
 }
 
 func validateNormalPulseArtifactCurrent(
@@ -222,25 +226,45 @@ func validateNormalPulseArtifactCurrent(
 	selected []deploy.Artifact,
 	manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
-) error {
-	if _, err := validateNormalPulseArtifact(a, selected, manifestArtifacts, opts); err != nil {
-		return err
+) ([]byte, bool, error) {
+	required, renderedJobs, jobsSourceMissing, err := requiredPulsesFor(
+		selected, manifestArtifacts, opts,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("resolve required pulses: %w", err)
+	}
+	if jobsSourceMissing {
+		return nil, true, nil
 	}
 	status := deploy.Status(a, opts)
-	if status.State == deploy.StateOK {
-		return nil
+	if status.State != deploy.StateOK {
+		detail := string(status.State)
+		if status.Error != "" {
+			detail += ": " + status.Error
+		}
+		return nil, false, fmt.Errorf(
+			"%s is %s; sync %s before publishing %s",
+			a.Name,
+			detail,
+			a.Name,
+			jobsArtifactName,
+		)
 	}
-	detail := string(status.State)
-	if status.Error != "" {
-		detail += ": " + status.Error
+
+	// Status preserves the generic source/live and create-directory contract,
+	// but it renders the source internally. Authorize this jobs publication
+	// from one exact live pulse snapshot read after that check: validating a
+	// separate source render would permit validate-A/approve-B source swaps.
+	// The caller holds the normal pulse publication lock through jobs activation.
+	// #nosec G703 -- status.DeployedPath is the manifest-selected live registry.
+	live, err := os.ReadFile(status.DeployedPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("read live pulse config %s: %w", status.DeployedPath, err)
 	}
-	return fmt.Errorf(
-		"%s is %s; sync %s before publishing %s",
-		a.Name,
-		detail,
-		a.Name,
-		jobsArtifactName,
-	)
+	if err := deploy.ValidateRequiredPulseConfigRendered(live, required); err != nil {
+		return nil, false, fmt.Errorf("validate live pulse config: %w", err)
+	}
+	return renderedJobs, false, nil
 }
 
 // pulseArtifactName is the manifest entry whose deployed copy is the host's
@@ -323,41 +347,43 @@ func mergePulsesDuringDeploy(
 	opts deploy.Options,
 	asJSON bool,
 	stdout io.Writer,
-) (deploy.PulseMergeResult, error) {
+) (deploy.PulseMergeResult, []byte, bool, error) {
 	hostPath := pulseHostPath(a, opts)
-	required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
+	required, renderedJobs, jobsSourceMissing, err := requiredPulsesFor(
+		selected, manifestArtifacts, opts,
+	)
 	if err != nil {
-		return deploy.PulseMergeResult{}, err
+		return deploy.PulseMergeResult{}, nil, false, err
 	}
 	rendered, err := a.Render(opts.RepoRoot, opts.Home)
 	if err != nil {
-		return deploy.PulseMergeResult{}, fmt.Errorf("render pulse defaults: %w", err)
+		return deploy.PulseMergeResult{}, nil, false, fmt.Errorf("render pulse defaults: %w", err)
 	}
 	mode, err := a.FileMode()
 	if err != nil {
-		return deploy.PulseMergeResult{}, fmt.Errorf("resolve pulse registry mode: %w", err)
+		return deploy.PulseMergeResult{}, nil, false, fmt.Errorf("resolve pulse registry mode: %w", err)
 	}
 	outcome, err := deploy.MergeRequiredPulsesRenderedResult(hostPath, rendered, mode, required)
 	if err != nil {
-		return deploy.PulseMergeResult{}, err
+		return deploy.PulseMergeResult{}, nil, false, err
 	}
 	if len(outcome.Added) == 0 {
 		if (outcome.LedgerChanged || outcome.Reconciled) && !asJSON {
 			fmt.Fprintln(stdout, "  RECONCILED absence-alarm pulse offer ledger")
 		}
-		return outcome, nil
+		return outcome, renderedJobs, jobsSourceMissing, nil
 	}
 	// In JSON mode the caller folds these names into the document it emits, so
 	// nothing is printed here: emitJSON has already written to stdout and
 	// appending text would make it undecodable.
 	if asJSON {
-		return outcome, nil
+		return outcome, renderedJobs, jobsSourceMissing, nil
 	}
 	for _, n := range outcome.Added {
 		fmt.Fprintf(stdout, "  MERGED    absence-alarm pulse %s\n", n)
 	}
 	fmt.Fprintln(stdout, "  Restart absence-alarm for the new pulses to take effect.")
-	return outcome, nil
+	return outcome, renderedJobs, jobsSourceMissing, nil
 }
 
 // jobsArtifactName is the manifest entry holding the recovery job registry.
@@ -371,16 +397,21 @@ const jobsArtifactName = "recovery-loop-jobs"
 func requiredPulsesFor(
 	selected, manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
-) (map[string]bool, error) {
+) (map[string]bool, []byte, bool, error) {
 	if a, ok := artifactNamed(manifestArtifacts, jobsArtifactName); ok {
 		_, jobsSelected := artifactNamed(selected, jobsArtifactName)
-		registry, err := requiredPulseJobRegistry(a, jobsSelected, opts)
+		resolved, err := requiredPulseJobRegistry(a, jobsSelected, opts)
 		if err != nil {
-			return nil, err
+			return nil, nil, false, err
 		}
-		return deploy.RequiredPulseNamesRendered(registry)
+		if !resolved.Exists {
+			return map[string]bool{}, resolved.Prepared, resolved.SourceMissing, nil
+		}
+		required, err := deploy.RequiredPulseNamesRendered(resolved.Registry)
+		return required, resolved.Prepared, resolved.SourceMissing, err
 	}
-	return deploy.RequiredPulseNames(opts.RepoRoot)
+	required, err := deploy.RequiredPulseNames(opts.RepoRoot)
+	return required, nil, false, err
 }
 
 // requiredPulsesForNormalPulse returns the requirements a normal pulse
@@ -393,29 +424,39 @@ func requiredPulsesFor(
 func requiredPulsesForNormalPulse(
 	selected, manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
-) (map[string]bool, []byte, error) {
+) (map[string]bool, []byte, bool, error) {
 	pulse, pulseSelected := artifactNamed(selected, pulseArtifactName)
 	jobs, jobsSelected := artifactNamed(selected, jobsArtifactName)
 	if !pulseSelected || pulse.AbsentOnly || !jobsSelected || jobs.AbsentOnly {
-		required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
-		return required, nil, err
+		return requiredPulsesFor(selected, manifestArtifacts, opts)
 	}
 
-	rendered, err := jobs.Render(opts.RepoRoot, opts.Home)
+	resolved, err := requiredPulseJobRegistry(jobs, true, opts)
 	if err != nil {
-		return nil, nil, fmt.Errorf("render recovery job registry: %w", err)
+		return nil, nil, false, err
 	}
+	if resolved.SourceMissing {
+		if !resolved.Exists {
+			return map[string]bool{}, nil, true, nil
+		}
+		required, err := deploy.RequiredPulseNamesRendered(resolved.Registry)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return required, nil, true, nil
+	}
+	rendered := resolved.Prepared
 	required, err := deploy.RequiredPulseNamesRendered(rendered)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	live, exists, err := readLiveRecoveryJobRegistry(jobs, opts)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if !exists {
-		return required, rendered, nil
+		return required, rendered, false, nil
 	}
 	liveRequired, err := deploy.RequiredPulseNamesRendered(live)
 	if err != nil {
@@ -424,12 +465,19 @@ func requiredPulsesForNormalPulse(
 		// from the already validated prospective snapshot. Observation errors
 		// above remain fail-closed, as do pulse-only and absent-only paths.
 		//nolint:nilerr // Parser rejection is the repair condition, not a success-path error leak.
-		return required, rendered, nil
+		return required, rendered, false, nil
 	}
 	for name := range liveRequired {
 		required[name] = true
 	}
-	return required, rendered, nil
+	return required, rendered, false, nil
+}
+
+type resolvedRecoveryJobRegistry struct {
+	Registry      []byte
+	Prepared      []byte
+	Exists        bool
+	SourceMissing bool
 }
 
 // requiredPulseJobRegistry returns the bytes the recovery-loop runtime will be
@@ -438,25 +486,47 @@ func requiredPulsesForNormalPulse(
 // Absent-only registries remain operator-owned even when selected. A missing
 // live registry falls back to the rendered source that would seed it; other
 // observation failures are not absence.
-func requiredPulseJobRegistry(a deploy.Artifact, jobsSelected bool, opts deploy.Options) ([]byte, error) {
+func requiredPulseJobRegistry(
+	a deploy.Artifact,
+	jobsSelected bool,
+	opts deploy.Options,
+) (resolvedRecoveryJobRegistry, error) {
 	// An unselected registry remains the runtime authority after this command,
 	// regardless of whether it is normally source-owned. Absent-only registries
 	// are always operator-owned and likewise remain live even when selected.
 	if a.AbsentOnly || !jobsSelected {
 		live, exists, err := readLiveRecoveryJobRegistry(a, opts)
 		if err != nil {
-			return nil, err
+			return resolvedRecoveryJobRegistry{}, err
 		}
 		if exists {
-			return live, nil
+			return resolvedRecoveryJobRegistry{Registry: live, Exists: true}, nil
 		}
 	}
 
 	rendered, err := a.Render(opts.RepoRoot, opts.Home)
 	if err != nil {
-		return nil, fmt.Errorf("render recovery job registry: %w", err)
+		if a.Optional && errors.Is(err, os.ErrNotExist) {
+			if jobsSelected && !a.AbsentOnly {
+				live, exists, readErr := readLiveRecoveryJobRegistry(a, opts)
+				if readErr != nil {
+					return resolvedRecoveryJobRegistry{}, readErr
+				}
+				return resolvedRecoveryJobRegistry{
+					Registry:      live,
+					Exists:        exists,
+					SourceMissing: true,
+				}, nil
+			}
+			return resolvedRecoveryJobRegistry{}, nil
+		}
+		return resolvedRecoveryJobRegistry{}, fmt.Errorf("render recovery job registry: %w", err)
 	}
-	return rendered, nil
+	resolved := resolvedRecoveryJobRegistry{Registry: rendered, Exists: true}
+	if jobsSelected && !a.AbsentOnly {
+		resolved.Prepared = rendered
+	}
+	return resolved, nil
 }
 
 func readLiveRecoveryJobRegistry(a deploy.Artifact, opts deploy.Options) ([]byte, bool, error) {

@@ -88,35 +88,6 @@ func TestDeploy_UpdatesDrift(t *testing.T) {
 	}
 }
 
-func TestDeployValidatedDeploysTheBytesItValidated(t *testing.T) {
-	a, opts := fixture(t, Artifact{Name: "p", Source: "src/p", Deployed: "~/p"}, "valid\n")
-	source := filepath.Join(opts.RepoRoot, a.Source)
-
-	res, err := DeployValidated(a, opts, func(rendered []byte) error {
-		if got, want := string(rendered), "valid\n"; got != want {
-			return errors.New("validator received unexpected bytes")
-		}
-		// Simulate the source changing after validation. Deployment must keep
-		// using the already-rendered, already-validated bytes.
-		err := os.WriteFile(source, []byte("invalid\n"), 0o644)
-		rendered[0] = 'X'
-		return err
-	})
-	if err != nil {
-		t.Fatalf("DeployValidated: %v", err)
-	}
-	deployed, err := os.ReadFile(res.DeployedPath)
-	if err != nil {
-		t.Fatalf("read deployed: %v", err)
-	}
-	if got, want := string(deployed), "valid\n"; got != want {
-		t.Fatalf("deployed content = %q, want validated content %q", got, want)
-	}
-	if got, want := res.SHA256, sha256hex([]byte("valid\n")); got != want {
-		t.Fatalf("deployed hash = %q, want %q", got, want)
-	}
-}
-
 func TestDeployRenderedUsesSuppliedSnapshot(t *testing.T) {
 	a, opts := fixture(t, Artifact{
 		Name:     "p",
@@ -149,26 +120,6 @@ func TestDeployRenderedUsesSuppliedSnapshot(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("deployed mode = %04o, want 0600", got)
-	}
-}
-
-func TestDeployValidatedFailureLeavesTargetUntouched(t *testing.T) {
-	a, opts := fixture(t, Artifact{Name: "p", Source: "src/p", Deployed: "~/p"}, "candidate\n")
-	target := a.DeployedPath(opts.Home)
-	if err := os.WriteFile(target, []byte("existing\n"), 0o644); err != nil {
-		t.Fatalf("seed target: %v", err)
-	}
-	wantErr := errors.New("invalid domain content")
-
-	if _, err := DeployValidated(a, opts, func([]byte) error { return wantErr }); !errors.Is(err, wantErr) {
-		t.Fatalf("DeployValidated error = %v, want sentinel %v", err, wantErr)
-	}
-	deployed, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("read target: %v", err)
-	}
-	if got, want := string(deployed), "existing\n"; got != want {
-		t.Fatalf("target after validation failure = %q, want %q", got, want)
 	}
 }
 

@@ -78,27 +78,7 @@ func resolveHome(opts Options) (string, error) {
 // previously-installed artifact is left exactly as it was. There is no bypass
 // flag: the only way to deploy is through this sequence (ADR-031, principle 9).
 func Deploy(a Artifact, opts Options) (Result, error) {
-	return deploy(a, opts, nil)
-}
-
-// DeployValidated renders an artifact once, validates those rendered bytes,
-// and atomically deploys the same bytes. It is for file formats whose
-// invariants must be checked after token expansion but before activation.
-// Validation failure leaves the previously installed artifact untouched. An
-// optional missing source is skipped before validation because there are no
-// rendered bytes to validate.
-func DeployValidated(
-	a Artifact,
-	opts Options,
-	validate func([]byte) error,
-) (Result, error) {
-	if validate == nil {
-		return Result{}, fmt.Errorf("deploy validated: validator is required")
-	}
-	if a.IsBinary() {
-		return Result{}, fmt.Errorf("deploy validated: binary artifact %q has no rendered file content", a.Name)
-	}
-	return deploy(a, opts, validate)
+	return deploy(a, opts)
 }
 
 // DeployRendered atomically deploys an already-rendered artifact snapshot. It
@@ -151,7 +131,7 @@ func SkipOptionalMissingSource(a Artifact, opts Options) (Result, error) {
 	return res, nil
 }
 
-func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, error) {
+func deploy(a Artifact, opts Options) (Result, error) {
 	if opts.RepoRoot == "" {
 		return Result{}, fmt.Errorf("deploy: RepoRoot is required")
 	}
@@ -176,7 +156,7 @@ func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, erro
 		return res, err
 	}
 
-	content, skipped, err := renderForDeploy(a, opts, home, validate)
+	content, skipped, err := renderForDeploy(a, opts, home)
 	if err != nil {
 		return res, err
 	}
@@ -289,7 +269,6 @@ func renderForDeploy(
 	a Artifact,
 	opts Options,
 	home string,
-	validate func([]byte) error,
 ) ([]byte, bool, error) {
 	content, err := a.Render(opts.RepoRoot, home)
 	if err != nil {
@@ -309,14 +288,6 @@ func renderForDeploy(
 			)
 		}
 		return nil, false, fmt.Errorf("rendering %q: %w", a.Name, err)
-	}
-	if validate != nil {
-		// Validation is observational. Give the callback its own copy so a
-		// buggy validator cannot mutate or retain the bytes that will be made
-		// live after it returns.
-		if err := validate(bytes.Clone(content)); err != nil {
-			return nil, false, fmt.Errorf("validating %q: %w", a.Name, err)
-		}
 	}
 	return content, false, nil
 }

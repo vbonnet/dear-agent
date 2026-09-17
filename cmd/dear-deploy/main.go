@@ -246,7 +246,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	// A required pulse that a sync would merge is real drift, even though the
 	// absent-only registry itself compares clean. Reporting OK here is how a
 	// missed migration stays invisible to a deployment audit.
-	pendingPulses, pulseMergeSelected, ledgerChanged, pulseErr := pendingPulseNames(
+	pendingPulses, pulseMergeSelected, ledgerChanged, _, _, pulseErr := pendingPulseNames(
 		selected, manifestArtifacts, opts, stderr,
 	)
 	pulseIndex := statusResultIndex(results, pulseArtifactName)
@@ -433,10 +433,18 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 
 	preparedPulse, normalPulseSelected, pulsePreflightErr := prepareNormalPulseSource(selected, opts)
 	var optionalPulseResult deploy.Result
+	var preparedJobs []byte
+	var optionalJobsSkipped bool
 	optionalPulseSkipped := normalPulseSelected && preparedPulse.SourceMissing
 	if optionalPulseSkipped {
-		if _, _, err := requiredPulsesForNormalPulse(selected, manifestArtifacts, opts); err != nil {
+		_, renderedJobs, jobsSourceMissing, err := requiredPulsesForNormalPulse(
+			selected, manifestArtifacts, opts,
+		)
+		if err != nil {
 			pulsePreflightErr = fmt.Errorf("resolve required pulses: %w", err)
+		} else {
+			preparedJobs = renderedJobs
+			optionalJobsSkipped = jobsSourceMissing
 		}
 		if _, jobsSelected := artifactNamed(selected, jobsArtifactName); pulsePreflightErr == nil && jobsSelected {
 			pulsePreflightErr = fmt.Errorf(
@@ -480,7 +488,6 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	// custom manifest's ownership contract.
 	var pulseResult *deploy.Result
 	var pulseDependencyErr error
-	var preparedJobs []byte
 	pulseHandled := false
 	if a, ok := artifactNamed(selected, pulseArtifactName); ok {
 		pulseHandled = true
@@ -492,7 +499,7 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 		case optionalPulseSkipped:
 			pulseResult = &optionalPulseResult
 		default:
-			result, renderedJobs, err := deployPulseDuringDeploy(
+			result, renderedJobs, jobsSourceMissing, err := deployPulseDuringDeploy(
 				a, selected, manifestArtifacts, opts, c.asJSON, stdout, preparedPulse.Rendered,
 			)
 			if err != nil {
@@ -502,12 +509,15 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 			} else {
 				pulseResult = &result
 				preparedJobs = renderedJobs
+				optionalJobsSkipped = jobsSourceMissing
 			}
 		}
 	} else if _, ok := artifactNamed(selected, jobsArtifactName); ok {
 		pulseDependencyErr = pulsePreflightErr
 		if pulseDependencyErr == nil {
-			preview, _, _, err := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
+			preview, _, _, renderedJobs, jobsSourceMissing, err := pendingPulseNames(
+				selected, manifestArtifacts, opts, stderr,
+			)
 			switch {
 			case err != nil:
 				pulseDependencyErr = err
@@ -517,6 +527,9 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 					strings.Join(preview, ", "),
 					pulseArtifactName,
 				)
+			default:
+				preparedJobs = renderedJobs
+				optionalJobsSkipped = jobsSourceMissing
 			}
 		}
 	}
@@ -537,9 +550,12 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 		}
 		var r deploy.Result
 		var err error
-		if a.Name == jobsArtifactName && preparedJobs != nil {
+		switch {
+		case a.Name == jobsArtifactName && optionalJobsSkipped:
+			r, err = deploy.SkipOptionalMissingSource(a, opts)
+		case a.Name == jobsArtifactName && preparedJobs != nil:
 			r, err = deploy.DeployRendered(a, opts, preparedJobs)
-		} else {
+		default:
 			r, err = deploy.Deploy(a, opts)
 		}
 		if err != nil {
@@ -596,7 +612,7 @@ func dryRunDeploy(
 	plans := make([]deployPlan, 0, len(selected))
 	// An absent-only registry always reports "unchanged", so without this a
 	// preview would show nothing while a real sync merged required pulses.
-	pendingPulses, pulseMergeSelected, ledgerChanged, pulsePreviewErr := pendingPulseNames(
+	pendingPulses, pulseMergeSelected, ledgerChanged, _, _, pulsePreviewErr := pendingPulseNames(
 		selected, manifestArtifacts, opts, stderr,
 	)
 	if pulsePreviewErr != nil {
@@ -690,13 +706,15 @@ func pendingPulseNames(
 	selected, manifestArtifacts []deploy.Artifact,
 	opts deploy.Options,
 	stderr io.Writer,
-) ([]string, bool, bool, error) {
+) ([]string, bool, bool, []byte, bool, error) {
 	a, pulseSelected := artifactNamed(selected, pulseArtifactName)
 	if pulseSelected && !a.AbsentOnly {
-		sourceMissing, err := validateNormalPulseArtifact(a, selected, manifestArtifacts, opts)
+		sourceMissing, renderedJobs, jobsSourceMissing, err := validateNormalPulseArtifact(
+			a, selected, manifestArtifacts, opts,
+		)
 		if err != nil {
 			fmt.Fprintf(stderr, "  ERROR     cannot validate pulse artifact: %v\n", err)
-			return nil, false, false, err
+			return nil, false, false, nil, false, err
 		}
 		if sourceMissing {
 			if _, jobsSelected := artifactNamed(selected, jobsArtifactName); jobsSelected {
@@ -705,48 +723,53 @@ func pendingPulseNames(
 					jobsArtifactName,
 				)
 				fmt.Fprintf(stderr, "  ERROR     cannot validate pulse artifact: %v\n", err)
-				return nil, false, false, err
+				return nil, false, false, nil, false, err
 			}
-			return nil, false, false, nil
+			return nil, false, false, renderedJobs, jobsSourceMissing, nil
 		}
-		return nil, false, false, nil
+		return nil, false, false, renderedJobs, jobsSourceMissing, nil
 	}
 	if !pulseSelected {
 		if _, jobsSelected := artifactNamed(selected, jobsArtifactName); !jobsSelected {
-			return nil, false, false, nil
+			return nil, false, false, nil, false, nil
 		}
 		var ok bool
 		a, ok = artifactNamed(manifestArtifacts, pulseArtifactName)
 		if !ok {
 			err := fmt.Errorf("manifest declares %s without %s", jobsArtifactName, pulseArtifactName)
 			fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
-			return nil, false, false, err
+			return nil, false, false, nil, false, err
 		}
 		if !a.AbsentOnly {
-			if err := validateNormalPulseArtifactCurrent(a, selected, manifestArtifacts, opts); err != nil {
+			renderedJobs, jobsSourceMissing, err := validateNormalPulseArtifactCurrent(
+				a, selected, manifestArtifacts, opts,
+			)
+			if err != nil {
 				fmt.Fprintf(stderr, "  ERROR     cannot publish %s: %v\n", jobsArtifactName, err)
-				return nil, false, false, err
+				return nil, false, false, nil, false, err
 			}
-			return nil, false, false, nil
+			return nil, false, false, renderedJobs, jobsSourceMissing, nil
 		}
 	}
 	hostPath := pulseHostPath(a, opts)
-	required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
+	required, renderedJobs, jobsSourceMissing, err := requiredPulsesFor(
+		selected, manifestArtifacts, opts,
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
-		return nil, pulseSelected, false, err
+		return nil, pulseSelected, false, nil, false, err
 	}
 	rendered, err := a.Render(opts.RepoRoot, opts.Home)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot render pulse defaults: %v\n", err)
-		return nil, pulseSelected, false, err
+		return nil, pulseSelected, false, nil, false, err
 	}
 	preview, err := deploy.PendingPulseMergePreviewRendered(hostPath, rendered, required)
 	if err != nil {
 		fmt.Fprintf(stderr, "  ERROR     cannot compute pending pulse merges: %v\n", err)
-		return nil, pulseSelected, false, err
+		return nil, pulseSelected, false, nil, false, err
 	}
-	return preview.Added, pulseSelected, preview.LedgerChanged, nil
+	return preview.Added, pulseSelected, preview.LedgerChanged, renderedJobs, jobsSourceMissing, nil
 }
 
 func formatDeploy(cmd string, results []deploy.Result, w io.Writer) {
@@ -899,7 +922,7 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 	}
 	hostPath := pulseHostPath(a, opts)
 
-	required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
+	required, _, _, err := requiredPulsesFor(selected, manifestArtifacts, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "dear-deploy: resolve required pulses: %v\n", err)
 		return 1
