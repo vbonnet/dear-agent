@@ -89,12 +89,7 @@ traceability still keyed to the old IDs.
 
 - Feature: `agm/test/bdd/features/engram_knowledge_guardrails.feature`
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-- Test consequence: Deterministic unit and integration tests in `engram/retrieval/retrieval_test.go`, `engram/retrieval/retrieval_integration_test.go`, and `engram/cmd/engram/cmd/tokens_estimate_integration_test.go` prove nonexistent absolute-path rejection, positive result limiting, parse-error isolation, missing-key local fallback, returned-result access persistence, best-effort flush failure handling, tag-over-type filter precedence, and external token-estimate command wiring.
-
-The current deterministic suite does not directly exercise default-path
-precedence or configured-key ranker order and metadata. Those coverage gaps
-are tracked by `ce-1hu9.98`; this ownership refactor does not claim to close
-them.
+- Test consequence: Deterministic unit and integration tests in `engram/retrieval/retrieval_test.go`, `engram/retrieval/retrieval_integration_test.go`, and `engram/cmd/engram/cmd/tokens_estimate_integration_test.go` prove nonexistent absolute-path rejection, default-path-before-relative precedence, positive result limiting, parse-error isolation, missing-key local fallback, configured-ranker order plus score/reasoning propagation, returned-result access persistence, best-effort flush failure handling, tag-over-type filter precedence, and external token-estimate command wiring. Configured-ranker proof uses a package-private per-service fake and no provider credential or network call.
 
 See `ARCHITECTURE.md` for the ownership seam and dependency flow. Durable
 behavior decisions are recorded under `docs/adrs/`.

@@ -66,10 +66,19 @@ type SearchResult struct {
 	Ranking string         // Reasoning (if API ranking used)
 }
 
+type ranker interface {
+	Rank(context.Context, string, []string) ([]ecphory.RankingResult, error)
+}
+
+type serviceDependencies struct {
+	newRanker func() (ranker, error)
+}
+
 // Service handles engram retrieval
 type Service struct {
 	parser  *engram.Parser
 	tracker *tracking.Tracker
+	deps    *serviceDependencies
 }
 
 // NewService creates a new retrieval service
@@ -80,6 +89,11 @@ func NewService() *Service {
 	return &Service{
 		parser:  engram.NewParser(),
 		tracker: tracker,
+		deps: &serviceDependencies{
+			newRanker: func() (ranker, error) {
+				return ecphory.NewRanker()
+			},
+		},
 	}
 }
 
@@ -114,7 +128,7 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) ([]*SearchResu
 			resultPaths = s.limitResults(candidates, opts.Limit)
 		} else {
 			// Use API ranking
-			ranker, err := ecphory.NewRanker()
+			ranker, err := s.deps.newRanker()
 			if err != nil {
 				return nil, fmt.Errorf("failed to create ranker: %w", err)
 			}

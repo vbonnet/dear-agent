@@ -13,6 +13,15 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/engram"
 )
 
+type rankerFunc func(context.Context, string, []string) ([]ecphory.RankingResult, error)
+
+func (f rankerFunc) Rank(ctx context.Context, query string, candidates []string) ([]ecphory.RankingResult, error) {
+	return f(ctx, query, candidates)
+}
+
+// assertComparable keeps Service usable anywhere a comparable Go value is required.
+func assertComparable[T comparable](T) {}
+
 // TestNewService tests the Service constructor
 func TestNewService(t *testing.T) {
 	service := NewService()
@@ -20,8 +29,12 @@ func TestNewService(t *testing.T) {
 		t.Fatal("NewService() returned nil")
 		return
 	}
+	assertComparable(*service)
 	if service.parser == nil {
 		t.Error("NewService() did not initialize parser")
+	}
+	if service.deps == nil || service.deps.newRanker == nil {
+		t.Error("NewService() did not initialize ranker factory")
 	}
 }
 
@@ -539,49 +552,48 @@ Content
 	})
 }
 
-// TestService_ResolveEngramPath_DefaultPaths tests default path resolution
-func TestService_ResolveEngramPath_DefaultPaths(t *testing.T) {
+// TestService_Search_DefaultPathTakesPrecedence proves the public Search path
+// uses the default directory before a valid directory relative to the CWD.
+func TestService_Search_DefaultPathTakesPrecedence(t *testing.T) {
 	service := NewService()
 
-	t.Run("create default path if it exists", func(t *testing.T) {
-		// This test checks the default ~/.engram/core/engrams path behavior
-		// We'll create it temporarily if it doesn't exist
-		home, err := os.UserHomeDir()
-		if err != nil {
-			t.Skip("cannot get home directory")
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	defaultPath := filepath.Join(home, ".engram", "core", "engrams")
+	cwd := filepath.Join(root, "workspace")
+	relativeName := "relative-engrams"
+	relativePath := filepath.Join(cwd, relativeName)
+	for _, dir := range []string{defaultPath, relativePath} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create fixture directory %q: %v", dir, err)
 		}
+	}
+	defaultFile := testutil.CreateTestEngram(t, defaultPath, "default.ai.md", "pattern", []string{"default"})
+	testutil.CreateTestEngram(t, relativePath, "relative.ai.md", "pattern", []string{"relative"})
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Chdir(cwd)
 
-		defaultPath := filepath.Join(home, ".engram/core/engrams")
-		pathExists := false
-		if _, err := os.Stat(defaultPath); err == nil {
-			pathExists = true
-		} else {
-			// Create temporarily for test
-			if err := os.MkdirAll(defaultPath, 0755); err != nil {
-				t.Skip("cannot create default path for test")
+	for _, test := range []struct {
+		name string
+		path string
+	}{
+		{name: "empty input", path: ""},
+		{name: "relative input", path: relativeName},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			results, err := service.Search(context.Background(), SearchOptions{EngramPath: test.path})
+			if err != nil {
+				t.Fatalf("Search(EngramPath: %q): %v", test.path, err)
 			}
-			t.Cleanup(func() {
-				// Only remove if we created it
-				os.RemoveAll(filepath.Join(home, ".engram"))
-			})
-		}
-
-		// Test empty string uses default
-		got, err := service.resolveEngramPath("")
-		if err != nil {
-			// If default doesn't exist and can't be created, that's okay
-			if !pathExists {
-				return
+			if len(results) != 1 {
+				t.Fatalf("Search(EngramPath: %q) returned %d results, want the one default result: %v", test.path, len(results), results)
 			}
-			t.Errorf("resolveEngramPath(\"\") failed: %v", err)
-			return
-		}
-
-		// Should resolve to some valid path
-		if got == "" {
-			t.Error("resolveEngramPath(\"\") returned empty string")
-		}
-	})
+			if results[0].Path != defaultFile {
+				t.Fatalf("Search(EngramPath: %q) returned %q, want default file %q (relative directory %q also exists)", test.path, results[0].Path, defaultFile, relativePath)
+			}
+		})
+	}
 }
 
 // TestService_Search_WithQuery tests search with Query parameter
@@ -632,34 +644,121 @@ func TestService_Search_WithQuery(t *testing.T) {
 	})
 }
 
-// Tags take precedence when both filters are supplied. The assertion compares
-// result sets rather than sizes: the "go" tag and the "workflow" type select
-// disjoint engrams in the fixture, so a precedence regression would return
-// workflow1 instead of the tag matches, which a count check could miss.
-func TestService_FilterCandidates_TagsTakePrecedenceOverType(t *testing.T) {
+func TestService_Search_ConfiguredRankerPreservesOrderAndMetadata(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	tmpdir := testutil.SetupTestEngrams(t)
+	service := NewService()
+
+	const query = "rank these deterministically"
+	factoryCalls := 0
+	var gotQuery string
+	var gotCandidates []string
+	service.deps.newRanker = func() (ranker, error) {
+		factoryCalls++
+		return rankerFunc(func(_ context.Context, query string, candidates []string) ([]ecphory.RankingResult, error) {
+			gotQuery = query
+			gotCandidates = slices.Clone(candidates)
+			pathsByBase := make(map[string]string, len(candidates))
+			for _, candidate := range candidates {
+				pathsByBase[filepath.Base(candidate)] = candidate
+			}
+			for _, base := range []string{"workflow1.ai.md", "pattern2.ai.md", "strategy1.ai.md"} {
+				if pathsByBase[base] == "" {
+					t.Fatalf("ranker candidates omit %q: %v", base, candidates)
+				}
+			}
+			return []ecphory.RankingResult{
+				{Path: pathsByBase["workflow1.ai.md"], Relevance: 0.91, Reasoning: "workflow match"},
+				{Path: pathsByBase["pattern2.ai.md"], Relevance: 0.73, Reasoning: "error pattern"},
+				{Path: pathsByBase["strategy1.ai.md"], Relevance: 0.42, Reasoning: "strategy fallback"},
+			}, nil
+		}), nil
+	}
+
+	// A cancelled context makes a future accidental production-ranker call fail
+	// before provider I/O; the deterministic fake intentionally ignores it.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results, err := service.Search(ctx, SearchOptions{
+		EngramPath: tmpdir,
+		Query:      query,
+		UseAPI:     true,
+		Limit:      2,
+	})
+	if err != nil {
+		t.Fatalf("Search() with configured ranker: %v", err)
+	}
+	if factoryCalls != 1 {
+		t.Fatalf("ranker factory calls = %d, want 1", factoryCalls)
+	}
+	if gotQuery != query {
+		t.Errorf("ranker query = %q, want %q", gotQuery, query)
+	}
+	if len(gotCandidates) <= 2 {
+		t.Fatalf("ranker candidates = %d, want more than limit 2 to prove limiting happens after ranking: %v", len(gotCandidates), gotCandidates)
+	}
+	if len(results) != 2 {
+		t.Fatalf("Search() returned %d ranked results, want limit 2", len(results))
+	}
+
+	want := []struct {
+		base      string
+		relevance float64
+		reasoning string
+	}{
+		{base: "workflow1.ai.md", relevance: 0.91, reasoning: "workflow match"},
+		{base: "pattern2.ai.md", relevance: 0.73, reasoning: "error pattern"},
+	}
+	for i, expected := range want {
+		if got := filepath.Base(results[i].Path); got != expected.base {
+			t.Errorf("results[%d].Path = %q, want ranked path %q", i, got, expected.base)
+		}
+		if results[i].Score != expected.relevance {
+			t.Errorf("results[%d].Score = %v, want %v", i, results[i].Score, expected.relevance)
+		}
+		if results[i].Ranking != expected.reasoning {
+			t.Errorf("results[%d].Ranking = %q, want %q", i, results[i].Ranking, expected.reasoning)
+		}
+	}
+}
+
+// Tags take precedence when both filters are supplied through the public
+// Search facade. The "go" tag and "workflow" type select disjoint fixtures,
+// so a wiring regression returns workflow1 instead of the tag matches.
+func TestService_Search_TagsTakePrecedenceOverType(t *testing.T) {
 	service := NewService()
 	tmpdir := testutil.SetupTestEngrams(t)
 
-	index := ecphory.NewIndex()
-	if err := index.Build(tmpdir); err != nil {
-		t.Fatalf("failed to build index: %v", err)
-	}
-
-	sorted := func(in []string) []string {
-		out := slices.Clone(in)
+	search := func(opts SearchOptions) []string {
+		t.Helper()
+		opts.EngramPath = tmpdir
+		results, err := service.Search(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("Search(%+v): %v", opts, err)
+		}
+		out := make([]string, 0, len(results))
+		for _, result := range results {
+			out = append(out, filepath.Base(result.Path))
+		}
 		slices.Sort(out)
 		return out
 	}
 
-	tagsOnly := service.filterCandidates(index, SearchOptions{Tags: []string{"go"}})
-	typeOnly := service.filterCandidates(index, SearchOptions{Type: "workflow"})
-	both := service.filterCandidates(index, SearchOptions{Tags: []string{"go"}, Type: "workflow"})
+	tagsOnly := search(SearchOptions{Tags: []string{"go"}})
+	typeOnly := search(SearchOptions{Type: "workflow"})
+	both := search(SearchOptions{Tags: []string{"go"}, Type: "workflow"})
 
 	if len(tagsOnly) == 0 || len(typeOnly) == 0 {
 		t.Fatalf("fixture cannot prove precedence: tags matched %d, type matched %d", len(tagsOnly), len(typeOnly))
 	}
-	if !slices.Equal(sorted(both), sorted(tagsOnly)) {
-		t.Errorf("filterCandidates(tags+type) = %v, want the tag-only result %v", both, tagsOnly)
+	for _, typed := range typeOnly {
+		if slices.Contains(tagsOnly, typed) {
+			t.Fatalf("fixture cannot prove precedence: %q appears in both tag-only %v and type-only %v results", typed, tagsOnly, typeOnly)
+		}
+	}
+	if !slices.Equal(both, tagsOnly) {
+		t.Errorf("Search(tags+type) = %v, want the tag-only result %v", both, tagsOnly)
 	}
 	for _, typed := range typeOnly {
 		if slices.Contains(both, typed) {
