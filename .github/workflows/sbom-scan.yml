@@ -32,8 +32,6 @@ concurrency:
 
 permissions:
   contents: read
-  security-events: write
-  vulnerability-alerts: read
 
 jobs:
   changes:
@@ -111,9 +109,14 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -173,9 +176,41 @@ jobs:
           echo "::notice ::Security tab. The full blocking scan runs on push to main,"
           echo "::notice ::on release, and daily."
 
+  provider-vulnerability-audit:
+    name: Provider Vulnerability Policy Audit
+    # Keep provider-read scope away from pull-request-authored code. This job
+    # runs only for trusted main, schedule, and manual-dispatch revisions.
+    needs: vulnerability-scan
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: read
+      vulnerability-alerts: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+
+      - name: Build vulnerability policy
+        run: go build -o "$RUNNER_TEMP/vulnerability-policy" ./cmd/vulnerability-policy
+        env:
+          GOWORK: "off"
+
       - name: Fetch provider vulnerability alerts
         id: provider_alerts
-        if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -190,11 +225,11 @@ jobs:
 
       - name: Run vulnerability policy canary
         id: policy_canary
-        if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.provider_alerts.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.provider_alerts.outcome == 'success' }}
         run: '"$RUNNER_TEMP/vulnerability-policy" self-test'
 
       - name: Audit provider vulnerability alerts
-        if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.provider_alerts.outcome == 'success' && steps.policy_canary.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.provider_alerts.outcome == 'success' && steps.policy_canary.outcome == 'success' }}
         run: |
           "$RUNNER_TEMP/vulnerability-policy" audit \
             --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
