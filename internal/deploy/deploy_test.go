@@ -117,6 +117,41 @@ func TestDeployValidatedDeploysTheBytesItValidated(t *testing.T) {
 	}
 }
 
+func TestDeployRenderedUsesSuppliedSnapshot(t *testing.T) {
+	a, opts := fixture(t, Artifact{
+		Name:     "p",
+		Source:   "src/p",
+		Deployed: "~/p",
+		Mode:     "0600",
+	}, "source changed after preparation\n")
+	if err := os.Remove(filepath.Join(opts.RepoRoot, a.Source)); err != nil {
+		t.Fatalf("remove source: %v", err)
+	}
+	rendered := []byte("prepared and validated\n")
+
+	res, err := DeployRendered(a, opts, rendered)
+	if err != nil {
+		t.Fatalf("DeployRendered: %v", err)
+	}
+	deployed, err := os.ReadFile(res.DeployedPath)
+	if err != nil {
+		t.Fatalf("read deployed: %v", err)
+	}
+	if got, want := string(deployed), string(rendered); got != want {
+		t.Fatalf("deployed content = %q, want supplied snapshot %q", got, want)
+	}
+	if got, want := res.SHA256, sha256hex(rendered); got != want {
+		t.Fatalf("deployed hash = %q, want %q", got, want)
+	}
+	info, err := os.Stat(res.DeployedPath)
+	if err != nil {
+		t.Fatalf("stat deployed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("deployed mode = %04o, want 0600", got)
+	}
+}
+
 func TestDeployValidatedFailureLeavesTargetUntouched(t *testing.T) {
 	a, opts := fixture(t, Artifact{Name: "p", Source: "src/p", Deployed: "~/p"}, "candidate\n")
 	target := a.DeployedPath(opts.Home)

@@ -127,6 +127,7 @@ func TestJSONTimestampPulsesAreNotAppendOnlyLogs(t *testing.T) {
 	}
 }
 
+// Conformance: deploy/launchd/SPEC.md DECL-LAUNCHD-05.
 func TestTokenRefresherPulseUsesCadenceOnlyLaunchdEvidence(t *testing.T) {
 	root := filepath.Join("..", "..")
 	plistRaw, err := os.ReadFile(filepath.Join(root, "deploy", "launchd", "com.dear-agent.token-refresher.plist"))

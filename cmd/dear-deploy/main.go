@@ -441,16 +441,20 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	// custom manifest's ownership contract.
 	var pulseResult *deploy.Result
 	var pulseDependencyErr error
+	var preparedJobs []byte
 	pulseHandled := false
 	if a, ok := artifactNamed(selected, pulseArtifactName); ok {
 		pulseHandled = true
-		result, err := deployPulseDuringDeploy(a, selected, manifestArtifacts, opts, c.asJSON, stdout)
+		result, renderedJobs, err := deployPulseDuringDeploy(
+			a, selected, manifestArtifacts, opts, c.asJSON, stdout,
+		)
 		if err != nil {
 			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
 			failures = append(failures, a.Name)
 			pulseDependencyErr = err
 		} else {
 			pulseResult = &result
+			preparedJobs = renderedJobs
 		}
 	} else if _, ok := artifactNamed(selected, jobsArtifactName); ok {
 		preview, _, _, err := pendingPulseNames(selected, manifestArtifacts, opts, stderr)
@@ -480,7 +484,13 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 			failures = append(failures, a.Name+" (pulse dependency)")
 			continue
 		}
-		r, err := deploy.Deploy(a, opts)
+		var r deploy.Result
+		var err error
+		if a.Name == jobsArtifactName && preparedJobs != nil {
+			r, err = deploy.DeployRendered(a, opts, preparedJobs)
+		} else {
+			r, err = deploy.Deploy(a, opts)
+		}
 		if err != nil {
 			// One bad artifact is reported but does not abort independent work.
 			// Activation is an atomic replace: an error leaves either the prior
@@ -843,129 +853,4 @@ func runMergePulses(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return emitMergePulsesOutcome(outcome, hostPath, c.asJSON, stdout, stderr)
-}
-
-// pulseArtifactName is the manifest entry whose deployed copy is the host's
-// absence-alarm pulse registry.
-const pulseArtifactName = "absence-alarm-pulses"
-
-// artifactNamed returns the selected artifact with this name, if any.
-func artifactNamed(selected []deploy.Artifact, name string) (deploy.Artifact, bool) {
-	for _, a := range selected {
-		if a.Name == name {
-			return a, true
-		}
-	}
-	return deploy.Artifact{}, false
-}
-
-// pulseHostPath derives the live registry from the selected manifest artifact
-// rather than hard-coding the standard host location.
-func pulseHostPath(a deploy.Artifact, opts deploy.Options) string {
-	return a.DeployedPath(opts.Home)
-}
-
-// mergePulsesDuringDeploy folds newly required pulses into the host registry
-// as part of a normal sync. A host with a registry this cannot safely update
-// keeps the registry it has and makes the deploy fail loud.
-func mergePulsesDuringDeploy(
-	a deploy.Artifact,
-	selected []deploy.Artifact,
-	manifestArtifacts []deploy.Artifact,
-	opts deploy.Options,
-	asJSON bool,
-	stdout io.Writer,
-) (deploy.PulseMergeResult, error) {
-	hostPath := pulseHostPath(a, opts)
-	required, err := requiredPulsesFor(selected, manifestArtifacts, opts)
-	if err != nil {
-		return deploy.PulseMergeResult{}, err
-	}
-	rendered, err := a.Render(opts.RepoRoot, opts.Home)
-	if err != nil {
-		return deploy.PulseMergeResult{}, fmt.Errorf("render pulse defaults: %w", err)
-	}
-	mode, err := a.FileMode()
-	if err != nil {
-		return deploy.PulseMergeResult{}, fmt.Errorf("resolve pulse registry mode: %w", err)
-	}
-	outcome, err := deploy.MergeRequiredPulsesRenderedResult(hostPath, rendered, mode, required)
-	if err != nil {
-		return deploy.PulseMergeResult{}, err
-	}
-	if len(outcome.Added) == 0 {
-		if (outcome.LedgerChanged || outcome.Reconciled) && !asJSON {
-			fmt.Fprintln(stdout, "  RECONCILED absence-alarm pulse offer ledger")
-		}
-		return outcome, nil
-	}
-	// In JSON mode the caller folds these names into the document it emits, so
-	// nothing is printed here: emitJSON has already written to stdout and
-	// appending text would make it undecodable.
-	if asJSON {
-		return outcome, nil
-	}
-	for _, n := range outcome.Added {
-		fmt.Fprintf(stdout, "  MERGED    absence-alarm pulse %s\n", n)
-	}
-	fmt.Fprintln(stdout, "  Restart absence-alarm for the new pulses to take effect.")
-	return outcome, nil
-}
-
-// jobsArtifactName is the manifest entry holding the recovery job registry.
-const jobsArtifactName = "recovery-loop-jobs"
-
-// requiredPulsesFor resolves the job registry through the manifest and command
-// selection. A selected normal job registry is about to be replaced from
-// source; an unselected or absent-only registry remains live and authoritative.
-// This also keeps --manifest relocation authoritative instead of consulting a
-// hard-coded repository path.
-func requiredPulsesFor(
-	selected, manifestArtifacts []deploy.Artifact,
-	opts deploy.Options,
-) (map[string]bool, error) {
-	if a, ok := artifactNamed(manifestArtifacts, jobsArtifactName); ok {
-		_, jobsSelected := artifactNamed(selected, jobsArtifactName)
-		registry, err := requiredPulseJobRegistry(a, jobsSelected, opts)
-		if err != nil {
-			return nil, err
-		}
-		return deploy.RequiredPulseNamesRendered(registry)
-	}
-	return deploy.RequiredPulseNames(opts.RepoRoot)
-}
-
-// requiredPulseJobRegistry returns the bytes the recovery-loop runtime will be
-// authoritative over after this command. An unselected live registry remains
-// deployed, while a selected normal registry will be replaced from source.
-// Absent-only registries remain operator-owned even when selected. A missing
-// live registry falls back to the rendered source that would seed it; other
-// observation failures are not absence.
-func requiredPulseJobRegistry(a deploy.Artifact, jobsSelected bool, opts deploy.Options) ([]byte, error) {
-	// An unselected registry remains the runtime authority after this command,
-	// regardless of whether it is normally source-owned. Absent-only registries
-	// are always operator-owned and likewise remain live even when selected.
-	if a.AbsentOnly || !jobsSelected {
-		livePath := a.DeployedPath(opts.Home)
-		// #nosec G703 -- livePath is the manifest-selected deployed artifact;
-		// observing that exact runtime input is the purpose of this boundary.
-		_, err := os.Lstat(livePath)
-		switch {
-		case err == nil:
-			// #nosec G703 -- see the manifest-selected path justification above.
-			live, readErr := os.ReadFile(livePath)
-			if readErr != nil {
-				return nil, fmt.Errorf("read live recovery job registry %s: %w", livePath, readErr)
-			}
-			return live, nil
-		case !os.IsNotExist(err):
-			return nil, fmt.Errorf("inspect live recovery job registry %s: %w", livePath, err)
-		}
-	}
-
-	rendered, err := a.Render(opts.RepoRoot, opts.Home)
-	if err != nil {
-		return nil, fmt.Errorf("render recovery job registry: %w", err)
-	}
-	return rendered, nil
 }

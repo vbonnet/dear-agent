@@ -70,10 +70,10 @@ broken.
 
 **DEP-24** When status or dry-run reports nested pulse state, the system shall keep every result name equal to a manifest-declared artifact selector and shall carry pulse-level context separately.
 
-**DEP-25** When scheduled token refresh liveness is monitored, the system shall observe the LaunchAgent's dedicated cadence audit path rather than the ordinary CLI default audit path.
-
 **DEP-26** When a pulse registry is selected without its normal recovery-job registry, the system shall derive required pulses from the deployed job registry, fall back to rendered source only when that deployed registry does not exist, and fail without changing deployed pulse bytes when the live registry cannot be observed or its requirements cannot be satisfied.
 
 **DEP-27** When an existing pulse registry needs only first-time offer-ledger adoption, the system shall report pulse-artifact work without writing during status and dry-run, report an update during a real sync, and report the state current during later previews and syncs.
 
 **DEP-28** When required-pulse transaction state is renamed into place or its pending marker is removed, the system shall sync the directory that owns that namespace update before advancing to the next transaction phase or reporting success.
+
+**DEP-29** When normal pulse and recovery-job registries are selected together, the system shall validate prospective pulse bytes against requirements from both deployed jobs and the exact rendered prospective jobs before either registry changes, publish the same rendered job bytes used in validation, and keep every deployed-job pulse present if job publication later fails.

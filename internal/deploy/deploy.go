@@ -101,6 +101,31 @@ func DeployValidated(
 	return deploy(a, opts, validate)
 }
 
+// DeployRendered atomically deploys an already-rendered artifact snapshot. It
+// is for callers that must validate one artifact against another and then
+// publish the exact same bytes later in the operation. The snapshot is copied
+// before deployment so caller mutation cannot change the bytes being written.
+// The caller owns semantic validation of the supplied bytes.
+func DeployRendered(a Artifact, opts Options, rendered []byte) (Result, error) {
+	if opts.RepoRoot == "" {
+		return Result{}, fmt.Errorf("deploy rendered: RepoRoot is required")
+	}
+	if a.IsBinary() {
+		return Result{}, fmt.Errorf("deploy rendered: binary artifact %q has no rendered file content", a.Name)
+	}
+	home, err := resolveHome(opts)
+	if err != nil {
+		return Result{}, err
+	}
+	deployedPath := a.DeployedPath(home)
+	res := Result{Name: a.Name, DeployedPath: deployedPath}
+	mode, err := a.FileMode()
+	if err != nil {
+		return res, err
+	}
+	return deployRendered(a, opts, home, deployedPath, res, mode, bytes.Clone(rendered))
+}
+
 func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, error) {
 	if opts.RepoRoot == "" {
 		return Result{}, fmt.Errorf("deploy: RepoRoot is required")
@@ -137,6 +162,18 @@ func deploy(a Artifact, opts Options, validate func([]byte) error) (Result, erro
 		res.Action = ActionSkipped
 		return res, nil
 	}
+	return deployRendered(a, opts, home, deployedPath, res, mode, content)
+}
+
+func deployRendered(
+	a Artifact,
+	opts Options,
+	home string,
+	deployedPath string,
+	res Result,
+	mode os.FileMode,
+	content []byte,
+) (Result, error) {
 	wantHash := sha256hex(content)
 	res.SHA256 = wantHash
 

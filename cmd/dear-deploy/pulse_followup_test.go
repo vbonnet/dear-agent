@@ -326,6 +326,252 @@ func TestNormalPulseValidationPrecedesJobsRegardlessOfManifestOrder(t *testing.T
 	}
 }
 
+func TestNormalRegistryPairRejectsPulseRemovalBeforeJobsCanPublish(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	pulseSource := `{"pulses":[{"name":"next-tick","type":"file_mtime","path":"~/next","window":"1h"}]}`
+	jobsSource := `{"jobs":[{"name":"next-job","pulse":"next-tick"}]}`
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), pulseSource)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"), jobsSource)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+    create-dirs:
+      - ~/jobs-write-blocker/child
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+`)
+
+	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	pulseBefore := `{"pulses":[{"name":"live-tick","type":"file_mtime","path":"~/live","window":"1h"}]}`
+	jobsBefore := `{"jobs":[{"name":"live-job","pulse":"live-tick"}]}`
+	mustWrite(t, pulsePath, pulseBefore)
+	mustWrite(t, jobsPath, jobsBefore)
+	// If pulse validation allowed the A -> B replacement, this file would make
+	// the later jobs deployment fail after live-tick had already disappeared.
+	mustWrite(t, filepath.Join(home, "jobs-write-blocker"), "not a directory")
+
+	code, out, errs := invoke(t, repo, home, "sync")
+	if code != 1 || !strings.Contains(errs, "live-tick") {
+		t.Fatalf("sync exit=%d stdout=%s stderr=%s; want live pulse dependency failure", code, out, errs)
+	}
+	for path, want := range map[string]string{pulsePath: pulseBefore, jobsPath: jobsBefore} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("rejected pair changed %s: got %s want %s", path, got, want)
+		}
+	}
+}
+
+func TestNormalRegistryPairPreservesLivePulseAcrossLaterJobsFailure(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	transitionPulses := `{"pulses":[
+  {"name":"live-tick","type":"file_mtime","path":"~/live","window":"1h"},
+  {"name":"next-tick","type":"file_mtime","path":"~/next","window":"1h"}
+]}`
+	nextPulses := `{"pulses":[{"name":"next-tick","type":"file_mtime","path":"~/next","window":"1h"}]}`
+	nextJobs := `{"jobs":[{"name":"next-job","pulse":"next-tick"}]}`
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), transitionPulses)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"), nextJobs)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+    create-dirs:
+      - ~/jobs-write-blocker/child
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+`)
+
+	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	liveJobs := `{"jobs":[{"name":"live-job","pulse":"live-tick"}]}`
+	mustWrite(t, pulsePath,
+		`{"pulses":[{"name":"live-tick","type":"file_mtime","path":"~/live","window":"1h"}]}`)
+	mustWrite(t, jobsPath, liveJobs)
+	blocker := filepath.Join(home, "jobs-write-blocker")
+	mustWrite(t, blocker, "not a directory")
+
+	code, out, errs := invoke(t, repo, home, "sync")
+	if code != 1 || !strings.Contains(errs, "creating required dir") {
+		t.Fatalf("sync exit=%d stdout=%s stderr=%s; want later jobs failure", code, out, errs)
+	}
+	if got, err := os.ReadFile(pulsePath); err != nil || string(got) != transitionPulses {
+		t.Fatalf("pulse transition after jobs failure: got=%s err=%v", got, err)
+	}
+	if got, err := os.ReadFile(jobsPath); err != nil || string(got) != liveJobs {
+		t.Fatalf("live jobs after failed publication: got=%s err=%v", got, err)
+	}
+
+	if err := os.Remove(blocker); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errs := invoke(t, repo, home, "sync"); code != 0 {
+		t.Fatalf("safe jobs retry exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	if got, err := os.ReadFile(jobsPath); err != nil || string(got) != nextJobs {
+		t.Fatalf("jobs after safe retry: got=%s err=%v", got, err)
+	}
+
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"), nextPulses)
+	if code, out, errs := invoke(t, repo, home, "sync", pulseArtifactName); code != 0 {
+		t.Fatalf("old-pulse cleanup exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	if got, err := os.ReadFile(pulsePath); err != nil || string(got) != nextPulses {
+		t.Fatalf("pulse cleanup after jobs migration: got=%s err=%v", got, err)
+	}
+}
+
+func TestNormalRegistryPairDeploysTheJobsSnapshotValidatedByPulses(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	prospective := `{"jobs":[{"name":"next-job","pulse":"next-tick"}]}`
+	replacement := `{"jobs":[{"name":"changed-job","pulse":"unvalidated-tick"}]}`
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"),
+		`{"pulses":[{"name":"next-tick","type":"file_mtime","path":"~/next","window":"1h"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+`)
+
+	source := filepath.Join(repo, "custom/jobs.json")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(repo, "jobs-source.fifo")
+	if err := unix.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	replacementPath := filepath.Join(repo, "replacement-jobs.json")
+	mustWrite(t, replacementPath, replacement)
+	if err := os.Symlink(fifo, source); err != nil {
+		t.Fatalf("symlink jobs source: %v", err)
+	}
+
+	writerDone := make(chan error, 1)
+	go func() {
+		f, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+		if err != nil {
+			writerDone <- err
+			return
+		}
+		if _, err = io.WriteString(f, prospective); err == nil {
+			nextLink := source + ".next"
+			if err = os.Symlink(replacementPath, nextLink); err == nil {
+				err = os.Rename(nextLink, source)
+			}
+		}
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+		writerDone <- err
+	}()
+
+	code, out, errs := invoke(t, repo, home, "sync")
+	if err := <-writerDone; err != nil {
+		t.Fatalf("replace jobs source after first render: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("sync exit=%d stdout=%s stderr=%s", code, out, errs)
+	}
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	if got, err := os.ReadFile(jobsPath); err != nil || string(got) != prospective {
+		t.Fatalf("deployed jobs snapshot: got=%s err=%v want=%s", got, err, prospective)
+	}
+}
+
+func TestNormalRegistryPairFailsClosedWhenLiveJobsCannotBeRead(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "deploy/absence-alarm/pulses.json"),
+		`{"pulses":[{"name":"next-tick","type":"file_mtime","path":"~/next","window":"1h"}]}`)
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"),
+		`{"jobs":[{"name":"next-job","pulse":"next-tick"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+`)
+
+	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	pulseBefore := `{"pulses":[{"name":"live-tick","type":"file_mtime","path":"~/live","window":"1h"}]}`
+	mustWrite(t, pulsePath, pulseBefore)
+	if err := os.MkdirAll(jobsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errs := invoke(t, repo, home, "sync")
+	if code != 1 || !strings.Contains(errs, "read live recovery job registry") {
+		t.Fatalf("sync exit=%d stdout=%s stderr=%s; want live observation failure", code, out, errs)
+	}
+	if got, err := os.ReadFile(pulsePath); err != nil || string(got) != pulseBefore {
+		t.Fatalf("unreadable live jobs changed pulses: got=%s err=%v", got, err)
+	}
+}
+
+func TestNormalRegistryPairRejectsMissingOptionalPulseSource(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, "custom/jobs.json"),
+		`{"jobs":[{"name":"next-job","pulse":"next-tick"}]}`)
+	mustWrite(t, filepath.Join(repo, "deploy/manifest.yaml"), `artifacts:
+  - name: recovery-loop-jobs
+    source: custom/jobs.json
+    deployed: ~/.config/dear-agent/recovery-loop-jobs.json
+    mode: "0644"
+  - name: absence-alarm-pulses
+    source: deploy/absence-alarm/missing-pulses.json
+    deployed: ~/.config/dear-agent/absence-alarm-pulses.json
+    mode: "0644"
+    optional: true
+`)
+
+	pulsePath := filepath.Join(home, ".config/dear-agent/absence-alarm-pulses.json")
+	jobsPath := filepath.Join(home, ".config/dear-agent/recovery-loop-jobs.json")
+	pulseBefore := `{"pulses":[{"name":"live-tick","type":"file_mtime","path":"~/live","window":"1h"}]}`
+	jobsBefore := `{"jobs":[{"name":"live-job","pulse":"live-tick"}]}`
+	mustWrite(t, pulsePath, pulseBefore)
+	mustWrite(t, jobsPath, jobsBefore)
+
+	code, out, errs := invoke(t, repo, home, "sync")
+	if code != 1 || !strings.Contains(errs, "pulse source is unavailable") {
+		t.Fatalf("sync exit=%d stdout=%s stderr=%s; want missing pulse source failure", code, out, errs)
+	}
+	for path, want := range map[string]string{pulsePath: pulseBefore, jobsPath: jobsBefore} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("missing pulse source changed %s: got %s want %s", path, got, want)
+		}
+	}
+}
+
 func TestTargetedNormalPulseSyncValidatesUnselectedLiveJobs(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
