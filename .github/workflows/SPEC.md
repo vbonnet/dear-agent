@@ -1,6 +1,6 @@
 # GitHub Workflow Configuration Specification
 
-<!-- Last audited at: 2026-08-27 -->
+<!-- Last audited at: 2026-09-17 -->
 
 ## EARS Requirements
 
