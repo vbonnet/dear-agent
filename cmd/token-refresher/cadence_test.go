@@ -311,30 +311,92 @@ func TestCadenceExit_PrunesStaleSentinels(t *testing.T) {
 	}
 }
 
+type activeCadenceSentinelFixture struct {
+	name            string
+	path            string
+	credentialsPath string
+	fingerprint     string
+	payload         []byte
+	agedModTime     time.Time
+}
+
+func seedActiveDeadSentinel(t *testing.T, stateDir string, age time.Duration) activeCadenceSentinelFixture {
+	t.Helper()
+
+	credentialsPath := writeCreds(t, "access-active", freshMs(), "refresh-active")
+	tokenFP, _ := credentialsFingerprint(credentialsPath)
+	if tokenFP == "" {
+		t.Fatal("credentials fingerprint is empty")
+	}
+
+	sentinelName := cadenceSentinelName("", credentialsPath)
+	sentinelPath := filepath.Join(stateDir, sentinelName)
+	rec := sentinelRecord{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		CredentialsPath: credentialsPath,
+		Fingerprint:     tokenFP,
+		Outcome:         "dead",
+	}
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal sentinel: %v", err)
+	}
+	payload = append(payload, '\n')
+	if err := os.WriteFile(sentinelPath, payload, 0o600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	agedTime := time.Now().Add(-age)
+	if err := os.Chtimes(sentinelPath, agedTime, agedTime); err != nil {
+		t.Fatalf("age sentinel: %v", err)
+	}
+	info, err := os.Stat(sentinelPath)
+	if err != nil {
+		t.Fatalf("stat aged sentinel: %v", err)
+	}
+
+	return activeCadenceSentinelFixture{
+		name:            sentinelName,
+		path:            sentinelPath,
+		credentialsPath: credentialsPath,
+		fingerprint:     tokenFP,
+		payload:         payload,
+		agedModTime:     info.ModTime(),
+	}
+}
+
 func TestCadenceExit_PreservesActiveSentinelSpanningMaxAge(t *testing.T) {
 	dir := t.TempDir()
-	now := time.Now()
-
-	activeSentinel := filepath.Join(dir, deathSentinelName)
-	if err := os.WriteFile(activeSentinel, []byte("active\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.Chtimes(activeSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
+	fixture := seedActiveDeadSentinel(t, dir, 48*time.Hour)
 
 	var stderr bytes.Buffer
 	// During an ongoing failure episode, cadenceExit must not delete the sentinel
 	// being handled, which would re-alert the operator every maxAge.
-	code := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, 24*time.Hour)
+	code := cadenceExit(
+		exitTokenFamilyDead,
+		dir,
+		fixture.name,
+		"",
+		fixture.credentialsPath,
+		fixture.fingerprint,
+		&stderr,
+		24*time.Hour,
+	)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
-	if _, err := os.Stat(activeSentinel); err != nil {
-		t.Errorf("active sentinel was pruned: %v", err)
+	content, err := os.ReadFile(fixture.path)
+	if err != nil {
+		t.Fatalf("active sentinel was pruned: %v", err)
 	}
-	// Sentinel content was not replaced (would indicate re-alerting).
-	content, err := os.ReadFile(activeSentinel)
-	if err != nil || string(content) != "active\n" {
-		t.Errorf("sentinel rewritten during unresolved episode: %q", string(content))
+	if !bytes.Equal(content, fixture.payload) {
+		t.Errorf("sentinel rewritten during unresolved episode:\n got: %q\nwant: %q", content, fixture.payload)
+	}
+	info, err := os.Stat(fixture.path)
+	if err != nil {
+		t.Fatalf("stat refreshed sentinel: %v", err)
+	}
+	if !info.ModTime().After(fixture.agedModTime) {
+		t.Errorf("sentinel ModTime = %v, want after aged ModTime %v", info.ModTime(), fixture.agedModTime)
 	}
 }
 
@@ -419,27 +481,32 @@ func TestCadenceExit_PreservesSentinelsForAllActiveJobs(t *testing.T) {
 
 func TestNotifyCadenceOnce_RefreshesSentinelModTimeOnActiveEpisode(t *testing.T) {
 	dir := t.TempDir()
-	now := time.Now()
+	fixture := seedActiveDeadSentinel(t, dir, 10*time.Hour)
 
-	sentinel := filepath.Join(dir, deathSentinelName)
-	if err := os.WriteFile(sentinel, []byte("initial\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	oldTime := now.Add(-10 * time.Hour)
-	_ = os.Chtimes(sentinel, oldTime, oldTime)
+	notifyCadenceOnce(
+		dir,
+		fixture.name,
+		"",
+		fixture.credentialsPath,
+		fixture.fingerprint,
+		"dead",
+		"test title",
+		"test message",
+	)
 
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "", "dead", "test title", "test message")
-
-	info, err := os.Stat(sentinel)
+	info, err := os.Stat(fixture.path)
 	if err != nil {
 		t.Fatalf("stat sentinel: %v", err)
 	}
-	if !info.ModTime().After(oldTime.Add(9 * time.Hour)) {
-		t.Errorf("sentinel ModTime was not refreshed: %v (wanted close to %v)", info.ModTime(), now)
+	if !info.ModTime().After(fixture.agedModTime) {
+		t.Errorf("sentinel ModTime = %v, want after aged ModTime %v", info.ModTime(), fixture.agedModTime)
 	}
-	content, err := os.ReadFile(sentinel)
-	if err != nil || string(content) != "initial\n" {
-		t.Errorf("sentinel content was modified: %q", string(content))
+	content, err := os.ReadFile(fixture.path)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	if !bytes.Equal(content, fixture.payload) {
+		t.Errorf("sentinel content was modified:\n got: %q\nwant: %q", content, fixture.payload)
 	}
 }
 
