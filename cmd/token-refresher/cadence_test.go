@@ -323,8 +323,20 @@ func TestCadenceExit_PreservesActiveSentinelSpanningMaxAge(t *testing.T) {
 
 	var stderr bytes.Buffer
 	// During an ongoing failure episode, cadenceExit must not delete the sentinel
-	// being handled, which would re-alert the operator every maxAge.
-	code := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, 24*time.Hour)
+	// being handled, which would re-alert the operator every maxAge. Point at a
+	// synthetic missing credentials file so the host's real default credentials
+	// cannot change this test's episode fingerprint.
+	credentialsPath := filepath.Join(dir, "missing-credentials.json")
+	code := cadenceExit(
+		exitTokenFamilyDead,
+		dir,
+		deathSentinelName,
+		"",
+		credentialsPath,
+		"",
+		&stderr,
+		24*time.Hour,
+	)
 	if code != exitOK {
 		t.Errorf("cadenceExit = %d, want %d", code, exitOK)
 	}
@@ -428,7 +440,19 @@ func TestNotifyCadenceOnce_RefreshesSentinelModTimeOnActiveEpisode(t *testing.T)
 	oldTime := now.Add(-10 * time.Hour)
 	_ = os.Chtimes(sentinel, oldTime, oldTime)
 
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "", "dead", "test title", "test message")
+	// Use an explicit synthetic path rather than letting an empty path resolve
+	// to the operator's real default credentials.
+	credentialsPath := filepath.Join(dir, "missing-credentials.json")
+	notifyCadenceOnce(
+		dir,
+		deathSentinelName,
+		"",
+		credentialsPath,
+		"",
+		"dead",
+		"test title",
+		"test message",
+	)
 
 	info, err := os.Stat(sentinel)
 	if err != nil {
