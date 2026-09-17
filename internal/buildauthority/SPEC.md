@@ -79,7 +79,7 @@ additional product requirements.
 **BUILD-AUTH-053** When source local configuration is admitted, the build authority shall require every normalized key and value to match the normative closed source-config table.
 **BUILD-AUTH-054** If Repository contains a forbidden routing, replacement, shallow, promisor, include, lock, or execution-affecting state, then the build authority shall refuse admission.
 **BUILD-AUTH-055** When the source object store is inventoried, the build authority shall admit only canonical loose objects and complete matching version-2 pack/index pairs as copied content.
-**BUILD-AUTH-056** When the source object store is inventoried, the build authority shall recognize only the exact bounded regular entries in the normative object-auxiliary table as noncontent metadata.
+**BUILD-AUTH-056** When the source object store is inventoried, the build authority shall parse only the chain controls and dumb-transport pack list, checksum-bind the graph and MIDX primaries, stream-hash the intentionally opaque bodies, and enforce the exact bounds, coexistence, membership, and revalidation policy in the normative object-auxiliary tables.
 **BUILD-AUTH-057** When private object content is copied, the build authority shall omit every source-object auxiliary named by BUILD-AUTH-056.
 **BUILD-AUTH-058** If the source object store contains a routing marker, incomplete pair, symlink, special entry, lock, or unknown name, then the build authority shall refuse admission.
 
@@ -1040,18 +1040,133 @@ single `.git` child is enumerated.
 
 ### Closed object-store auxiliary grammar
 
-`H` below means exactly 40 lowercase hexadecimal bytes for SHA-1 or 64 for
-SHA-256. Every auxiliary is a bounded, digested, no-follow protected regular
-file that is omitted from the private copy.
+The external terminology and checksum layout are pinned to Apple Git
+`Git-155`, peeled commit
+[`6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba`](https://github.com/apple-oss-distributions/Git/tree/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git).
+The exact source set is
+[`Documentation/technical/commit-graph.adoc`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/Documentation/technical/commit-graph.adoc),
+[`Documentation/gitformat-commit-graph.adoc`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/Documentation/gitformat-commit-graph.adoc),
+[`commit-graph.c`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/commit-graph.c),
+[`Documentation/technical/multi-pack-index.adoc`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/Documentation/technical/multi-pack-index.adoc),
+[`Documentation/gitformat-pack.adoc`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/Documentation/gitformat-pack.adoc),
+[`midx.c`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/midx.c),
+[`pack-revindex.c`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/pack-revindex.c),
+and
+[`pack-bitmap.c`](https://github.com/apple-oss-distributions/Git/blob/6b2f9bfe72d6d4b5c9bcc1c2d0236c026d321cba/src/git/pack-bitmap.c).
+Each listed Git blob is byte-identical to the corresponding blob in upstream
+Git `v2.50.1`, peeled commit
+[`d82adb61ba2fd11d8f2587fca1b6bd7925ce4044`](https://github.com/git/git/tree/d82adb61ba2fd11d8f2587fca1b6bd7925ce4044).
+Those sources explain the native formats; the narrower admission policy below
+is normative and does not float with later Git releases.
 
-| Location or form | Exact admitted closure |
+`H` below is exactly 40 lowercase hexadecimal bytes for a SHA-1 repository or
+64 for SHA-256. Its decoded value is respectively 20 or 32 bytes. Every
+auxiliary file is a no-follow protected regular file, enters the repository
+manifest with an exact SHA-256 content digest, and is omitted from the private
+copy. Admission grants no command, parse, copy, or object authority.
+
+| Location or form | Exact admitted closure | Content policy |
+| --- | --- | --- |
+| Directories | `info/`, `pack/`, canonical two-hex loose directories, optional `info/commit-graphs/`, and optional `pack/multi-pack-index.d/`; either optional directory may be empty | No directory content |
+| Commit graph | Either `info/commit-graph`, or `info/commit-graphs/commit-graph-chain` plus exactly its named `graph-H.graph` files; the two forms cannot coexist | The chain uses the exact control grammar below; each primary is checksum-bound below and its remaining binary body is opaque |
+| Dumb-transport pack list | `info/packs` containing only LF-terminated blank records or `P pack-H.pack` records; every named pack exists and occurs at most once, but the list may be a stale subset because no admitted command consumes it | Parse at most 1,000,000 records within the 8-GiB file bound; count blank records; do not consult the result for copy or object discovery |
+| Per-pack companions | `pack/pack-H.rev`, `.bitmap`, `.keep`, or `.mtimes` only when the same H has one admitted complete `.pack` and `.idx` pair | Bounded opaque bytes, including an empty body; neither reverse-index nor bitmap structure is decoded |
+| Monolithic MIDX | `pack/multi-pack-index` with optional `multi-pack-index-H.rev` and `multi-pack-index-H.bitmap`; H equals the computed primary checksum | The primary is checksum-bound below; companion bodies are bounded opaque bytes, including an empty body |
+| Incremental MIDX | `pack/multi-pack-index.d/multi-pack-index-chain`, exactly its named `multi-pack-index-H.midx` layers, and optional same-H `.rev` or `.bitmap` companions | The chain uses the exact control grammar below; every layer is checksum-bound below; companion bodies are bounded opaque bytes, including an empty body |
+
+A monolithic and an incremental MIDX may coexist. Each has independent exact
+closure and checksum binding. The authority applies no read precedence because
+no source MIDX or companion is consumed or copied. SHA-1 and SHA-256 use the
+same policy with their repository-specific H width; in particular, `.rev` and
+`.bitmap` bodies remain opaque under both formats and no embedded hash-version
+field is trusted or required.
+
+Both chain-control files use this complete grammar:
+
+| Property | Exact policy |
 | --- | --- |
-| Directories | `info/`, `pack/`, canonical two-hex loose directories, optional `info/commit-graphs/`, and optional `pack/multi-pack-index.d/`; either optional directory may be empty |
-| Commit graph | Either `info/commit-graph`, or `info/commit-graphs/commit-graph-chain` plus exactly its named `graph-H.graph` files |
-| Dumb-transport pack list | `info/packs` containing only blank lines or `P pack-H.pack`; every named pack exists, but the list may be a stale subset because no admitted command consumes it |
-| Per-pack companions | `pack/pack-H.rev`, `.bitmap`, `.keep`, or `.mtimes` only when the same H has one admitted complete `.pack` and `.idx` pair |
-| Monolithic MIDX | `pack/multi-pack-index` with optional `multi-pack-index-H.rev` and `multi-pack-index-H.bitmap`; H equals the primary MIDX trailing checksum |
-| Incremental MIDX | `pack/multi-pack-index.d/multi-pack-index-chain`, exact named `multi-pack-index-H.midx` layers, and optional same-H `.rev` or `.bitmap` files; the chain and layers have exact closure with no orphan |
+| Record | One H followed by one LF byte; CR, NUL, blank, whitespace-padded, uppercase, nonhexadecimal, and partial records refuse |
+| Cardinality and file size | One through 256 records; therefore at most 10,496 bytes for SHA-1 or 16,640 for SHA-256; zero records refuse as malformed, while a file one byte over its repository-format ceiling or record 257 refuses as limit before termination or record grammar is considered |
+| Termination | The final record has its LF; a missing final LF or any trailing byte refuses |
+| Order | Preserve the declared lowest-to-highest sequence exactly and never sort it; because layer bodies are omitted and otherwise opaque, admission does not infer or validate another order from binary chunks |
+| Distinctness | Every H occurs exactly once; a duplicate refuses as malformed |
+| Closure | The decoded H sequence names exactly the layer files in that chain directory; a missing named layer refuses and an extra layer or companion without its primary refuses |
+
+`info/packs` uses this complete grammar:
+
+| Property | Exact policy |
+| --- | --- |
+| Empty file and record | A zero-byte file is valid. An LF byte alone is one valid blank record, and blank records count toward the record bound |
+| Named record | Exact ASCII `P pack-H.pack` followed by one LF byte, with H at the repository-format lowercase hexadecimal width |
+| Termination and alphabet | Every nonempty record has its final LF; CR, NUL, whitespace padding, uppercase, nonhexadecimal, a partial H, another prefix or suffix, or any trailing byte refuses |
+| Cardinality and distinctness | Zero through 1,000,000 total records including blanks; named H values are unique; record 1,000,001 refuses as limit and a duplicate H refuses as malformed |
+| Membership | Every named H has one admitted complete matching `pack-H.pack` and `pack-H.idx` pair; unnamed admitted pairs are allowed because the list is only a stale dumb-transport subset |
+
+For a monolithic commit graph, monolithic MIDX, split commit-graph layer, or
+incremental MIDX layer, the descriptor-bound exact-size reader requires at
+least one repository-hash-width trailer. It streams the repository hash over
+every preceding byte and requires the result to equal the raw trailing hash.
+For a named layer, that same hash must equal both its filename H and its chain
+record. For a monolithic MIDX, that computed H is the only H allowed on its
+`.rev` and `.bitmap` companion names. No other primary-body header, chunk,
+table, reverse-index, or bitmap byte is decoded. Every non-chain auxiliary is
+at most 8 GiB, is hashed without whole-file retention, and remains within the
+64-GiB repository aggregate.
+
+The checksum-binding fixtures use exact opaque payloads rather than native Git
+chunks. `P0` is the bytes `fixture-body\n`, whose SHA-1 is
+`278ba08e67b94297af0cbad4802a99d78b6edc1d` and whose SHA-256 is
+`eb4a9d5d2425f9c3df774098d2a4f0d8cb3b39b70bbf104a5e00331d8634f0bb`.
+`P1` is the bytes `fixture-body-2\n`, whose SHA-1 is
+`6c7878392d192da73498d35962384110cfe28dad` and whose SHA-256 is
+`560846af25c6cc921054ea227ced3adc0c2e31157176e04e423eabd9375656fa`.
+A valid proving primary is `P0` or `P1` followed by the corresponding raw
+decoded digest bytes, never its hexadecimal text.
+
+Initial admission first classifies the complete observed topology under the
+closed pathname grammar; it does not yet claim an expected row set. In raw-path
+byte order it then validates each present row's identity and security evidence,
+performs its exact-size parser- or hash-owned read, parses a chain or
+`info/packs` when applicable, computes its SHA-256 manifest digest and any
+repository-hash checksum binding, and performs the post-read observation. Only
+after every row succeeds may it validate chain membership, pack-list
+membership, coexistence, and companion closure, then seal the complete row set
+and repository and source-object manifests.
+
+Revalidation first compares complete observed topology, size, identity, and
+security evidence with that sealed row set. For each unchanged present row in
+raw-path byte order it then repeats the exact-size read, grammar, repository-hash
+binding, SHA-256 digest, post-read observation, and closure checks before
+comparing retained content claims and manifests. Complete-byte grammar or
+repository-hash failures retain their parser or identity attribution; only
+grammar-, checksum-, and closure-valid bytes whose sealed digest or declared
+chain order changed become `source/compare/unstable`. Opaque bytes are never
+decoded, but their exact size and digest remain revalidated.
+
+| Observation | Exact attribution |
+| --- | --- |
+| Object-inventory or non-chain 8-GiB bound exceeded | `source/walk/limit` |
+| On initial admission, a chain file is above 10,496 SHA-1 or 16,640 SHA-256 bytes | `source/parse/limit` |
+| During admission or revalidation, chain record 257, `info/packs` record 1,000,001, or another decoded-work bound is reached | `source/parse/limit` |
+| Complete chain or `info/packs` bytes violate their grammar or distinctness, or a primary is shorter than its trailer | `source/parse/malformed` |
+| Chain- or `info/packs`-named primary is absent | `source/open/not-found` |
+| Extra primary, orphan companion, or forbidden commit-graph coexistence is present | `source/validate/unsupported` |
+| Computed primary checksum differs from its trailer, filename H, chain H, or the primary H named by a monolithic companion | `source/compare/identity` |
+| Revalidation observes topology or size drift, or grammar-, checksum-, and closure-valid chain order or same-identity content drift | `source/compare/unstable` |
+| Revalidation resolves an expected row to another filesystem object | `source/compare/identity` |
+
+Implementation is incomplete; its required future evidence groups are:
+
+| Proving test | Required exact fixtures |
+| --- | --- |
+| `TestSourceObjectAuxiliaryChainGrammar` | Valid one- and two-record SHA-1 and SHA-256 chains over P0 and P1; 39/40/41-byte SHA-1 and 63/64/65-byte SHA-256 H fields, cross-format width, uppercase, nonhexadecimal, CRLF, blank, padded, NUL, missing-final-LF, double-LF, and trailing-byte cases; duplicate H; empty chain |
+| `TestSourceObjectAuxiliaryPackListGrammar` | Valid empty file, blank record, and SHA-1 and SHA-256 named records; wrong prefix and suffix; 39/40/41-byte SHA-1 and 63/64/65-byte SHA-256 H fields; cross-format width, uppercase, nonhexadecimal, CRLF, padded, NUL, missing-final-LF, and trailing-byte cases; duplicate H |
+| `TestSourceObjectAuxiliaryBounds` | Exactly 10,496/10,497 SHA-1 chain bytes, 16,640/16,641 SHA-256 chain bytes, 256 records and record 257 with limit-before-grammar precedence; exactly 1,000,000 `info/packs` records and record 1,000,001; exactly 8 GiB and one byte over for a non-chain auxiliary without allocating either body |
+| `TestSourceObjectAuxiliaryClosure` | Exact members; one missing named member; one unlisted extra member; duplicate and absent `info/packs` member; companion without primary; commit-graph monolithic/split conflict; independently valid coexisting monolithic and incremental MIDX; a valid monolithic MIDX cannot hide a malformed incremental MIDX |
+| `TestSourceObjectAuxiliaryChecksumBinding` | Exact P0 and P1 monolithic and split/layer vectors; wrong raw trailer; correct trailer under the wrong filename or chain H; monolithic MIDX companion bound to the wrong primary under SHA-1 and SHA-256 |
+| `TestSourceObjectAuxiliaryOpaqueBodyPolicy` | Empty and arbitrary non-Git `.rev`, `.bitmap`, `.keep`, and `.mtimes` bodies admitted when name-bound; P0 and P1 admitted without header or chunk decoding; no opaque body enters the private copy |
+| `TestSourceObjectAuxiliaryRevalidation` | Unchanged exact rows; reordered chain; same-identity byte change; size change; added, removed, and replaced row |
+| `TestSourceObjectAuxiliaryFailureAttribution` | One fixture for every attribution row; the first failure retains its phase and later closure or manifest checks do not relabel it |
 
 `info/alternates`, `info/http-alternates`, every `.promisor`, every
 temporary or lock file including `objects/maintenance.lock`, an orphan
@@ -1379,7 +1494,7 @@ top-level Go call. The exception never authorizes a module-owned nil stdin.
 | GOMODCACHE | 500,000 descendants, root excluded; 16 GiB aggregate regular bytes; 512 MiB/regular file |
 | Source local config | 1 MiB; 4,096 normalized records |
 | Packed refs | 16 MiB; 1,000,000 LF-terminated rows |
-| Repository metadata/object files | 1,000,000 descendants, inspected roots excluded; 64 GiB aggregate regular bytes; 8 GiB/pack |
+| Repository metadata/object files | 1,000,000 descendants, inspected roots excluded; 64 GiB aggregate regular bytes; 8 GiB/pack or non-chain auxiliary; chain controls are at most 256 records, 10,496 SHA-1 bytes, or 16,640 SHA-256 bytes; `info/packs` is at most 1,000,000 records |
 | Physical Git representations | 1,000,000 loose-plus-pack entries, duplicates included |
 | Git representation inflation | 512 MiB/representation; 16 GiB aggregate inflated bytes charged per physical representation |
 | Git resolved objects | 512 MiB/resolved object; separate 16 GiB aggregate resolved bytes charged per physical representation |
@@ -1841,12 +1956,12 @@ merge, installation, or activation.
 | Requirements | Required evidence |
 | --- | --- |
 | 001-019 | Compile-time interface checks plus public lifecycle and receipt tests; every eight-step no-scratch failure closes the already-retained capability prefix, returns no allocation or Recovery, and survives `-race`; successful-`mkdirat` partial-allocation, descriptor, and concurrent Close cases |
-| 020-058 | Public filesystem fixtures plus distinct nominal Go/compiler/Git and retained physical-root/null capability checks; exact `0755` physical-root success, one-off root-mode failures, and wrong null kind, owner, complete `020666` mode, link count, raw major, or raw minor; physical-root-anchored fresh-leaf initial and repeated `GOROOT/go.env` transactions with operation-attributed open/probe/ACL-parse/exact-read/grammar/hash/post-observation/compare, retained-row and digest binding, every primitive failure, and exact-once close including Primary plus DescriptorClose; exact Go/compiler/Git wire lengths and digests, root-sentinel outcomes, and per-use identity/security drift; golden SHA-256 vectors for all six manifest domains, fixed root framing, raw-byte ordering, root-count exclusion, control/newline names, and symlink target-record binding; selective `.git` authority/forbidden/inert classification, inert add/remove/replace/reclassify and identity/security drift, and allowed same-inode unread inert-byte change; absent/no-ACL/empty-ACL, bad-filesec-magic, endian, bounds, unknown-bit, permit/deny, and 128/129-entry ACL cases; injected exact/one-over accounting for GOROOT 65,536 descendants, 2 GiB aggregate, and 128 MiB/file, GOMODCACHE 500,000 descendants, 16 GiB aggregate, and 512 MiB/file, and Repository 1,000,000 descendants, 64 GiB aggregate, and 8 GiB/pack; dual-open root identity mismatch and pathname replacement; local/ignore-ownership, visible-flag masking, and descendant FSID/device transition; GOROOT 4-KiB and 40-link exact/one-over, absolute, dangling, directory-target, cycle, escape, and target drift; thin/fat 0/1/32/33 rows, duplicate row, table/slice overlap, alignment, outer/inner mismatch, swapped/FAT64/ARM64e, exact header flags, every allowed command family exact/one-off size, multiplicity, extent, padding, path-prefix lookalike, and panic containment; all five linkedit-data commands with zero-size interior, exact-end, and one-over cursors, a synthetic pinned-Git-shaped empty `LC_DATA_IN_CODE`, and zero-count/nonzero-offset refusal for every other extent family |
+| 020-058 | Public filesystem fixtures plus distinct nominal Go/compiler/Git and retained physical-root/null capability checks; exact `0755` physical-root success, one-off root-mode failures, and wrong null kind, owner, complete `020666` mode, link count, raw major, or raw minor; physical-root-anchored fresh-leaf initial and repeated `GOROOT/go.env` transactions with operation-attributed open/probe/ACL-parse/exact-read/grammar/hash/post-observation/compare, retained-row and digest binding, every primitive failure, and exact-once close including Primary plus DescriptorClose; exact Go/compiler/Git wire lengths and digests, root-sentinel outcomes, and per-use identity/security drift; golden SHA-256 vectors for all six manifest domains, fixed root framing, raw-byte ordering, root-count exclusion, control/newline names, and symlink target-record binding; selective `.git` authority/forbidden/inert classification, inert add/remove/replace/reclassify and identity/security drift, and allowed same-inode unread inert-byte change; `TestSourceObjectAuxiliaryChainGrammar`, `TestSourceObjectAuxiliaryPackListGrammar`, `TestSourceObjectAuxiliaryBounds`, `TestSourceObjectAuxiliaryClosure`, `TestSourceObjectAuxiliaryChecksumBinding`, `TestSourceObjectAuxiliaryOpaqueBodyPolicy`, `TestSourceObjectAuxiliaryRevalidation`, and `TestSourceObjectAuxiliaryFailureAttribution`, including intentionally opaque primary bodies after checksum binding and intentionally opaque `.rev`, `.bitmap`, `.keep`, and `.mtimes` bodies; absent/no-ACL/empty-ACL, bad-filesec-magic, endian, bounds, unknown-bit, permit/deny, and 128/129-entry ACL cases; injected exact/one-over accounting for GOROOT 65,536 descendants, 2 GiB aggregate, and 128 MiB/file, GOMODCACHE 500,000 descendants, 16 GiB aggregate, and 512 MiB/file, and Repository 1,000,000 descendants, 64 GiB aggregate, 8 GiB/pack or non-chain auxiliary, exact/one-over chain bounds, and 1,000,000/1,000,001 `info/packs` records; dual-open root identity mismatch and pathname replacement; local/ignore-ownership, visible-flag masking, and descendant FSID/device transition; GOROOT 4-KiB and 40-link exact/one-over, absolute, dangling, directory-target, cycle, escape, and target drift; thin/fat 0/1/32/33 rows, duplicate row, table/slice overlap, alignment, outer/inner mismatch, swapped/FAT64/ARM64e, exact header flags, every allowed command family exact/one-off size, multiplicity, extent, padding, path-prefix lookalike, and panic containment; all five linkedit-data commands with zero-size interior, exact-end, and one-over cursors, a synthetic pinned-Git-shaped empty `LC_DATA_IN_CODE`, and zero-count/nonzero-offset refusal for every other extent family |
 | 059-111 | Public synthetic standalone repositories; exact eight-step/one-block order and four-manifest move-once aggregate before allocation; the deep five-command non-source interface, exact non-source rows, mandatory entered-command brackets, separately armed non-source block-end bracket on every later exit, five named request materializers with no raw caller command or timing authority, same-clock opaque command windows, earliest caller/transaction/phase deadline, and zero allocation; a production guard and full trace proving exactly five preallocation children and no process request or child cwd, argv, environment, or stdin carries Repository, `.git`, source-config, or source-object path authority; C1 initial-policy versus revalidation-drift attribution and fixed post-content-observe, close, and trailing-rebind failure composition; the fifteen-row fail-fast final schedule with StateRoot last and infallible sealing; C1 atomic pending/moved/closed first-winner take plus losing/repeated/concurrent alias refusal before handle access; exactly-once transfer or close in the thirteen-owner order, physical-root descriptor-before-`os.Root` order, every other root-bundle `os.Root`-before-descriptor order, and injected dual-inner-close failures; exact 12-byte lowercase name framing, entropy error/short read, context stop, collision without allocation, 100-candidate exhaustion, every closed noncollision `mkdirat` cause, and immediate post-success unobserved claim; exact no-home initial workspace, sole symlink, and unchanged-policy boundary; retained read/write spool-to-`ReaderAt`, same-inode one-to-zero unlink proof, rename/swap refusal, 4,096/4,097 files, 2-GiB exact/one-over, generations, empty-before-Git, and cleanup; distinct exact 39-row byte-sorted preallocation/task-private direct environments and fresh clones; hostile ambient home/telemetry/sidecar/cache/temp/proxy/loader variables absent; pinned empty-home telemetry-off/no-artifact probe and writable-home negative; all five preallocation commands before allocator count changes, retained-null stdin, root/null brackets, filesystem-write-denied evidence allowing only `/dev/null`, exact 39-to-50 mutation, 51-row Git, 50-row tool-ID, 52-row compile/assembler, and 51-row link projections; exhaustive source-config/topology/format/routing corpora and source-state noninterference; object/zlib/pack/delta accounting, same-ID canonical equivalence, commit grammar, raw-tree `40000` to transcript `040000`, tree-DAG/path collision; byte-exact SHA-1/SHA-256 private config; raw batch/tree/attribute framing including inert `diff=set`; copy completeness, source/private manifest equality, repeated private custom preflight, private Git corroboration, checkout, and exact Git state |
 | 112-138 | Synthetic module-cache, `go.sum`, ZIP/ZIP64, cancellation, no-follow source/symlink, graph recheck, assembly, `go_asm.h`, and exact derived-tree threshold cases; all twelve role-list seven-plus-three bundles, no operational role-list child, six module-list/two-mod-verify negative traces, and exact 42 tool-ID total |
 | 139-154 | Deterministic build-info; exact seven-row Go-owned Git argv/output/exit/order traces for all twelve role-package queries and both role builds; exact 98 Git and 42 tool-ID totals; no fifth pinned-Go child constructor; each role's exact operational child multiset and causal partial order with every argv/cwd/environment, allowed ready-action interleavings, and host-derived `GOMAXPROCS`/compiler `-c`; thin-Mach-O, retained-output-identity, role-order, graph comparison, and partial-pair cases plus one opt-in exact real pair build |
 | 155-170 | Public real-process and instance-local supervisor cases plus tagged retained-null and bounded-input-pipe plans, nil/untyped-input refusal, pinned-Go nil-stdin/root-null exception, exit-zero/nonempty-stderr refusal and successful-result withholding until quiescence/closure/empty stderr; production-source guard for the exact 16-byte sigaction ABI, admitted/ignored/changed/query-error `SIGCHLD`, forbidden broad reapers, and allowed exact-PID waits; exact descriptor-read/EOF attribution, required/optional/forbidden observations, sentinel and allocator mappings, preallocation root/non-root close ordering, setup failure before and after task allocation, including successful `mkdirat` with failed retained open and optional recovery identity; exact write-once Primary mappings, first-postcheck-as-Primary, child-Primary plus one bounded private non-close postcheck record, proof withholding, no later record, no public secondary slot, independent DescriptorClose and Cleanup, and rendered slot order; exact-once pipe close/join, captured `Setpgid=true`/`Pgid=0`, Start/process-group-establishment failure, immediate and deliberately delayed observation of a fast exit without post-Start `getpgid`, Darwin/arm64 siginfo size/alignment/field offsets and every exact terminal code/status boundary, nonblocking waitid terminal/anomalous/stopped states, preterminal `ECHILD`/lost-identity no-signal handoff with permanently absent public status despite early or late private Wait return, post-terminal sigaction drift with no signal/probe plus synchronous status-preserving reap, single and persistent EINTR/deadline resampling with the exact positive channel-free five-millisecond retry and second-EINTR handoff, waitid-versus-ProcessState mismatch, natural/nonzero/signaled exit, cancel/deadline/limit/parse/input/read races and fixed precedence including one-read limit-before-parse publication, five-millisecond maximum programmed wait, exact handoff-plus-one-second pipe finalization before every background return, structured-versus-streamed mode validation, a greater-than-256-MiB valid streamed fixture without whole-output retention, concrete-tagged-plan and no-function/writer/open-interface source guards, incomplete-stream-worker no-result and task-preservation proof, terminal-latch versus late-I/O-fault cases, cloned-input concurrent-mutation coverage, a deterministic completion-channel scheduler, five-second post-attempt observation and `child-wait` handoff, leader pinning, required zombie leader, empty/missing/live/wrong-state snapshots, raw sysctl overflow, terminate/wait/probe/drain/survivor faults, provisional `ESRCH`/`EPERM`, 4,096/4,097 members, 1,000-snapshot follow-up, held stdout and stderr, common one-second EOF bound, signed/absent status, exact stderr prefix/count/digest/truncation, earliest-child/single-Child reporting, all disposition/Recovery rows, whole-ledger preflight before any delete, removal plus root-close failure, replacement root, nested mount, descriptor failure, and concurrent Close |
-| SPEC ownership | `internal/buildauthority/SPEC.md`; its `# RELATED-SPEC` reciprocal link; the `internal/buildauthority` row and wait-ownership scenario in `agm/test/bdd/features/internal_foundation_guardrails.feature`; and the production-source scanner plus allowed-exact-PID and forbidden-wildcard/foreign-reaper fixtures in `agm/test/bdd/steps/internal_foundation_guardrails_steps.go` and `internal_foundation_guardrails_steps_test.go` |
+| SPEC ownership | `internal/buildauthority/SPEC.md`; its primary `# SPEC` reciprocal link and wait-ownership scenario in `agm/test/bdd/features/build_authority_guardrails.feature`; its `# RELATED-SPEC` reciprocal link and `internal/buildauthority` row in `agm/test/bdd/features/internal_foundation_guardrails.feature`; and the production-source scanner plus allowed-exact-PID and forbidden-wildcard/foreign-reaper fixtures in `agm/test/bdd/steps/internal_foundation_guardrails_steps.go` and `internal_foundation_guardrails_steps_test.go` |
 
 The current Homebrew ancestry rejection is an acceptance case for
 BUILD-AUTH-020 through BUILD-AUTH-048. The current source's
@@ -1860,8 +1975,9 @@ condition; they do not implement child supervision.
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/build_authority_guardrails.feature`
 - Feature: `agm/test/bdd/features/internal_foundation_guardrails.feature`
-- Scenario: Build authority retains exclusive broad child-reaping ownership
+- Scenario: Build authority retains exclusive child-wait ownership
 
 ## Test Traceability
 

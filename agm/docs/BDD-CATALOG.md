@@ -1354,6 +1354,22 @@ prompt generation SPEC coverage.
 **Why this matters:** Autonomous dispatch prompts are control-plane artifacts;
 they must enforce safety rules without hardcoding one harness or model.
 
+### Build Authority Guardrails
+
+**File:** [`build_authority_guardrails.feature`](../test/bdd/features/build_authority_guardrails.feature)
+
+**Drives:** the `internal/buildauthority` process-wide child-wait ownership
+boundary.
+
+**Key scenarios:**
+- Production code outside `internal/buildauthority` cannot import C, mutate or
+  subscribe to SIGCHLD, or broadly or foreign-reap children.
+
+**Why this matters:** The authenticated build authority can supervise its
+children safely only while one exact package owns the process-wide wait
+mechanism; another reaper could consume terminal status and invalidate its
+receipts.
+
 ### Internal Foundation Guardrails
 
 **File:** [`internal_foundation_guardrails.feature`](../test/bdd/features/internal_foundation_guardrails.feature)
