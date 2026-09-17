@@ -1,4 +1,5 @@
 # SPEC: cmd/session-skill-extractor/SPEC.md
+# RELATED-SPEC: cmd/vulnerability-policy/SPEC.md
 # RELATED-SPEC: pkg/headerlint/SPEC.md
 # RELATED-SPEC: pkg/instructionlint/SPEC.md
 # RELATED-SPEC: tests/githooks/SPEC.md
@@ -33,6 +34,7 @@ Feature: Developer tool package guardrails
     Examples:
       | package                                            |
       | cmd/session-skill-extractor                        |
+      | cmd/vulnerability-policy                           |
       | pkg/headerlint                                     |
       | pkg/instructionlint                                |
       | tests/githooks                                     |
