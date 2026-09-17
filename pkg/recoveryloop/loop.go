@@ -138,36 +138,50 @@ func ExpandHome(s string) string {
 	return s
 }
 
+// ParseConfig parses and validates the exact bytes accepted by the recovery
+// loop. Deployment uses this same seam before publishing a rendered registry,
+// so a file cannot pass deployment validation and then fail at runtime.
+func ParseConfig(raw []byte) (*Config, error) {
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("decode jobs config: %w", err)
+	}
+	if len(cfg.Jobs) == 0 {
+		return nil, fmt.Errorf("contains no jobs")
+	}
+	seen := make(map[string]bool, len(cfg.Jobs))
+	for i := range cfg.Jobs {
+		j := &cfg.Jobs[i]
+		if j.Name == "" {
+			return nil, fmt.Errorf("job at index %d has empty name", i)
+		}
+		if seen[j.Name] {
+			return nil, fmt.Errorf("duplicate job name %q", j.Name)
+		}
+		seen[j.Name] = true
+	}
+	return &cfg, nil
+}
+
 // LoadConfig reads and validates the critical jobs configuration.
 func LoadConfig(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read jobs config %s: %w", path, err)
 	}
-	var cfg Config
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("parse jobs config %s: %w", path, err)
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		return nil, fmt.Errorf("jobs config %s: %w", path, err)
 	}
-	if len(cfg.Jobs) == 0 {
-		return nil, fmt.Errorf("jobs config %s contains no jobs", path)
-	}
-	seen := make(map[string]bool, len(cfg.Jobs))
 	for i := range cfg.Jobs {
 		j := &cfg.Jobs[i]
-		if j.Name == "" {
-			return nil, fmt.Errorf("jobs config %s: job at index %d has empty name", path, i)
-		}
-		if seen[j.Name] {
-			return nil, fmt.Errorf("jobs config %s: duplicate job name %q", path, j.Name)
-		}
-		seen[j.Name] = true
 		j.PlistPath = ExpandHome(j.PlistPath)
 		j.BinaryPath = ExpandHome(j.BinaryPath)
 		for k, arg := range j.InstallCmd {
 			j.InstallCmd[k] = ExpandHome(arg)
 		}
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 // ParseLaunchdList parses output of `launchctl list`.

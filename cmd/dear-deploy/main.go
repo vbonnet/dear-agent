@@ -8,15 +8,12 @@
 // activate, see internal/deploy): a failed deploy never leaves a half-written
 // file in place, and there is no bypass flag (ADR-031).
 //
-// Subcommands:
+// Run `dear-deploy --help` for the subcommand and flag inventory. It is not
+// repeated here: this comment and cmd/dear-deploy/README.md had both drifted to
+// a four-command list while the binary had five, and a catalog that disagrees
+// with the binary is worse than no catalog.
 //
-//	dear-deploy list                 list every deployable artifact
-//	dear-deploy status [name...]     show deployed state vs the manifest
-//	dear-deploy sync   [name...]     deploy artifacts that have drifted (idempotent)
-//	dear-deploy install [name...]    (re)install artifacts, even if unchanged
-//
-// With no names, status/sync/install operate on the whole manifest. Common
-// flags: --manifest <file>, --repo-root <dir>, --json, --dry-run (sync/install).
+// With no names, status/sync/install operate on the whole manifest.
 //
 // Artifacts come in two kinds. File artifacts (plists, compiled hooks) are
 // compared and deployed by byte content. Binary artifacts (Go programs such as
@@ -66,6 +63,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDeploy(cmd, rest, stdout, stderr)
 	case "build-install":
 		return runBuildInstall(rest, stdout, stderr)
+	case "merge-pulses":
+		return runMergePulses(rest, stdout, stderr)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -115,7 +114,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 // load resolves the repo root, reads and parses the manifest, and selects the
 // requested artifacts. It centralises the error reporting so each subcommand
 // stays focused on its own output.
-func (c *commonFlags) load(names []string, stderr io.Writer) ([]deploy.Artifact, deploy.Options, int) {
+func (c *commonFlags) load(names []string, stderr io.Writer) ([]deploy.Artifact, []deploy.Artifact, deploy.Options, int) {
 	root := c.repoRoot
 	if root == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -124,7 +123,7 @@ func (c *commonFlags) load(names []string, stderr io.Writer) ([]deploy.Artifact,
 		if err != nil {
 			fmt.Fprintf(stderr, "error: cannot detect repo root: %v\n", err)
 			fmt.Fprintf(stderr, "hint: run inside the dear-agent checkout or pass --repo-root <dir>\n")
-			return nil, deploy.Options{}, 1
+			return nil, nil, deploy.Options{}, 1
 		}
 		root = detected
 	}
@@ -136,17 +135,17 @@ func (c *commonFlags) load(names []string, stderr io.Writer) ([]deploy.Artifact,
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: reading manifest: %v\n", err)
-		return nil, deploy.Options{}, 1
+		return nil, nil, deploy.Options{}, 1
 	}
 	m, err := deploy.ParseManifest(data)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
-		return nil, deploy.Options{}, 1
+		return nil, nil, deploy.Options{}, 1
 	}
 	selected, err := m.Select(names)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
-		return nil, deploy.Options{}, 1
+		return nil, nil, deploy.Options{}, 1
 	}
 
 	// Resolve home eagerly so displayed deployed paths are concrete (~ expanded)
@@ -157,11 +156,11 @@ func (c *commonFlags) load(names []string, stderr io.Writer) ([]deploy.Artifact,
 		h, err := os.UserHomeDir()
 		if err != nil {
 			fmt.Fprintf(stderr, "error: cannot resolve home dir: %v\n", err)
-			return nil, deploy.Options{}, 1
+			return nil, nil, deploy.Options{}, 1
 		}
 		home = h
 	}
-	return selected, deploy.Options{RepoRoot: root, Home: home}, 0
+	return selected, m.Artifacts, deploy.Options{RepoRoot: root, Home: home}, 0
 }
 
 func runList(args []string, stdout, stderr io.Writer) int {
@@ -173,7 +172,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	selected, opts, code := c.load(names, stderr)
+	selected, _, opts, code := c.load(names, stderr)
 	if code != 0 {
 		return code
 	}
@@ -234,7 +233,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	selected, opts, code := c.load(names, stderr)
+	selected, manifestArtifacts, opts, code := c.load(names, stderr)
 	if code != 0 {
 		return code
 	}
@@ -242,6 +241,58 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	results := make([]deploy.StatusResult, 0, len(selected))
 	for _, a := range selected {
 		results = append(results, deploy.Status(a, opts))
+	}
+
+	// A required pulse that a sync would merge is real drift, even though the
+	// absent-only registry itself compares clean. Reporting OK here is how a
+	// missed migration stays invisible to a deployment audit.
+	pendingPulses, pulseMergeSelected, ledgerChanged, _, _, pulseErr := pendingPulseNames(
+		selected, manifestArtifacts, opts, stderr,
+	)
+	pulseIndex := statusResultIndex(results, pulseArtifactName)
+	if len(pendingPulses) > 0 || pulseMergeSelected && ledgerChanged {
+		detail := "pending pulse-ledger update"
+		if len(pendingPulses) > 0 {
+			detail = "pending required pulses: " + strings.Join(pendingPulses, ", ")
+		}
+		if pulseIndex >= 0 {
+			// Absent-only status is normally OK once the operator registry exists.
+			// Pending required pulses are real artifact drift, but the artifact's
+			// selector must remain its manifest name rather than a synthetic child.
+			if results[pulseIndex].State == deploy.StateOK {
+				results[pulseIndex].State = deploy.StateDrift
+			}
+			results[pulseIndex].Detail = detail
+			results[pulseIndex].Remediation = "dear-deploy sync " + pulseArtifactName
+		} else {
+			results = append(results, deploy.StatusResult{
+				Name:         pulseArtifactName,
+				State:        deploy.StateDrift,
+				DeployedPath: pulseArtifactPath(manifestArtifacts, opts),
+				Remediation:  "dear-deploy sync " + pulseArtifactName,
+				Detail:       detail,
+			})
+		}
+	}
+	if pulseErr != nil {
+		// "Could not check" is not "clean". A status that exits 0 because it
+		// failed to read the registry tells an audit the host is fine when
+		// nobody looked.
+		errorName, errorPath := pulseDiagnosticArtifact(selected, manifestArtifacts, opts)
+		errorIndex := statusResultIndex(results, errorName)
+		if errorIndex >= 0 {
+			results[errorIndex].State = deploy.StateError
+			results[errorIndex].Error = pulseErr.Error()
+			results[errorIndex].Detail = "required-pulse evaluation failed"
+		} else {
+			results = append(results, deploy.StatusResult{
+				Name:         errorName,
+				State:        deploy.StateError,
+				DeployedPath: errorPath,
+				Error:        pulseErr.Error(),
+				Detail:       "required-pulse evaluation failed",
+			})
+		}
 	}
 
 	if c.asJSON {
@@ -271,10 +322,10 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	switch {
-	case drift:
-		return 2
 	case errs:
 		return 1
+	case drift:
+		return 2
 	default:
 		return 0
 	}
@@ -297,6 +348,9 @@ func formatStatus(results []deploy.StatusResult, w io.Writer) {
 			if r.Kind == deploy.KindBinary {
 				fmt.Fprintf(w, "            deployed %s -> source %s — %s\n", r.DeployedVersion, r.SourceVersion, r.Detail)
 				fmt.Fprintf(w, "            fix: %s\n", binaryFix(r))
+			} else if r.Remediation != "" {
+				fmt.Fprintf(w, "            deployed: %s\n", r.DeployedPath)
+				fmt.Fprintf(w, "            fix: %s\n", r.Remediation)
 			} else {
 				fmt.Fprintf(w, "            deployed: %s\n", r.DeployedPath)
 				fmt.Fprintf(w, "            fix: dear-deploy sync %s\n", r.Name)
@@ -330,12 +384,15 @@ func formatStatus(results []deploy.StatusResult, w io.Writer) {
 			errs++
 			fmt.Fprintf(w, "  ERROR     %s — %s\n", r.Name, r.Error)
 		}
+		if r.Detail != "" && (r.Kind != deploy.KindBinary || r.State != deploy.StateDrift) {
+			fmt.Fprintf(w, "            detail: %s\n", r.Detail)
+		}
 	}
 	fmt.Fprintf(w, "\n%d artifact(s): %d ok, %d drift, %d missing, %d no-source, %d skipped, %d error\n",
 		len(results), ok, drift, missing, srcMissing, skipped, errs)
-	if drift+missing == 0 && errs == 0 {
+	if drift+missing+srcMissing == 0 && errs == 0 {
 		fmt.Fprintf(w, "In sync: every deployed artifact matches the manifest.\n")
-	} else if drift+missing > 0 {
+	} else if drift+missing+srcMissing > 0 {
 		fmt.Fprintf(w, "OUT OF SYNC — apply each fix line above (file artifacts: `dear-deploy sync`; binaries: their make target).\n")
 	}
 }
@@ -364,32 +421,165 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	selected, opts, code := c.load(names, stderr)
+	selected, manifestArtifacts, opts, code := c.load(names, stderr)
 	if code != 0 {
 		return code
 	}
 	opts.Force = cmd == "install"
 
 	if dryRun {
-		return dryRunDeploy(cmd, selected, opts, c.asJSON, stdout, stderr)
+		return dryRunDeploy(cmd, selected, manifestArtifacts, opts, c.asJSON, stdout, stderr)
+	}
+
+	preparedPulse, normalPulseSelected, pulsePreflightErr := prepareNormalPulseSource(selected, opts)
+	var optionalPulseResult deploy.Result
+	var preparedJobs []byte
+	var optionalJobsSkipped bool
+	optionalPulseSkipped := normalPulseSelected && preparedPulse.SourceMissing
+	if optionalPulseSkipped {
+		_, renderedJobs, jobsSourceMissing, err := requiredPulsesForNormalPulse(
+			selected, manifestArtifacts, opts,
+		)
+		if err != nil {
+			pulsePreflightErr = fmt.Errorf("resolve required pulses: %w", err)
+		} else {
+			preparedJobs = renderedJobs
+			optionalJobsSkipped = jobsSourceMissing
+		}
+		if _, jobsSelected := artifactNamed(selected, jobsArtifactName); pulsePreflightErr == nil && jobsSelected {
+			pulsePreflightErr = fmt.Errorf(
+				"pulse source is unavailable; refusing to publish %s",
+				jobsArtifactName,
+			)
+		}
+		if pulsePreflightErr == nil {
+			optionalPulseResult, pulsePreflightErr = deploy.SkipOptionalMissingSource(preparedPulse.Artifact, opts)
+		}
+	}
+
+	// A normal pulse registry and its dependent recovery-job registry form one
+	// publication domain. Hold the same persistent host lock used by absent-only
+	// pulse merges before observing either live registry and until every selected
+	// artifact has had its publication attempt. This covers paired, pulse-only,
+	// and jobs-only mutations; absent-only pulse selection is not wrapped because
+	// its additive merger acquires this lock internally.
+	var unlockPulseRegistry func()
+	if pulse, ok := normalPulseMutationArtifact(selected, manifestArtifacts); ok &&
+		!optionalPulseSkipped && pulsePreflightErr == nil {
+		var lockErr error
+		unlockPulseRegistry, lockErr = deploy.LockPulseRegistry(pulseHostPath(pulse, opts))
+		if lockErr != nil {
+			pulsePreflightErr = fmt.Errorf("publication lock: %w", lockErr)
+		}
+		defer func() {
+			if unlockPulseRegistry != nil {
+				unlockPulseRegistry()
+			}
+		}()
 	}
 
 	results := make([]deploy.Result, 0, len(selected))
 	var failures []string
+
+	// Publish the pulse registry before recovery jobs regardless of manifest
+	// ordering. An absent-only registry uses the locked additive protocol; a
+	// normal artifact uses validated exact-source generic deployment. Treating
+	// the reserved name as inherently absent-only would silently ignore a
+	// custom manifest's ownership contract.
+	var pulseResult *deploy.Result
+	var pulseDependencyErr error
+	pulseHandled := false
+	if a, ok := artifactNamed(selected, pulseArtifactName); ok {
+		pulseHandled = true
+		switch {
+		case pulsePreflightErr != nil:
+			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, pulsePreflightErr)
+			failures = append(failures, a.Name)
+			pulseDependencyErr = pulsePreflightErr
+		case optionalPulseSkipped:
+			pulseResult = &optionalPulseResult
+		default:
+			result, renderedJobs, jobsSourceMissing, err := deployPulseDuringDeploy(
+				a, selected, manifestArtifacts, opts, c.asJSON, stdout, preparedPulse.Rendered,
+			)
+			if err != nil {
+				fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
+				failures = append(failures, a.Name)
+				pulseDependencyErr = err
+			} else {
+				pulseResult = &result
+				preparedJobs = renderedJobs
+				optionalJobsSkipped = jobsSourceMissing
+			}
+		}
+	} else if _, ok := artifactNamed(selected, jobsArtifactName); ok {
+		pulseDependencyErr = pulsePreflightErr
+		if pulseDependencyErr == nil {
+			preview, _, _, renderedJobs, jobsSourceMissing, err := pendingPulseNames(
+				selected, manifestArtifacts, opts, stderr,
+			)
+			switch {
+			case err != nil:
+				pulseDependencyErr = err
+			case len(preview) > 0:
+				pulseDependencyErr = fmt.Errorf(
+					"required pulse state is not current (%s); sync %s first",
+					strings.Join(preview, ", "),
+					pulseArtifactName,
+				)
+			default:
+				preparedJobs = renderedJobs
+				optionalJobsSkipped = jobsSourceMissing
+			}
+		}
+	}
+
 	for _, a := range selected {
-		r, err := deploy.Deploy(a, opts)
+		if a.Name == pulseArtifactName && pulseHandled {
+			// The prepass already used the ownership mode declared by this
+			// artifact and completed before any dependent recovery jobs.
+			if pulseResult != nil {
+				results = append(results, *pulseResult)
+			}
+			continue
+		}
+		if a.Name == jobsArtifactName && pulseDependencyErr != nil {
+			fmt.Fprintf(stderr, "  FAILED    %s pulse dependency — %v\n", a.Name, pulseDependencyErr)
+			failures = append(failures, a.Name+" (pulse dependency)")
+			continue
+		}
+		var r deploy.Result
+		var err error
+		switch {
+		case a.Name == jobsArtifactName && optionalJobsSkipped:
+			r, err = deploy.SkipOptionalMissingSource(a, opts)
+		case a.Name == jobsArtifactName && preparedJobs != nil:
+			r, err = deploy.DeployRendered(a, opts, preparedJobs)
+		default:
+			r, err = deploy.Deploy(a, opts)
+		}
 		if err != nil {
-			// One bad artifact is reported but does not abort the rest: a
-			// failed write is already rolled back (the target is untouched),
-			// so continuing cannot corrupt anything.
+			// One bad artifact is reported but does not abort independent work.
+			// Activation is an atomic replace: an error leaves either the prior
+			// bytes or the complete intended bytes, never a partial artifact. A
+			// post-rename durability error is retried before "unchanged" can be
+			// reported on the next sync.
 			fmt.Fprintf(stderr, "  FAILED    %s — %v\n", a.Name, err)
 			failures = append(failures, a.Name)
 			continue
 		}
 		results = append(results, r)
 	}
+	if unlockPulseRegistry != nil {
+		unlockPulseRegistry()
+		unlockPulseRegistry = nil
+	}
 
 	if c.asJSON {
+		// sync/install --json predates pulse migration and its top-level array is
+		// consumed by automation. The synthetic pulse Result above carries the
+		// compatible installed/updated/unchanged receipt without versioning the
+		// output contract underneath existing callers.
 		if rc := emitJSON(results, stdout, stderr); rc != 0 {
 			return rc
 		}
@@ -404,51 +594,182 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, asJSON bool, stdout, stderr io.Writer) int {
-	type plan struct {
-		Name         string `json:"name"`
-		DeployedPath string `json:"deployed"`
-		WouldDo      string `json:"would_do"`
-	}
+type deployPlan struct {
+	Name         string `json:"name"`
+	DeployedPath string `json:"deployed"`
+	WouldDo      string `json:"would_do"`
+	Detail       string `json:"detail,omitempty"`
+}
+
+func dryRunDeploy(
+	cmd string,
+	selected, manifestArtifacts []deploy.Artifact,
+	opts deploy.Options,
+	asJSON bool,
+	stdout, stderr io.Writer,
+) int {
 	force := cmd == "install"
-	plans := make([]plan, 0, len(selected))
+	plans := make([]deployPlan, 0, len(selected))
+	// An absent-only registry always reports "unchanged", so without this a
+	// preview would show nothing while a real sync merged required pulses.
+	pendingPulses, pulseMergeSelected, ledgerChanged, _, _, pulsePreviewErr := pendingPulseNames(
+		selected, manifestArtifacts, opts, stderr,
+	)
+	if pulsePreviewErr != nil {
+		return 1
+	}
+	jobsBlocked := !pulseMergeSelected && len(pendingPulses) > 0
+	hasErrors := false
 	for _, a := range selected {
-		// Binaries are status-only — sync/install never copy them into place.
-		if a.IsBinary() {
-			plans = append(plans, plan{Name: a.Name, DeployedPath: a.DeployedPath(opts.Home), WouldDo: "skip (binary)"})
-			continue
-		}
-		s := deploy.Status(a, opts)
-		would := "unchanged"
-		switch s.State {
-		case deploy.StateMissing:
-			would = "install"
-		case deploy.StateDrift:
-			would = "update"
-		case deploy.StateOK:
-			if force && !a.AbsentOnly {
-				would = "reinstall"
-			}
-		case deploy.StateSourceMissing:
-			if a.Optional {
-				would = "skip (no source)"
-			} else {
-				would = "ERROR: source not built"
-			}
-		case deploy.StateError:
-			would = "ERROR: " + s.Error
-		}
-		plans = append(plans, plan{Name: a.Name, DeployedPath: s.DeployedPath, WouldDo: would})
+		p, artifactErr := planArtifact(a, opts, force, jobsBlocked)
+		p = planPulsePreview(a, p, pulseMergeSelected, pendingPulses, ledgerChanged)
+		plans = append(plans, p)
+		hasErrors = hasErrors || artifactErr
+	}
+	if !pulseMergeSelected && len(pendingPulses) > 0 {
+		hasErrors = true
+		plans = append(plans, deployPlan{
+			Name:         pulseArtifactName,
+			DeployedPath: pulseArtifactPath(manifestArtifacts, opts),
+			WouldDo:      "ERROR: sync " + pulseArtifactName + " first",
+			Detail:       "pending required pulses: " + strings.Join(pendingPulses, ", "),
+		})
 	}
 	if asJSON {
-		return emitJSON(plans, stdout, stderr)
+		if rc := emitJSON(plans, stdout, stderr); rc != 0 {
+			return rc
+		}
+	} else {
+		fmt.Fprintf(stdout, "[dry-run] %s would:\n", cmd)
+		for _, p := range plans {
+			fmt.Fprintf(stdout, "  %-18s %s -> %s\n", p.WouldDo, p.Name, p.DeployedPath)
+			if p.Detail != "" {
+				fmt.Fprintf(stdout, "                     detail: %s\n", p.Detail)
+			}
+		}
+		fmt.Fprintf(stdout, "\n[dry-run] nothing written.\n")
 	}
-	fmt.Fprintf(stdout, "[dry-run] %s would:\n", cmd)
-	for _, p := range plans {
-		fmt.Fprintf(stdout, "  %-18s %s -> %s\n", p.WouldDo, p.Name, p.DeployedPath)
+	if hasErrors {
+		return 1
 	}
-	fmt.Fprintf(stdout, "\n[dry-run] nothing written.\n")
 	return 0
+}
+
+func planArtifact(a deploy.Artifact, opts deploy.Options, force, jobsBlocked bool) (deployPlan, bool) {
+	// Binaries are status-only — sync/install never copy them into place.
+	if a.IsBinary() {
+		return deployPlan{Name: a.Name, DeployedPath: a.DeployedPath(opts.Home), WouldDo: "skip (binary)"}, false
+	}
+	s := deploy.Status(a, opts)
+	would := "unchanged"
+	hasError := false
+	switch s.State {
+	case deploy.StateMissing:
+		would = "install"
+	case deploy.StateDrift:
+		would = "update"
+	case deploy.StateOK:
+		if force && !a.AbsentOnly {
+			would = "reinstall"
+		}
+	case deploy.StateSourceMissing:
+		if a.Optional {
+			would = "skip (no source)"
+		} else {
+			would = "ERROR: source not built"
+			hasError = true
+		}
+	case deploy.StateError:
+		would = "ERROR: " + s.Error
+		hasError = true
+	}
+	if a.Name == jobsArtifactName && jobsBlocked {
+		would = "ERROR: required pulse state is not current"
+		hasError = true
+	}
+	return deployPlan{Name: a.Name, DeployedPath: s.DeployedPath, WouldDo: would}, hasError
+}
+
+// pendingPulseNames reports the required pulses a real sync would merge and
+// also checks that a jobs-only selection is safe to publish against the live
+// registry. The first bool reports whether this command selected an absent-
+// only pulse artifact and can therefore perform the pending merge itself. The
+// second reports a ledger-only adoption that is actionable only for that pulse
+// selection. A normal pulse artifact is validated as an exact replacement and
+// emits no merge plan.
+//
+// The registry is absent-only, so Status and dry-run both classify it OK on
+// any host that has one. A preview that cannot see a pending migration is a
+// preview that disagrees with the thing it previews, which is how a missed
+// migration stays invisible to deployment audits.
+func pendingPulseNames(
+	selected, manifestArtifacts []deploy.Artifact,
+	opts deploy.Options,
+	stderr io.Writer,
+) ([]string, bool, bool, []byte, bool, error) {
+	a, pulseSelected := artifactNamed(selected, pulseArtifactName)
+	if pulseSelected && !a.AbsentOnly {
+		sourceMissing, renderedJobs, jobsSourceMissing, err := validateNormalPulseArtifact(
+			a, selected, manifestArtifacts, opts,
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "  ERROR     cannot validate pulse artifact: %v\n", err)
+			return nil, false, false, nil, false, err
+		}
+		if sourceMissing {
+			if _, jobsSelected := artifactNamed(selected, jobsArtifactName); jobsSelected {
+				err := fmt.Errorf(
+					"pulse source is unavailable; refusing to publish %s",
+					jobsArtifactName,
+				)
+				fmt.Fprintf(stderr, "  ERROR     cannot validate pulse artifact: %v\n", err)
+				return nil, false, false, nil, false, err
+			}
+			return nil, false, false, renderedJobs, jobsSourceMissing, nil
+		}
+		return nil, false, false, renderedJobs, jobsSourceMissing, nil
+	}
+	if !pulseSelected {
+		if _, jobsSelected := artifactNamed(selected, jobsArtifactName); !jobsSelected {
+			return nil, false, false, nil, false, nil
+		}
+		var ok bool
+		a, ok = artifactNamed(manifestArtifacts, pulseArtifactName)
+		if !ok {
+			err := fmt.Errorf("manifest declares %s without %s", jobsArtifactName, pulseArtifactName)
+			fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
+			return nil, false, false, nil, false, err
+		}
+		if !a.AbsentOnly {
+			renderedJobs, jobsSourceMissing, err := validateNormalPulseArtifactCurrent(
+				a, selected, manifestArtifacts, opts,
+			)
+			if err != nil {
+				fmt.Fprintf(stderr, "  ERROR     cannot publish %s: %v\n", jobsArtifactName, err)
+				return nil, false, false, nil, false, err
+			}
+			return nil, false, false, renderedJobs, jobsSourceMissing, nil
+		}
+	}
+	hostPath := pulseHostPath(a, opts)
+	required, renderedJobs, jobsSourceMissing, err := requiredPulsesFor(
+		selected, manifestArtifacts, opts,
+	)
+	if err != nil {
+		fmt.Fprintf(stderr, "  ERROR     cannot resolve required pulses: %v\n", err)
+		return nil, pulseSelected, false, nil, false, err
+	}
+	rendered, err := a.Render(opts.RepoRoot, opts.Home)
+	if err != nil {
+		fmt.Fprintf(stderr, "  ERROR     cannot render pulse defaults: %v\n", err)
+		return nil, pulseSelected, false, nil, false, err
+	}
+	preview, err := deploy.PendingPulseMergePreviewRendered(hostPath, rendered, required)
+	if err != nil {
+		fmt.Fprintf(stderr, "  ERROR     cannot compute pending pulse merges: %v\n", err)
+		return nil, pulseSelected, false, nil, false, err
+	}
+	return preview.Added, pulseSelected, preview.LedgerChanged, renderedJobs, jobsSourceMissing, nil
 }
 
 func formatDeploy(cmd string, results []deploy.Result, w io.Writer) {
@@ -535,9 +856,13 @@ Usage:
   dear-deploy sync   [name...]     deploy artifacts that have drifted (idempotent)
   dear-deploy install [name...]    (re)install artifacts, even if unchanged
   dear-deploy build-install --pkg P   build a Go binary and atomically install it
+  dear-deploy merge-pulses         add newly required absence-alarm pulses to the
+                                   host config, keeping operator customization
 
-Each write is atomic (stage -> verify -> activate); a failed deploy leaves the
-previously-installed artifact untouched. There is no force/bypass flag.
+Each file write is staged and verified before atomic activation. Failures before
+activation leave the prior artifact untouched; a pulse-ledger failure after
+registry activation leaves a pending transaction for the next sync to reconcile.
+There is no force/bypass flag.
 
 build-install flags:
   --pkg PKG         go package to build, relative to repo root (e.g. ./agm/cmd/agm) [required]
@@ -554,3 +879,68 @@ Common flags:
 
 Exit codes: 0 ok/clean; 2 (status) drift or required artifact missing; 1 error.
 `
+
+// runMergePulses adds newly required absence-alarm pulses to the host config.
+//
+// The pulse config is absent-only, so no other deploy path will touch a host
+// that already has one. Without this step a pulse the recovery job registry
+// depends on can live in the repository for months while the running alarm
+// never emits it, and nothing reports the gap because every artifact is
+// "deployed".
+func runMergePulses(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("merge-pulses", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c commonFlags
+	c.register(fs)
+	positional, err := parseArgs(fs, args)
+	if err != nil {
+		return 1
+	}
+	if len(positional) > 0 {
+		// Silently ignoring names would let `merge-pulses some-other-artifact`
+		// look like it did something targeted when it always acts on the pulse
+		// registry alone.
+		fmt.Fprintf(stderr, "dear-deploy: merge-pulses takes no artifact names (got %v)\n", positional)
+		return 1
+	}
+
+	// Resolve through the manifest, so --manifest and --repo-root behave here
+	// exactly as they do on the sync path instead of this command mutating
+	// hard-coded locations the caller never selected.
+	selected, manifestArtifacts, opts, code := c.load([]string{pulseArtifactName}, stderr)
+	if code != 0 {
+		return code
+	}
+	a, ok := artifactNamed(selected, pulseArtifactName)
+	if !ok {
+		fmt.Fprintf(stderr, "dear-deploy: manifest has no %q artifact\n", pulseArtifactName)
+		return 1
+	}
+	if !a.AbsentOnly {
+		fmt.Fprintf(stderr, "dear-deploy: %s is not absent-only; use sync or install for exact-source deployment\n", pulseArtifactName)
+		return 1
+	}
+	hostPath := pulseHostPath(a, opts)
+
+	required, _, _, err := requiredPulsesFor(selected, manifestArtifacts, opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: resolve required pulses: %v\n", err)
+		return 1
+	}
+	rendered, err := a.Render(opts.RepoRoot, opts.Home)
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: render pulse defaults: %v\n", err)
+		return 1
+	}
+	mode, err := a.FileMode()
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: resolve pulse registry mode: %v\n", err)
+		return 1
+	}
+	outcome, err := deploy.MergeRequiredPulsesRenderedResult(hostPath, rendered, mode, required)
+	if err != nil {
+		fmt.Fprintf(stderr, "dear-deploy: merge pulses: %v\n", err)
+		return 1
+	}
+	return emitMergePulsesOutcome(outcome, hostPath, c.asJSON, stdout, stderr)
+}

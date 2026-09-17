@@ -12,6 +12,8 @@
 
 **DECL-LAUNCHD-04** When an operator installs recurring dangerous-override review on macOS, the system shall install a root-owned system LaunchDaemon and root-owned audit executable that runs as the named unprivileged operator and that an unattended same-user agent cannot replace or disable through its GUI launchd domain.
 
+**DECL-LAUNCHD-05** When the token-refresher LaunchAgent is configured for cadence mode, the system shall direct its audit writes to the dedicated path monitored by its recovery pulse and shall keep that path separate from the ordinary CLI default audit path.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/declarative_runtime_guardrails.feature`

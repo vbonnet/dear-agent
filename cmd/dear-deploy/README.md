@@ -53,17 +53,12 @@ flag** (ADR-031).
 
 ## Subcommands
 
-| Command                        | Effect                                              |
-| ------------------------------ | --------------------------------------------------- |
-| `dear-deploy list`             | list every deployable artifact (source → deployed)  |
-| `dear-deploy status [name...]` | show deployed state vs the manifest (exit 2 = drift) |
-| `dear-deploy sync [name...]`   | deploy artifacts that have drifted (idempotent)     |
-| `dear-deploy install [name...]`| (re)install artifacts even if unchanged             |
+Run `dear-deploy --help` for the current command and flag inventory. It is not
+duplicated here: this file drifted once already, claiming a four-command CLI
+after a fifth was added, and a catalog that disagrees with the binary is worse
+than no catalog.
 
 With no names, status/sync/install operate on the whole manifest.
-
-Common flags: `--manifest FILE`, `--repo-root DIR`, `--home DIR`, `--json`,
-`--dry-run` (sync/install).
 
 Exit codes: `0` ok/clean · `2` (status) drift or a required artifact missing ·
 `1` error.
