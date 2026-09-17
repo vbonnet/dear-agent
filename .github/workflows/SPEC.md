@@ -20,7 +20,7 @@
 
 **DECL-WORKFLOW-08** When the monthly cognitive-complexity audit evaluates the repository, the system shall report bounded findings from a complete trustworthy scan and shall fail without reporting clean whenever the scan is unavailable, invalid, incomplete, or violates its expected result protocol.
 
-**DECL-WORKFLOW-09** When the daily schedule, a dependency-path push to main, or a manual dispatch triggers the vulnerability workflow, the system shall retrieve every page of open dependency and Trivy code-scanning alerts before evaluating the repository vulnerability policy.
+**DECL-WORKFLOW-09** When the daily schedule, a dependency-path push to the default branch, or a default-branch manual dispatch triggers the vulnerability workflow, the system shall use a dedicated non-pull-request job with only the required read permissions to retrieve every page of open dependency and Trivy code-scanning alerts before evaluating the repository vulnerability policy.
 
 **DECL-WORKFLOW-10** If either provider vulnerability-alert source is unavailable, malformed, or incomplete, then the system shall fail the provider audit without reporting policy compliance.
 
