@@ -96,12 +96,12 @@ type optionalPulseFile struct {
 // also catch a complete transaction that starts and finishes between marker
 // checks, preventing a preview from combining an old registry with a new
 // ledger (or vice versa).
-func readPulseMergeSnapshot(hostPath string) (pulseMergeSnapshot, error) {
+func readPulseMergeSnapshot(hostPath, registryPath string) (pulseMergeSnapshot, error) {
 	for range pulsePreviewSnapshotAttempts {
 		if err := rejectPendingPulseLedgerTransaction(hostPath); err != nil {
 			return pulseMergeSnapshot{}, err
 		}
-		registry, err := readOptionalPulseFile(hostPath)
+		registry, err := readOptionalPulseFile(registryPath)
 		if err != nil {
 			return pulseMergeSnapshot{}, fmt.Errorf("read host pulses %s: %w", hostPath, err)
 		}
@@ -112,7 +112,7 @@ func readPulseMergeSnapshot(hostPath string) (pulseMergeSnapshot, error) {
 		if err := rejectPendingPulseLedgerTransaction(hostPath); err != nil {
 			return pulseMergeSnapshot{}, err
 		}
-		registryCheck, err := readOptionalPulseFile(hostPath)
+		registryCheck, err := readOptionalPulseFile(registryPath)
 		if err != nil {
 			return pulseMergeSnapshot{}, fmt.Errorf("re-read host pulses %s: %w", hostPath, err)
 		}
@@ -198,6 +198,17 @@ func advancePulseLedger(
 	if err != nil {
 		return err
 	}
+	projectedRaw, err := json.Marshal(names)
+	if err != nil {
+		return fmt.Errorf("encode pulse ledger projection: %w", err)
+	}
+	currentRaw, err := os.ReadFile(pulseLedgerPath(hostPath))
+	if err == nil && bytes.Equal(currentRaw, projectedRaw) {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read current pulse ledger projection: %w", err)
+	}
 	registrySHA256 := sha256hex(registryRaw)
 	txn, err := preparePulseLedgerTransaction(
 		hostPath,
@@ -264,7 +275,7 @@ func commitPulseLedgerTransaction(
 // interruption and the intent is discarded; out-of-band ABA edits cannot be
 // distinguished with two artifacts. Any third state is ambiguous operator
 // drift and fails loud without destroying the recovery evidence.
-func reconcilePulseLedgerTransaction(hostPath string, ops pulseFileOps) error {
+func reconcilePulseLedgerTransaction(hostPath, registryPath string, ops pulseFileOps) error {
 	raw, err := os.ReadFile(pulseLedgerTransactionPath(hostPath))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -280,7 +291,7 @@ func reconcilePulseLedgerTransaction(hostPath string, ops pulseFileOps) error {
 		return err
 	}
 
-	registryRaw, err := os.ReadFile(hostPath)
+	registryRaw, err := os.ReadFile(registryPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if txn.BaseRegistrySHA256 == "" {

@@ -46,6 +46,14 @@ broken.
 
 **DEP-12** When an operator installs a root-owned hook helper, the system shall require exact artifact and fixed-bootstrap digest confirmation, reject a passwordless probe, and stage, verify, and atomically activate the helper beneath verified root-owned non-writable non-symlink ancestry in one non-caching privileged command.
 
-**DEP-13** When a required-pulse merge would advance either the registry or its offered ledger, the system shall record the exact base registry digest, target registry digest, and ledger projection in a pending transaction before activating either projection, reconcile that transaction before another merge, preserve it on ambiguous registry drift, and not roll back an activated pulse.
+**DEP-13** When publication of required-pulse state is interrupted or partially fails, the system shall preserve any required pulse already activated and shall restore one consistent state before applying a later merge, or fail without discarding operator state.
 
-**DEP-14** While a pulse ledger transaction is pending or the registry and ledger change during a read-only preview, the system shall fail the preview without writing and not report the pulse projection clean.
+**DEP-14** When status or dry-run cannot observe one stable required-pulse state, the system shall fail without writing and shall not report the deployment clean.
+
+**DEP-15** When concurrent deployments publish required pulses to an initially absent registry, the system shall retain every required pulse activated by either completed deployment, and a later sync shall still install any required pulse that neither deployment activated.
+
+**DEP-16** When required-pulse state is already current, the system shall leave that required-pulse state unchanged during a repeated sync.
+
+**DEP-17** When the pulse registry is a valid leaf symlink, the system shall preserve the symlink and its target mode while merging; when that symlink is dangling, the system shall fail without modifying the link, its target, or required-pulse history.
+
+**DEP-18** When deployment cannot establish that the selected recovery-job registry and projected live pulse registry are runtime-loadable and that every declared job pulse is validly defined with current required-pulse state, the system shall fail without activating the recovery-job registry.

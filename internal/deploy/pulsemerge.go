@@ -6,8 +6,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 
+	"github.com/vbonnet/dear-agent/pkg/absencealarm"
 	"github.com/vbonnet/dear-agent/pkg/recoveryloop"
 )
 
@@ -58,23 +61,42 @@ func MergeRequiredPulses(
 	return mergeRequiredPulses(hostPath, defaultsRaw, seedMode, required)
 }
 
+// PulseMergeResult reports both the names added and whether this invocation
+// created the live registry. Created is decided while holding the registry
+// lock, so concurrent fresh-host deployments cannot both claim installation.
+type PulseMergeResult struct {
+	Added   []string
+	Created bool
+}
+
 // MergeRequiredPulsesRendered is MergeRequiredPulses over already-rendered
-// defaults, so a caller that resolves the artifact through the manifest
-// installs what the manifest would deploy rather than the raw source. Today the
-// pulse registry declares no tokens, but a source that grows one must not reach
-// a host with its placeholders intact.
+// defaults. It retains the compact names-only API for callers that do not need
+// a locked creation receipt.
 func MergeRequiredPulsesRendered(
 	hostPath string,
 	defaultsRaw []byte,
 	seedMode os.FileMode,
 	required map[string]bool,
 ) ([]string, error) {
+	result, err := MergeRequiredPulsesRenderedResult(hostPath, defaultsRaw, seedMode, required)
+	return result.Added, err
+}
+
+// MergeRequiredPulsesRenderedResult returns the full locked merge outcome for
+// deployment reporting while installing the same rendered bytes as the
+// manifest-selected artifact.
+func MergeRequiredPulsesRenderedResult(
+	hostPath string,
+	defaultsRaw []byte,
+	seedMode os.FileMode,
+	required map[string]bool,
+) (PulseMergeResult, error) {
 	unlock, err := lockPulseRegistry(hostPath)
 	if err != nil {
-		return nil, err
+		return PulseMergeResult{}, err
 	}
 	defer unlock()
-	return mergeRequiredPulses(hostPath, defaultsRaw, seedMode, required)
+	return mergeRequiredPulsesResultWithOps(hostPath, defaultsRaw, seedMode, required, defaultPulseFileOps())
 }
 
 func mergeRequiredPulses(
@@ -86,6 +108,37 @@ func mergeRequiredPulses(
 	return mergeRequiredPulsesWithOps(hostPath, defaultsRaw, seedMode, required, defaultPulseFileOps())
 }
 
+// resolvePulseRegistryPath preserves an operator-managed leaf symlink by
+// directing atomic registry activation at its resolved regular-file target.
+// The lock, ledger, and pending transaction stay beside the logical deployed
+// path, so removal history remains owned by the declared artifact. A dangling
+// link is not an absent registry: seeding over it would silently replace the
+// operator's link, so it fails before any transaction is prepared.
+func resolvePulseRegistryPath(hostPath string) (string, error) {
+	info, err := os.Lstat(hostPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return hostPath, nil
+		}
+		return "", fmt.Errorf("inspect pulse registry %s: %w", hostPath, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return hostPath, nil
+	}
+	resolved, err := filepath.EvalSymlinks(hostPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve pulse registry symlink %s: %w", hostPath, err)
+	}
+	targetInfo, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("stat pulse registry symlink target %s: %w", resolved, err)
+	}
+	if !targetInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("pulse registry symlink target %s is not a regular file", resolved)
+	}
+	return resolved, nil
+}
+
 func mergeRequiredPulsesWithOps(
 	hostPath string,
 	defaultsRaw []byte,
@@ -93,31 +146,50 @@ func mergeRequiredPulsesWithOps(
 	required map[string]bool,
 	ops pulseFileOps,
 ) ([]string, error) {
-	if err := reconcilePulseLedgerTransaction(hostPath, ops); err != nil {
-		return nil, err
+	result, err := mergeRequiredPulsesResultWithOps(hostPath, defaultsRaw, seedMode, required, ops)
+	return result.Added, err
+}
+
+func mergeRequiredPulsesResultWithOps(
+	hostPath string,
+	defaultsRaw []byte,
+	seedMode os.FileMode,
+	required map[string]bool,
+	ops pulseFileOps,
+) (PulseMergeResult, error) {
+	defaults, err := parseRequiredPulseDefaults(defaultsRaw, required, "pulse defaults")
+	if err != nil {
+		return PulseMergeResult{}, err
 	}
 
-	var defaults pulseDoc
-	if err := json.Unmarshal(defaultsRaw, &defaults); err != nil {
-		return nil, fmt.Errorf("parse pulse defaults: %w", err)
+	registryPath, err := resolvePulseRegistryPath(hostPath)
+	if err != nil {
+		return PulseMergeResult{}, err
+	}
+	if err := reconcilePulseLedgerTransaction(hostPath, registryPath, ops); err != nil {
+		return PulseMergeResult{}, err
 	}
 
-	hostRaw, err := os.ReadFile(hostPath)
+	hostRaw, err := os.ReadFile(registryPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("read host pulses %s: %w", hostPath, err)
+			return PulseMergeResult{}, fmt.Errorf("read host pulses %s: %w", hostPath, err)
 		}
-		return seedPulseConfig(hostPath, defaultsRaw, defaults, seedMode, ops)
+		added, seedErr := seedPulseConfig(hostPath, registryPath, defaultsRaw, defaults, seedMode, ops)
+		if seedErr != nil {
+			return PulseMergeResult{}, seedErr
+		}
+		return PulseMergeResult{Added: added, Created: true}, nil
 	}
-	hostInfo, err := os.Stat(hostPath)
+	hostInfo, err := os.Stat(registryPath)
 	if err != nil {
-		return nil, fmt.Errorf("stat host pulses %s: %w", hostPath, err)
+		return PulseMergeResult{}, fmt.Errorf("stat host pulses %s: %w", hostPath, err)
 	}
 	hostMode := hostInfo.Mode().Perm()
 
 	var host pulseDoc
 	if err := json.Unmarshal(hostRaw, &host); err != nil {
-		return nil, fmt.Errorf("parse host pulses %s (refusing to overwrite): %w", hostPath, err)
+		return PulseMergeResult{}, fmt.Errorf("parse host pulses %s (refusing to overwrite): %w", hostPath, err)
 	}
 
 	have := pulseNameSet(host.Pulses)
@@ -130,7 +202,7 @@ func mergeRequiredPulsesWithOps(
 	// somebody switched off.
 	seen, err := loadPulseLedger(hostPath)
 	if err != nil {
-		return nil, err
+		return PulseMergeResult{}, err
 	}
 
 	var added []string
@@ -143,46 +215,55 @@ func mergeRequiredPulsesWithOps(
 	}
 
 	if len(added) == 0 {
-		// Nothing to install. The ledger still advances to the defaults this
-		// host already HAS, so that removing one later is recognised as a
-		// removal rather than as a host that predates the pulse.
-		if err := advancePulseLedger(
-			hostPath,
-			hostRaw,
-			defaultNamesPresent(defaults, have),
-			ops,
-		); err != nil {
-			return nil, err
-		}
-		return nil, nil
+		return PulseMergeResult{}, finishUnchangedPulseRegistry(hostPath, hostRaw, defaults, have, ops)
 	}
 
 	if err := activatePulseRegistryAdditions(
 		hostPath,
+		registryPath,
 		hostRaw,
 		host,
 		hostMode,
 		defaults,
 		ops,
 	); err != nil {
-		return nil, err
+		return PulseMergeResult{}, err
 	}
-	return added, nil
+	return PulseMergeResult{Added: added}, nil
+}
+
+func finishUnchangedPulseRegistry(
+	hostPath string,
+	hostRaw []byte,
+	defaults pulseDoc,
+	have map[string]bool,
+	ops pulseFileOps,
+) error {
+	if err := validatePulseConfigBytes(hostRaw, "live pulse registry"); err != nil {
+		return err
+	}
+	// Nothing needs installation. The ledger still advances to the defaults
+	// this host already HAS, so a later removal is recognised as deliberate
+	// rather than mistaken for a host that predates the pulse.
+	return advancePulseLedger(hostPath, hostRaw, defaultNamesPresent(defaults, have), ops)
 }
 
 func activatePulseRegistryAdditions(
 	hostPath string,
+	registryPath string,
 	hostRaw []byte,
 	host pulseDoc,
 	hostMode os.FileMode,
 	defaults pulseDoc,
 	ops pulseFileOps,
 ) error {
-	merged, err := json.MarshalIndent(host, "", "  ")
+	merged, err := marshalPulseDoc(host)
 	if err != nil {
 		return fmt.Errorf("encode merged pulses: %w", err)
 	}
-	merged = append(merged, '\n')
+	if err := validatePulseConfigBytes(merged, "projected pulse registry"); err != nil {
+		return err
+	}
 	present := defaultNamesPresent(defaults, pulseNameSet(host.Pulses))
 	offered, err := nextPulseLedgerNames(hostPath, present)
 	if err != nil {
@@ -192,7 +273,7 @@ func activatePulseRegistryAdditions(
 	if err != nil {
 		return err
 	}
-	if err := writePulseDoc(hostPath, merged, hostMode, ops); err != nil {
+	if err := writePulseDoc(registryPath, merged, hostMode, ops); err != nil {
 		return err
 	}
 	if err := commitPulseLedgerTransaction(hostPath, txn, ops); err != nil {
@@ -238,6 +319,14 @@ func (d pulseDoc) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
+func marshalPulseDoc(doc pulseDoc) ([]byte, error) {
+	raw, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
 func pulseName(p map[string]any) string {
 	if n, ok := p["name"].(string); ok {
 		return n
@@ -276,6 +365,7 @@ func writePulseDoc(path string, data []byte, mode os.FileMode, ops pulseFileOps)
 // registry yet.
 func seedPulseConfig(
 	hostPath string,
+	registryPath string,
 	defaultsRaw []byte,
 	defaults pulseDoc,
 	seedMode os.FileMode,
@@ -290,7 +380,7 @@ func seedPulseConfig(
 	if err != nil {
 		return nil, err
 	}
-	if err := writePulseDoc(hostPath, defaultsRaw, seedMode, ops); err != nil {
+	if err := writePulseDoc(registryPath, defaultsRaw, seedMode, ops); err != nil {
 		return nil, err
 	}
 	if err := commitPulseLedgerTransaction(hostPath, txn, ops); err != nil {
@@ -313,32 +403,82 @@ func RequiredPulseNames(repoRoot string) (map[string]bool, error) {
 // --manifest override that relocates or customises it is honoured instead of
 // this code consulting a registry the caller never selected.
 func RequiredPulseNamesFrom(jobsPath string) (map[string]bool, error) {
+	raw, err := os.ReadFile(jobsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return defaultRequiredPulseNames(), nil
+		}
+		return nil, fmt.Errorf("read recovery job registry: %w", err)
+	}
+	return RequiredPulseNamesRendered(raw)
+}
+
+// RequiredPulseNamesRendered returns every pulse named by the already-rendered
+// job registry. An explicit registry replaces the built-in jobs at runtime, so
+// its rendered bytes are authoritative; built-ins are only the fallback when
+// no registry source exists.
+func RequiredPulseNamesRendered(raw []byte) (map[string]bool, error) {
+	required := make(map[string]bool)
+	cfg, err := recoveryloop.ParseConfig(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse recovery job registry: %w", err)
+	}
+	for _, j := range cfg.Jobs {
+		if j.Pulse != "" {
+			required[j.Pulse] = true
+		}
+	}
+	return required, nil
+}
+
+// validateRequiredPulseDefinitions rejects a recovery job whose health names
+// a pulse the selected defaults cannot publish. Silently ignoring such a name
+// would let the jobs registry deploy successfully while its recovery decision
+// can never receive evidence.
+func validateRequiredPulseDefinitions(defaults pulseDoc, required map[string]bool) error {
+	defined := pulseNameSet(defaults.Pulses)
+	missing := make([]string, 0)
+	for name, wanted := range required {
+		if wanted && !defined[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("required recovery pulses are not defined in pulse defaults: %s", strings.Join(missing, ", "))
+}
+
+func parseRequiredPulseDefaults(raw []byte, required map[string]bool, label string) (pulseDoc, error) {
+	var defaults pulseDoc
+	if err := json.Unmarshal(raw, &defaults); err != nil {
+		return pulseDoc{}, fmt.Errorf("parse %s: %w", label, err)
+	}
+	if err := validatePulseConfigBytes(raw, label); err != nil {
+		return pulseDoc{}, err
+	}
+	if err := validateRequiredPulseDefinitions(defaults, required); err != nil {
+		return pulseDoc{}, err
+	}
+	return defaults, nil
+}
+
+func validatePulseConfigBytes(raw []byte, label string) error {
+	if _, err := absencealarm.ParsePulseConfig(raw); err != nil {
+		return fmt.Errorf("validate %s: %w", label, err)
+	}
+	return nil
+}
+
+func defaultRequiredPulseNames() map[string]bool {
 	required := make(map[string]bool)
 	for _, j := range recoveryloop.DefaultJobs() {
 		if j.Pulse != "" {
 			required[j.Pulse] = true
 		}
 	}
-
-	raw, err := os.ReadFile(jobsPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return required, nil
-		}
-		return nil, fmt.Errorf("read recovery job registry: %w", err)
-	}
-	var doc struct {
-		Jobs []recoveryloop.Job `json:"jobs"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse recovery job registry: %w", err)
-	}
-	for _, j := range doc.Jobs {
-		if j.Pulse != "" {
-			required[j.Pulse] = true
-		}
-	}
-	return required, nil
+	return required
 }
 
 // PendingPulseMerges reports which required pulses a sync would add, without
@@ -366,12 +506,16 @@ func PendingPulseMergesRendered(
 	defaultsRaw []byte,
 	required map[string]bool,
 ) ([]string, error) {
-	var defaults pulseDoc
-	if err := json.Unmarshal(defaultsRaw, &defaults); err != nil {
-		return nil, fmt.Errorf("parse rendered pulse defaults: %w", err)
+	defaults, err := parseRequiredPulseDefaults(defaultsRaw, required, "rendered pulse defaults")
+	if err != nil {
+		return nil, err
 	}
 
-	snapshot, err := readPulseMergeSnapshot(hostPath)
+	registryPath, err := resolvePulseRegistryPath(hostPath)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := readPulseMergeSnapshot(hostPath, registryPath)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +531,18 @@ func PendingPulseMergesRendered(
 	for _, p := range defaults.Pulses {
 		if n := pulseName(p); wantsPulse(n, have, snapshot.ledger, required) {
 			pending = append(pending, n)
+			host.Pulses = append(host.Pulses, p)
 		}
+	}
+	projected := snapshot.registryRaw
+	if len(pending) > 0 {
+		projected, err = marshalPulseDoc(host)
+		if err != nil {
+			return nil, fmt.Errorf("encode projected pulses: %w", err)
+		}
+	}
+	if err := validatePulseConfigBytes(projected, "projected pulse registry"); err != nil {
+		return nil, err
 	}
 	return pending, nil
 }

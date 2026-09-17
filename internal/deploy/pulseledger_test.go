@@ -65,11 +65,55 @@ func failFirstPulseLedgerWrite(hostPath string, failure error) (pulseFileOps, *b
 	return ops, failed
 }
 
+func TestMergeRequiredPulses_CurrentLedgerWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	hostRaw := validPulseConfig("existing")
+	ledgerRaw := []byte(`["existing"]`)
+	if err := os.WriteFile(host, hostRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pulseLedgerPath(host), ledgerRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	unexpectedWrite := errors.New("unexpected no-op ledger write")
+	ops := defaultPulseFileOps()
+	ops.atomicWrite = func(string, []byte, os.FileMode, string) error {
+		return unexpectedWrite
+	}
+	ops.remove = func(string) error {
+		return errors.New("unexpected no-op transaction removal")
+	}
+
+	added, err := mergeRequiredPulsesWithOps(
+		host,
+		hostRaw,
+		0o644,
+		map[string]bool{"existing": true},
+		ops,
+	)
+	if err != nil {
+		t.Fatalf("current ledger merge attempted a write: %v", err)
+	}
+	if len(added) != 0 {
+		t.Fatalf("current ledger merge added = %v, want none", added)
+	}
+	currentLedger, err := os.ReadFile(pulseLedgerPath(host))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(currentLedger, ledgerRaw) {
+		t.Fatalf("current ledger changed: got %s, want %s", currentLedger, ledgerRaw)
+	}
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
+}
+
 func TestMergeRequiredPulses_RecoversExistingHostAfterLedgerWriteFailure(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	hostRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
-	defaultsRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"new"}]}`)
+	hostRaw := validPulseConfig("existing")
+	defaultsRaw := validPulseConfig("existing", "new")
 	if err := os.WriteFile(host, hostRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +187,7 @@ func TestMergeRequiredPulses_RecoversExistingHostAfterLedgerWriteFailure(t *test
 func TestMergeRequiredPulses_RecoversAbsentHostAfterLedgerWriteFailure(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "nested", "host.json")
-	defaultsRaw := []byte(`{"pulses":[{"name":"a"},{"name":"b"}]}`)
+	defaultsRaw := validPulseConfig("a", "b")
 
 	injected := errors.New("injected pulse ledger write failure")
 	ops, failed := failFirstPulseLedgerWrite(host, injected)
@@ -186,7 +230,7 @@ func TestMergeRequiredPulses_RecoversAbsentHostAfterLedgerWriteFailure(t *testin
 
 	added, err := mergeRequiredPulses(
 		host,
-		[]byte(`{"pulses":[{"name":"a"}]}`),
+		validPulseConfig("a"),
 		0o600,
 		map[string]bool{"a": true},
 	)
@@ -199,7 +243,7 @@ func TestMergeRequiredPulses_RecoversAbsentHostAfterLedgerWriteFailure(t *testin
 	requireNames(t, readPulseLedgerNames(t, host), "a", "b")
 	requirePathMissing(t, pulseLedgerTransactionPath(host))
 
-	if err := os.WriteFile(host, []byte(`{"pulses":[{"name":"a"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(host, validPulseConfig("a"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	added, err = mergeRequiredPulses(
@@ -220,8 +264,8 @@ func TestMergeRequiredPulses_RecoversAbsentHostAfterLedgerWriteFailure(t *testin
 func TestMergeRequiredPulses_DiscardsTransactionBeforeRegistryActivation(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	baseRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
-	targetRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"new"}]}`)
+	baseRaw := validPulseConfig("existing")
+	targetRaw := validPulseConfig("existing", "new")
 	defaultsRaw := targetRaw
 	if err := os.WriteFile(host, baseRaw, 0o644); err != nil {
 		t.Fatal(err)
@@ -254,8 +298,8 @@ func TestMergeRequiredPulses_DiscardsTransactionBeforeRegistryActivation(t *test
 func TestMergeRequiredPulses_CompletesTransactionAfterRegistryActivation(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	baseRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
-	targetRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"new"}]}`)
+	baseRaw := validPulseConfig("existing")
+	targetRaw := validPulseConfig("existing", "new")
 	if err := os.WriteFile(host, baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -309,9 +353,9 @@ func TestMergeRequiredPulses_CompletesTransactionAfterRegistryActivation(t *test
 func TestMergeRequiredPulses_PreservesAmbiguousTransaction(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	baseRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
-	targetRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"new"}]}`)
-	operatorRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"operator-local"}]}`)
+	baseRaw := validPulseConfig("existing")
+	targetRaw := validPulseConfig("existing", "new")
+	operatorRaw := validPulseConfig("existing", "operator-local")
 	if err := os.WriteFile(host, baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -353,8 +397,8 @@ func TestMergeRequiredPulses_PreservesAmbiguousTransaction(t *testing.T) {
 func TestPendingPulseMerges_ReportsReconciliationDebt(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	baseRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
-	targetRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"new"}]}`)
+	baseRaw := validPulseConfig("existing")
+	targetRaw := validPulseConfig("existing", "new")
 	if err := os.WriteFile(host, baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +428,7 @@ func TestPendingPulseMerges_ReportsReconciliationDebt(t *testing.T) {
 func TestMergeRequiredPulses_RecoversLedgerOnlyAdvancement(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	registryRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
+	registryRaw := validPulseConfig("existing")
 	if err := os.WriteFile(host, registryRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -423,8 +467,7 @@ func TestMergeRequiredPulses_RecoversLedgerOnlyAdvancement(t *testing.T) {
 		t.Fatalf("pending preview error = %v, want reconciliation debt", previewErr)
 	}
 
-	emptyDefaults := []byte(`{"pulses":[]}`)
-	added, err := mergeRequiredPulses(host, emptyDefaults, 0o644, map[string]bool{})
+	added, err := mergeRequiredPulses(host, registryRaw, 0o644, map[string]bool{})
 	if err != nil {
 		t.Fatalf("ledger-only recovery: %v", err)
 	}
@@ -434,7 +477,8 @@ func TestMergeRequiredPulses_RecoversLedgerOnlyAdvancement(t *testing.T) {
 	requireNames(t, readPulseLedgerNames(t, host), "existing")
 	requirePathMissing(t, pulseLedgerTransactionPath(host))
 
-	if err := os.WriteFile(host, emptyDefaults, 0o644); err != nil {
+	operatorOnly := validPulseConfig("operator-local")
+	if err := os.WriteFile(host, operatorOnly, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	added, err = mergeRequiredPulses(
@@ -449,16 +493,16 @@ func TestMergeRequiredPulses_RecoversLedgerOnlyAdvancement(t *testing.T) {
 	if len(added) != 0 {
 		t.Fatalf("re-added deliberately removed pulse: %v", added)
 	}
-	if got := readPulseNames(t, host); len(got) != 0 {
-		t.Fatalf("host pulses = %v, want none", got)
+	if got := readPulseNames(t, host); !slices.Equal(got, []string{"operator-local"}) {
+		t.Fatalf("host pulses = %v, want [operator-local]", got)
 	}
 }
 
 func TestMergeRequiredPulses_PreservesTransactionWhenRegistryActivationFails(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	baseRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
-	defaultsRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"new"}]}`)
+	baseRaw := validPulseConfig("existing")
+	defaultsRaw := validPulseConfig("existing", "new")
 	if err := os.WriteFile(host, baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -517,8 +561,8 @@ func TestMergeRequiredPulses_PreservesTransactionWhenRegistryActivationFails(t *
 func TestMergeRequiredPulses_RetriesTransactionCleanup(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host.json")
-	baseRaw := []byte(`{"pulses":[{"name":"existing"}]}`)
-	defaultsRaw := []byte(`{"pulses":[{"name":"existing"},{"name":"new"}]}`)
+	baseRaw := validPulseConfig("existing")
+	defaultsRaw := validPulseConfig("existing", "new")
 	if err := os.WriteFile(host, baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +625,7 @@ func TestMergeRequiredPulses_PreservesInvalidTransactions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			host := filepath.Join(dir, "host.json")
-			hostRaw := []byte(`{"pulses":[]}`)
+			hostRaw := validPulseConfig("existing")
 			if err := os.WriteFile(host, hostRaw, 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -590,7 +634,7 @@ func TestMergeRequiredPulses_PreservesInvalidTransactions(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err := mergeRequiredPulses(host, hostRaw, 0o644, map[string]bool{})
+			_, err := mergeRequiredPulses(host, hostRaw, 0o644, map[string]bool{"existing": true})
 			if err == nil {
 				t.Fatal("invalid transaction was accepted")
 			}

@@ -3,11 +3,36 @@ package deploy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
+
+func validPulseConfig(names ...string) []byte {
+	type fixturePulse struct {
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		Path   string `json:"path"`
+		Window string `json:"window"`
+	}
+	doc := struct {
+		Pulses []fixturePulse `json:"pulses"`
+	}{Pulses: make([]fixturePulse, 0, len(names))}
+	for _, name := range names {
+		doc.Pulses = append(doc.Pulses, fixturePulse{
+			Name: name, Type: "file_mtime", Path: "/tmp/" + name, Window: "1h",
+		})
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
 
 func readPulseNames(t *testing.T, path string) []string {
 	t.Helper()
@@ -444,6 +469,91 @@ func TestRequiredPulseNames_CoversDeployedRegistry(t *testing.T) {
 	}
 }
 
+func TestRequiredPulseNamesRendered_UsesRenderedJobRegistryBytes(t *testing.T) {
+	req, err := RequiredPulseNamesRendered([]byte(`{"jobs":[
+	  {"name":"custom","pulse":"custom-tick"},
+	  {"name":"no-pulse"}
+	]}`))
+	if err != nil {
+		t.Fatalf("RequiredPulseNamesRendered: %v", err)
+	}
+	if !req["custom-tick"] {
+		t.Error("rendered custom pulse was not required")
+	}
+	for _, want := range []string{"sandbox-gc-tick", "token-refresher-tick", "absence-alarm-heartbeat"} {
+		if req[want] {
+			t.Errorf("built-in pulse %q leaked into an explicit replacement registry", want)
+		}
+	}
+}
+
+func TestPulseOperationsRejectUndefinedRequiredPulse(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	defaults := []byte(`{"pulses":[{"name":"defined-tick","type":"file_mtime","path":"~/defined","window":"1h"}]}`)
+	before := []byte(`{"pulses":[]}`)
+	if err := os.WriteFile(host, before, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	required := map[string]bool{"orphan-tick": true}
+
+	if _, err := PendingPulseMergesRendered(host, defaults, required); err == nil || !strings.Contains(err.Error(), "orphan-tick") {
+		t.Fatalf("preview error = %v, want undefined required pulse", err)
+	}
+	if _, err := MergeRequiredPulsesRenderedResult(host, defaults, 0o644, required); err == nil || !strings.Contains(err.Error(), "orphan-tick") {
+		t.Fatalf("merge error = %v, want undefined required pulse", err)
+	}
+
+	after, err := os.ReadFile(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("failed validation changed registry: got %q, want %q", after, before)
+	}
+	if info, err := os.Stat(host); err != nil {
+		t.Fatal(err)
+	} else if got := info.Mode().Perm(); got != 0o640 {
+		t.Fatalf("failed validation changed mode to %04o", got)
+	}
+	for _, suffix := range []string{".offered", ".offered.pending"} {
+		if _, err := os.Lstat(host + suffix); !os.IsNotExist(err) {
+			t.Fatalf("failed validation wrote %s: %v", suffix, err)
+		}
+	}
+}
+
+func TestPulseOperationsRejectRuntimeInvalidProjectedRegistry(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	before := []byte(`{"pulses":[{"name":"required-tick","type":"file_mtime","path":"~/required"}]}`)
+	if err := os.WriteFile(host, before, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	defaults := []byte(`{"pulses":[{"name":"required-tick","type":"file_mtime","path":"~/required","window":"1h"}]}`)
+	required := map[string]bool{"required-tick": true}
+
+	if _, err := PendingPulseMergesRendered(host, defaults, required); err == nil || !strings.Contains(err.Error(), "requires window") {
+		t.Fatalf("preview error = %v, want runtime validation failure", err)
+	}
+	if _, err := MergeRequiredPulsesRenderedResult(host, defaults, 0o644, required); err == nil || !strings.Contains(err.Error(), "requires window") {
+		t.Fatalf("merge error = %v, want runtime validation failure", err)
+	}
+
+	after, err := os.ReadFile(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("failed validation changed registry: got %q, want %q", after, before)
+	}
+	for _, suffix := range []string{".offered", ".offered.pending"} {
+		if _, err := os.Lstat(host + suffix); !os.IsNotExist(err) {
+			t.Fatalf("failed validation wrote %s: %v", suffix, err)
+		}
+	}
+}
+
 // Concurrent merges must not lose additions. Two post-merge deployments from
 // different worktrees can overlap, and the registry plus its ledger are a
 // read-modify-write pair: an interleaving that drops one run's additions while
@@ -490,4 +600,231 @@ func TestMergeRequiredPulses_ConcurrentRunsDoNotLoseAdditions(t *testing.T) {
 			t.Errorf("%q installed %d times", want, seen[want])
 		}
 	}
+}
+
+func TestMergeRequiredPulses_ConcurrentFirstSeedsConverge(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host.json")
+	oldDefaults := []byte(`{"pulses":[{"name":"old","type":"file_mtime","path":"~/old","window":"1h"}]}`)
+	newDefaults := []byte(`{"pulses":[{"name":"new","type":"file_mtime","path":"~/new","window":"1h"}]}`)
+
+	var wg sync.WaitGroup
+	created := make(chan bool, 16)
+	for i := range 16 {
+		defaults := oldDefaults
+		required := map[string]bool{"old": true}
+		if i%2 == 1 {
+			defaults = newDefaults
+			required = map[string]bool{"new": true}
+		}
+		wg.Go(func() {
+			result, err := MergeRequiredPulsesRenderedResult(host, defaults, 0o644, required)
+			if err != nil {
+				t.Errorf("concurrent first seed: %v", err)
+				return
+			}
+			created <- result.Created
+		})
+	}
+	wg.Wait()
+	close(created)
+	createdCount := 0
+	for wasCreated := range created {
+		if wasCreated {
+			createdCount++
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("created receipts = %d, want exactly one", createdCount)
+	}
+
+	registryNames := readPulseNames(t, host)
+	ledgerNames := readPulseLedgerNames(t, host)
+	slices.Sort(registryNames)
+	slices.Sort(ledgerNames)
+	requireNames(t, registryNames, "new", "old")
+	requireNames(t, ledgerNames, "new", "old")
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
+}
+
+func TestMergeRequiredPulses_PreservesRegistrySymlinkAndTargetMode(t *testing.T) {
+	dir := t.TempDir()
+	managedDir := filepath.Join(dir, "managed")
+	logicalDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(logicalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(managedDir, "pulses.json")
+	host := filepath.Join(logicalDir, "pulses.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	if err := os.WriteFile(target, validPulseConfig("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaults, validPulseConfig("existing", "new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "managed", "pulses.json"), host); err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err := PendingPulseMerges(host, defaults, map[string]bool{"existing": true, "new": true})
+	if err != nil {
+		t.Fatalf("preview through symlink: %v", err)
+	}
+	requireNames(t, pending, "new")
+	added, err := MergeRequiredPulses(host, defaults, 0o644, map[string]bool{"existing": true, "new": true})
+	if err != nil {
+		t.Fatalf("merge through symlink: %v", err)
+	}
+	requireNames(t, added, "new")
+
+	linkInfo, err := os.Lstat(host)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("logical registry is no longer a symlink: info=%v err=%v", linkInfo, err)
+	}
+	requireNames(t, readPulseNames(t, target), "existing", "new")
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := targetInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("symlink target mode = %04o, want 0600", got)
+	}
+	requireNames(t, readPulseLedgerNames(t, host), "existing", "new")
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
+	requirePathMissing(t, pulseLedgerPath(target))
+}
+
+func TestMergeRequiredPulses_RecoversInterruptedSymlinkTransaction(t *testing.T) {
+	dir := t.TempDir()
+	managedDir := filepath.Join(dir, "managed")
+	logicalDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(logicalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(managedDir, "pulses.json")
+	host := filepath.Join(logicalDir, "pulses.json")
+	baseRaw := validPulseConfig("existing")
+	defaultsRaw := validPulseConfig("existing", "new")
+	if err := os.WriteFile(target, baseRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "managed", "pulses.json"), host); err != nil {
+		t.Fatal(err)
+	}
+
+	injected := errors.New("injected logical ledger write failure")
+	ops, failed := failFirstPulseLedgerWrite(host, injected)
+	_, err := mergeRequiredPulsesWithOps(
+		host,
+		defaultsRaw,
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		ops,
+	)
+	if !errors.Is(err, injected) || !*failed {
+		t.Fatalf("first merge error = %v, failed=%v; want injected ledger failure", err, *failed)
+	}
+	requireNames(t, readPulseNames(t, target), "existing", "new")
+	requirePathMissing(t, pulseLedgerPath(host))
+	if _, err := os.Stat(pulseLedgerTransactionPath(host)); err != nil {
+		t.Fatalf("logical pending transaction missing: %v", err)
+	}
+
+	retryOps := defaultPulseFileOps()
+	realWrite := retryOps.atomicWrite
+	registryRewrite := false
+	retryOps.atomicWrite = func(path string, content []byte, mode os.FileMode, wantHash string) error {
+		if path == target {
+			registryRewrite = true
+			return errors.New("unexpected registry rewrite during reconciliation")
+		}
+		return realWrite(path, content, mode, wantHash)
+	}
+	added, err := mergeRequiredPulsesWithOps(
+		host,
+		defaultsRaw,
+		0o644,
+		map[string]bool{"existing": true, "new": true},
+		retryOps,
+	)
+	if err != nil {
+		t.Fatalf("retry reconciliation: %v", err)
+	}
+	if registryRewrite {
+		t.Fatal("retry rewrote an already-activated symlink target")
+	}
+	if len(added) != 0 {
+		t.Fatalf("retry added duplicate pulses: %v", added)
+	}
+
+	linkInfo, err := os.Lstat(host)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("logical registry is no longer a symlink: info=%v err=%v", linkInfo, err)
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := targetInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("symlink target mode = %04o, want 0600", got)
+	}
+	requireNames(t, readPulseNames(t, target), "existing", "new")
+	requireNames(t, readPulseLedgerNames(t, host), "existing", "new")
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
+	requirePathMissing(t, pulseLedgerPath(target))
+}
+
+func TestPulseMerge_DanglingRegistrySymlinkFailsWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "pulses.json")
+	target := filepath.Join(dir, "missing.json")
+	defaults := filepath.Join(dir, "defaults.json")
+	if err := os.WriteFile(defaults, validPulseConfig("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(target), host); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, operation := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "preview",
+			run: func() error {
+				_, err := PendingPulseMerges(host, defaults, map[string]bool{"new": true})
+				return err
+			},
+		},
+		{
+			name: "merge",
+			run: func() error {
+				_, err := MergeRequiredPulses(host, defaults, 0o644, map[string]bool{"new": true})
+				return err
+			},
+		},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			err := operation.run()
+			if err == nil || !strings.Contains(err.Error(), "resolve pulse registry symlink") {
+				t.Fatalf("error = %v, want dangling-symlink refusal", err)
+			}
+		})
+	}
+
+	linkInfo, err := os.Lstat(host)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("dangling link was replaced: info=%v err=%v", linkInfo, err)
+	}
+	requirePathMissing(t, target)
+	requirePathMissing(t, pulseLedgerPath(host))
+	requirePathMissing(t, pulseLedgerTransactionPath(host))
 }
