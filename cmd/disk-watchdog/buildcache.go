@@ -43,6 +43,26 @@ var buildCacheFurniture = map[string]bool{
 	"testexpire.txt": true,
 }
 
+// buildCacheFurnitureDirs are directories Go itself creates in a cache root
+// that are not hex shards.
+//
+// `go test -fuzz` writes its corpus to $GOCACHE/fuzz. Before this was listed,
+// one such directory disqualified the whole cache: cacheShards returned
+// not-a-cache, and the canonical 47 GB cache on this host reported
+// "not a proven Go build cache root" on every breached tick while the disk
+// filled. The reaper did not crash, it silently declined, which is the worse
+// failure for a thing nobody watches.
+//
+// This is deliberately a closed allowlist of one rather than "permit any
+// directory". The structural proof exists so that a GOCACHE mis-set to a
+// source tree reclaims nothing, and relaxing it to all directories would throw
+// that away. The trim only ever removes hex shards, so a fuzz corpus is
+// preserved: shards are regenerable build output, while a corpus took CPU time
+// to find and cannot be reproduced on demand.
+var buildCacheFurnitureDirs = map[string]bool{
+	"fuzz": true,
+}
+
 // minHexShards is how many shard directories must be present before a
 // directory is accepted. Go and golangci-lint both create all 256 up front,
 // so the threshold only has to be high enough that no ordinary directory
@@ -137,6 +157,8 @@ func cacheShards(dir string) (shards []string, rootInfo os.FileInfo, ok bool) {
 			shards = append(shards, filepath.Join(dir, name))
 		case buildCacheFurniture[name] && info.Mode().IsRegular():
 			// furniture, fine
+		case e.IsDir() && buildCacheFurnitureDirs[name]:
+			// a directory Go creates itself; not a shard, and never trimmed
 		default:
 			return nil, nil, false
 		}

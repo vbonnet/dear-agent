@@ -115,12 +115,12 @@ const (
 )
 
 type config struct {
-	jsonOutput bool
-	dryRun     bool
-	path       string
-	agmBin     string
-	trailPath  string
-	brakePath  string
+	jsonOutput           bool
+	dryRun               bool
+	path                 string
+	agmBin               string
+	trailPath            string
+	brakePath            string
 	brakeTTL             time.Duration
 	gcLogPath            string
 	gcMaxAge             time.Duration
@@ -143,6 +143,16 @@ type config struct {
 	e2eCacheMinAge     time.Duration
 	e2eCacheMaxEntries int
 
+	// The canonical Go build cache is the opposite case to the abandoned caches
+	// above, and needs the opposite gate. It is never stale, because every build
+	// touches it, so age cannot bound it, and it is worth its disk right up until
+	// it is the reason writes fail. So the gate is size, and the trim runs only
+	// when a disk threshold is actually breached. On 2026-09-04 this cache was
+	// 48 GB while the host had 12 GiB free, and nothing in this watchdog could
+	// see it: it lives under os.UserCacheDir, outside every build-cache scan root.
+	goCacheDirs     string
+	goCacheMaxBytes int64
+
 	// Preflight scratch directories accumulate under the user cache directory
 	// and legacy dotdirs under HOME (ce-m6j1y).
 	preflightScratchRoots  string
@@ -157,7 +167,7 @@ func run(args []string, out io.Writer) (int, error) {
 	fs := flag.NewFlagSet("disk-watchdog", flag.ContinueOnError)
 	fs.SetOutput(out)
 	cfg := config{}
-	var freeWarnGB, freeCriticalGB float64
+	var freeWarnGB, freeCriticalGB, goCacheMaxGB float64
 	fs.BoolVar(&cfg.jsonOutput, "json", false, "emit JSON instead of a human-readable report")
 	fs.BoolVar(&cfg.dryRun, "dry-run", false, "detect and log, but do not reap any worktrees")
 	fs.StringVar(&cfg.path, "path", "/", "filesystem path to measure")
@@ -187,6 +197,10 @@ func run(args []string, out io.Writer) (int, error) {
 		"only reap E2E fixture directories whose mtime is older than this")
 	fs.IntVar(&cfg.e2eCacheMaxEntries, "e2e-cache-max-entries", defaultE2ECacheMaxEntries,
 		"maximum number of recent E2E fixture directories to retain")
+	fs.StringVar(&cfg.goCacheDirs, "go-cache-dirs", defaultGoCacheDirs(),
+		"canonical Go build caches trimmed when over budget under disk pressure; empty disables the trim")
+	fs.Float64Var(&goCacheMaxGB, "go-cache-max-gb", defaultGoCacheMaxGB,
+		"size budget (GiB) for each canonical Go build cache; an over-budget cache is emptied on a breached tick")
 	fs.StringVar(&cfg.preflightScratchRoots, "preflight-scratch-roots", defaultPreflightScratchRoots(),
 		"comma-separated directories scanned for abandoned preflight scratch (empty disables the reaper)")
 	fs.DurationVar(&cfg.preflightScratchMinAge, "preflight-scratch-min-age", defaultPreflightScratchMinAge,
@@ -226,6 +240,10 @@ func run(args []string, out io.Writer) (int, error) {
 	if cfg.e2eCacheDir != "" && cfg.e2eCacheMaxEntries < 0 {
 		return 2, fmt.Errorf("invalid -e2e-cache-max-entries %d: must be non-negative", cfg.e2eCacheMaxEntries)
 	}
+	if goCacheMaxGB < 0 {
+		return 2, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget cannot be negative (pass an empty -go-cache-dirs to disable the trim)", goCacheMaxGB)
+	}
+	cfg.goCacheMaxBytes = int64(goCacheMaxGB * supervisor.GiB)
 	if cfg.preflightScratchRoots != "" && cfg.preflightScratchMinAge <= 0 {
 		return 2, fmt.Errorf("invalid -preflight-scratch-min-age %s: must be positive (pass an empty -preflight-scratch-roots to disable the reaper)", cfg.preflightScratchMinAge)
 	}
@@ -261,6 +279,7 @@ func run(args []string, out io.Writer) (int, error) {
 	buildCaches := reapAbandonedBuildCaches(cfg)
 	e2eCaches := reapAbandonedE2ECaches(cfg)
 	preflightScratch := reapAbandonedPreflightScratch(cfg)
+	goCaches := trimOversizedCanonicalCaches(cfg, diskBreached)
 
 	var remediation *sweepResult
 	if diskBreached && !cfg.dryRun {
@@ -304,7 +323,7 @@ func run(args []string, out io.Writer) (int, error) {
 	// write is timeout-bounded because I/O on an exhausted disk can stall.
 	if breached {
 		logCtx, logCancel := context.WithTimeout(context.Background(), trailTimeout)
-		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc, absence, buildCaches, e2eCaches, preflightScratch)
+		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc, absence, buildCaches, e2eCaches, preflightScratch, goCaches)
 		logCancel()
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: trail append failed: %v\n", lerr)
@@ -312,11 +331,11 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	if cfg.jsonOutput {
-		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, absence, buildCaches, e2eCaches, preflightScratch); err != nil {
+		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, absence, buildCaches, e2eCaches, preflightScratch, goCaches); err != nil {
 			return 2, err
 		}
 	} else {
-		emitReport(out, snap, level, reasons, remediation, cfg, gc, absence, buildCaches, e2eCaches, preflightScratch)
+		emitReport(out, snap, level, reasons, remediation, cfg, gc, absence, buildCaches, e2eCaches, preflightScratch, goCaches)
 	}
 
 	if breached {
@@ -547,7 +566,7 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, gc *gcHealth,
 	absence *absenceHealth,
 	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult,
-	preflightScratch *preflightScratchReapResult) error {
+	preflightScratch *preflightScratchReapResult, goCaches *canonicalCacheTrimResult) error {
 	trail, err := decisiontrail.OpenJSONL(cfg.trailPath)
 	if err != nil {
 		return err
@@ -611,6 +630,9 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 	if buildCaches != nil {
 		payload["build_caches"] = buildCaches
 	}
+	if goCaches != nil {
+		payload["go_caches"] = goCaches
+	}
 	if e2eCaches != nil {
 		payload["e2e_caches"] = e2eCaches
 	}
@@ -629,7 +651,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
 	absence *absenceHealth,
 	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult,
-	preflightScratch *preflightScratchReapResult) error {
+	preflightScratch *preflightScratchReapResult, goCaches *canonicalCacheTrimResult) error {
 	type gcReport struct {
 		Stale       bool   `json:"stale"`
 		LastSuccess string `json:"last_success,omitempty"`
@@ -659,6 +681,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		SandboxGC         *gcReport                      `json:"sandbox_gc,omitempty"`
 		AbsenceAlarm      *absenceReport                 `json:"absence_alarm,omitempty"`
 		BuildCaches       *buildCacheReapResult          `json:"build_caches,omitempty"`
+		GoCaches          *canonicalCacheTrimResult      `json:"go_caches,omitempty"`
 		E2ECaches         *e2eCacheReapResult            `json:"e2e_caches,omitempty"`
 		PreflightScratch  *preflightScratchReapResult    `json:"preflight_scratch,omitempty"`
 		OK                bool                           `json:"ok"`
@@ -692,6 +715,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		SandboxGC:         gcr,
 		AbsenceAlarm:      ar,
 		BuildCaches:       buildCaches,
+		GoCaches:          goCaches,
 		E2ECaches:         e2eCaches,
 		PreflightScratch:  preflightScratch,
 		OK:                level == supervisor.PressureNone,
@@ -705,7 +729,7 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
 	absence *absenceHealth,
 	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult,
-	preflightScratch *preflightScratchReapResult) {
+	preflightScratch *preflightScratchReapResult, goCaches *canonicalCacheTrimResult) {
 	fmt.Fprintln(out, "disk-watchdog report")
 	fmt.Fprintf(out, "  path        : %s\n", cfg.path)
 	fmt.Fprintf(out, "  disk free   : %.1f GiB  [warn < %.0f GiB, critical < %.0f GiB]\n",
@@ -745,6 +769,9 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	}
 	if buildCaches != nil {
 		fmt.Fprintf(out, "  %s\n", summarizeBuildCacheReap(*buildCaches))
+	}
+	if goCaches != nil {
+		fmt.Fprintf(out, "  %s\n", summarizeCanonicalCacheTrim(*goCaches))
 	}
 	if e2eCaches != nil {
 		fmt.Fprintf(out, "  %s\n", summarizeE2ECacheReap(*e2eCaches))
