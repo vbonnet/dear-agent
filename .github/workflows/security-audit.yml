@@ -176,7 +176,7 @@ jobs:
                 if (indent <= blockindent) { inblock = 0; next }
                 key = $1; sub(/:.*/, "", key); print key
               }
-            ' "$f" | grep -vxE "actions|attestations|checks|contents|deployments|discussions|id-token|issues|models|packages|pages|pull-requests|security-events|statuses" | sort -u || true)
+            ' "$f" | grep -vxE "actions|attestations|checks|contents|deployments|discussions|id-token|issues|models|packages|pages|pull-requests|security-events|statuses|vulnerability-alerts" | sort -u || true)
             if [ -n "$bad" ]; then
               findings="${findings}\n- ${f}: invalid \`permissions:\` key(s) — $(echo "$bad" | tr '\n' ' ')(GitHub rejects the file; the run dies before any job starts)"
             fi
