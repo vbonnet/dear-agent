@@ -422,6 +422,15 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
 				fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
 			fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
+			// The async route carries no --delete-branch, and the repository
+			// setting that would cover it cannot be assumed for an arbitrary
+			// --repo target, so remove the remote head explicitly. The merge is
+			// already confirmed, so a failure here is a warning, never a result.
+			if stacked {
+				if err := deleteRemoteHeadBranch(ctx, cfg.Repo, headInfo.Branch); err != nil {
+					fmt.Fprintf(os.Stderr, "safe-merge: cleanup: %v\n", err)
+				}
+			}
 		},
 	)
 	if failure != nil {

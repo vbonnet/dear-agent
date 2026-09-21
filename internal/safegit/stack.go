@@ -16,15 +16,21 @@
 package safegit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 )
 
 // stackProbeTimeout bounds the stack-membership query. It is a single
 // point-read against the PR payload, so it is short by design.
 const stackProbeTimeout = mergeConfirmationCommandTimeout
+
+// stackProbeWaitDelay bounds pipe draining if a probe descendant outlives the
+// direct gh process while retaining stdout or stderr.
+const stackProbeWaitDelay = mergeConfirmationCommandWaitDelay
 
 // stackMembership is the subset of the PR payload that decides the transport.
 // A nil Stack means the PR merges through the ordinary GraphQL path.
@@ -58,9 +64,18 @@ func resolveStackMembership(ctx context.Context, prNum int, repo string) (bool, 
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, stackProbeTimeout)
 	defer cancel()
-	out, err := runCommand(exec.CommandContext(probeCtx, "gh", "api",
-		fmt.Sprintf("repos/%s/pulls/%d", repoPath, prNum)))
+	// Bound pipe draining too. Cancelling the context kills only the direct gh
+	// process; a credential helper that inherited stdout or stderr can keep the
+	// read blocked past the timeout, and this probe is on the mandatory merge
+	// path, so an unbounded wait here would stall every merge.
+	cmd := exec.CommandContext(probeCtx, "gh", "api",
+		fmt.Sprintf("repos/%s/pulls/%d", repoPath, prNum))
+	cmd.WaitDelay = stackProbeWaitDelay
+	out, err := runCommand(cmd)
 	if err != nil {
+		if ctxErr := probeCtx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
 		return false, fmt.Errorf("resolving stack membership for PR #%d: %w", prNum, err)
 	}
 	return parseStackMembership(out)
@@ -109,4 +124,50 @@ func mergeArgsForTransport(stacked bool, prNum int, repo, headSHA string) []stri
 		return BuildAsyncMergeArgs(prNum, repo, headSHA)
 	}
 	return BuildMergeArgs(prNum, repo, headSHA)
+}
+
+// deleteRemoteHeadBranch removes the merged head branch from the provider.
+//
+// The GraphQL route passes --delete-branch, which deletes the remote branch as
+// well as the local one. The async REST route has no such flag, and
+// delete_branch_on_merge cannot be assumed: safe-merge --repo can target a
+// repository where that setting is off, and the local post-merge cleanup only
+// touches local git state. So the async route deletes the remote head itself.
+//
+// A branch the repository setting already removed is not an error, so a missing
+// ref is success. Any other failure is reported as a warning: the merge is
+// confirmed by this point, and a surviving branch must not be mistaken for a
+// failed merge.
+func deleteRemoteHeadBranch(ctx context.Context, repo, branch string) error {
+	if branch == "" {
+		return fmt.Errorf("deleting remote head: no branch resolved")
+	}
+	repoPath, err := escapedRepoPath(repo)
+	if err != nil {
+		return err
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stackProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(deleteCtx, "gh", "api", "-X", "DELETE",
+		fmt.Sprintf("repos/%s/git/refs/heads/%s", repoPath, url.PathEscape(branch)))
+	cmd.WaitDelay = stackProbeWaitDelay
+	if _, err := runCommand(cmd); err != nil {
+		if ctxErr := deleteCtx.Err(); ctxErr != nil {
+			return fmt.Errorf("deleting remote head %q: %w", branch, ctxErr)
+		}
+		// runCommand appends stderr to the error, which is where gh reports a
+		// missing ref.
+		if isMissingRefResponse([]byte(err.Error())) {
+			return nil
+		}
+		return fmt.Errorf("deleting remote head %q: %w", branch, err)
+	}
+	return nil
+}
+
+// isMissingRefResponse reports whether the provider answered that the ref is
+// already gone, which the repository's own delete_branch_on_merge can cause.
+func isMissingRefResponse(out []byte) bool {
+	return bytes.Contains(bytes.ToLower(out), []byte("not found")) ||
+		bytes.Contains(bytes.ToLower(out), []byte("reference does not exist"))
 }

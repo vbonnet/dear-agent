@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseStackMembership_NullStackIsNotStacked(t *testing.T) {
@@ -176,5 +177,73 @@ func TestMergeArgsForTransport_MakesNoProviderCall(t *testing.T) {
 		if !containsArg(args, "sha=abc123") && !containsArg(args, "abc123") {
 			t.Fatalf("stacked=%v: merge argv lost the head anchor: %v", stacked, args)
 		}
+	}
+}
+
+// The stack probe runs on every merge, so an unbounded wait here would stall
+// every merge, not just this one. It must bound pipe draining the way the other
+// mandatory provider read does.
+func TestResolveStackMembership_BoundsDescendantHeldPipe(t *testing.T) {
+	dir := t.TempDir()
+	// gh exits immediately but leaves a descendant holding stdout.
+	script := "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' '{\"number\":1,\"stack\":null}'\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := resolveStackMembership(context.Background(), 1, "o/r")
+		done <- err
+	}()
+	select {
+	case <-done:
+		// Returned promptly: the WaitDelay bound did its job.
+	case <-time.After(20 * time.Second):
+		t.Fatal("stack probe blocked on a descendant-held pipe; it must set a " +
+			"finite WaitDelay or a hung credential helper stalls every merge")
+	}
+}
+
+func TestDeleteRemoteHeadBranch_RequiresABranch(t *testing.T) {
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", ""); err == nil {
+		t.Fatal("deleting an unnamed remote head must be an error, not a silent no-op")
+	}
+}
+
+func TestDeleteRemoteHeadBranch_TreatsAlreadyDeletedAsSuccess(t *testing.T) {
+	dir := t.TempDir()
+	// delete_branch_on_merge may have removed it first; that is not a failure.
+	script := "#!/bin/sh\nprintf '%s\\n' 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic"); err != nil {
+		t.Fatalf("an already-deleted remote head must be success; got %v", err)
+	}
+}
+
+func TestDeleteRemoteHeadBranch_EscapesSlashesInBranchName(t *testing.T) {
+	dir := t.TempDir()
+	// Record the path so a slash-bearing branch cannot be split into a wrong ref.
+	rec := filepath.Join(dir, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + rec + "\nprintf '%s\\n' '{}'\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "fix/some-topic"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatalf("read recorded args: %v", err)
+	}
+	if !strings.Contains(string(got), "refs/heads/fix%2Fsome-topic") {
+		t.Fatalf("branch name must be path-escaped so it cannot address a different ref; got %s", got)
 	}
 }
