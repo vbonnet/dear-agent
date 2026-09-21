@@ -149,12 +149,16 @@ func TestShowStatusRendersFallback(t *testing.T) {
 
 // TestCoverageSupervisorClassification pins dead, stale, auth-failed, and alive health outcomes.
 func TestCoverageSupervisorClassification(t *testing.T) {
-	bin := t.TempDir()
-	writeFakeAGM(t, bin, `case "$2" in list) printf '%s\n' 'vroom-orchestrator';; esac`)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	orig := captureSupervisorPane
-	t.Cleanup(func() { captureSupervisorPane = orig })
 	sup := supervisor{Name: "vroom-orchestrator", Harness: "codex-cli", TickInterval: time.Hour}
+	now := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
+	checkerForPane := func(pane string) supervisorHealthChecker {
+		return supervisorHealthChecker{
+			sessionAlive:  func(name string) bool { return name == sup.Name },
+			capturePane:   func(string) (string, error) { return pane, nil },
+			readHeartbeat: readSupervisorHeartbeat,
+			now:           func() time.Time { return now },
+		}
+	}
 	writeRecord := func(home, id string, beat time.Time) {
 		t.Helper()
 		store := supervisorheartbeat.New(filepath.Join(home, ".agm", "supervisors"))
@@ -193,24 +197,23 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 	}
 
 	freshHome := t.TempDir()
-	writeRecord(freshHome, sup.Name, time.Now().UTC())
-	captureSupervisorPane = func(string) (string, error) { return "codex login required", nil }
-	classify := func(home string, candidate supervisor) supervisorHealth {
+	writeRecord(freshHome, sup.Name, now)
+	classify := func(checker supervisorHealthChecker, home string, candidate supervisor) supervisorHealth {
 		t.Helper()
-		health, err := classifySupervisor(home, candidate)
+		health, err := checker.classify(home, candidate)
 		if err != nil {
-			t.Fatalf("classifySupervisor(%q): %v", candidate.Name, err)
+			t.Fatalf("classify(%q): %v", candidate.Name, err)
 		}
 		return health
 	}
-	if got := classify(freshHome, sup); got != healthAuthFailed {
+	if got := classify(checkerForPane("codex login required"), freshHome, sup); got != healthAuthFailed {
 		t.Errorf("fresh heartbeat with auth failure classification = %v", got)
 	}
-	captureSupervisorPane = func(string) (string, error) { return "gpt-5 · /tmp\n›", nil }
+	readyChecker := checkerForPane("gpt-5 · /tmp\n›")
 
 	missingHome := t.TempDir()
-	writeMirror(missingHome, time.Now().UTC())
-	if got := classify(missingHome, sup); got != healthStale {
+	writeMirror(missingHome, now)
+	if got := classify(readyChecker, missingHome, sup); got != healthStale {
 		t.Errorf("fresh mirror with missing authoritative heartbeat classification = %v", got)
 	}
 	zeroHome := t.TempDir()
@@ -218,8 +221,8 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 	if err := zeroStore.Write(supervisorheartbeat.Record{ID: sup.Name}); err != nil {
 		t.Fatal(err)
 	}
-	writeMirror(zeroHome, time.Now().UTC())
-	if got := classify(zeroHome, sup); got != healthStale {
+	writeMirror(zeroHome, now)
+	if got := classify(readyChecker, zeroHome, sup); got != healthStale {
 		t.Errorf("fresh mirror with zero authoritative heartbeat classification = %v", got)
 	}
 	malformedHome := t.TempDir()
@@ -230,8 +233,8 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(malformedDir, "heartbeat.json"), []byte("not-json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeMirror(malformedHome, time.Now().UTC())
-	malformedHealth, malformedErr := classifySupervisor(malformedHome, sup)
+	writeMirror(malformedHome, now)
+	malformedHealth, malformedErr := readyChecker.classify(malformedHome, sup)
 	if malformedHealth != healthStale {
 		t.Errorf("fresh mirror with malformed authoritative heartbeat classification = %v", malformedHealth)
 	}
@@ -241,21 +244,122 @@ func TestCoverageSupervisorClassification(t *testing.T) {
 		t.Errorf("malformed authoritative heartbeat diagnostic = %v", malformedErr)
 	}
 	agedHome := t.TempDir()
-	writeRecord(agedHome, sup.Name, time.Now().UTC().Add(-3*time.Hour))
-	writeMirror(agedHome, time.Now().UTC())
-	if got := classify(agedHome, sup); got != healthStale {
+	writeRecord(agedHome, sup.Name, now.Add(-3*time.Hour))
+	writeMirror(agedHome, now)
+	if got := classify(readyChecker, agedHome, sup); got != healthStale {
 		t.Errorf("fresh mirror with aged authoritative heartbeat classification = %v", got)
 	}
 
 	home := t.TempDir()
-	writeRecord(home, sup.Name, time.Now().UTC())
-	writeMirror(home, time.Now().UTC().Add(-24*time.Hour))
-	if got := classify(home, sup); got != healthAlive {
+	writeRecord(home, sup.Name, now)
+	writeMirror(home, now.Add(-24*time.Hour))
+	if got := classify(readyChecker, home, sup); got != healthAlive {
 		t.Errorf("fresh authoritative heartbeat with stale mirror classification = %v", got)
 	}
-	writeRecord(home, "missing", time.Now().UTC())
-	if got := classify(home, supervisor{Name: "missing", TickInterval: time.Hour}); got != healthDead {
+	writeRecord(home, "missing", now)
+	if got := classify(readyChecker, home, supervisor{Name: "missing", TickInterval: time.Hour}); got != healthDead {
 		t.Errorf("fresh heartbeat with absent session classification = %v", got)
+	}
+	thresholdHome := t.TempDir()
+	writeRecord(thresholdHome, sup.Name, now.Add(-2*sup.TickInterval))
+	if got := classify(readyChecker, thresholdHome, sup); got != healthAlive {
+		t.Errorf("heartbeat at exact threshold classification = %v", got)
+	}
+	writeRecord(thresholdHome, sup.Name, now.Add(-2*sup.TickInterval-time.Nanosecond))
+	if got := classify(readyChecker, thresholdHome, sup); got != healthStale {
+		t.Errorf("heartbeat beyond threshold classification = %v", got)
+	}
+}
+
+func TestSupervisorHealthCheckerHarnessAuth(t *testing.T) {
+	now := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name, harness, pane string
+		want                supervisorHealth
+	}{
+		{"Claude auth", "claude-code", "Error: 401 Unauthorized\nPlease run /login", healthAuthFailed},
+		{"Codex auth", "codex-cli", "No OpenAI credentials found. Run `codex login` to continue.", healthAuthFailed},
+		{"AGY auth", "agy", "Application Default Credentials unavailable; run gcloud auth application-default login", healthAuthFailed},
+		{"other harness", "other", "codex login required", healthAlive},
+		{"Codex ready", "codex-cli", "codex login required\n›\n\ngpt-5.6 xhigh · ~/src/project", healthAlive},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checker := supervisorHealthChecker{
+				sessionAlive: func(string) bool { return true },
+				capturePane:  func(string) (string, error) { return tt.pane, nil },
+				readHeartbeat: func(string, string) (*supervisorheartbeat.Record, error) {
+					return &supervisorheartbeat.Record{LastBeatUTC: now}, nil
+				},
+				now: func() time.Time { return now },
+			}
+			got, err := checker.classify(t.TempDir(), supervisor{
+				Name: "vroom-orchestrator", Harness: tt.harness, TickInterval: time.Hour,
+			})
+			if err != nil || got != tt.want {
+				t.Fatalf("classify() = (%v, %v), want (%v, nil)", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSupervisorHealthCheckerProbeOrder(t *testing.T) {
+	now := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		sessionUp  bool
+		pane       string
+		paneErr    error
+		record     *supervisorheartbeat.Record
+		wantHealth supervisorHealth
+		wantCalls  string
+	}{
+		{"dead skips later probes", false, "", nil, nil, healthDead, "session"},
+		{"auth skips heartbeat and clock", true, "codex login required", nil, nil, healthAuthFailed, "session,pane"},
+		{"missing heartbeat skips clock", true, "", nil, nil, healthStale, "session,pane,heartbeat"},
+		{"pane error does not hide heartbeat", true, "", errors.New("tmux unavailable"), nil, healthStale, "session,pane,heartbeat"},
+		{"fresh heartbeat reads clock", true, "", nil, &supervisorheartbeat.Record{LastBeatUTC: now}, healthAlive, "session,pane,heartbeat,clock"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			checker := supervisorHealthChecker{
+				sessionAlive: func(name string) bool {
+					calls = append(calls, "session")
+					if name != "vroom-orchestrator" {
+						t.Fatalf("session probe name = %q", name)
+					}
+					return tt.sessionUp
+				},
+				capturePane: func(name string) (string, error) {
+					calls = append(calls, "pane")
+					if name != "vroom-orchestrator" {
+						t.Fatalf("pane probe name = %q", name)
+					}
+					return tt.pane, tt.paneErr
+				},
+				readHeartbeat: func(home, name string) (*supervisorheartbeat.Record, error) {
+					calls = append(calls, "heartbeat")
+					if home != "/test-home" || name != "vroom-orchestrator" {
+						t.Fatalf("heartbeat probe args = (%q, %q)", home, name)
+					}
+					return tt.record, nil
+				},
+				now: func() time.Time {
+					calls = append(calls, "clock")
+					return now
+				},
+			}
+			got, err := checker.classify("/test-home", supervisor{
+				Name: "vroom-orchestrator", Harness: "codex-cli", TickInterval: time.Hour,
+			})
+			if err != nil || got != tt.wantHealth {
+				t.Fatalf("classify() = (%v, %v), want (%v, nil)", got, err, tt.wantHealth)
+			}
+			if gotCalls := strings.Join(calls, ","); gotCalls != tt.wantCalls {
+				t.Fatalf("probe calls = %q, want %q", gotCalls, tt.wantCalls)
+			}
+		})
 	}
 }
 
