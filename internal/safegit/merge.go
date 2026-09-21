@@ -350,6 +350,16 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		return fmt.Errorf("state gate returned no headRefOid or headRefName; cannot anchor merge")
 	}
 
+	// Resolve the merge transport before Gate 5. GitHub refuses the GraphQL
+	// merge mutation for stacked PRs, so the transport has to be known, but this
+	// probe is a provider round trip: running it after the freshness proof would
+	// let the base advance unchecked for the probe's whole timeout.
+	stacked, err := resolveStackMembership(ctx, cfg.PRNumber, cfg.Repo)
+	if err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge transport: "+err.Error())
+		return fmt.Errorf("selecting merge transport: %w", err)
+	}
+
 	// Gate 5: independently resolve the live base and prove it is an ancestor of
 	// the exact gated head. Running this last means a branch update and subsequent
 	// CI cycle are only ever requested for a PR that cleared every other gate.
@@ -388,13 +398,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
 	mergeSpan.SetAttributes(attribute.String("pr.head_sha", headInfo.SHA))
 
-	mergeArgs, stacked, err := selectMergeArgs(ctx, cfg.PRNumber, cfg.Repo, headInfo.SHA)
-	if err != nil {
-		mergeSpan.RecordError(err)
-		mergeSpan.SetStatus(codes.Error, err.Error())
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge transport: "+err.Error())
-		return fmt.Errorf("selecting merge transport: %w", err)
-	}
+	mergeArgs := mergeArgsForTransport(stacked, cfg.PRNumber, cfg.Repo, headInfo.SHA)
 	mergeSpan.SetAttributes(attribute.Bool("pr.stacked", stacked))
 	if stacked {
 		fmt.Fprintln(os.Stderr, "safe-merge: PR is part of a stack — using the asynchronous REST merge")

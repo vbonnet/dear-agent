@@ -80,6 +80,8 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-32** When stack membership cannot be resolved, the system shall block the merge rather than assume a transport, since either default can merge through a path the provider refuses.
 
+**SAFEGIT-33** When the system resolves stack membership, it shall do so before the base-freshness gate, so that no provider round trip separates the freshness proof from the merge; a probe in that position would let the target branch advance unchecked for the probe's timeout and defeat the gate's protection.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

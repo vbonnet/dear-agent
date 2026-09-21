@@ -47,8 +47,11 @@ func parseStackMembership(payload []byte) (bool, error) {
 	return m.Stack != nil, nil
 }
 
-// isStackedPR asks GitHub whether the PR belongs to a stack.
-func isStackedPR(ctx context.Context, prNum int, repo string) (bool, error) {
+// resolveStackMembership asks GitHub whether the PR belongs to a stack. A
+// failure is reported rather than guessed: choosing the wrong transport either
+// fails loudly (GraphQL on a stacked PR) or surprises the caller, and neither
+// belongs behind a silent default.
+func resolveStackMembership(ctx context.Context, prNum int, repo string) (bool, error) {
 	repoPath, err := escapedRepoPath(repo)
 	if err != nil {
 		return false, err
@@ -86,17 +89,14 @@ func BuildAsyncMergeArgs(prNum int, repo, headSHA string) []string {
 	}
 }
 
-// selectMergeArgs picks the merge transport from provider truth. A failure to
-// determine stack membership is reported rather than guessed: choosing the
-// wrong transport either fails loudly (GraphQL on a stacked PR) or bypasses the
-// caller's expectations, and neither belongs behind a silent default.
-func selectMergeArgs(ctx context.Context, prNum int, repo, headSHA string) ([]string, bool, error) {
-	stacked, err := isStackedPR(ctx, prNum, repo)
-	if err != nil {
-		return nil, false, err
-	}
+// mergeArgsForTransport builds the argv for an already-resolved transport.
+// Membership is resolved before the base-freshness gate rather than here, so
+// the freshness proof stays the last provider read before the mutation: a probe
+// between that proof and the merge would let the base advance unchecked for the
+// probe's whole timeout, defeating the gate's TOCTOU protection.
+func mergeArgsForTransport(stacked bool, prNum int, repo, headSHA string) []string {
 	if stacked {
-		return BuildAsyncMergeArgs(prNum, repo, headSHA), true, nil
+		return BuildAsyncMergeArgs(prNum, repo, headSHA)
 	}
-	return BuildMergeArgs(prNum, repo, headSHA), false, nil
+	return BuildMergeArgs(prNum, repo, headSHA)
 }

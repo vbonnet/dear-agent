@@ -109,45 +109,72 @@ func fakeGHStackProbe(t *testing.T, payload string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestSelectMergeArgs_StackedPRUsesAsyncTransport(t *testing.T) {
+func TestResolveStackMembership_StackedPRUsesAsyncTransport(t *testing.T) {
 	fakeGHStackProbe(t, `{"number":1411,"stack":{"id":1212736,"number":1528,"position":1,"size":3}}`)
 
-	args, stacked, err := selectMergeArgs(context.Background(), 1411, "vbonnet/dear-agent", "abc123")
+	stacked, err := resolveStackMembership(context.Background(), 1411, "vbonnet/dear-agent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !stacked {
 		t.Fatal("a PR with a stack object must be routed as stacked")
 	}
-	if !containsArg(args, "PUT") || containsArg(args, "merge") && containsArg(args, "pr") {
+	args := mergeArgsForTransport(stacked, 1411, "vbonnet/dear-agent", "abc123")
+	if !containsArg(args, "PUT") || containsArg(args, "pr") {
 		t.Fatalf("stacked PR must merge through the async REST endpoint; got: %v", args)
 	}
 }
 
-func TestSelectMergeArgs_OrdinaryPRKeepsGraphQLTransport(t *testing.T) {
+func TestResolveStackMembership_OrdinaryPRKeepsGraphQLTransport(t *testing.T) {
 	fakeGHStackProbe(t, `{"number":1510,"stack":null}`)
 
-	args, stacked, err := selectMergeArgs(context.Background(), 1510, "vbonnet/dear-agent", "abc123")
+	stacked, err := resolveStackMembership(context.Background(), 1510, "vbonnet/dear-agent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if stacked {
 		t.Fatal("a PR with a null stack must not be routed as stacked")
 	}
+	args := mergeArgsForTransport(stacked, 1510, "vbonnet/dear-agent", "abc123")
 	if !containsArg(args, "--match-head-commit") {
 		t.Fatalf("ordinary PRs must keep the GraphQL path and its TOCTOU anchor; got: %v", args)
 	}
 }
 
-func TestSelectMergeArgs_ProbeFailureIsReportedNotGuessed(t *testing.T) {
+func TestResolveStackMembership_ProbeFailureIsReportedNotGuessed(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if _, _, err := selectMergeArgs(context.Background(), 1, "o/r", "abc123"); err == nil {
+	if _, err := resolveStackMembership(context.Background(), 1, "o/r"); err == nil {
 		t.Fatal("an unresolvable stack membership must fail loudly — defaulting " +
 			"either way merges through a transport the provider may refuse")
+	}
+}
+
+// mergeArgsForTransport must not talk to the provider. The stack probe runs
+// before the base-freshness gate precisely so that no provider round trip sits
+// between the freshness proof and the merge; a probe there would let the base
+// advance unchecked for the probe's whole timeout.
+func TestMergeArgsForTransport_MakesNoProviderCall(t *testing.T) {
+	dir := t.TempDir()
+	// A gh that fails loudly if anything invokes it during argv construction.
+	if err := os.WriteFile(filepath.Join(dir, "gh"),
+		[]byte("#!/bin/sh\necho 'gh must not run between the freshness gate and the merge' >&2\nexit 3\n"),
+		0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	for _, stacked := range []bool{true, false} {
+		args := mergeArgsForTransport(stacked, 42, "o/r", "abc123")
+		if len(args) == 0 {
+			t.Fatalf("stacked=%v: expected merge argv", stacked)
+		}
+		if !containsArg(args, "sha=abc123") && !containsArg(args, "abc123") {
+			t.Fatalf("stacked=%v: merge argv lost the head anchor: %v", stacked, args)
+		}
 	}
 }
