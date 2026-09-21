@@ -2,6 +2,7 @@ package safegit
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,7 +208,7 @@ func TestResolveStackMembership_BoundsDescendantHeldPipe(t *testing.T) {
 }
 
 func TestDeleteRemoteHeadBranch_RequiresABranch(t *testing.T) {
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", ""); err == nil {
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "", mergedOID); err == nil {
 		t.Fatal("deleting an unnamed remote head must be an error, not a silent no-op")
 	}
 }
@@ -221,29 +222,78 @@ func TestDeleteRemoteHeadBranch_TreatsAlreadyDeletedAsSuccess(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic"); err != nil {
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", mergedOID); err != nil {
 		t.Fatalf("an already-deleted remote head must be success; got %v", err)
 	}
 }
 
 func TestDeleteRemoteHeadBranch_EscapesSlashesInBranchName(t *testing.T) {
+	// A slash-bearing branch must not be split into a different ref path.
+	deleted := fakeGHRefServer(t, "fix/some-topic", mergedOID)
+
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "fix/some-topic", mergedOID); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := os.ReadFile(deleted)
+	if err != nil {
+		t.Fatalf("read recorded delete args: %v", err)
+	}
+	if !strings.Contains(string(got), "refs/heads/fix%2Fsome-topic") {
+		t.Fatalf("branch name must be path-escaped so it cannot address a different ref; got %s", got)
+	}
+}
+
+const mergedOID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func fakeGHRefServer(t *testing.T, branch, refOID string) (deletedMarker string) {
+	t.Helper()
 	dir := t.TempDir()
-	// Record the path so a slash-bearing branch cannot be split into a wrong ref.
-	rec := filepath.Join(dir, "args")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + rec + "\nprintf '%s\\n' '{}'\n"
+	deletedMarker = filepath.Join(dir, "deleted")
+	script := `#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "DELETE" ]; then
+    printf '%s' "$*" > ` + deletedMarker + `
+    printf '{}'
+    exit 0
+  fi
+done
+printf '{"ref":"refs/heads/` + branch + `","object":{"sha":"` + refOID + `","type":"commit"}}'
+`
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return deletedMarker
+}
 
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "fix/some-topic"); err != nil {
+func TestDeleteRemoteHeadBranch_RequiresAMergedCommit(t *testing.T) {
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", ""); err == nil {
+		t.Fatal("deleting without a merged commit must be an error — an unguarded " +
+			"delete can discard commits pushed after the merge")
+	}
+}
+
+// An async merge can complete between confirmation polls. If the branch moved
+// in that gap, deleting it would destroy work the merge never contained.
+func TestDeleteRemoteHeadBranch_RefusesWhenBranchAdvanced(t *testing.T) {
+	deleted := fakeGHRefServer(t, "topic", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+	err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", mergedOID)
+	if !errors.Is(err, errRemoteHeadAdvanced) {
+		t.Fatalf("error = %v, want errRemoteHeadAdvanced", err)
+	}
+	if _, statErr := os.Stat(deleted); statErr == nil {
+		t.Fatal("an advanced branch must not be deleted — that discards post-merge commits")
+	}
+}
+
+func TestDeleteRemoteHeadBranch_DeletesWhenStillAtMergedCommit(t *testing.T) {
+	deleted := fakeGHRefServer(t, "topic", mergedOID)
+
+	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", mergedOID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got, err := os.ReadFile(rec)
-	if err != nil {
-		t.Fatalf("read recorded args: %v", err)
-	}
-	if !strings.Contains(string(got), "refs/heads/fix%2Fsome-topic") {
-		t.Fatalf("branch name must be path-escaped so it cannot address a different ref; got %s", got)
+	if _, statErr := os.Stat(deleted); statErr != nil {
+		t.Fatal("a branch still at the merged commit must be deleted")
 	}
 }

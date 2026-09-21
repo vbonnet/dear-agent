@@ -84,7 +84,7 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-34** When a merge attempt fails or remains incomplete, the system shall report the interface it actually used, since naming an operation that was never attempted hides the actionable failure.
 
-**SAFEGIT-35** When the system completes a merge through an interface that does not itself delete the merged head branch, the system shall delete that remote branch, since the repository setting that would otherwise cover it cannot be assumed for an arbitrary target repository; a branch already removed shall count as success and a failed deletion shall not change the confirmed merge result.
+**SAFEGIT-35** When the system completes a merge through an interface that does not itself delete the merged head branch, the system shall delete that remote branch only while it still points at the merged commit, since a branch that advanced after the merge carries work the merge never contained; a branch already removed shall count as success, and neither a refusal nor a failed deletion shall change the confirmed merge result.
 
 ## BDD Traceability
 

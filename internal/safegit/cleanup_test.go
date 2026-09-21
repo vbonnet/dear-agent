@@ -712,6 +712,8 @@ case "$*" in
   "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{"message":"Updating pull request branch."}' ;;
+  "api repos/owner/repo/git/ref/heads%2Fcleanup-topic")
+    printf '%s\n' '{"ref":"refs/heads/cleanup-topic","object":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"commit"}}' ;;
   "api -X DELETE repos/owner/repo/git/refs/heads/cleanup-topic")
     printf '%s\n' delete-remote >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{}' ;;

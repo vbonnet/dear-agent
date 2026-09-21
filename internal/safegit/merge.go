@@ -427,7 +427,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 			// --repo target, so remove the remote head explicitly. The merge is
 			// already confirmed, so a failure here is a warning, never a result.
 			if stacked {
-				if err := deleteRemoteHeadBranch(ctx, cfg.Repo, headInfo.Branch); err != nil {
+				if err := deleteRemoteHeadBranch(ctx, cfg.Repo, headInfo.Branch, headInfo.SHA); err != nil {
 					fmt.Fprintf(os.Stderr, "safe-merge: cleanup: %v\n", err)
 				}
 			}

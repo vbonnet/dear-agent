@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -126,6 +127,10 @@ func mergeArgsForTransport(stacked bool, prNum int, repo, headSHA string) []stri
 	return BuildMergeArgs(prNum, repo, headSHA)
 }
 
+// errRemoteHeadAdvanced reports that the branch moved past the merged commit,
+// so deleting it would discard work that the merge never contained.
+var errRemoteHeadAdvanced = errors.New("remote head advanced past the merged commit")
+
 // deleteRemoteHeadBranch removes the merged head branch from the provider.
 //
 // The GraphQL route passes --delete-branch, which deletes the remote branch as
@@ -134,13 +139,21 @@ func mergeArgsForTransport(stacked bool, prNum int, repo, headSHA string) []stri
 // repository where that setting is off, and the local post-merge cleanup only
 // touches local git state. So the async route deletes the remote head itself.
 //
+// The deletion is conditional on the live ref still pointing at mergedSHA. An
+// async merge can complete between confirmation polls, and anything that
+// advances the branch in that gap would otherwise be destroyed by an
+// unconditional delete. GitHub's ref deletion takes no compare-and-swap, so
+// this is a read followed by a delete rather than an atomic lease: it narrows
+// the window instead of closing it, and it fails safe by leaving the branch.
+//
 // A branch the repository setting already removed is not an error, so a missing
-// ref is success. Any other failure is reported as a warning: the merge is
-// confirmed by this point, and a surviving branch must not be mistaken for a
-// failed merge.
-func deleteRemoteHeadBranch(ctx context.Context, repo, branch string) error {
+// ref is success.
+func deleteRemoteHeadBranch(ctx context.Context, repo, branch, mergedSHA string) error {
 	if branch == "" {
 		return fmt.Errorf("deleting remote head: no branch resolved")
+	}
+	if !validGitOID(mergedSHA) {
+		return fmt.Errorf("deleting remote head %q: a merged commit is required to guard the delete", branch)
 	}
 	repoPath, err := escapedRepoPath(repo)
 	if err != nil {
@@ -148,6 +161,19 @@ func deleteRemoteHeadBranch(ctx context.Context, repo, branch string) error {
 	}
 	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stackProbeTimeout)
 	defer cancel()
+
+	live, err := readRemoteHeadOID(deleteCtx, repoPath, branch)
+	if err != nil {
+		if errors.Is(err, errRemoteHeadMissing) {
+			return nil
+		}
+		return fmt.Errorf("deleting remote head %q: %w", branch, err)
+	}
+	if live != mergedSHA {
+		return fmt.Errorf("%w: %s is at %s, not the merged %s",
+			errRemoteHeadAdvanced, branch, live, mergedSHA)
+	}
+
 	cmd := exec.CommandContext(deleteCtx, "gh", "api", "-X", "DELETE",
 		fmt.Sprintf("repos/%s/git/refs/heads/%s", repoPath, url.PathEscape(branch)))
 	cmd.WaitDelay = stackProbeWaitDelay
@@ -155,8 +181,6 @@ func deleteRemoteHeadBranch(ctx context.Context, repo, branch string) error {
 		if ctxErr := deleteCtx.Err(); ctxErr != nil {
 			return fmt.Errorf("deleting remote head %q: %w", branch, ctxErr)
 		}
-		// runCommand appends stderr to the error, which is where gh reports a
-		// missing ref.
 		if isMissingRefResponse([]byte(err.Error())) {
 			return nil
 		}
@@ -165,9 +189,31 @@ func deleteRemoteHeadBranch(ctx context.Context, repo, branch string) error {
 	return nil
 }
 
+// errRemoteHeadMissing reports that the ref is already gone, which the
+// repository's own delete_branch_on_merge can cause.
+var errRemoteHeadMissing = errors.New("remote head is already deleted")
+
+// readRemoteHeadOID resolves the commit a remote branch currently points at.
+func readRemoteHeadOID(ctx context.Context, repoPath, branch string) (string, error) {
+	cmd := exec.CommandContext(ctx, "gh", "api", liveRefEndpoint(repoPath, branch))
+	cmd.WaitDelay = stackProbeWaitDelay
+	out, err := runCommand(cmd)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
+		if isMissingRefResponse([]byte(err.Error())) {
+			return "", errRemoteHeadMissing
+		}
+		return "", err
+	}
+	return parseLiveRefOID(out, "refs/heads/"+branch)
+}
+
 // isMissingRefResponse reports whether the provider answered that the ref is
-// already gone, which the repository's own delete_branch_on_merge can cause.
+// already gone.
 func isMissingRefResponse(out []byte) bool {
-	return bytes.Contains(bytes.ToLower(out), []byte("not found")) ||
-		bytes.Contains(bytes.ToLower(out), []byte("reference does not exist"))
+	lower := bytes.ToLower(out)
+	return bytes.Contains(lower, []byte("not found")) ||
+		bytes.Contains(lower, []byte("reference does not exist"))
 }
