@@ -144,7 +144,8 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 	audit := filepath.Join(t.TempDir(), "audit.jsonl")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-clear-quarantine", "-credentials", creds, "-quarantine", quar, "-audit-log", audit}, &stdout, &stderr)
+	code := run([]string{"-clear-quarantine", "-credentials", creds, "-quarantine", quar,
+		"-audit-log", audit, "-state-dir", t.TempDir()}, &stdout, &stderr)
 
 	if code != exitOK {
 		t.Errorf("exit code = %d, want %d", code, exitOK)
