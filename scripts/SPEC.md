@@ -22,6 +22,8 @@
 
 **REPO-SCRIPT-10** When a local preflight gate fails, the system shall record the failing gate name, and the names of the failing tests when that gate collected them, to the report file the calling tool reads, and shall determine test failure from the test command's own exit status rather than the enclosing pipeline's.
 
+**REPO-SCRIPT-11** When any local preflight tier runs, the system shall invoke the authoritative structural-health scanner exactly once after compilation succeeds, shall record a named failing gate when the scanner rejects the repository, and shall stop before repository tests run.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
@@ -29,3 +31,4 @@
 - Feature: `tests/bats/isolated-preflight.bats` (REPO-SCRIPT-08)
 - Feature: `tests/bats/preflight-lease.bats` (REPO-SCRIPT-09)
 - Feature: `tests/bats/preflight-gate.bats` (REPO-SCRIPT-10)
+- Feature: `tests/bats/preflight-structural-health.bats` (REPO-SCRIPT-11)

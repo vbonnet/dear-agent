@@ -7,7 +7,7 @@
 # this script exists.
 #
 # Usage:
-#   scripts/preflight.sh            # fast tier: vet + build + AI skills + lint
+#   scripts/preflight.sh            # fast tier: vet + build + structural health + AI skills + lint
 #   scripts/preflight.sh --tests    # fast tier + go test (no -race, no vuln)
 #   scripts/preflight.sh --race     # fast tier + go test -race (no vuln)
 #   scripts/preflight.sh --full     # add: race tests + ordinary performance SLA + govulncheck
@@ -269,6 +269,10 @@ go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
 go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
 go build ./...
 ok "build clean"
+
+step "go run ./cmd/structural-health"
+go run ./cmd/structural-health || fail "structural-health scan failed"
+ok "structural health clean"
 
 step "validate tracked AI skills"
 go run ./tools/skill-lint -repo . || fail "AI skill validation failed"

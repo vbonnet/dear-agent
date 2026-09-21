@@ -121,7 +121,7 @@ override _GOVERNED_BUILD_TARGETS := \
 #   lint-specs              Validate EARS requirements in SPEC.md files
 #   lint-skills             Validate every tracked skill and command prompt
 #   plugin-verify-hashes    Verify AGM plugin command and skill content hashes
-#   preflight               Fast local CI-parity gates: vet + build + AI skills + lint (~25s)
+#   preflight               Fast local CI-parity gates: vet + build + structural health + AI skills + lint
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-race          preflight + go test -race — catch data races before push
 #   preflight-full          race tests + ordinary performance SLAs + govulncheck
@@ -278,9 +278,9 @@ lint-adrs:
 plugin-verify-hashes:
 	@cd agm && go run ./cmd/plugin-hash -check
 
-# Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
-# CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
-# build cache. See vbonnet/engram-research
+# Fast local CI-parity gates. Runs the same go vet / go build / structural
+# health / golangci-lint gates CI does, no Docker needed. See
+# vbonnet/engram-research
 # retrospectives/2026-05-27-ci-shift-left.md for the rationale
 # (CI on GitHub is not part of the inner dev loop).
 preflight:
