@@ -8,6 +8,7 @@
 # RELATED-SPEC: .github/language-policy/SPEC.md
 # RELATED-SPEC: tools/language-policy/SPEC.md
 # RELATED-SPEC: tools/header-lint/SPEC.md
+# RELATED-SPEC: tools/security-audit-issues/SPEC.md
 # RELATED-SPEC: tools/devlog/cmd/devlog/SPEC.md
 # RELATED-SPEC: tools/devlog/internal/config/SPEC.md
 # RELATED-SPEC: tools/devlog/internal/errors/SPEC.md
@@ -39,6 +40,7 @@ Feature: Developer tool package guardrails
       | tools/dead-links                                   |
       | tools/instruction-lint                             |
       | tools/header-lint                                  |
+      | tools/security-audit-issues                        |
       | tools/devlog/cmd/devlog                            |
       | tools/devlog/internal/config                       |
       | tools/devlog/internal/errors                       |
