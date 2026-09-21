@@ -136,6 +136,7 @@ func fingerprintOf(t *testing.T, credPath string) string {
 }
 
 func TestRun_ClearQuarantineOverride(t *testing.T) {
+	creds := credsWithRefreshToken(t, "rt-clear-override")
 	quar := tmpQuarantine(t)
 	if err := os.WriteFile(quar, []byte(`{"refresh_token_fp":"abc123def456"}`), 0o600); err != nil {
 		t.Fatalf("write marker: %v", err)
@@ -143,7 +144,7 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 	audit := filepath.Join(t.TempDir(), "audit.jsonl")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-clear-quarantine", "-quarantine", quar, "-audit-log", audit}, &stdout, &stderr)
+	code := run([]string{"-clear-quarantine", "-credentials", creds, "-quarantine", quar, "-audit-log", audit}, &stdout, &stderr)
 
 	if code != exitOK {
 		t.Errorf("exit code = %d, want %d", code, exitOK)
@@ -156,6 +157,7 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 func TestRun_ClearQuarantineSucceedsWhenDefaultStateDirUnavailable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	creds := credsWithRefreshToken(t, "rt-clear-unavailable-state")
 	if err := os.WriteFile(filepath.Join(home, ".local"), []byte("blocks state directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +167,7 @@ func TestRun_ClearQuarantineSucceedsWhenDefaultStateDirUnavailable(t *testing.T)
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-clear-quarantine", "-quarantine", quar}, &stdout, &stderr)
+	code := run([]string{"-clear-quarantine", "-credentials", creds, "-quarantine", quar}, &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d; stderr: %s", code, exitOK, stderr.String())
 	}
@@ -459,12 +461,15 @@ func TestRun_UnreadableMarkerBlocksRefresh(t *testing.T) {
 // on 2026-07-19.
 func TestCadenceExit_QuarantinedKeepsScheduleAlive(t *testing.T) {
 	stateDir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
+	notifications := testNotificationLog(t)
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
+	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge); got != exitOK {
 		t.Errorf("cadence exit = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, deathSentinelName)); err != nil {
 		t.Error("expected a sentinel so the next tick does not re-notify")
 	}
+	assertNotificationCount(t, notifications, 1)
 }
