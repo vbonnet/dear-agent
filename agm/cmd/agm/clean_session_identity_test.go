@@ -1,0 +1,104 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/config"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/ui"
+)
+
+func TestCleanupUISessions_DuplicateNamesKeepOwnStatus(t *testing.T) {
+	live := &manifest.Manifest{
+		SessionID: "live-id", Name: "shared-name",
+		Tmux: manifest.Tmux{SessionName: "live-tmux"},
+	}
+	stopped := &manifest.Manifest{
+		SessionID: "stopped-id", Name: "shared-name",
+		Tmux: manifest.Tmux{SessionName: "stopped-tmux"},
+	}
+	archived := &manifest.Manifest{
+		SessionID: "archived-id", Name: "shared-name",
+		Lifecycle: manifest.LifecycleArchived,
+	}
+	tmux := session.NewMockTmux()
+	tmux.Sessions["live-tmux"] = true
+
+	got := cleanupUISessions([]*manifest.Manifest{live, stopped, archived}, tmux)
+	for i, want := range []struct {
+		id, status string
+	}{{"live-id", "active"}, {"stopped-id", "stopped"}, {"archived-id", "archived"}} {
+		if got[i].SessionID != want.id || got[i].Status != want.status {
+			t.Errorf("session %d = (%q, %q), want (%q, %q)",
+				i, got[i].SessionID, got[i].Status, want.id, want.status)
+		}
+	}
+}
+
+func TestCleanupDispatch_DuplicateNamesUseSelectedManifests(t *testing.T) {
+	root := t.TempDir()
+	previousCfg := cfg
+	cfg = &config.Config{SessionsDir: filepath.Join(root, "sessions")}
+	t.Cleanup(func() { cfg = previousCfg })
+
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(root, "agm.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	makeSession := func(id string, lifecycle string) *manifest.Manifest {
+		m := &manifest.Manifest{
+			SchemaVersion: manifest.SchemaVersion,
+			SessionID:     id,
+			Name:          "shared-name",
+			Harness:       "agy",
+			Lifecycle:     lifecycle,
+			CreatedAt:     time.Now().Add(-time.Hour),
+			UpdatedAt:     time.Now().Add(-time.Hour),
+			Context:       manifest.Context{Project: root},
+			Tmux:          manifest.Tmux{SessionName: id},
+		}
+		if err := adapter.CreateSession(m); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		if err := os.MkdirAll(getSessionDir(id), 0o700); err != nil {
+			t.Fatalf("make session directory %s: %v", id, err)
+		}
+		return m
+	}
+	stopped := makeSession("stopped-id", "")
+	archivedA := makeSession("archive-a", manifest.LifecycleArchived)
+	archivedB := makeSession("archive-b", manifest.LifecycleArchived)
+
+	selected := &ui.CleanupResult{
+		ToArchive: []*ui.Session{{Manifest: stopped}},
+		ToDelete:  []*ui.Session{{Manifest: archivedB}},
+	}
+	if err := archiveSessionManifest(adapter, selected.ToArchive[0].Manifest); err != nil {
+		t.Fatalf("archive selected session: %v", err)
+	}
+	if err := deleteSessionManifest(selected.ToDelete[0].Manifest); err != nil {
+		t.Fatalf("delete selected session directory: %v", err)
+	}
+
+	stored, err := adapter.GetSession(stopped.SessionID)
+	if err != nil || stored.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("selected archive lifecycle = %v, err = %v", stored, err)
+	}
+	unselected, err := adapter.GetSession(archivedA.SessionID)
+	if err != nil || unselected.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("unselected duplicate lifecycle = %v, err = %v", unselected, err)
+	}
+	if _, err := os.Stat(getSessionDir(archivedA.SessionID)); err != nil {
+		t.Fatalf("unselected duplicate directory changed: %v", err)
+	}
+	if _, err := os.Stat(getSessionDir(archivedB.SessionID)); !os.IsNotExist(err) {
+		t.Fatalf("selected delete directory still exists or stat failed: %v", err)
+	}
+}

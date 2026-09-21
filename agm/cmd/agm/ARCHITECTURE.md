@@ -855,6 +855,9 @@ for _, m := range manifests {
 statuses := session.ComputeStatusBatch(manifests, tmuxClient)
 ```
 
+Lifecycle decisions use `ComputeStatusBatchByID` and look up each manifest by
+`SessionID`; the name-keyed result above is only suitable for display.
+
 ### Health Check Caching
 
 Tmux health checks are cached with a 5-second TTL:

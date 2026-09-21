@@ -44,16 +44,7 @@ Examples:
 		}
 
 		// Convert to UI sessions with status
-		uiSessions := make([]*ui.Session, len(manifests))
-		statuses := session.ComputeStatusBatch(manifests, tmuxClient)
-
-		for i, m := range manifests {
-			uiSessions[i] = &ui.Session{
-				Manifest:  m,
-				Status:    statuses[m.Name],
-				UpdatedAt: m.UpdatedAt,
-			}
-		}
+		uiSessions := cleanupUISessions(manifests, tmuxClient)
 
 		// Show multi-select cleanup UI
 		result, err := ui.CleanupMultiSelect(uiSessions, uiCfg)
@@ -115,6 +106,19 @@ Examples:
 		ui.PrintSuccess(fmt.Sprintf("Cleanup complete: %d archived, %d deleted", archived, deleted))
 		return nil
 	},
+}
+
+func cleanupUISessions(manifests []*manifest.Manifest, tmux session.TmuxInterface) []*ui.Session {
+	statuses := session.ComputeStatusBatchByID(manifests, tmux)
+	uiSessions := make([]*ui.Session, len(manifests))
+	for i, m := range manifests {
+		uiSessions[i] = &ui.Session{
+			Manifest:  m,
+			Status:    statuses[m.SessionID],
+			UpdatedAt: m.UpdatedAt,
+		}
+	}
+	return uiSessions
 }
 
 func archiveSessionManifest(adapter *dolt.Adapter, m *manifest.Manifest) error {

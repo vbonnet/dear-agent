@@ -396,7 +396,7 @@ Provide a production-ready CLI that:
   - **Boot Automation:** Works with systemd service (`agm-resume-boot.service`) for automatic boot recovery
   - **Admin Commands:** Future `agm admin enable-auto-resume` and `disable-auto-resume` for opt-in boot automation
 - **Performance:**
-  - **Batch Status Computation:** Uses `session.ComputeStatusBatch()` for efficient stopped session detection
+  - **Batch Status Computation:** Uses `session.ComputeStatusBatchByID()` for efficient per-session stopped detection even when names repeat
   - **Sequential Processing:** 500ms delays prevent tmux server overload
   - **Progress Feedback:** Real-time updates during long operations (20+ sessions)
 - **Safety Guarantees:**
