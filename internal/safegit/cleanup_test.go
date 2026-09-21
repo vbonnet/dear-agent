@@ -654,7 +654,14 @@ case "$*" in
   "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{"message":"Updating pull request branch."}' ;;
-  "pr merge 42 --repo owner/repo --squash --auto --delete-branch --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+  "api repos/owner/repo/pulls/42")
+    if [ "${SAFEGIT_ATTEMPT_MERGE_STACKED:-}" = "1" ]; then
+      printf '%s\n' '{"number":42,"stack":{"id":7,"number":43,"position":1,"size":2}}'
+    else
+      printf '%s\n' '{"number":42,"stack":null}'
+    fi ;;
+  "pr merge 42 --repo owner/repo --squash --auto --delete-branch --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"|\
+  "api -X PUT repos/owner/repo/pulls/42/merge-async -f merge_method=squash -f sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	printf '%s\n' provider >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
 	if [ "${SAFEGIT_ATTEMPT_MERGE_PROVIDER_FAILURE:-}" = "1" ]; then
 	  printf '%s\n' 'synthetic provider failure' >&2

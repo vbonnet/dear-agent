@@ -388,7 +388,17 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
 	mergeSpan.SetAttributes(attribute.String("pr.head_sha", headInfo.SHA))
 
-	mergeArgs := BuildMergeArgs(cfg.PRNumber, cfg.Repo, headInfo.SHA)
+	mergeArgs, stacked, err := selectMergeArgs(ctx, cfg.PRNumber, cfg.Repo, headInfo.SHA)
+	if err != nil {
+		mergeSpan.RecordError(err)
+		mergeSpan.SetStatus(codes.Error, err.Error())
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge transport: "+err.Error())
+		return fmt.Errorf("selecting merge transport: %w", err)
+	}
+	mergeSpan.SetAttributes(attribute.Bool("pr.stacked", stacked))
+	if stacked {
+		fmt.Fprintln(os.Stderr, "safe-merge: PR is part of a stack — using the asynchronous REST merge")
+	}
 	confirm := func() error {
 		return confirmMergedWithin(ctx, mergeConfirmationCommandTimeout,
 			cfg.PRNumber, cfg.Repo, headInfo.SHA)

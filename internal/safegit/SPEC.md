@@ -76,6 +76,10 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-30** When the set of commits a push would publish cannot be determined, the system shall report the skipped scan on the diagnostic stream and shall allow the push to proceed.
 
+**SAFEGIT-31** When a pull request belongs to a stack, the system shall merge it through the asynchronous REST merge endpoint anchored to the exact head SHA, since the provider refuses the GraphQL merge mutation for stacked pull requests and every gate would otherwise pass while the merge failed at the transport.
+
+**SAFEGIT-32** When stack membership cannot be resolved, the system shall block the merge rather than assume a transport, since either default can merge through a path the provider refuses.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
