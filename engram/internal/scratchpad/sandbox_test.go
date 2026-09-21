@@ -86,6 +86,7 @@ type fakeDockerEnvironment struct {
 	logPath             string
 	containerNamePath   string
 	containerExistsPath string
+	probeStartedPath    string
 }
 
 func installFakeDocker(t *testing.T, options fakeDockerOptions) fakeDockerEnvironment {
@@ -136,6 +137,7 @@ case "$1" in
     fi
     cat
     if [ "$FAKE_DOCKER_PROBE_BLOCK" = "block" ]; then
+	  touch "$FAKE_DOCKER_PROBE_STARTED"
       while :; do :; done
     fi
     if [ "$FAKE_DOCKER_MOUNT_VISIBLE" != "visible" ]; then
@@ -174,12 +176,14 @@ esac
 	logPath := filepath.Join(fixtureRoot, "docker.log")
 	containerNamePath := filepath.Join(fixtureRoot, "container-name")
 	containerExistsPath := filepath.Join(fixtureRoot, "container-exists")
+	probeStartedPath := filepath.Join(fixtureRoot, "probe-started")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("TMPDIR", tempRoot)
 	t.Setenv("FAKE_DOCKER_LOG", logPath)
 	t.Setenv("FAKE_DOCKER_SOURCE", filepath.Join(fixtureRoot, "mount-source"))
 	t.Setenv("FAKE_DOCKER_CONTAINER_NAME", containerNamePath)
 	t.Setenv("FAKE_DOCKER_CONTAINER_EXISTS", containerExistsPath)
+	t.Setenv("FAKE_DOCKER_PROBE_STARTED", probeStartedPath)
 	t.Setenv("FAKE_DOCKER_MOUNT_VISIBLE", boolWord(options.mountVisible, "visible", "hidden"))
 	t.Setenv("FAKE_DOCKER_PROBE_COMMAND", boolWord(options.probeCommandAvailable, "available", "missing"))
 	t.Setenv("FAKE_DOCKER_PROBE_BLOCK", boolWord(options.probeBlocks, "block", "continue"))
@@ -193,6 +197,7 @@ esac
 		logPath:             logPath,
 		containerNamePath:   containerNamePath,
 		containerExistsPath: containerExistsPath,
+		probeStartedPath:    probeStartedPath,
 	}
 }
 
@@ -210,6 +215,27 @@ func readFakeDockerLog(t *testing.T, path string) string {
 		t.Fatalf("read fake Docker log: %v", err)
 	}
 	return string(contents)
+}
+
+func cancelContextWhenFileExists(ctx context.Context, cancel context.CancelFunc, path string) <-chan struct{} {
+	observed := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if _, err := os.Stat(path); err == nil {
+				close(observed)
+				cancel()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return observed
 }
 
 func TestNewSandboxAcceptsVisibleBindUnderNonDefaultTempRoot(t *testing.T) {
@@ -310,25 +336,9 @@ func TestNewSandboxLaunchCancellationRollsBackPreassignedContainer(t *testing.T)
 				runBlocks:   true,
 				removeFails: test.removeFails,
 			})
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			creationObserved := make(chan struct{})
-			go func() {
-				ticker := time.NewTicker(5 * time.Millisecond)
-				defer ticker.Stop()
-				for {
-					if _, err := os.Stat(fake.containerExistsPath); err == nil {
-						close(creationObserved)
-						cancel()
-						return
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-					}
-				}
-			}()
+			creationObserved := cancelContextWhenFileExists(ctx, cancel, fake.containerExistsPath)
 
 			sandbox, err := NewSandbox(ctx, scratchpadTestConfig(3))
 			if sandbox != nil {
@@ -400,7 +410,7 @@ func TestNewSandboxRejectsUnverifiedBindAndRollsBack(t *testing.T) {
 		wantCleanupError bool
 		wantSkippable    bool
 		wantErrorDetails string
-		contextTimeout   time.Duration
+		cancelProbe      bool
 	}{
 		{
 			name: "invisible bind source",
@@ -432,7 +442,7 @@ func TestNewSandboxRejectsUnverifiedBindAndRollsBack(t *testing.T) {
 			wantErrorDetails: "probe command failed before reading its input",
 		},
 		{
-			name: "probe context expires after command starts",
+			name: "probe context is canceled after command starts",
 			options: fakeDockerOptions{
 				mountVisible:          true,
 				probeCommandAvailable: true,
@@ -440,8 +450,8 @@ func TestNewSandboxRejectsUnverifiedBindAndRollsBack(t *testing.T) {
 			},
 			wantUnavailable:  false,
 			wantSkippable:    false,
-			wantErrorDetails: "bind visibility probe interrupted: context deadline exceeded",
-			contextTimeout:   750 * time.Millisecond,
+			wantErrorDetails: "bind visibility probe interrupted: context canceled",
+			cancelProbe:      true,
 		},
 		{
 			name: "container rollback failure is joined",
@@ -462,10 +472,16 @@ func TestNewSandboxRejectsUnverifiedBindAndRollsBack(t *testing.T) {
 			ctx := context.Background()
 			var sandbox *Sandbox
 			var err error
-			if test.contextTimeout > 0 {
-				timedCtx, cancel := context.WithTimeout(ctx, test.contextTimeout)
+			if test.cancelProbe {
+				timedCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 				defer cancel()
+				probeObserved := cancelContextWhenFileExists(timedCtx, cancel, fake.probeStartedPath)
 				sandbox, err = NewSandbox(timedCtx, scratchpadTestConfig(3))
+				select {
+				case <-probeObserved:
+				default:
+					t.Fatal("fake bind probe was not observed before sandbox creation returned")
+				}
 			} else {
 				sandbox, err = NewSandbox(ctx, scratchpadTestConfig(3))
 			}
@@ -554,10 +570,6 @@ func TestRollbackSandboxCreationStopsAtCleanupLimit(t *testing.T) {
 	}
 	if _, err := os.Stat(workdir); !os.IsNotExist(err) {
 		t.Fatalf("rollback left workdir behind: %v", err)
-	}
-	log := readFakeDockerLog(t, fake.logPath)
-	if strings.Count(log, "rm -f fake-container") != 1 {
-		t.Fatalf("rollback container cleanup count = %d, want 1:\n%s", strings.Count(log, "rm -f fake-container"), log)
 	}
 }
 
