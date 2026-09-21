@@ -83,6 +83,7 @@ func RegisterScenarioDefinitions(ctx *godog.ScenarioContext) {
 	steps.RegisterDeclarativeFixtureGuardrailSteps(ctx)
 	steps.RegisterEngramAnalysisConfigurationGuardrailSteps(ctx)
 	steps.RegisterEngramCoreContextGuardrailSteps(ctx)
+	steps.RegisterEngramScratchpadBindVisibilitySteps(ctx)
 	steps.RegisterEngramCLISupportGuardrailSteps(ctx)
 	steps.RegisterEngramHookGuardrailSteps(ctx)
 	steps.RegisterEngramGovernanceRuntimeGuardrailSteps(ctx)

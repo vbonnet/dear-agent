@@ -793,6 +793,27 @@ families. Its trust sources, canonical `AGENTS.md` constitution, Wayfinder
 memory integration, prompt boundaries, and execution sandbox need explicit,
 executable contracts rather than package tests alone.
 
+### Engram Scratchpad Bind Visibility
+
+**File:** [`engram_scratchpad_bind_visibility.feature`](../test/bdd/features/engram_scratchpad_bind_visibility.feature)
+
+**Drives:** deterministic scratchpad container-construction regressions for
+visible, invisible, mismatched, canceled, ambiguous-launch, cleanup-deadline,
+and cleanup-failing Docker bind verification paths.
+
+**Key scenarios:**
+- Scratchpad construction proves the container reads the unchanged per-sandbox
+  identity value before returning a sandbox.
+- Failed visibility proof rolls back both the container and temporary workdir
+  before any interpreter execution.
+- Interrupted launch reclaims the preassigned container identity, and container
+  cleanup remains bounded even after creation-request cancellation.
+
+**Why this matters:** Docker VM and remote-daemon path resolution can accept a
+host bind while exposing an empty or different workspace. Construction must
+reject that infrastructure failure rather than misreporting it as probe-code
+or interpreter behavior.
+
 ### Engram CLI Support Guardrails
 
 **File:** [`engram_cli_support_guardrails.feature`](../test/bdd/features/engram_cli_support_guardrails.feature)

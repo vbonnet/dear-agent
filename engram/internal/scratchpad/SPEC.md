@@ -25,7 +25,15 @@ container and cleans up all temporary resources.
 
 **ESP-08** When concurrent execution or cleanup calls occur, the system shall serialize sandbox state changes.
 
+**ESP-09** When scratchpad container startup succeeds, the system shall return a sandbox for code execution only after a private creation-time value is visible unchanged inside the execution environment.
+
+**ESP-10** If the private creation-time value is absent or differs, the system shall return no sandbox and report that bind capability is unavailable before any interpreter execution.
+
+**ESP-11** When sandbox creation fails after container startup begins, the system shall attempt cleanup of the preassigned container identity despite an ambiguous launch result and cleanup of the temporary working directory independently of creation-request cancellation, bound container cleanup by the cleanup time limit, and return cleanup failures together with the creation failure.
+
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/engram_scratchpad_bind_visibility.feature`
 - Feature: `agm/test/bdd/features/engram_core_context_guardrails.feature`
 - Package tests: `engram/internal/scratchpad/sandbox_test.go`
+- Test consequence: Deterministic integration tests exercise visible, missing, mismatched, canceled, ambiguous-launch, cleanup-deadline, and cleanup-failing Docker paths before interpreter execution.
