@@ -1133,14 +1133,11 @@ func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitKind(
 	case *ast.CompositeLit:
 		return analyzer.processWaitTypeKind(value.Type)
 	case *ast.CallExpr:
-		if kind := analyzer.processWaitConstructorKind(value); kind != buildAuthorityNotProcessWait {
-			return kind
-		}
-		return analyzer.processWaitCallResultKind(value)
+		return analyzer.processWaitCallExpressionKind(value)
 	case *ast.Ident:
 		return analyzer.processWaitObjectKind(value.Obj, before, visiting)
 	case *ast.IndexExpr:
-		if kind := analyzer.processWaitIndexedElementKind(value.X, before, visiting); kind != buildAuthorityNotProcessWait {
+		if kind := analyzer.processWaitIndexedElementKind(value.X, visiting); kind != buildAuthorityNotProcessWait {
 			return kind
 		}
 		return analyzer.processWaitGenericProvenanceKind(value, before, visiting)
@@ -1162,12 +1159,20 @@ func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitKind(
 	return buildAuthorityNotProcessWait
 }
 
+func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitCallExpressionKind(
+	call *ast.CallExpr,
+) buildAuthorityProcessWaitKind {
+	if kind := analyzer.processWaitConstructorKind(call); kind != buildAuthorityNotProcessWait {
+		return kind
+	}
+	return analyzer.processWaitCallResultKind(call)
+}
+
 func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitIndexedElementKind(
 	expression ast.Expr,
-	before token.Pos,
 	visiting map[*buildAuthorityLexicalObject]struct{},
 ) buildAuthorityProcessWaitKind {
-	typeExpression := analyzer.processWaitContainerType(expression, before, visiting)
+	typeExpression := analyzer.processWaitContainerType(expression, visiting)
 	if typeExpression == nil {
 		return buildAuthorityNotProcessWait
 	}
@@ -1185,7 +1190,7 @@ func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitIndexedElementKi
 		if !ok {
 			return buildAuthorityNotProcessWait
 		}
-		return analyzer.processWaitIndexedElementKind(declaration.Type, before, visiting)
+		return analyzer.processWaitIndexedElementKind(declaration.Type, visiting)
 	default:
 		return buildAuthorityNotProcessWait
 	}
@@ -1193,7 +1198,6 @@ func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitIndexedElementKi
 
 func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitContainerType(
 	expression ast.Expr,
-	before token.Pos,
 	visiting map[*buildAuthorityLexicalObject]struct{},
 ) ast.Expr {
 	expression = buildAuthorityUnwrapExpression(expression)
@@ -1205,40 +1209,48 @@ func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitContainerType(
 	case *ast.TypeAssertExpr:
 		return value.Type
 	case *ast.Ident:
-		if value.Obj == nil {
-			return nil
-		}
-		if _, found := visiting[value.Obj]; found {
-			return nil
-		}
-		visiting[value.Obj] = struct{}{}
-		defer delete(visiting, value.Obj)
-		switch declaration := value.Obj.Decl.(type) {
-		case *ast.Field:
-			return declaration.Type
-		case *ast.ValueSpec:
-			if declaration.Type != nil {
-				return declaration.Type
-			}
-			for index, name := range declaration.Names {
-				if name.Obj == value.Obj && index < len(declaration.Values) {
-					return analyzer.processWaitContainerType(declaration.Values[index], before, visiting)
-				}
-			}
-		case *ast.AssignStmt:
-			for index, target := range declaration.Lhs {
-				identifier, ok := buildAuthorityUnwrapExpression(target).(*ast.Ident)
-				if ok && identifier.Obj == value.Obj && index < len(declaration.Rhs) {
-					return analyzer.processWaitContainerType(declaration.Rhs[index], before, visiting)
-				}
-			}
-		}
+		return analyzer.processWaitContainerObjectType(value.Obj, visiting)
 	case *ast.CallExpr:
 		functionType := buildAuthorityCalledFunctionType(value.Fun)
 		if functionType == nil || functionType.Results == nil || len(functionType.Results.List) != 1 {
 			return nil
 		}
 		return functionType.Results.List[0].Type
+	}
+	return nil
+}
+
+func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitContainerObjectType(
+	object *buildAuthorityLexicalObject,
+	visiting map[*buildAuthorityLexicalObject]struct{},
+) ast.Expr {
+	if object == nil {
+		return nil
+	}
+	if _, found := visiting[object]; found {
+		return nil
+	}
+	visiting[object] = struct{}{}
+	defer delete(visiting, object)
+	switch declaration := object.Decl.(type) {
+	case *ast.Field:
+		return declaration.Type
+	case *ast.ValueSpec:
+		if declaration.Type != nil {
+			return declaration.Type
+		}
+		for index, name := range declaration.Names {
+			if name.Obj == object && index < len(declaration.Values) {
+				return analyzer.processWaitContainerType(declaration.Values[index], visiting)
+			}
+		}
+	case *ast.AssignStmt:
+		for index, target := range declaration.Lhs {
+			identifier, ok := buildAuthorityUnwrapExpression(target).(*ast.Ident)
+			if ok && identifier.Obj == object && index < len(declaration.Rhs) {
+				return analyzer.processWaitContainerType(declaration.Rhs[index], visiting)
+			}
+		}
 	}
 	return nil
 }
@@ -1375,19 +1387,19 @@ func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitConstructorKind(
 			}
 		}
 	}
-	if len(call.Args) == 1 {
-		switch analyzer.processWaitTypeKind(call.Fun) {
-		case buildAuthorityForeignProcessWait:
-			return buildAuthorityForeignProcessWait
-		case buildAuthorityForgedCommandWait:
-			return buildAuthorityOpaqueProcessWait
-		case buildAuthorityNotProcessWait, buildAuthorityOwnedCommandWait,
-			buildAuthorityUnknownCommandWait, buildAuthorityOpaqueProcessWait:
-		}
+	if len(call.Args) != 1 {
+		return buildAuthorityNotProcessWait
+	}
+	switch analyzer.processWaitTypeKind(call.Fun) {
+	case buildAuthorityForeignProcessWait:
+		return buildAuthorityForeignProcessWait
+	case buildAuthorityForgedCommandWait:
+		return buildAuthorityOpaqueProcessWait
+	case buildAuthorityNotProcessWait, buildAuthorityOwnedCommandWait,
+		buildAuthorityUnknownCommandWait, buildAuthorityOpaqueProcessWait:
 	}
 	identifier, ok := buildAuthorityUnwrapExpression(call.Fun).(*ast.Ident)
-	if !ok || len(call.Args) != 1 ||
-		!analyzer.isPredeclaredIdentifier(identifier, "new") {
+	if !ok || !analyzer.isPredeclaredIdentifier(identifier, "new") {
 		return buildAuthorityNotProcessWait
 	}
 	return analyzer.processWaitTypeKind(call.Args[0])
@@ -1483,22 +1495,29 @@ func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitSensitiveTypeKin
 			analyzer.processWaitSensitiveTypeKind(value.Y, visiting),
 		)
 	case *ast.Ident:
-		if value.Obj == nil {
-			return buildAuthorityNotProcessWait
-		}
-		if _, found := visiting[value.Obj]; found {
-			return buildAuthorityNotProcessWait
-		}
-		declaration, ok := value.Obj.Decl.(*ast.TypeSpec)
-		if !ok {
-			return buildAuthorityNotProcessWait
-		}
-		visiting[value.Obj] = struct{}{}
-		defer delete(visiting, value.Obj)
-		return analyzer.processWaitSensitiveTypeKind(declaration.Type, visiting)
+		return analyzer.processWaitNamedSensitiveTypeKind(value, visiting)
 	default:
 		return buildAuthorityNotProcessWait
 	}
+}
+
+func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitNamedSensitiveTypeKind(
+	identifier *ast.Ident,
+	visiting map[*buildAuthorityLexicalObject]struct{},
+) buildAuthorityProcessWaitKind {
+	if identifier.Obj == nil {
+		return buildAuthorityNotProcessWait
+	}
+	if _, found := visiting[identifier.Obj]; found {
+		return buildAuthorityNotProcessWait
+	}
+	declaration, ok := identifier.Obj.Decl.(*ast.TypeSpec)
+	if !ok {
+		return buildAuthorityNotProcessWait
+	}
+	visiting[identifier.Obj] = struct{}{}
+	defer delete(visiting, identifier.Obj)
+	return analyzer.processWaitSensitiveTypeKind(declaration.Type, visiting)
 }
 
 func (analyzer *buildAuthorityWaitOwnershipAnalyzer) processWaitGenericObjectKind(
