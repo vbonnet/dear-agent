@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/vbonnet/dear-agent/agm/internal/fuzzy"
@@ -67,19 +68,10 @@ func ConfirmCleanup(toArchive, toDelete []string, cfg *Config) (bool, error) {
 		return false, fmt.Errorf("no sessions selected")
 	}
 
-	desc := ""
-	if len(toArchive) > 0 {
-		desc += fmt.Sprintf("Archive %d sessions\n", len(toArchive))
-	}
-	if len(toDelete) > 0 {
-		desc += fmt.Sprintf("Delete %d sessions\n", len(toDelete))
-	}
-	desc += "\nThis action cannot be undone for deleted sessions."
-
 	var confirmed bool
 	err := huh.NewConfirm().
 		Title("Confirm cleanup").
-		Description(desc).
+		Description(cleanupConfirmationDescription(toArchive, toDelete)).
 		Affirmative("Yes, proceed").
 		Negative("Cancel").
 		Value(&confirmed).
@@ -87,4 +79,26 @@ func ConfirmCleanup(toArchive, toDelete []string, cfg *Config) (bool, error) {
 		Run()
 
 	return confirmed, err
+}
+
+func cleanupConfirmationDescription(toArchive, toDelete []string) string {
+	var desc strings.Builder
+	writeCleanupConfirmationTargets(&desc, "Archive", toArchive)
+	writeCleanupConfirmationTargets(&desc, "Delete", toDelete)
+	desc.WriteString("\nThis action cannot be undone for deleted sessions.")
+	return desc.String()
+}
+
+func writeCleanupConfirmationTargets(desc *strings.Builder, action string, targets []string) {
+	if len(targets) == 0 {
+		return
+	}
+	fmt.Fprintf(desc, "%s %d session", action, len(targets))
+	if len(targets) != 1 {
+		desc.WriteByte('s')
+	}
+	desc.WriteString(":\n")
+	for _, target := range targets {
+		fmt.Fprintf(desc, "  - %s\n", target)
+	}
 }

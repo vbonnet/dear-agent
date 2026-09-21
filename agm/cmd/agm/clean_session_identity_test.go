@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,27 @@ func TestCleanupUISessions_DuplicateNamesKeepOwnStatus(t *testing.T) {
 			t.Errorf("session %d = (%q, %q), want (%q, %q)",
 				i, got[i].SessionID, got[i].Status, want.id, want.status)
 		}
+	}
+}
+
+func TestCleanupConfirmationLabels_KeepSelectedIDsAndEscapeNames(t *testing.T) {
+	sessions := []*ui.Session{
+		{Manifest: &manifest.Manifest{SessionID: "archive-a", Name: "shared-name"}},
+		{Manifest: &manifest.Manifest{SessionID: "archive-b", Name: "shared-name\nDelete another"}},
+	}
+
+	labels := cleanupConfirmationLabels(sessions)
+	if len(labels) != 2 {
+		t.Fatalf("labels = %d, want 2", len(labels))
+	}
+	if labels[0] != `"shared-name" [ID: "archive-a"]` {
+		t.Errorf("first selected target = %q", labels[0])
+	}
+	if labels[1] != `"shared-name\nDelete another" [ID: "archive-b"]` {
+		t.Errorf("second selected target = %q", labels[1])
+	}
+	if strings.Contains(labels[1], "\n") {
+		t.Fatalf("selected target contains a literal newline: %q", labels[1])
 	}
 }
 

@@ -852,11 +852,15 @@ for _, m := range manifests {
 }
 
 // FAST: Single tmux call
-statuses := session.ComputeStatusBatch(manifests, tmuxClient)
+statuses := session.ComputeStatusBatchByID(manifests, tmuxClient)
+for _, m := range manifests {
+    status := statuses[m.SessionID]
+}
 ```
 
-Lifecycle decisions use `ComputeStatusBatchByID` and look up each manifest by
-`SessionID`; the name-keyed result above is only suitable for display.
+The name-keyed `ComputeStatusBatch` result loses duplicate-name sessions, so
+callers making per-session decisions use the ID-keyed result. Cleanup also
+carries the selected ID through dispatch and displays it at final confirmation.
 
 ### Health Check Caching
 
