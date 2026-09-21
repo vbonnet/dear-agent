@@ -960,8 +960,8 @@ func TestSpecAuditTaskRootCleanupRefusesIdentityAndPermissionDrift(t *testing.T)
 }
 
 func TestTrustedExecutableValidationRejectsReplacementAndUnsafeAncestry(t *testing.T) {
-	//nolint:usetesting // t.TempDir cannot select the trusted repository parent required to test executable ancestry.
-	fixtureRoot, err := os.MkdirTemp(packageSpecBDDRepoRoot(), ".specaudit-exec-test-")
+	//nolint:usetesting // t.TempDir cannot select a trusted parent outside the authenticated repository root.
+	fixtureRoot, err := os.MkdirTemp(filepath.Dir(packageSpecBDDRepoRoot()), ".specaudit-exec-test-")
 	if err != nil {
 		t.Fatalf("MkdirTemp(trusted executable fixture root) error = %v", err)
 	}
