@@ -613,7 +613,7 @@ func handleNoArgs(ctx context.Context, adapter *dolt.Adapter, matchingSessions [
 // Use 'agm session resume <name>' or 'agm session new <name>' instead
 
 func showSessionPicker(ctx context.Context, adapter *dolt.Adapter, sessions []*manifest.Manifest, uiCfg *ui.Config) error {
-	uiSessions := pickerSessions(sessions, tmuxClient)
+	uiSessions := uiSessionsFromManifests(sessions, tmuxClient)
 
 	// Show interactive picker
 	selected, err := ui.SessionPicker(uiSessions, uiCfg)
@@ -623,19 +623,6 @@ func showSessionPicker(ctx context.Context, adapter *dolt.Adapter, sessions []*m
 
 	fmt.Printf("Resuming session: %s\n", selected.Name)
 	return performResume(ctx, adapter, selected.SessionID)
-}
-
-func pickerSessions(sessions []*manifest.Manifest, tmux session.TmuxInterface) []*ui.Session {
-	statuses := session.ComputeStatusBatchByID(sessions, tmux)
-	uiSessions := make([]*ui.Session, len(sessions))
-	for i, m := range sessions {
-		uiSessions[i] = &ui.Session{
-			Manifest:  m,
-			Status:    statuses[m.SessionID],
-			UpdatedAt: m.UpdatedAt,
-		}
-	}
-	return uiSessions
 }
 
 // performResume runs the full resume workflow for an already-selected session.
