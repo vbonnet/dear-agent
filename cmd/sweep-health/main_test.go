@@ -347,3 +347,68 @@ func TestRun_BoundedTailScanDiscardsPartialLine(t *testing.T) {
 		t.Errorf("stdout = %q, want HEALTHY", out)
 	}
 }
+
+func TestRun_WatchdogRemediationCannotCertifySchedule(t *testing.T) {
+	now := fixedTime()
+	logPath := writeLog(t,
+		fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+			now.Add(-8*time.Hour).Format(time.RFC3339)),
+		fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed","source":"disk-watchdog"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)),
+	)
+	d := defaultDeps()
+	d.now = fixedTime
+	var report Report
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath, "--json"}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "degraded" || report.LatestSweepAt != now.Add(-8*time.Hour).Format(time.RFC3339) {
+		t.Fatalf("report = %+v, want stale scheduled proof only", report)
+	}
+}
+
+func TestRun_ExplicitSandboxErrorIsDiagnostic(t *testing.T) {
+	now := fixedTime()
+	logPath := writeLog(t,
+		fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive_error","error":"session error"}`,
+			now.Add(-2*time.Minute).Format(time.RFC3339)),
+		fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_error","error":"mount table unreadable"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)),
+	)
+	d := defaultDeps()
+	d.now = fixedTime
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if !strings.Contains(out, "mount table unreadable") || strings.Contains(out, "session error") {
+		t.Fatalf("output = %q, want sandbox diagnostic only", out)
+	}
+}
+
+func TestRun_IndeterminateTailIsNotNeverRan(t *testing.T) {
+	now := fixedTime()
+	var lines []string
+	for range 12 {
+		lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive","reason":"chatter"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)))
+	}
+	logPath := writeLog(t, lines...)
+	d := defaultDeps()
+	d.now = fixedTime
+	d.maxLogScanBytes, d.maxLogMaxBytes = 128, 256
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if !strings.Contains(out, "undetermined") || strings.Contains(out, "no completed") {
+		t.Fatalf("output = %q, want explicit uncertainty", out)
+	}
+}

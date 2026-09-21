@@ -90,6 +90,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/gcloghealth"
 	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 	"github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
@@ -115,12 +116,12 @@ const (
 )
 
 type config struct {
-	jsonOutput bool
-	dryRun     bool
-	path       string
-	agmBin     string
-	trailPath  string
-	brakePath  string
+	jsonOutput           bool
+	dryRun               bool
+	path                 string
+	agmBin               string
+	trailPath            string
+	brakePath            string
 	brakeTTL             time.Duration
 	gcLogPath            string
 	gcMaxAge             time.Duration
@@ -470,7 +471,7 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 }
 
 // brakeSource identifies this watchdog in the admission-brake record.
-const brakeSource = "disk-watchdog"
+const brakeSource = gcloghealth.WatchdogSource
 
 // brakeDecision is what a tick concluded about the admission brake. Pure, so
 // the policy can be tested without touching the filesystem.

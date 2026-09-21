@@ -13,6 +13,8 @@
   the refusal and producer-tag wire contracts is pinned in
   `agm/internal/ops/sandbox_gc_test.go` and `agm/internal/gclog/gclog_test.go`
   (SGC-17), since `cmd/` cannot import `agm/internal/...`.
+- Shared scheduled-reaper JSONL observation and the truncated legacy-reap
+  guard: `internal/gcloghealth/scan_test.go` (DW-19, DW-21 through DW-29).
 - Build-cache reaper evidence: `cmd/disk-watchdog/buildcache_test.go` (DW-32..DW-38).
 - E2E-cache reaper evidence: `cmd/disk-watchdog/e2ecache_test.go` (DW-39..DW-42).
 - Preflight-scratch reaper evidence: `cmd/disk-watchdog/preflight_scratch_test.go` (DW-43..DW-47).
@@ -119,7 +121,7 @@ would worsen an outage rather than resolve it.
 
 **DW-31** When the configured reaper-liveness window is negative, the system shall reject it as a usage error and exit 2 rather than disabling the check, so a typo cannot leave a dead reaper unmonitored while every tick reports OK. Only zero disables the check (DW-20).
 
-**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors and zero probe failures as proof of a completed sweep. It may accept sandbox reap records only from logs that contain no completion records.
+**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors and zero probe failures as proof of a completed sweep. It may accept only untagged sandbox reap records after a complete log scan establishes that no completion records exist; a tagged or truncated reap is not legacy proof.
 
 **DW-24** When a sandbox-GC completion record reports probe failures (a safety gate such as lsof, the mount table, or the session store could not be evaluated, as distinct from a gate that positively found a sandbox in use), the system shall treat that record the same as a record with reap errors: not proof of a completed sweep, so a reaper whose probes are systematically broken cannot suppress its own staleness alarm by reporting "kept" with zero errors.
 

@@ -1,40 +1,21 @@
-// Command sweep-health reports whether the sandbox garbage collector has produced
-// its positive event: at least one proof-of-completed-sweep record within a
-// configured lookback window (default 6h, matching DW-17).
-//
-// It is a sibling of cmd/bead-health, cmd/merge-health, and cmd/jaeger-health,
-// adhering to the shared absence-alarm exit-code contract:
-//
-//	0  healthy  - at least one completed sweep inside lookback
-//	1  degraded - log is readable but no completed sweep inside lookback
-//	2  down     - log file cannot be evaluated or clock skew exceeded
-//	3  usage    - bad flags or invalid lookback
-//
-// Usage:
-//
-//	sweep-health [--log ~/.agm/logs/gc.jsonl] [--lookback 6h] [--json]
+// Command sweep-health reports whether the scheduled sandbox reaper produced
+// a completed sweep inside the lookback window. Exit 0 means healthy, 1
+// degraded, 2 down, and 3 usage error.
 package main
 
 import (
-	"bufio"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gcloghealth"
 )
 
-const (
-	clockSkewTolerance   = 5 * time.Minute
-	maxLogRecordBytes    = 1024 * 1024
-	maxLogScanBytes      = int64(8 * 1024 * 1024)
-	gcCompletedOperation = "sandbox_gc_completed"
-	gcOperationPrefix    = "sandbox_gc"
-)
+const maxLogScanBytes = gcloghealth.DefaultInitialBytes
 
 // Report is the machine-readable output emitted with --json (SWEEP-07).
 type Report struct {
@@ -48,66 +29,19 @@ type Report struct {
 	Error          string `json:"error,omitempty"`
 }
 
-// gcEntry captures the log fields checked for reaper liveness.
-type gcEntry struct {
-	Timestamp     time.Time `json:"timestamp"`
-	Operation     string    `json:"operation"`
-	Source        string    `json:"source,omitempty"`
-	Reason        string    `json:"reason,omitempty"`
-	DryRun        bool      `json:"dry_run,omitempty"`
-	Errors        int       `json:"errors,omitempty"`
-	ProbeFailures int       `json:"probe_failures,omitempty"`
-}
-
-func (e gcEntry) isValidCompletedSweep() bool {
-	return e.Operation == gcCompletedOperation && !e.DryRun && e.Errors == 0 && e.ProbeFailures == 0
-}
-
-func rejectedReason(e gcEntry) string {
-	if e.Operation != gcCompletedOperation {
-		return ""
-	}
-	var causes []string
-	if e.DryRun {
-		causes = append(causes, "dry run reclaimed nothing")
-	}
-	if e.Errors > 0 {
-		causes = append(causes, fmt.Sprintf("%d deletion error(s)", e.Errors))
-	}
-	if e.ProbeFailures > 0 {
-		causes = append(causes, fmt.Sprintf("%d safety-probe failure(s)", e.ProbeFailures))
-	}
-	if len(causes) == 0 {
-		return ""
-	}
-	return "sweep completed without a healthy heartbeat: " + strings.Join(causes, ", ")
-}
-
-type logSummary struct {
-	hasCompletion         bool
-	latestCompletedAt     time.Time
-	latestCompletedReason string
-	latestRejectedAt      time.Time
-	latestRejectedReason  string
-	latestReapAt          time.Time
-	latestFutureAt        time.Time
-}
-
 type deps struct {
 	now             func() time.Time
 	userHomeDir     func() (string, error)
-	statFile        func(path string) (os.FileInfo, error)
-	openFile        func(path string) (*os.File, error)
 	maxLogScanBytes int64
+	maxLogMaxBytes  int64
 }
 
 func defaultDeps() deps {
 	return deps{
 		now:             time.Now,
 		userHomeDir:     os.UserHomeDir,
-		statFile:        os.Stat,
-		openFile:        os.Open,
 		maxLogScanBytes: maxLogScanBytes,
+		maxLogMaxBytes:  gcloghealth.DefaultMaxBytes,
 	}
 }
 
@@ -137,13 +71,11 @@ func parseCLIArgs(args []string, d deps) (cliConfig, int) {
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, 3
 	}
-
 	window, err := time.ParseDuration(*lookback)
 	if err != nil || window <= 0 {
 		fmt.Fprintf(os.Stderr, "sweep-health: invalid --lookback %q\n", *lookback)
 		return cliConfig{}, 3
 	}
-
 	resolvedLog := *logFlag
 	if strings.HasPrefix(resolvedLog, "~/") {
 		if homeErr != nil {
@@ -152,13 +84,7 @@ func parseCLIArgs(args []string, d deps) (cliConfig, int) {
 		}
 		resolvedLog = filepath.Join(home, resolvedLog[2:])
 	}
-
-	return cliConfig{
-		logPath:  resolvedLog,
-		lookback: *lookback,
-		window:   window,
-		asJSON:   *asJSON,
-	}, 0
+	return cliConfig{logPath: resolvedLog, lookback: *lookback, window: window, asJSON: *asJSON}, 0
 }
 
 func run(args []string, d deps) int {
@@ -166,163 +92,70 @@ func run(args []string, d deps) int {
 	if code != 0 {
 		return code
 	}
-
 	now := d.now()
-	r := Report{
-		CheckedAt: now.UTC().Format(time.RFC3339),
-		Log:       cfg.logPath,
-		Lookback:  cfg.lookback,
-	}
-
-	statFile := d.statFile
-	if statFile == nil {
-		statFile = os.Stat
-	}
-	fi, err := statFile(cfg.logPath)
+	r := Report{CheckedAt: now.UTC().Format(time.RFC3339), Log: cfg.logPath, Lookback: cfg.lookback}
+	fi, err := os.Stat(cfg.logPath)
 	if err != nil {
-		r.Status = "down"
-		r.Error = err.Error()
+		r.Status, r.Error = "down", err.Error()
 		return emit(r, cfg.asJSON, fmt.Sprintf("DOWN: cannot access sandbox GC log in %s: %v", cfg.logPath, err), 2)
 	}
 	if fi.IsDir() {
-		r.Status = "down"
-		r.Error = "log path is a directory"
+		r.Status, r.Error = "down", "log path is a directory"
 		return emit(r, cfg.asJSON, fmt.Sprintf("DOWN: sandbox GC log %s is a directory", cfg.logPath), 2)
 	}
-
-	openFile := d.openFile
-	if openFile == nil {
-		openFile = os.Open
-	}
-	f, err := openFile(cfg.logPath)
+	summary, err := gcloghealth.Scan(cfg.logPath, gcloghealth.Options{
+		Now:            now,
+		MaxAge:         cfg.window,
+		InitialBytes:   d.maxLogScanBytes,
+		MaxBytes:       d.maxLogMaxBytes,
+		IgnoredSources: []string{gcloghealth.WatchdogSource},
+	})
 	if err != nil {
-		r.Status = "down"
-		r.Error = err.Error()
-		return emit(r, cfg.asJSON, fmt.Sprintf("DOWN: cannot open sandbox GC log in %s: %v", cfg.logPath, err), 2)
-	}
-	defer f.Close()
-
-	maxScanBytes := d.maxLogScanBytes
-	if maxScanBytes <= 0 {
-		maxScanBytes = maxLogScanBytes
-	}
-	summary, err := scanLog(f, fi.Size(), maxScanBytes)
-	if err != nil {
-		r.Status = "down"
-		r.Error = err.Error()
+		r.Status, r.Error = "down", err.Error()
 		return emit(r, cfg.asJSON, fmt.Sprintf("DOWN: error reading sandbox GC log in %s: %v", cfg.logPath, err), 2)
 	}
-
-	msg, exitCode := evaluateSweep(summary, now, cfg.window, cfg.lookback, &r)
-	return emit(r, cfg.asJSON, msg, exitCode)
+	msg, code := evaluateSweep(summary, now, cfg.window, cfg.lookback, &r)
+	return emit(r, cfg.asJSON, msg, code)
 }
 
-func scanLog(f *os.File, size int64, maxScanBytes int64) (logSummary, error) {
-	var summary logSummary
-	seeked := false
-	if maxScanBytes > 0 && size > maxScanBytes {
-		if _, err := f.Seek(size-maxScanBytes, io.SeekStart); err == nil {
-			seeked = true
-		}
-	}
-
-	reader := bufio.NewReaderSize(f, maxLogRecordBytes)
-	if seeked {
-		// Discard the initial partial record
-		if _, err := reader.ReadBytes('\n'); err != nil && !errors.Is(err, io.EOF) {
-			return summary, err
-		}
-	}
-	for {
-		line, readErr := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			var e gcEntry
-			if json.Unmarshal(line, &e) == nil && strings.HasPrefix(e.Operation, gcOperationPrefix) {
-				foldRecord(&summary, e)
-			}
-		}
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			return summary, readErr
-		}
-	}
-	return summary, nil
-}
-
-func foldRecord(s *logSummary, e gcEntry) {
-	if e.Timestamp.IsZero() {
-		return
-	}
-	switch {
-	case e.isValidCompletedSweep():
-		s.hasCompletion = true
-		if e.Timestamp.After(s.latestCompletedAt) {
-			s.latestCompletedAt = e.Timestamp
-			s.latestCompletedReason = e.Reason
-		}
-	case e.Operation == gcCompletedOperation:
-		s.hasCompletion = true
-		if e.Timestamp.After(s.latestRejectedAt) {
-			s.latestRejectedAt = e.Timestamp
-			s.latestRejectedReason = rejectedReason(e)
-		}
-	case e.Operation == "sandbox_gc_reap":
-		if e.Timestamp.After(s.latestReapAt) {
-			s.latestReapAt = e.Timestamp
-		}
-	}
-	if e.Timestamp.After(s.latestFutureAt) {
-		s.latestFutureAt = e.Timestamp
-	}
-}
-
-func evaluateSweep(s logSummary, now time.Time, window time.Duration, lookback string, r *Report) (string, int) {
-	// SWEEP-05: check clock skew
-	if !s.latestFutureAt.IsZero() && s.latestFutureAt.After(now.Add(clockSkewTolerance)) {
-		age := now.Sub(s.latestFutureAt)
-		r.Status = "down"
-		r.Error = "latest sweep timestamp is in the future"
+func evaluateSweep(s gcloghealth.Summary, now time.Time, window time.Duration, lookback string, r *Report) (string, int) {
+	if !s.LastFutureCompletionAt.IsZero() {
+		age := now.Sub(s.LastFutureCompletionAt)
+		r.Status, r.Error = "down", "latest sweep timestamp is in the future"
 		return fmt.Sprintf("DOWN: latest sweep timestamp %s is %s in the future",
-			s.latestFutureAt.UTC().Format(time.RFC3339), (-age).Round(time.Second)), 2
+			s.LastFutureCompletionAt.UTC().Format(time.RFC3339), (-age).Round(time.Second)), 2
 	}
-
-	targetTime := s.latestCompletedAt
+	targetTime, viaFallback := s.Proof()
 	if targetTime.IsZero() {
-		if s.hasCompletion && !s.latestRejectedAt.IsZero() {
-			r.Status = "degraded"
-			r.Error = s.latestRejectedReason
-			return fmt.Sprintf("DEGRADED: %s", s.latestRejectedReason), 1
-		}
-		// Compatibility fallback if log predates sandbox_gc_completed
-		if !s.hasCompletion && !s.latestReapAt.IsZero() {
-			targetTime = s.latestReapAt
-			r.Reason = "liveness inferred from reap records (log predates sandbox_gc_completed heartbeat)"
-		} else {
-			r.Status = "degraded"
+		r.Status = "degraded"
+		switch {
+		case s.Indeterminate:
+			r.Error = "sandbox GC liveness is undetermined: older history was not scanned"
+			return "DEGRADED: " + r.Error, 1
+		case s.LastError != "":
+			r.Error = s.LastError
+			return "DEGRADED: " + s.LastError, 1
+		default:
 			r.Error = "no completed sandbox sweeps found in log"
 			return fmt.Sprintf("DEGRADED: no completed sandbox sweeps found in %s", r.Log), 1
 		}
 	}
-
+	if viaFallback {
+		r.Reason = "liveness inferred from reap records (log predates sandbox_gc_completed heartbeat)"
+	}
 	age := now.Sub(targetTime)
 	r.LatestSweepAt = targetTime.UTC().Format(time.RFC3339)
 	r.LatestSweepAge = age.Round(time.Minute).String()
-
 	if age > window {
 		r.Status = "degraded"
-		if !s.latestRejectedAt.IsZero() && s.latestRejectedAt.After(targetTime) {
-			r.Error = s.latestRejectedReason
-			return fmt.Sprintf("DEGRADED: no completed sweep in last %s; latest sweep was rejected: %s", lookback, s.latestRejectedReason), 1
+		if s.LastErrorAt.After(targetTime) {
+			r.Error = s.LastError
+			return fmt.Sprintf("DEGRADED: no completed sweep in last %s; latest sweep was rejected: %s", lookback, s.LastError), 1
 		}
-		msg := fmt.Sprintf("DEGRADED: no sandbox sweep completed in last %s (latest completed %s ago)", lookback, r.LatestSweepAge)
-		return msg, 1
+		return fmt.Sprintf("DEGRADED: no sandbox sweep completed in last %s (latest completed %s ago)", lookback, r.LatestSweepAge), 1
 	}
-
 	r.Status = "healthy"
-	msg := fmt.Sprintf("HEALTHY: sandbox sweep completed %s ago (window %s)", r.LatestSweepAge, lookback)
-	return msg, 0
+	return fmt.Sprintf("HEALTHY: sandbox sweep completed %s ago (window %s)", r.LatestSweepAge, lookback), 0
 }
 
 func emit(r Report, asJSON bool, msg string, code int) int {
