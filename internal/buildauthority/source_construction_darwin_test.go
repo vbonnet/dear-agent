@@ -27,8 +27,8 @@ func TestDarwinSourceConstructionRetainsProtectedRepository(t *testing.T) {
 		var outcome sourceUseOutcome
 		owner.closeInto(&outcome)
 	})
-	if !owner.validInitialRetention() || owner.state != sourceConstructionActive {
-		t.Fatalf("initial source construction is not valid and active: %+v", owner)
+	if !owner.validObjectClaimRetention() || owner.state != sourceConstructionActive {
+		t.Fatalf("full source construction is not valid and active: %+v", owner)
 	}
 
 	components, err := absolutePathComponents(repository)
@@ -71,9 +71,9 @@ func TestDarwinSourceConstructionRetainsProtectedRepository(t *testing.T) {
 			wantConfigDigest,
 		)
 	}
-	if !owner.packedRefs.valid() || owner.packedRefs.state != sourcePackedRefsUnresolved ||
+	if !owner.packedRefs.valid() || owner.packedRefs.state != sourcePackedRefsAbsent ||
 		owner.packedRefs.leaf != nil {
-		t.Fatalf("initial packed-refs slot = %+v, want unresolved with no leaf", owner.packedRefs)
+		t.Fatalf("full packed-refs slot = %+v, want resolved absent with no leaf", owner.packedRefs)
 	}
 
 	rootHandles := []*os.Root{
@@ -281,7 +281,7 @@ func TestDarwinSourceConstructionPackedRefsStage(t *testing.T) {
 				)
 			}
 			primitives := requireDarwinSourcePrimitives(t)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				sourceRepositoryLocator{path: repository, seal: validSourceRepositoryLocator},
 				primitives,
@@ -364,7 +364,7 @@ func TestDarwinSourceConstructionPackedRefsRejectsNonRegularEntries(t *testing.T
 			repository, _ := writeDarwinSourceConstructionRepository(t)
 			test.arrange(t, repository)
 			primitives := requireDarwinSourcePrimitives(t)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				sourceRepositoryLocator{path: repository, seal: validSourceRepositoryLocator},
 				primitives,

@@ -34,9 +34,19 @@ func retainSourceConstructionWith(
 		))
 	} else {
 		builder.retainInitialSource(locator)
+		if builder.outcome.proved() {
+			completed := builder.retainPackedRefs() &&
+				builder.retainSourceAdministrativeInventory() &&
+				builder.retainSourceObjectPathInventory() &&
+				builder.retainSourceObjectAuxiliaryClaimInventory() &&
+				builder.revalidateSourceObjectAuxiliaryClaimInventory()
+			if !completed && builder.outcome.proved() {
+				builder.failInvariant()
+			}
+		}
 	}
 	if builder.outcome.proved() {
-		builder.outcome.addPrimitive(validateInitialSourceOwner(builder.ctx, builder.owner))
+		builder.outcome.addPrimitive(validateSourceObjectClaimOwner(builder.ctx, builder.owner))
 	}
 	if !builder.outcome.proved() {
 		builder.owner.closeIntoWith(primitives, &builder.outcome)

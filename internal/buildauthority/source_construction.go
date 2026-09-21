@@ -34,8 +34,9 @@ type retainedSourceGit struct {
 }
 
 type retainedSourceObjects struct {
-	root  retainedSourceRoot
-	paths *sourceObjectPathInventory
+	root   retainedSourceRoot
+	paths  *sourceObjectPathInventory
+	claims *sourceObjectAuxiliaryClaimInventory
 }
 
 type retainedSourceConfig struct {
@@ -141,7 +142,7 @@ func (owner *sourceConstructionOwner) validInitialConfig() bool {
 
 func (owner *sourceConstructionOwner) validInitialObjects() bool {
 	return owner.objects != nil && owner.objects.root.validOpenDirectory() &&
-		owner.objects.paths == nil
+		owner.objects.paths == nil && owner.objects.claims == nil
 }
 
 func (owner *sourceConstructionOwner) validPackedRefsRetention() bool {
@@ -188,7 +189,7 @@ func (owner *sourceConstructionOwner) validObjectPathRetention() bool {
 		!owner.validInitialRepository() || owner.git == nil ||
 		!owner.git.root.validOpenDirectory() || owner.git.administration == nil ||
 		owner.objects == nil || !owner.objects.root.validOpenDirectory() ||
-		owner.objects.paths == nil || !owner.validInitialConfig() ||
+		owner.objects.paths == nil || owner.objects.claims != nil || !owner.validInitialConfig() ||
 		!owner.validResolvedPackedRefs() {
 		return false
 	}
@@ -204,6 +205,38 @@ func (owner *sourceConstructionOwner) validObjectPathRetention() bool {
 	return owner.objects.paths.valid(
 		owner.config.claim.objectFormat,
 		owner.git.administration,
+	)
+}
+
+//nolint:gocyclo // Keep the complete retained-owner invariant visible as one closed predicate.
+func (owner *sourceConstructionOwner) validObjectClaimRetention() bool {
+	if owner == nil || owner.state != sourceConstructionActive || owner.closeFailure ||
+		!owner.validInitialRepository() || owner.git == nil ||
+		!owner.git.root.validOpenDirectory() || owner.git.administration == nil ||
+		owner.objects == nil || !owner.objects.root.validOpenDirectory() ||
+		owner.objects.paths == nil || owner.objects.claims == nil ||
+		!owner.validInitialConfig() || !owner.validResolvedPackedRefs() {
+		return false
+	}
+	if !owner.git.administration.valid(
+		owner.config.claim.objectFormat,
+		owner.packedRefs,
+		owner.git.root.evidence,
+		owner.config.evidence,
+		owner.objects.root.evidence,
+	) || !owner.objects.paths.valid(
+		owner.config.claim.objectFormat,
+		owner.git.administration,
+	) {
+		return false
+	}
+	return sourceObjectAuxiliaryClaimInventoryValid(
+		owner.config.claim.objectFormat,
+		owner.objects.paths,
+		owner.objects.claims,
+	) && sourceObjectAuxiliaryClaimsMatchAdministration(
+		owner.git.administration,
+		owner.objects.claims,
 	)
 }
 

@@ -547,18 +547,77 @@ func (darwinSourcePrimitives) readExactForParse(
 	if failure := sourceContextPrimitiveFailure(ctx, OperationParse); failure != nil {
 		return failure
 	}
-	read, err := owner.file.ReadAt(content, 0)
-	runtime.KeepAlive(owner.file)
+	read, err := readDarwinSourceDescriptorAt(owner, 0, content)
 	if failure := sourceContextPrimitiveFailure(ctx, OperationParse); failure != nil {
 		return failure
 	}
-	if read == len(content) && (err == nil || err == io.EOF) {
+	if read == len(content) && (err == nil || errors.Is(err, io.EOF)) {
 		return nil
 	}
 	if errors.Is(err, fs.ErrPermission) {
 		return newSourcePrimitiveFailure(OperationParse, CausePermission)
 	}
 	return newSourcePrimitiveFailure(OperationParse, CauseUnstable)
+}
+
+func (darwinSourcePrimitives) readExactAtForParse(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+) *sourcePrimitiveFailure {
+	if !owner.validOpen() || offset < 0 || content == nil {
+		return newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationParse); failure != nil {
+		return failure
+	}
+	read, err := readDarwinSourceDescriptorAt(owner, offset, content)
+	if failure := sourceContextPrimitiveFailure(ctx, OperationParse); failure != nil {
+		return failure
+	}
+	if read == len(content) && (err == nil || errors.Is(err, io.EOF)) {
+		return nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return newSourcePrimitiveFailure(OperationParse, CausePermission)
+	}
+	return newSourcePrimitiveFailure(OperationParse, CauseUnstable)
+}
+
+func (darwinSourcePrimitives) readExactAtForHash(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+) *sourcePrimitiveFailure {
+	if !owner.validOpen() || offset < 0 || content == nil {
+		return newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	if failure := sourceContextPrimitiveFailure(ctx, OperationHash); failure != nil {
+		return failure
+	}
+	read, err := readDarwinSourceDescriptorAt(owner, offset, content)
+	if failure := sourceContextPrimitiveFailure(ctx, OperationHash); failure != nil {
+		return failure
+	}
+	if read == len(content) && (err == nil || errors.Is(err, io.EOF)) {
+		return nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return newSourcePrimitiveFailure(OperationHash, CausePermission)
+	}
+	return newSourcePrimitiveFailure(OperationHash, CauseUnstable)
+}
+
+func readDarwinSourceDescriptorAt(
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+) (int, error) {
+	read, err := owner.file.ReadAt(content, offset)
+	runtime.KeepAlive(owner.file)
+	return read, err
 }
 
 func (darwinSourcePrimitives) hashBytes(

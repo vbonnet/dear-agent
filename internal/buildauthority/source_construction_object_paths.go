@@ -5,10 +5,11 @@ import (
 	"strings"
 )
 
-// sourceObjectPathInventory is the value-only name and path-local prerequisite
-// proof that follows the selective administrative walk. It contains no bytes,
-// digest, parsed chain membership, or handle and therefore cannot authorize
-// object parsing, copying, or C1 sealing.
+// sourceObjectPathInventory is the value-only pathname, role, and topology
+// proof that follows the selective administrative walk. It deliberately does
+// not prove pack pairing, coexistence, companion closure, chain membership, or
+// bytes; those relationships are checked only after every auxiliary read. It
+// therefore cannot authorize object parsing, copying, or C1 sealing.
 type sourceObjectPathInventory struct {
 	rows               []sourceObjectPathRow
 	contentFileCount   uint64
@@ -85,8 +86,7 @@ func (inventory *sourceObjectPathInventory) valid(
 	return rowsMatch &&
 		contentFileCount == inventory.contentFileCount &&
 		auxiliaryFileCount == inventory.auxiliaryFileCount &&
-		sourceObjectPathTopologyValid(inventory.rows) &&
-		sourceObjectPathPrerequisitesAdmitted(inventory.rows)
+		sourceObjectPathTopologyValid(inventory.rows)
 }
 
 func sourceObjectPathRowsMatchAdministration(
@@ -195,19 +195,12 @@ func deriveSourceObjectPathInventory(
 			auxiliaryFileCount++
 		}
 	}
-	topologyValid := sourceObjectPathTopologyValid(rows)
-	if failure := sourceContextPrimitiveFailure(ctx, OperationValidate); failure != nil {
+	topologyValid, failure := sourceObjectPathTopologyValidity(ctx, OperationValidate, rows)
+	if failure != nil {
 		return nil, failure
 	}
 	if !topologyValid {
 		return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
-	}
-	prerequisitesAdmitted := sourceObjectPathPrerequisitesAdmitted(rows)
-	if failure := sourceContextPrimitiveFailure(ctx, OperationValidate); failure != nil {
-		return nil, failure
-	}
-	if !prerequisitesAdmitted {
-		return nil, newSourcePrimitiveFailure(OperationValidate, CauseUnsupported)
 	}
 	return &sourceObjectPathInventory{
 		rows:               rows,
@@ -436,111 +429,118 @@ func sourceObjectHashFileKey(
 }
 
 func sourceObjectPathTopologyValid(rows []sourceObjectPathRow) bool {
-	if len(rows) == 0 || rows[0] != (sourceObjectPathRow{
+	valid, failure := sourceObjectPathTopologyValidity(
+		context.Background(),
+		OperationValidate,
+		rows,
+	)
+	return valid && failure == nil
+}
+
+func sourceObjectPathInventoryShapeValidity(
+	ctx context.Context,
+	operation Operation,
+	inventory *sourceObjectPathInventory,
+) (bool, *sourcePrimitiveFailure) {
+	if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+		return false, failure
+	}
+	baseValid := inventory != nil && len(inventory.rows) != 0 &&
+		len(inventory.rows) <= maxRepositoryEntries+1
+	if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+		return false, failure
+	}
+	if !baseValid {
+		return false, nil
+	}
+	topologyValid, failure := sourceObjectPathTopologyValidity(
+		ctx,
+		operation,
+		inventory.rows,
+	)
+	if failure != nil || !topologyValid {
+		return false, failure
+	}
+	var contentFileCount uint64
+	var auxiliaryFileCount uint64
+	for index := range inventory.rows {
+		if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+			return false, failure
+		}
+		role := inventory.rows[index].role
+		if role.content() {
+			contentFileCount++
+		}
+		if role.auxiliary() {
+			auxiliaryFileCount++
+		}
+	}
+	countsValid := contentFileCount == inventory.contentFileCount &&
+		auxiliaryFileCount == inventory.auxiliaryFileCount
+	if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+		return false, failure
+	}
+	return countsValid, nil
+}
+
+//nolint:gocyclo // The two bounded passes are the closed topology proof and stay contiguous.
+func sourceObjectPathTopologyValidity(
+	ctx context.Context,
+	operation Operation,
+	rows []sourceObjectPathRow,
+) (bool, *sourcePrimitiveFailure) {
+	if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+		return false, failure
+	}
+	rootValid := len(rows) != 0 && rows[0] == (sourceObjectPathRow{
 		path: ".git/objects",
 		role: sourceObjectDirectoryPath,
-	}) {
-		return false
+	})
+	if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+		return false, failure
+	}
+	if !rootValid {
+		return false, nil
 	}
 	directories := make(map[string]bool)
+	previousPath := ""
 	for index := range rows {
+		if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+			return false, failure
+		}
 		row := rows[index]
-		if index > 0 && rows[index-1].path >= row.path {
-			return false
+		ordered := index == 0 || previousPath < row.path
+		if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+			return false, failure
+		}
+		if !ordered {
+			return false, nil
 		}
 		if row.role == sourceObjectDirectoryPath {
-			if row.key != "" {
-				return false
+			keyValid := row.key == ""
+			if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+				return false, failure
+			}
+			if !keyValid {
+				return false, nil
 			}
 			directories[row.path] = true
 		}
+		previousPath = row.path
 	}
 	for index := 1; index < len(rows); index++ {
+		if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+			return false, failure
+		}
 		parentEnd := strings.LastIndexByte(rows[index].path, '/')
-		if parentEnd < len(".git/objects") || !directories[rows[index].path[:parentEnd]] {
-			return false
+		parentValid := parentEnd >= len(".git/objects") &&
+			directories[rows[index].path[:parentEnd]]
+		if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+			return false, failure
+		}
+		if !parentValid {
+			return false, nil
 		}
 	}
-	return true
-}
-
-// sourceObjectPathPrerequisitesAdmitted proves only relationships decidable
-// from admitted pathnames. Chain membership, checksum/name binding, pack-list
-// membership, and every auxiliary byte grammar remain deliberately unproved.
-func sourceObjectPathPrerequisitesAdmitted(rows []sourceObjectPathRow) bool {
-	index := indexSourceObjectPathPrerequisites(rows)
-	if index.commitGraph && index.commitGraphChain {
-		return false
-	}
-	for rowIndex := range rows {
-		if !sourceObjectPathPrerequisiteAdmitted(rows[rowIndex], index) {
-			return false
-		}
-	}
-	return true
-}
-
-type sourceObjectPathPrerequisiteIndex struct {
-	packParts            map[string]uint8
-	multiPackIndexLayers map[string]bool
-	commitGraph          bool
-	commitGraphChain     bool
-	multiPackIndex       bool
-	multiPackIndexChain  bool
-}
-
-func indexSourceObjectPathPrerequisites(rows []sourceObjectPathRow) sourceObjectPathPrerequisiteIndex {
-	index := sourceObjectPathPrerequisiteIndex{
-		packParts:            make(map[string]uint8),
-		multiPackIndexLayers: make(map[string]bool),
-	}
-	for rowIndex := range rows {
-		row := rows[rowIndex]
-		switch row.role {
-		case sourceObjectPackContentPath:
-			index.packParts[row.key] |= 1
-		case sourceObjectPackIndexPath:
-			index.packParts[row.key] |= 2
-		case sourceObjectCommitGraphPath:
-			index.commitGraph = true
-		case sourceObjectCommitGraphChainPath:
-			index.commitGraphChain = true
-		case sourceObjectMultiPackIndexPath:
-			index.multiPackIndex = true
-		case sourceObjectMultiPackIndexChainPath:
-			index.multiPackIndexChain = true
-		case sourceObjectMultiPackIndexLayerPath:
-			index.multiPackIndexLayers[row.key] = true
-		case sourceObjectDirectoryPath, sourceObjectLooseContentPath,
-			sourceObjectPackAuxiliaryPath, sourceObjectSplitCommitGraphPath,
-			sourceObjectPackListPath, sourceObjectMultiPackIndexAuxiliaryPath,
-			sourceObjectMultiPackIndexLayerAuxiliaryPath:
-		}
-	}
-	return index
-}
-
-func sourceObjectPathPrerequisiteAdmitted(
-	row sourceObjectPathRow,
-	index sourceObjectPathPrerequisiteIndex,
-) bool {
-	switch row.role {
-	case sourceObjectPackContentPath, sourceObjectPackIndexPath,
-		sourceObjectPackAuxiliaryPath:
-		return index.packParts[row.key] == 3
-	case sourceObjectSplitCommitGraphPath:
-		return index.commitGraphChain
-	case sourceObjectMultiPackIndexAuxiliaryPath:
-		return index.multiPackIndex
-	case sourceObjectMultiPackIndexLayerPath:
-		return index.multiPackIndexChain
-	case sourceObjectMultiPackIndexLayerAuxiliaryPath:
-		return index.multiPackIndexChain && index.multiPackIndexLayers[row.key]
-	case sourceObjectDirectoryPath, sourceObjectLooseContentPath,
-		sourceObjectCommitGraphPath, sourceObjectCommitGraphChainPath,
-		sourceObjectPackListPath, sourceObjectMultiPackIndexPath,
-		sourceObjectMultiPackIndexChainPath:
-		return true
-	}
-	return false
+	return true, sourceContextPrimitiveFailure(ctx, operation)
 }

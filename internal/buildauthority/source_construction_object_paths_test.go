@@ -37,8 +37,7 @@ func TestSourceObjectPathRolesAreClosed(t *testing.T) {
 		}
 	}
 	for _, invalid := range []sourceObjectPathRole{0, 255} {
-		if invalid.content() || invalid.auxiliary() ||
-			sourceObjectPathPrerequisitesAdmitted([]sourceObjectPathRow{{role: invalid}}) {
+		if invalid.content() || invalid.auxiliary() {
 			t.Errorf("invalid object path role %d was admitted", invalid)
 		}
 	}
@@ -234,7 +233,7 @@ func TestSourceObjectPathClassificationIsFormatBound(t *testing.T) {
 	}
 }
 
-func TestSourceObjectPathPrerequisites(t *testing.T) {
+func TestSourceObjectPathInventoryDefersClosurePrerequisites(t *testing.T) {
 	hash := strings.Repeat("a", objectFormatSHA1.hexWidth())
 	looseTail := strings.Repeat("a", objectFormatSHA1.hexWidth()-2)
 	packDirectory := metadataInventoryValidationRow{path: ".git/objects/pack", kind: sourceObservedDirectory}
@@ -254,9 +253,11 @@ func TestSourceObjectPathPrerequisites(t *testing.T) {
 	midxLayerAux := metadataInventoryValidationRow{path: ".git/objects/pack/multi-pack-index.d/multi-pack-index-" + hash + ".bitmap", kind: sourceObservedRegular}
 
 	for _, test := range []struct {
-		name string
-		rows []metadataInventoryValidationRow
-		want bool
+		name      string
+		rows      []metadataInventoryValidationRow
+		want      bool
+		operation Operation
+		cause     CauseCode
 	}{
 		{name: "empty object root", want: true},
 		{
@@ -280,35 +281,118 @@ func TestSourceObjectPathPrerequisites(t *testing.T) {
 		{name: "monolithic MIDX with auxiliary", rows: []metadataInventoryValidationRow{packDirectory, midx, midxAux}, want: true},
 		{name: "incremental MIDX layer without chain", rows: []metadataInventoryValidationRow{packDirectory, midxDirectory, midxLayer}},
 		{name: "incremental MIDX layer with chain", rows: []metadataInventoryValidationRow{packDirectory, midxDirectory, midxChain, midxLayer}, want: true},
-		{name: "incremental MIDX auxiliary without layer", rows: []metadataInventoryValidationRow{packDirectory, midxDirectory, midxChain, midxLayerAux}},
+		{
+			name:      "incremental MIDX auxiliary without layer",
+			rows:      []metadataInventoryValidationRow{packDirectory, midxDirectory, midxChain, midxLayerAux},
+			operation: OperationOpen,
+			cause:     CauseNotFound,
+		},
 		{name: "incremental MIDX layer and auxiliary", rows: []metadataInventoryValidationRow{packDirectory, midxDirectory, midxChain, midxLayer, midxLayerAux}, want: true},
 		{name: "empty auxiliary directories", rows: []metadataInventoryValidationRow{infoDirectory, graphDirectory, packDirectory, midxDirectory}, want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newMetadataInventoryValidationFixture(objectFormatSHA1, test.rows)
 			if !fixture.valid() {
-				t.Fatalf("administrative fixture is invalid before relationship proof: %+v", fixture.inventory)
+				t.Fatalf("administrative fixture is invalid before topology proof: %+v", fixture.inventory)
 			}
 			inventory, failure := deriveSourceObjectPathInventory(
 				context.Background(),
 				objectFormatSHA1,
 				fixture.inventory,
 			)
+			if failure != nil || !inventory.valid(objectFormatSHA1, fixture.inventory) {
+				t.Fatalf("topology inventory = %+v / %+v", inventory, failure)
+			}
+			values, checksumOverrides := sourceObjectPathClosureTestClaims(inventory, hash)
+			claims := sourceObjectAuxiliaryTestClaims(
+				t,
+				objectFormatSHA1,
+				inventory,
+				values,
+				checksumOverrides,
+			)
+			closureFailure := validateSourceObjectAuxiliaryClaimInventory(
+				context.Background(),
+				objectFormatSHA1,
+				inventory,
+				claims,
+			)
 			if test.want {
-				if failure != nil || !inventory.valid(objectFormatSHA1, fixture.inventory) {
-					t.Fatalf("relationship inventory = %+v / %+v", inventory, failure)
+				if closureFailure != nil {
+					t.Fatalf("deferred relationship closure = %+v", closureFailure)
 				}
 				return
 			}
-			requireMetadataPrimitiveFailure(t, failure, OperationValidate, CauseUnsupported)
-			if inventory != nil {
-				t.Fatalf("unsupported relationship returned inventory: %+v", inventory)
+			wantOperation := test.operation
+			if wantOperation == "" {
+				wantOperation = OperationValidate
 			}
+			wantCause := test.cause
+			if wantCause == "" {
+				wantCause = CauseUnsupported
+			}
+			requireMetadataPrimitiveFailure(
+				t,
+				closureFailure,
+				wantOperation,
+				wantCause,
+			)
 		})
 	}
 }
 
-func TestSourceObjectPathRetentionRejectsIncompletePackWithoutMutation(t *testing.T) {
+func sourceObjectPathClosureTestClaims(
+	inventory *sourceObjectPathInventory,
+	fallbackHash string,
+) (map[string][]string, map[string]string) {
+	values := make(map[string][]string)
+	checksumOverrides := make(map[string]string)
+	var graphValues []string
+	var multiPackIndexValues []string
+	var graphChainPath string
+	var multiPackIndexChainPath string
+	var monolithicMultiPackIndexPath string
+	var monolithicMultiPackIndexHash string
+	for index := range inventory.rows {
+		row := inventory.rows[index]
+		switch row.role {
+		case sourceObjectCommitGraphChainPath:
+			graphChainPath = row.path
+		case sourceObjectSplitCommitGraphPath:
+			graphValues = append(graphValues, row.key)
+		case sourceObjectMultiPackIndexChainPath:
+			multiPackIndexChainPath = row.path
+		case sourceObjectMultiPackIndexLayerPath:
+			multiPackIndexValues = append(multiPackIndexValues, row.key)
+		case sourceObjectMultiPackIndexPath:
+			monolithicMultiPackIndexPath = row.path
+		case sourceObjectMultiPackIndexAuxiliaryPath:
+			monolithicMultiPackIndexHash = row.key
+		case sourceObjectDirectoryPath, sourceObjectLooseContentPath,
+			sourceObjectPackContentPath, sourceObjectPackIndexPath,
+			sourceObjectPackAuxiliaryPath, sourceObjectCommitGraphPath,
+			sourceObjectPackListPath, sourceObjectMultiPackIndexLayerAuxiliaryPath:
+		}
+	}
+	if graphChainPath != "" {
+		if len(graphValues) == 0 {
+			graphValues = []string{fallbackHash}
+		}
+		values[graphChainPath] = graphValues
+	}
+	if multiPackIndexChainPath != "" {
+		if len(multiPackIndexValues) == 0 {
+			multiPackIndexValues = []string{fallbackHash}
+		}
+		values[multiPackIndexChainPath] = multiPackIndexValues
+	}
+	if monolithicMultiPackIndexPath != "" && monolithicMultiPackIndexHash != "" {
+		checksumOverrides[monolithicMultiPackIndexPath] = monolithicMultiPackIndexHash
+	}
+	return values, checksumOverrides
+}
+
+func TestSourceObjectClaimRetentionRejectsIncompletePackAfterPathRetention(t *testing.T) {
 	owner, primitives := newMetadataInventoryHarness(t)
 	pack := ".git/objects/pack/pack-" + strings.Repeat("b", objectFormatSHA1.hexWidth()) + ".pack"
 	index := ".git/objects/pack/pack-" + strings.Repeat("b", objectFormatSHA1.hexWidth()) + ".idx"
@@ -319,11 +403,18 @@ func TestSourceObjectPathRetentionRejectsIncompletePackWithoutMutation(t *testin
 	if !owner.validAdministrativeRetention() {
 		t.Fatalf("name-level incomplete pack did not reach relationship stage: %+v", owner)
 	}
-	if builder.retainSourceObjectPathInventory() {
-		t.Fatal("incomplete pack relationship was retained")
+	if !builder.retainSourceObjectPathInventory() {
+		t.Fatalf("incomplete pack topology was not retained: %+v", builder.outcome)
+	}
+	if !owner.validObjectPathRetention() || owner.objects.claims != nil {
+		t.Fatalf("incomplete pack did not stop at the path-only state: %+v", owner)
+	}
+	if builder.retainSourceObjectAuxiliaryClaimInventory() {
+		t.Fatal("incomplete pack relationship produced claims")
 	}
 	requireMetadataInventoryFailure(t, builder.outcome, OperationValidate, CauseUnsupported)
-	if owner.objects.paths != nil || !owner.validAdministrativeRetention() {
+	if owner.objects.paths == nil || owner.objects.claims != nil ||
+		!owner.validObjectPathRetention() {
 		t.Fatalf("incomplete pack mutated owner: %+v", owner)
 	}
 	if primitives.contentCalls != 0 {
@@ -388,7 +479,7 @@ func TestSourceObjectPathRetentionRejectsRepeatedAndCanceledStages(t *testing.T)
 		}
 	})
 
-	t.Run("cancellation outranks unsupported prerequisite", func(t *testing.T) {
+	t.Run("cancellation continues through derived topology", func(t *testing.T) {
 		hash := strings.Repeat("a", objectFormatSHA1.hexWidth())
 		fixture := newMetadataInventoryValidationFixture(
 			objectFormatSHA1,
@@ -405,9 +496,11 @@ func TestSourceObjectPathRetentionRejectsRepeatedAndCanceledStages(t *testing.T)
 			objectFormatSHA1,
 			fixture.inventory,
 		)
-		requireMetadataPrimitiveFailure(t, failure, OperationValidate, CauseCanceled)
+		if failure == nil || failure.cause != CauseCanceled {
+			t.Fatalf("derived-topology cancellation = %+v", failure)
+		}
 		if inventory != nil {
-			t.Fatalf("canceled unsupported-prerequisite derivation returned inventory: %+v", inventory)
+			t.Fatalf("canceled topology derivation returned inventory: %+v", inventory)
 		}
 	})
 

@@ -453,6 +453,8 @@ func TestSourceAdministrativeInventoryBoundsHelpers(t *testing.T) {
 			owner.git.root.descriptor,
 			".git",
 			"HEAD",
+			sourceInitialWalkPresent,
+			nil,
 		) {
 			t.Fatalf("exact descendant capture failed: %+v", builder.outcome)
 		}
@@ -465,6 +467,8 @@ func TestSourceAdministrativeInventoryBoundsHelpers(t *testing.T) {
 			owner.git.root.descriptor,
 			".git",
 			"HEAD",
+			sourceInitialWalkPresent,
+			nil,
 		) {
 			t.Fatal("one-over descendant capture succeeded")
 		}
@@ -756,19 +760,25 @@ type metadataInventoryPrimitives struct {
 
 	nodes       map[string]metadataInventoryNode
 	directories map[string][]string
+	contents    map[string][]byte
 
 	descriptorPaths map[*ownedSourceDescriptor]string
+	descriptorModes map[*ownedSourceDescriptor]sourcePresenceMode
 	rootPaths       map[*ownedSourceRoot]string
 	transient       []*ownedSourceDescriptor
 	closeCounts     map[*ownedSourceDescriptor]int
 	readCounts      map[string]int
+	readCursors     map[*ownedSourceDescriptor]int
 	events          []string
 	contentCalls    int
 
-	failRootOpenAfterOwner bool
-	failOpenPathAfterOwner string
-	failProbePathMissing   string
-	failOpenPathMissing    string
+	failRootOpenAfterOwner  bool
+	failOpenPathAfterOwner  string
+	failProbePathMissing    string
+	failOpenPathMissing     string
+	failRebindPathMissing   string
+	failClosePath           string
+	rebindIdentityDriftPath string
 
 	mutationPermittingACLPath string
 }
@@ -781,12 +791,17 @@ func newMetadataInventoryHarness(
 		t:               t,
 		nodes:           make(map[string]metadataInventoryNode),
 		directories:     make(map[string][]string),
+		contents:        make(map[string][]byte),
 		descriptorPaths: make(map[*ownedSourceDescriptor]string),
+		descriptorModes: make(map[*ownedSourceDescriptor]sourcePresenceMode),
 		rootPaths:       make(map[*ownedSourceRoot]string),
 		closeCounts:     make(map[*ownedSourceDescriptor]int),
 		readCounts:      make(map[string]int),
+		readCursors:     make(map[*ownedSourceDescriptor]int),
 	}
 
+	primitives.addNode("physical", sourceObservedDirectory, 0, 15)
+	primitives.addNode("repository", sourceObservedDirectory, 0, 1)
 	primitives.addNode(".git", sourceObservedDirectory, 0, 2)
 	primitives.addNode(".git/HEAD", sourceObservedRegular, 41, 3)
 	primitives.addNode(".git/config", sourceObservedRegular, 32, 4)
@@ -827,12 +842,8 @@ func newMetadataInventoryHarness(
 		"pack-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.idx",
 	}
 
-	repositoryEvidence := metadataInventoryEvidence(
-		"repository",
-		sourceObservedDirectory,
-		0,
-		1,
-	)
+	physicalEvidence := primitives.nodes["physical"].evidence
+	repositoryEvidence := primitives.nodes["repository"].evidence
 	repositoryRoot := metadataInventoryRootOwner()
 	repositoryDescriptor := metadataInventoryDescriptorOwner(sourceObservedDirectory)
 	gitRoot := metadataInventoryRootOwner()
@@ -872,7 +883,10 @@ func newMetadataInventoryHarness(
 				descriptor: repositoryDescriptor,
 				evidence:   repositoryEvidence,
 			},
-			pathClaims: []authorityPathClaim{repositoryEvidence.pathClaim()},
+			pathClaims: []authorityPathClaim{
+				physicalEvidence.pathClaim(),
+				repositoryEvidence.pathClaim(),
+			},
 		},
 	}
 	primitives.owner = owner
@@ -911,6 +925,45 @@ func (primitives *metadataInventoryPrimitives) addNode(
 			primitives.directories[path] = nil
 		}
 	}
+}
+
+func (primitives *metadataInventoryPrimitives) addDirectoryNode(
+	path string,
+	inode uint64,
+) {
+	primitives.t.Helper()
+	primitives.addNode(path, sourceObservedDirectory, 0, inode)
+	primitives.addDirectoryChild(path)
+}
+
+func (primitives *metadataInventoryPrimitives) addContentNode(
+	path string,
+	content []byte,
+	inode uint64,
+) {
+	primitives.t.Helper()
+	primitives.addNode(path, sourceObservedRegular, int64(len(content)), inode)
+	primitives.contents[path] = append([]byte(nil), content...)
+	primitives.addDirectoryChild(path)
+}
+
+func (primitives *metadataInventoryPrimitives) addDirectoryChild(path string) {
+	separator := strings.LastIndexByte(path, '/')
+	if separator < 0 {
+		primitives.t.Fatalf("metadata child path has no parent: %q", path)
+	}
+	parent := path[:separator]
+	if node, present := primitives.nodes[parent]; !present ||
+		node.kind != sourceObservedDirectory {
+		primitives.t.Fatalf("metadata child parent %q is unavailable for %q", parent, path)
+	}
+	name := path[separator+1:]
+	for _, existing := range primitives.directories[parent] {
+		if existing == name {
+			primitives.t.Fatalf("metadata child %q already exists", path)
+		}
+	}
+	primitives.directories[parent] = append(primitives.directories[parent], name)
 }
 
 func metadataInventoryEvidence(
@@ -1053,8 +1106,10 @@ func (primitives *metadataInventoryPrimitives) openRepositoryRoot(
 func (primitives *metadataInventoryPrimitives) openPhysicalRootDescriptor(
 	context.Context,
 ) (*ownedSourceDescriptor, *sourcePrimitiveFailure) {
-	primitives.t.Fatal("metadata inventory unexpectedly opened the physical root")
-	return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	primitives.events = append(primitives.events, "open:physical")
+	owner := primitives.acquireDescriptor("physical", sourceObservedDirectory)
+	primitives.descriptorModes[owner] = sourceRevalidatePresent
+	return owner, nil
 }
 
 func (primitives *metadataInventoryPrimitives) probeRelativeKind(
@@ -1063,17 +1118,26 @@ func (primitives *metadataInventoryPrimitives) probeRelativeKind(
 	name string,
 	mode sourcePresenceMode,
 ) (sourceObservedKind, bool, *sourcePrimitiveFailure) {
-	if ctx == nil || mode != sourceInitialWalkPresent {
+	if ctx == nil || (mode != sourceInitialWalkPresent &&
+		mode != sourceRevalidatePresent) {
 		primitives.t.Fatalf("metadata probe inputs = %+v / %d", ctx, mode)
 	}
 	path := primitives.childPath(parent, name)
 	primitives.events = append(primitives.events, "probe:"+path)
 	if primitives.failProbePathMissing == path {
-		return 0, false, newSourcePrimitiveFailure(OperationProbe, CauseUnstable)
+		operation := OperationProbe
+		if mode == sourceRevalidatePresent {
+			operation = OperationCompare
+		}
+		return 0, false, newSourcePrimitiveFailure(operation, CauseUnstable)
 	}
 	node, present := primitives.nodes[path]
 	if !present {
-		return 0, false, newSourcePrimitiveFailure(OperationProbe, CauseUnstable)
+		operation := OperationProbe
+		if mode == sourceRevalidatePresent {
+			operation = OperationCompare
+		}
+		return 0, false, newSourcePrimitiveFailure(operation, CauseUnstable)
 	}
 	return node.kind, true, nil
 }
@@ -1085,13 +1149,27 @@ func (primitives *metadataInventoryPrimitives) openRelativeNoFollow(
 	kind sourceObservedKind,
 	mode sourcePresenceMode,
 ) (*ownedSourceDescriptor, *sourcePrimitiveFailure) {
-	if ctx == nil || mode != sourceInitialWalkPresent {
+	if ctx == nil || (mode != sourceInitialWalkPresent &&
+		mode != sourceInitialRequired && mode != sourceRevalidatePresent) {
 		primitives.t.Fatalf("metadata open inputs = %+v / %d", ctx, mode)
 	}
 	path := primitives.childPath(parent, name)
+	if mode == sourceRevalidatePresent && primitives.failRebindPathMissing == path {
+		primitives.events = append(primitives.events, "open:"+path)
+		return nil, newSourcePrimitiveFailure(OperationCompare, CauseUnstable)
+	}
 	if primitives.failOpenPathMissing == path {
 		primitives.events = append(primitives.events, "open:"+path)
-		return nil, newSourcePrimitiveFailure(OperationOpen, CauseUnstable)
+		switch mode {
+		case sourceInitialRequired:
+			return nil, newSourcePrimitiveFailure(OperationOpen, CauseNotFound)
+		case sourceRevalidatePresent:
+			return nil, newSourcePrimitiveFailure(OperationCompare, CauseUnstable)
+		case sourceInitialWalkPresent:
+			return nil, newSourcePrimitiveFailure(OperationOpen, CauseUnstable)
+		default:
+			return nil, newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+		}
 	}
 	node, present := primitives.nodes[path]
 	if !present || node.kind != kind {
@@ -1099,6 +1177,7 @@ func (primitives *metadataInventoryPrimitives) openRelativeNoFollow(
 	}
 	primitives.events = append(primitives.events, "open:"+path)
 	owner := primitives.acquireDescriptor(path, kind)
+	primitives.descriptorModes[owner] = mode
 	if primitives.failOpenPathAfterOwner == path {
 		return owner, newSourcePrimitiveFailure(OperationOpen, CausePermission)
 	}
@@ -1137,7 +1216,8 @@ func (primitives *metadataInventoryPrimitives) readDirectoryBatch(
 	if ctx == nil || primitives.nodes[path].kind != sourceObservedDirectory {
 		primitives.t.Fatalf("metadata directory read inputs = %+v / %q", ctx, path)
 	}
-	batch := primitives.readCounts[path]
+	batch := primitives.readCursors[owner]
+	primitives.readCursors[owner]++
 	primitives.readCounts[path]++
 	primitives.events = append(primitives.events, "walk:"+path)
 	names := primitives.directories[path]
@@ -1166,7 +1246,12 @@ func (primitives *metadataInventoryPrimitives) statDescriptor(
 	if !present {
 		primitives.t.Fatalf("metadata stat has no node for %q", path)
 	}
-	return node.evidence.snapshot, nil
+	snapshot := node.evidence.snapshot
+	if primitives.descriptorModes[owner] == sourceRevalidatePresent &&
+		primitives.rebindIdentityDriftPath == path {
+		snapshot.identity.Inode++
+	}
+	return snapshot, nil
 }
 
 func (primitives *metadataInventoryPrimitives) statFilesystem(
@@ -1258,10 +1343,18 @@ func (primitives *metadataInventoryPrimitives) compareRootAndDescriptor(
 	root *ownedSourceRoot,
 	descriptor *ownedSourceDescriptor,
 ) *sourcePrimitiveFailure {
-	if ctx == nil || root != primitives.owner.git.root.root || primitives.descriptorPath(descriptor) != ".git" {
-		primitives.t.Fatalf("metadata root comparison = %+v / %p / %q", ctx, root, primitives.descriptorPath(descriptor))
+	rootPath, present := primitives.rootPaths[root]
+	descriptorPath := primitives.descriptorPath(descriptor)
+	if ctx == nil || !present || rootPath != descriptorPath {
+		primitives.t.Fatalf(
+			"metadata root comparison = %+v / %p (%q) / %q",
+			ctx,
+			root,
+			rootPath,
+			descriptorPath,
+		)
 	}
-	primitives.events = append(primitives.events, "compare-root:.git")
+	primitives.events = append(primitives.events, "compare-root:"+rootPath)
 	return nil
 }
 
@@ -1282,7 +1375,7 @@ func (primitives *metadataInventoryPrimitives) closeDescriptor(owner *ownedSourc
 	primitives.events = append(primitives.events, "close:"+path)
 	owner.file = nil
 	owner.state = sourceHandleClosed
-	return false
+	return primitives.failClosePath == path
 }
 
 func (primitives *metadataInventoryPrimitives) acquireDescriptor(
@@ -1309,7 +1402,15 @@ func (primitives *metadataInventoryPrimitives) childPath(
 	name string,
 ) string {
 	primitives.t.Helper()
-	return primitives.descriptorPath(parent) + "/" + name
+	parentPath := primitives.descriptorPath(parent)
+	switch {
+	case parentPath == "physical" && name == "repository":
+		return "repository"
+	case parentPath == "repository" && name == ".git":
+		return ".git"
+	default:
+		return parentPath + "/" + name
+	}
 }
 
 func (primitives *metadataInventoryPrimitives) expectedRegularBytes() uint64 {

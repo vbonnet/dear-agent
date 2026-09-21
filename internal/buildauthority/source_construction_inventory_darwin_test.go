@@ -40,7 +40,7 @@ func TestDarwinSourceAdministrativeInventoryRetainsOnlyValueRows(t *testing.T) {
 			}
 
 			primitives := requireDarwinSourcePrimitives(t)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				sourceRepositoryLocator{path: repository, seal: validSourceRepositoryLocator},
 				primitives,
@@ -109,7 +109,7 @@ func TestDarwinSourceAdministrativeInventoryConsumesMultipleDirectoryBatches(t *
 	}
 
 	primitives := requireDarwinSourcePrimitives(t)
-	owner, initial := retainSourceConstructionWith(
+	owner, initial := retainInitialSourceConstructionForTest(
 		context.Background(),
 		sourceRepositoryLocator{path: repository, seal: validSourceRepositoryLocator},
 		primitives,
@@ -172,7 +172,7 @@ func TestDarwinSourceAdministrativeInventoryRejectsForbiddenTopology(t *testing.
 			repository, _ := writeDarwinSourceConstructionRepository(t)
 			test.arrange(t, repository)
 			primitives := requireDarwinSourcePrimitives(t)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				sourceRepositoryLocator{path: repository, seal: validSourceRepositoryLocator},
 				primitives,

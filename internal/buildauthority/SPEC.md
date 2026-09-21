@@ -1155,7 +1155,10 @@ decoded, but their exact size and digest remain revalidated.
 | Revalidation observes topology or size drift, or grammar-, checksum-, and closure-valid chain order or same-identity content drift | `source/compare/unstable` |
 | Revalidation resolves an expected row to another filesystem object | `source/compare/identity` |
 
-Implementation is incomplete; its required future evidence groups are:
+The private, unsealable auxiliary-claim slice is implemented and evidenced by
+the following groups. Descriptor-bound copy, repository and source-object
+manifest sealing, final C1 transfer, public `Stage` wiring, installation, and
+activation remain incomplete:
 
 | Proving test | Required exact fixtures |
 | --- | --- |

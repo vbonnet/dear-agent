@@ -2,6 +2,9 @@ package buildauthority
 
 import (
 	"context"
+	"crypto/sha1" //nolint:gosec // Git's closed object format requires SHA-1 compatibility.
+	"crypto/sha256"
+	"encoding"
 	"os"
 	"strings"
 )
@@ -85,6 +88,112 @@ func sourceContextPrimitiveFailure(
 		return newSourcePrimitiveFailure(operation, cause)
 	}
 	return nil
+}
+
+// sourceContentDigestState keeps only the standard library's value-encoded
+// hash state. The hash.Hash and encoding interfaces used to advance it are
+// transient locals inside this primitive module; source construction never
+// retains a callable or type-erased hashing capability.
+type sourceContentDigestAlgorithm uint8
+
+const (
+	sourceContentDigestSHA1 sourceContentDigestAlgorithm = iota + 1
+	sourceContentDigestSHA256
+	sourceContentDigestStateBytes = 256
+)
+
+type sourceContentDigestState struct {
+	algorithm sourceContentDigestAlgorithm
+	wire      [sourceContentDigestStateBytes]byte
+	wireN     uint16
+}
+
+func newSourceContentDigestState(
+	algorithm sourceContentDigestAlgorithm,
+) (sourceContentDigestState, bool) {
+	state := sourceContentDigestState{algorithm: algorithm}
+	if !state.consume(nil) {
+		return sourceContentDigestState{}, false
+	}
+	return state, true
+}
+
+//nolint:gocyclo // The closed algorithm switch keeps transient hash-interface use locally auditable.
+func (state *sourceContentDigestState) consume(content []byte) bool {
+	if state == nil {
+		return false
+	}
+	switch state.algorithm {
+	case sourceContentDigestSHA1:
+		hasher := sha1.New() //nolint:gosec // Git SHA-1 object-format compatibility.
+		restorer, restoreOK := hasher.(encoding.BinaryUnmarshaler)
+		saver, saveOK := hasher.(encoding.BinaryAppender)
+		if !restoreOK || !saveOK ||
+			(state.wireN != 0 && restorer.UnmarshalBinary(state.wire[:state.wireN]) != nil) {
+			return false
+		}
+		written, writeErr := hasher.Write(content)
+		if writeErr != nil || written != len(content) {
+			return false
+		}
+		wire, saveErr := saver.AppendBinary(state.wire[:0])
+		return saveErr == nil && state.saveWire(wire)
+	case sourceContentDigestSHA256:
+		hasher := sha256.New()
+		restorer, restoreOK := hasher.(encoding.BinaryUnmarshaler)
+		saver, saveOK := hasher.(encoding.BinaryAppender)
+		if !restoreOK || !saveOK ||
+			(state.wireN != 0 && restorer.UnmarshalBinary(state.wire[:state.wireN]) != nil) {
+			return false
+		}
+		written, writeErr := hasher.Write(content)
+		if writeErr != nil || written != len(content) {
+			return false
+		}
+		wire, saveErr := saver.AppendBinary(state.wire[:0])
+		return saveErr == nil && state.saveWire(wire)
+	default:
+		return false
+	}
+}
+
+func (state *sourceContentDigestState) saveWire(wire []byte) bool {
+	if state == nil || len(wire) == 0 || len(wire) > len(state.wire) {
+		return false
+	}
+	state.wireN = uint16(len(wire)) //nolint:gosec // len(wire) was proved at most the 256-byte fixed buffer.
+	return true
+}
+
+func (state sourceContentDigestState) sum() ([32]byte, int, bool) {
+	switch state.algorithm {
+	case sourceContentDigestSHA1:
+		hasher := sha1.New() //nolint:gosec // Git SHA-1 object-format compatibility.
+		restorer, ok := hasher.(encoding.BinaryUnmarshaler)
+		if !ok || state.wireN == 0 || restorer.UnmarshalBinary(state.wire[:state.wireN]) != nil {
+			return [32]byte{}, 0, false
+		}
+		var digest [32]byte
+		value := hasher.Sum(digest[:0])
+		if len(value) != sha1.Size {
+			return [32]byte{}, 0, false
+		}
+		return digest, sha1.Size, true
+	case sourceContentDigestSHA256:
+		hasher := sha256.New()
+		restorer, ok := hasher.(encoding.BinaryUnmarshaler)
+		if !ok || state.wireN == 0 || restorer.UnmarshalBinary(state.wire[:state.wireN]) != nil {
+			return [32]byte{}, 0, false
+		}
+		var digest [32]byte
+		value := hasher.Sum(digest[:0])
+		if len(value) != sha256.Size {
+			return [32]byte{}, 0, false
+		}
+		return digest, sha256.Size, true
+	default:
+		return [32]byte{}, 0, false
+	}
 }
 
 // sourceUseOutcome has deliberately no command/block private-later slot. A C1
@@ -341,6 +450,18 @@ type sourcePrimitives interface {
 	readExactForParse(
 		context.Context,
 		*ownedSourceDescriptor,
+		[]byte,
+	) *sourcePrimitiveFailure
+	readExactAtForParse(
+		context.Context,
+		*ownedSourceDescriptor,
+		int64,
+		[]byte,
+	) *sourcePrimitiveFailure
+	readExactAtForHash(
+		context.Context,
+		*ownedSourceDescriptor,
+		int64,
 		[]byte,
 	) *sourcePrimitiveFailure
 	hashBytes(context.Context, []byte) (Digest, *sourcePrimitiveFailure)

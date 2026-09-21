@@ -41,13 +41,15 @@ func TestSourceObjectPathValidatedInstallGuardRejectsDrift(t *testing.T) {
 `
 	const install = "\tbuilder.owner.objects.paths = inventory\n"
 	for _, test := range []struct {
-		name        string
-		original    string
-		replacement string
+		name                string
+		original            string
+		replacement         string
+		passBuilderArgument bool
 	}{
 		{
-			name:     "receiver spoofed by parameter",
-			original: retentionSignature,
+			name:                "receiver spoofed by parameter",
+			original:            retentionSignature,
+			passBuilderArgument: true,
 			replacement: "func (receiver *sourceConstructionBuilder) " +
 				"retainSourceObjectPathInventory(builder *sourceConstructionBuilder) bool {",
 		},
@@ -68,9 +70,13 @@ func TestSourceObjectPathValidatedInstallGuardRejectsDrift(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			overlay := sourceObjectPathOverlay(t, test.original, test.replacement)
+			if test.passBuilderArgument {
+				sourceObjectPathRetainCallOverlay(t, overlay)
+			}
 			typedPackage := loadTypedSourceConstructionPackage(
 				t,
-				sourceObjectPathOverlay(t, test.original, test.replacement),
+				overlay,
 			)
 			joined := strings.Join(sourceObjectPathValidatedInstallViolations(typedPackage), "\n")
 			if !strings.Contains(joined, "validated install is outside audited shape") {
@@ -78,6 +84,29 @@ func TestSourceObjectPathValidatedInstallGuardRejectsDrift(t *testing.T) {
 			}
 		})
 	}
+}
+
+func sourceObjectPathRetainCallOverlay(t *testing.T, overlay map[string][]byte) {
+	t.Helper()
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("resolve buildauthority directory: %v", err)
+	}
+	path := filepath.Join(workingDirectory, "source_construction_acquire.go")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read source construction acquisition fixture: %v", err)
+	}
+	const original = "builder.retainSourceObjectPathInventory()"
+	if count := strings.Count(string(source), original); count != 1 {
+		t.Fatalf("source object path retention call count = %d, want 1", count)
+	}
+	overlay[path] = []byte(strings.Replace(
+		string(source),
+		original,
+		"builder.retainSourceObjectPathInventory(builder)",
+		1,
+	))
 }
 
 func TestSourceObjectPathMutationGuardRejectsDrift(t *testing.T) {
@@ -1807,7 +1836,7 @@ func sourceObjectPathAllowedAppendCall(
 	parents map[ast.Node]ast.Node,
 ) bool {
 	if typedPackage == nil || typedPackage.TypesInfo == nil || function == nil ||
-		function.Body == nil || len(function.Body.List) != 13 || call == nil {
+		function.Body == nil || len(function.Body.List) != 10 || call == nil {
 		return false
 	}
 	info := typedPackage.TypesInfo
@@ -1872,7 +1901,7 @@ func sourceObjectPathAllowedInventoryConstruction(
 	parents map[ast.Node]ast.Node,
 ) bool {
 	if typedPackage == nil || typedPackage.TypesInfo == nil || function == nil ||
-		function.Body == nil || len(function.Body.List) != 13 || address == nil ||
+		function.Body == nil || len(function.Body.List) != 10 || address == nil ||
 		address.Op != token.AND {
 		return false
 	}
@@ -1883,7 +1912,7 @@ func sourceObjectPathAllowedInventoryConstruction(
 	) != "deriveSourceObjectPathInventory" {
 		return false
 	}
-	returned, ok := function.Body.List[12].(*ast.ReturnStmt)
+	returned, ok := function.Body.List[9].(*ast.ReturnStmt)
 	if !ok || parents[address] != returned || len(returned.Results) != 2 ||
 		!sourceConstructionDirectExpression(returned.Results[0], address) {
 		return false

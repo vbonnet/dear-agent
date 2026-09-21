@@ -27,12 +27,43 @@ import (
 
 const validSourceConstructionConfig = "[core]\n\trepositoryformatversion = 0\n\tbare = false\n"
 
+// retainInitialSourceConstructionForTest isolates the initial acquisition
+// prefix for tests whose scripted primitives intentionally do not implement
+// the administrative, object-path, and auxiliary-claim phases.
+func retainInitialSourceConstructionForTest(
+	ctx context.Context,
+	locator sourceRepositoryLocator,
+	primitives sourcePrimitives,
+) (*sourceConstructionOwner, sourceUseOutcome) {
+	builder := &sourceConstructionBuilder{
+		ctx:        ctx,
+		primitives: primitives,
+		owner:      newSourceConstructionOwner(),
+	}
+	if ctx == nil || primitives == nil || !locator.valid() {
+		builder.outcome.addPrimitive(newSourcePrimitiveFailure(
+			OperationValidate,
+			CauseInternalInvariant,
+		))
+	} else {
+		builder.retainInitialSource(locator)
+	}
+	if builder.outcome.proved() {
+		builder.outcome.addPrimitive(validateInitialSourceOwner(builder.ctx, builder.owner))
+	}
+	if !builder.outcome.proved() {
+		builder.owner.closeIntoWith(primitives, &builder.outcome)
+		return nil, builder.outcome
+	}
+	return builder.owner, builder.outcome
+}
+
 func TestSourceConstructionSuccessTraceAndShape(t *testing.T) {
 	primitives := newScriptedSourceConstructionPrimitives(
 		t,
 		[]byte(validSourceConstructionConfig),
 	)
-	owner, outcome := retainSourceConstructionWith(
+	owner, outcome := retainInitialSourceConstructionForTest(
 		context.Background(),
 		testSourceRepositoryLocator(),
 		primitives,
@@ -85,7 +116,7 @@ func TestSourceConstructionWalksAndClosesNestedRepositoryAncestry(t *testing.T) 
 		path: "/parent/repository",
 		seal: validSourceRepositoryLocator,
 	}
-	owner, outcome := retainSourceConstructionWith(
+	owner, outcome := retainInitialSourceConstructionForTest(
 		context.Background(),
 		primitives.locator,
 		primitives,
@@ -135,7 +166,7 @@ func TestSourceConstructionWalksAndClosesNestedRepositoryAncestry(t *testing.T) 
 		failed.locator = primitives.locator
 		failed.failureEvent = "stat:repository"
 		failed.failure = newSourcePrimitiveFailure(OperationProbe, CauseUnstable)
-		failedOwner, failedOutcome := retainSourceConstructionWith(
+		failedOwner, failedOutcome := retainInitialSourceConstructionForTest(
 			context.Background(),
 			failed.locator,
 			failed,
@@ -169,7 +200,7 @@ func TestSourceConstructionWalksAndClosesNestedRepositoryAncestry(t *testing.T) 
 		failed.failureEvent = "stat:repository"
 		failed.failure = newSourcePrimitiveFailure(OperationProbe, CauseUnstable)
 		failed.closeFailures["close-descriptor:parent"] = true
-		failedOwner, failedOutcome := retainSourceConstructionWith(
+		failedOwner, failedOutcome := retainInitialSourceConstructionForTest(
 			context.Background(),
 			failed.locator,
 			failed,
@@ -212,7 +243,7 @@ func TestSourceConstructionWalksAndClosesNestedRepositoryAncestry(t *testing.T) 
 		failed.locator = primitives.locator
 		failed.ownerFailureEvent = "open-descriptor:parent"
 		failed.failure = newSourcePrimitiveFailure(OperationOpen, CauseUnstable)
-		failedOwner, failedOutcome := retainSourceConstructionWith(
+		failedOwner, failedOutcome := retainInitialSourceConstructionForTest(
 			context.Background(),
 			failed.locator,
 			failed,
@@ -243,7 +274,7 @@ func TestSourceConstructionWalksAndClosesNestedRepositoryAncestry(t *testing.T) 
 		)
 		failed.locator = primitives.locator
 		failed.closeFailures["close-descriptor:parent"] = true
-		failedOwner, failedOutcome := retainSourceConstructionWith(
+		failedOwner, failedOutcome := retainInitialSourceConstructionForTest(
 			context.Background(),
 			failed.locator,
 			failed,
@@ -281,7 +312,7 @@ func TestSourceConstructionRetainedPackedRefsClosesFirst(t *testing.T) {
 		t,
 		[]byte(validSourceConstructionConfig),
 	)
-	owner, acquisition := retainSourceConstructionWith(
+	owner, acquisition := retainInitialSourceConstructionForTest(
 		context.Background(),
 		testSourceRepositoryLocator(),
 		primitives,
@@ -355,7 +386,7 @@ func TestSourceConstructionRetainedPackedRefsCloseFailureContinuesAndCaches(t *t
 	)
 	primitives.packedRefsPresent = true
 	primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
-	owner, acquisition := retainSourceConstructionWith(
+	owner, acquisition := retainInitialSourceConstructionForTest(
 		context.Background(),
 		testSourceRepositoryLocator(),
 		primitives,
@@ -458,7 +489,7 @@ func TestSourceConstructionPackedRefsStageRetainsAbsentAndPresentStates(t *testi
 			primitives := newScriptedSourceConstructionPrimitives(t, test.config)
 			primitives.packedRefsPresent = test.present
 			primitives.packedRefs = append([]byte(nil), test.content...)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -556,7 +587,7 @@ func TestSourceConstructionPackedRefsParseAndPolicyAttribution(t *testing.T) {
 			)
 			primitives.packedRefsPresent = true
 			primitives.packedRefs = append([]byte(nil), test.content...)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -688,7 +719,7 @@ func TestSourceConstructionPackedRefsRejectsKindAndAbsenceDrift(t *testing.T) {
 				[]byte(validSourceConstructionConfig),
 			)
 			maps.Copy(primitives.probeResults, test.results)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -753,7 +784,7 @@ func TestSourceConstructionPackedRefsRejectsUnsafeLeafEvidence(t *testing.T) {
 			primitives.packedRefsPresent = true
 			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
 			test.apply(primitives)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -805,7 +836,7 @@ func TestSourceConstructionReobservationComparesSecurityDriftBeforePolicy(t *tes
 					t.Fatalf("unknown reobservation target %q", target)
 				}
 
-				owner, outcome := retainSourceConstructionWith(
+				owner, outcome := retainInitialSourceConstructionForTest(
 					context.Background(),
 					testSourceRepositoryLocator(),
 					primitives,
@@ -866,7 +897,7 @@ func TestSourceConstructionReobservationRejectsInvalidParsedACL(t *testing.T) {
 				primitives.packedRefsPresent = true
 				primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
 			}
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -913,7 +944,7 @@ func TestSourceConstructionPackedRefsInstallsOpenOwnersBeforeFailure(t *testing.
 			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
 			primitives.ownerFailureEvent = event
 			primitives.failure = newSourcePrimitiveFailure(OperationOpen, CauseUnstable)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -958,7 +989,7 @@ func TestSourceConstructionPackedRefsRejectsNilOwnerWithoutFailure(t *testing.T)
 			primitives.packedRefsPresent = true
 			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
 			primitives.nilOwnerEvent = event
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1023,7 +1054,7 @@ func TestSourceConstructionPackedRefsContentFailureRunsRequiredTail(t *testing.T
 			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
 			primitives.failureEvent = test.event
 			primitives.failure = newSourcePrimitiveFailure(test.operation, test.cause)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1073,7 +1104,7 @@ func TestSourceConstructionPackedRefsPrimitiveFailuresRespectTailBoundary(t *tes
 			primitives.packedRefs = []byte(strings.Repeat("1", 40) + " refs/heads/main\n")
 			primitives.failureEvent = event
 			primitives.failure = newSourcePrimitiveFailure(operation, CauseUnstable)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1145,7 +1176,7 @@ func TestSourceConstructionPackedRefsFailureAndCloseComposition(t *testing.T) {
 				t.Fatalf("unknown test drift %q", test.primaryDrift)
 			}
 			primitives.closeFailures[test.closeEvent] = true
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1191,7 +1222,7 @@ func TestSourceConstructionPackedRefsRequiresUnresolvedActiveOwner(t *testing.T)
 		t,
 		[]byte(validSourceConstructionConfig),
 	)
-	owner, initial := retainSourceConstructionWith(
+	owner, initial := retainInitialSourceConstructionForTest(
 		context.Background(),
 		testSourceRepositoryLocator(),
 		primitives,
@@ -1256,7 +1287,7 @@ func TestSourceConstructionPackedRefsContextBoundaries(t *testing.T) {
 				t,
 				[]byte(validSourceConstructionConfig),
 			)
-			owner, initial := retainSourceConstructionWith(
+			owner, initial := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1294,7 +1325,7 @@ func TestSourceConstructionRejectsInvalidInputsBeforePrimitives(t *testing.T) {
 				t,
 				[]byte(validSourceConstructionConfig),
 			)
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				test.ctx,
 				test.locator,
 				primitives,
@@ -1319,7 +1350,7 @@ func TestSourceConstructionRejectsInvalidInputsBeforePrimitives(t *testing.T) {
 		})
 	}
 
-	owner, outcome := retainSourceConstructionWith(
+	owner, outcome := retainInitialSourceConstructionForTest(
 		context.Background(),
 		testSourceRepositoryLocator(),
 		nil,
@@ -1359,7 +1390,7 @@ func TestSourceConstructionCancellationAtPrimitiveBoundaries(t *testing.T) {
 			primitives.cancelEvent = test.event
 			primitives.cancel = cancel
 
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				ctx,
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1606,7 +1637,7 @@ func TestSourceConstructionPrimitiveFailuresStopBeforeLaterAcquisition(t *testin
 			primitives.failureEvent = event
 			primitives.failure = newSourcePrimitiveFailure(operation, CauseUnstable)
 
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1643,7 +1674,7 @@ func TestSourceConstructionInstallsOpenOwnersBeforeInterpretingFailure(t *testin
 			primitives.ownerFailureEvent = event
 			primitives.failure = newSourcePrimitiveFailure(OperationOpen, CauseUnstable)
 
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1686,7 +1717,7 @@ func TestSourceConstructionRejectsNilOwnerWithoutFailure(t *testing.T) {
 			)
 			primitives.nilOwnerEvent = event
 
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1743,7 +1774,7 @@ func TestSourceConstructionRejectsRequiredPresenceAndKindMismatch(t *testing.T) 
 			)
 			primitives.probeResults[test.event] = test.result
 
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1796,7 +1827,7 @@ func TestSourceConstructionRejectsCrossDeviceAndFilesystemChildren(t *testing.T)
 				[]byte(validSourceConstructionConfig),
 			)
 			test.mutate(primitives)
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1825,7 +1856,7 @@ func TestSourceConstructionRejectsMalformedParsedACLWithoutFakeFailure(t *testin
 		[]byte(validSourceConstructionConfig),
 	)
 	primitives.invalidACLEvent = "parse-acl:config-before"
-	owner, outcome := retainSourceConstructionWith(
+	owner, outcome := retainInitialSourceConstructionForTest(
 		context.Background(),
 		testSourceRepositoryLocator(),
 		primitives,
@@ -1868,7 +1899,7 @@ func TestSourceConstructionConfigParseAndPolicyAttribution(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			primitives := newScriptedSourceConstructionPrimitives(t, []byte(test.content))
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1901,7 +1932,7 @@ func TestSourceConstructionPostReadDriftAttribution(t *testing.T) {
 				[]byte(validSourceConstructionConfig),
 			)
 			primitives.configPostReadDrift = test.drift
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1940,7 +1971,7 @@ func TestSourceConstructionRebindDriftAttribution(t *testing.T) {
 				[]byte(validSourceConstructionConfig),
 			)
 			primitives.configRebindDrift = test.drift
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -1982,7 +2013,7 @@ func TestSourceConstructionRebindCloseFailureComposition(t *testing.T) {
 			primitives.configRebindDrift = test.rebindDrift
 			primitives.closeFailures["close-descriptor:config-rebind"] = true
 
-			owner, outcome := retainSourceConstructionWith(
+			owner, outcome := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -2035,7 +2066,7 @@ func TestSourceConstructionCloseOrderContinuesAndCaches(t *testing.T) {
 			t,
 			[]byte(validSourceConstructionConfig),
 		)
-		owner, acquisition := retainSourceConstructionWith(
+		owner, acquisition := retainInitialSourceConstructionForTest(
 			context.Background(),
 			testSourceRepositoryLocator(),
 			primitives,
@@ -2065,7 +2096,7 @@ func TestSourceConstructionCloseOrderContinuesAndCaches(t *testing.T) {
 			t,
 			[]byte(validSourceConstructionConfig),
 		)
-		owner, acquisition := retainSourceConstructionWith(
+		owner, acquisition := retainInitialSourceConstructionForTest(
 			context.Background(),
 			testSourceRepositoryLocator(),
 			primitives,
@@ -2114,7 +2145,7 @@ func TestSourceConstructionConcurrentCloseIsExactOnce(t *testing.T) {
 				t,
 				[]byte(validSourceConstructionConfig),
 			)
-			owner, acquisition := retainSourceConstructionWith(
+			owner, acquisition := retainInitialSourceConstructionForTest(
 				context.Background(),
 				testSourceRepositoryLocator(),
 				primitives,
@@ -2168,7 +2199,7 @@ func TestSourceConstructionTransientCloseFailureStopsAcquisition(t *testing.T) {
 		[]byte(validSourceConstructionConfig),
 	)
 	primitives.closeFailures["close-descriptor:physical-root"] = true
-	owner, outcome := retainSourceConstructionWith(
+	owner, outcome := retainInitialSourceConstructionForTest(
 		context.Background(),
 		testSourceRepositoryLocator(),
 		primitives,
@@ -2211,6 +2242,11 @@ func TestSourceConstructionHasNoPrematureOwnershipTransferSurface(t *testing.T) 
 		"retainSourceConstruction":     true,
 		"retainSourceConstructionWith": true,
 	}
+	allowedNonOwnershipTransferNames := map[string]int{
+		"source_construction_revalidation.go|function|revalidateSourceEnvelopePathBindings": 1,
+		"source_construction_revalidation.go|type|sourceEnvelopeBindingPhase":               1,
+	}
+	observedNonOwnershipTransferNames := make(map[string]int)
 	files := token.NewFileSet()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -2258,8 +2294,8 @@ func TestSourceConstructionHasNoPrematureOwnershipTransferSurface(t *testing.T) 
 			parsed:       parsed,
 		})
 	}
-	if matched != 4 {
-		t.Fatalf("source construction governance matched %d production files, want 4", matched)
+	if matched != 7 {
+		t.Fatalf("source construction governance matched %d production files, want 7", matched)
 	}
 
 	for _, source := range parsedFiles {
@@ -2282,11 +2318,15 @@ func TestSourceConstructionHasNoPrematureOwnershipTransferSurface(t *testing.T) 
 			switch current := declaration.(type) {
 			case *ast.FuncDecl:
 				if sourceConstructionTransferName(current.Name.Name) {
-					t.Fatalf(
-						"%s declares premature source ownership surface %s",
-						files.Position(current.Name.Pos()),
-						current.Name.Name,
-					)
+					site := source.name + "|function|" + current.Name.Name
+					observedNonOwnershipTransferNames[site]++
+					if allowedNonOwnershipTransferNames[site] == 0 {
+						t.Fatalf(
+							"%s declares premature source ownership surface %s",
+							files.Position(current.Name.Pos()),
+							current.Name.Name,
+						)
+					}
 				}
 				if escaped := sourceConstructionEscapeResult(current.Type.Results); escaped != "" &&
 					(escaped != "sourceConstructionOwner" || current.Recv != nil ||
@@ -2310,11 +2350,15 @@ func TestSourceConstructionHasNoPrematureOwnershipTransferSurface(t *testing.T) 
 						continue
 					}
 					if sourceConstructionTransferName(typeSpec.Name.Name) {
-						t.Fatalf(
-							"%s declares premature source ownership type %s",
-							files.Position(typeSpec.Name.Pos()),
-							typeSpec.Name.Name,
-						)
+						site := source.name + "|type|" + typeSpec.Name.Name
+						observedNonOwnershipTransferNames[site]++
+						if allowedNonOwnershipTransferNames[site] == 0 {
+							t.Fatalf(
+								"%s declares premature source ownership type %s",
+								files.Position(typeSpec.Name.Pos()),
+								typeSpec.Name.Name,
+							)
+						}
 					}
 					structure, ok := typeSpec.Type.(*ast.StructType)
 					if !ok {
@@ -2333,6 +2377,16 @@ func TestSourceConstructionHasNoPrematureOwnershipTransferSurface(t *testing.T) 
 					}
 				}
 			}
+		}
+	}
+	for site, want := range allowedNonOwnershipTransferNames {
+		if observed := observedNonOwnershipTransferNames[site]; observed != want {
+			t.Fatalf(
+				"audited non-ownership transfer-name site %s count = %d, want %d",
+				site,
+				observed,
+				want,
+			)
 		}
 	}
 }
@@ -2912,7 +2966,7 @@ func (sourceConstructionFixtureReplacementError) Is(error) bool {
 		builder.outcome.addPrimitive(failure)
 		return false
 	}
-	if capture.descendants >= maxRepositoryEntries {`,
+	var sealedRow sourceAdministrativeRow`,
 			inventoryReplacement: `	if failure != nil {
 		builder.outcome.addPrimitive(failure)
 		return false
@@ -2920,7 +2974,7 @@ func (sourceConstructionFixtureReplacementError) Is(error) bool {
 	if name == "production-only" {
 		name = "different-valid-sibling"
 	}
-	if capture.descendants >= maxRepositoryEntries {`,
+	var sealedRow sourceAdministrativeRow`,
 			inventoryCount: 1,
 			want: []string{
 				"source call closure requires read-only parameter source_construction_inventory.go|" +
@@ -2933,13 +2987,13 @@ func (sourceConstructionFixtureReplacementError) Is(error) bool {
 		builder.outcome.addPrimitive(failure)
 		return false
 	}
-	if capture.descendants >= maxRepositoryEntries {`,
+	var sealedRow sourceAdministrativeRow`,
 			inventoryReplacement: `	if failure != nil {
 		builder.outcome.addPrimitive(failure)
 		return false
 	}
 	path = ".git/different-valid-sibling"
-	if capture.descendants >= maxRepositoryEntries {`,
+	var sealedRow sourceAdministrativeRow`,
 			inventoryCount: 1,
 			want: []string{
 				"source administrative child path/name provenance is outside audited shape",
@@ -2964,10 +3018,14 @@ func (sourceConstructionFixtureReplacementError) Is(error) bool {
 			name: "opened inventory row path mutates before descriptor open",
 			inventoryOriginal: `	name string,
 	candidate sourceAdministrativeCandidate,
+	presence sourcePresenceMode,
+	sealed *sourceAdministrativeInventory,
 ) bool {
 	descriptor, openFailure := builder.primitives.openRelativeNoFollow(`,
 			inventoryReplacement: `	name string,
 	candidate sourceAdministrativeCandidate,
+	presence sourcePresenceMode,
+	sealed *sourceAdministrativeInventory,
 ) bool {
 	candidate.row.path = ".git/different-valid-sibling"
 	descriptor, openFailure := builder.primitives.openRelativeNoFollow(`,
@@ -2988,10 +3046,24 @@ func (sourceConstructionFixtureReplacementError) Is(error) bool {
 		{
 			name: "directory range name is replaced before dispatch",
 			inventoryOriginal: `		for _, name := range names {
-			if !builder.captureSourceAdministrativeEntry(capture, descriptor, prefix, name) {`,
+			if !builder.captureSourceAdministrativeEntry(
+				capture,
+				descriptor,
+				prefix,
+				name,
+				presence,
+				sealed,
+			) {`,
 			inventoryReplacement: `		for _, name := range names {
 			_ = name
-			if !builder.captureSourceAdministrativeEntry(capture, descriptor, prefix, "different-valid-sibling") {`,
+			if !builder.captureSourceAdministrativeEntry(
+				capture,
+				descriptor,
+				prefix,
+				"different-valid-sibling",
+				presence,
+				sealed,
+			) {`,
 			inventoryCount: 1,
 			want: []string{
 				"source administrative directory batch/name provenance is outside audited shape",
@@ -3000,12 +3072,26 @@ func (sourceConstructionFixtureReplacementError) Is(error) bool {
 		{
 			name: "directory walk skips a targeted subtree",
 			inventoryOriginal: `		for _, name := range names {
-			if !builder.captureSourceAdministrativeEntry(capture, descriptor, prefix, name) {`,
+			if !builder.captureSourceAdministrativeEntry(
+				capture,
+				descriptor,
+				prefix,
+				name,
+				presence,
+				sealed,
+			) {`,
 			inventoryReplacement: `		for _, name := range names {
 			if prefix == ".git/objects/info" {
 				continue
 			}
-			if !builder.captureSourceAdministrativeEntry(capture, descriptor, prefix, name) {`,
+			if !builder.captureSourceAdministrativeEntry(
+				capture,
+				descriptor,
+				prefix,
+				name,
+				presence,
+				sealed,
+			) {`,
 			inventoryCount: 1,
 			want: []string{
 				"source administrative directory batch/name provenance is outside audited shape",
@@ -3057,12 +3143,16 @@ func (sourceConstructionFixtureReplacementError) Is(error) bool {
 			descriptor,
 			candidate.row.path,
 			observation,
+			presence,
+			sealed,
 		)`,
 			inventoryReplacement: `		captured = builder.captureSourceAdministrativeDirectory(
 			capture,
 			descriptor,
 			".git/hooks",
 			observation,
+			presence,
+			sealed,
 		)`,
 			inventoryCount: 1,
 			want: []string{
@@ -6557,6 +6647,18 @@ func (primitives *scriptedSourceConstructionPrimitives) readExactForParse(
 	owner *ownedSourceDescriptor,
 	content []byte,
 ) *sourcePrimitiveFailure {
+	return primitives.readExactAtForParse(ctx, owner, 0, content)
+}
+
+func (primitives *scriptedSourceConstructionPrimitives) readExactAtForParse(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+) *sourcePrimitiveFailure {
+	if offset != 0 {
+		return newSourcePrimitiveFailure(OperationParse, CauseUnstable)
+	}
 	name := primitives.descriptorName(owner)
 	want := primitives.config
 	if name == "packed-refs" {
@@ -6572,6 +6674,21 @@ func (primitives *scriptedSourceConstructionPrimitives) readExactForParse(
 		return failure
 	}
 	copy(content, want)
+	return nil
+}
+
+func (primitives *scriptedSourceConstructionPrimitives) readExactAtForHash(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+) *sourcePrimitiveFailure {
+	if offset != 0 {
+		return newSourcePrimitiveFailure(OperationHash, CauseUnstable)
+	}
+	if failure := primitives.readExactAtForParse(ctx, owner, offset, content); failure != nil {
+		return newSourcePrimitiveFailure(OperationHash, failure.cause)
+	}
 	return nil
 }
 
@@ -6597,6 +6714,52 @@ func (primitives *scriptedSourceConstructionPrimitives) hashBytes(
 		return Digest{}, failure
 	}
 	return digest, nil
+}
+
+func (primitives *metadataInventoryPrimitives) readExactAtForParse(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+) *sourcePrimitiveFailure {
+	return primitives.readExactMetadataContent(ctx, owner, offset, content, OperationParse)
+}
+
+func (primitives *metadataInventoryPrimitives) readExactAtForHash(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+) *sourcePrimitiveFailure {
+	return primitives.readExactMetadataContent(ctx, owner, offset, content, OperationHash)
+}
+
+func (primitives *metadataInventoryPrimitives) readExactMetadataContent(
+	ctx context.Context,
+	owner *ownedSourceDescriptor,
+	offset int64,
+	content []byte,
+	operation Operation,
+) *sourcePrimitiveFailure {
+	if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+		return failure
+	}
+	if owner == nil || offset < 0 || content == nil ||
+		(operation != OperationParse && operation != OperationHash) {
+		return newSourcePrimitiveFailure(OperationValidate, CauseInternalInvariant)
+	}
+	path := primitives.descriptorPath(owner)
+	body, present := primitives.contents[path]
+	if !present || offset > int64(len(body)) || int64(len(content)) > int64(len(body))-offset {
+		return newSourcePrimitiveFailure(operation, CauseUnstable)
+	}
+	primitives.contentCalls++
+	primitives.events = append(primitives.events, "read:"+path)
+	copy(content, body[offset:offset+int64(len(content))])
+	if failure := sourceContextPrimitiveFailure(ctx, operation); failure != nil {
+		return failure
+	}
+	return nil
 }
 
 func (primitives *scriptedSourceConstructionPrimitives) compareRootAndDescriptor(
@@ -7071,6 +7234,9 @@ func loadTypedSourceConstructionPackageWithEnvironment(
 
 func sourceConstructionAllowedSensitiveParameters() map[string]map[int]map[string]bool {
 	return map[string]map[int]map[string]bool{
+		"validateSourceObjectClaimOwner": {
+			1: {"*sourceConstructionOwner": true},
+		},
 		"(*sourceConstructionBuilder).retainRepositoryDescriptor": {
 			1: {"*retainedSourceRepository": true},
 		},
@@ -7101,6 +7267,9 @@ func sourceConstructionAllowedSensitiveParameters() map[string]map[int]map[strin
 			0: {"*ownedSourceDescriptor": true},
 		},
 		"(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy": {
+			0: {"*ownedSourceDescriptor": true},
+		},
+		"(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk": {
 			0: {"*ownedSourceDescriptor": true},
 		},
 		"(*sourceConstructionBuilder).captureSourceAdministrativeDirectory": {
@@ -7171,17 +7340,24 @@ func sourceConstructionAllowedSensitiveParameters() map[string]map[int]map[strin
 
 func sourceConstructionAllowedAcquisitionSites() map[string]int {
 	return map[string]int{
-		"openRepositoryRoot|(*sourceConstructionBuilder).retainRepository|:=|root,failure":                                   1,
-		"openPhysicalRootDescriptor|(*sourceConstructionBuilder).retainRepositoryDescriptor|:=|physicalRoot,openFailure":     1,
-		"openRelativeNoFollow|(*sourceConstructionBuilder).retainRepositoryDescriptor|:=|next,nextFailure":                   1,
-		"openRelativeNoFollow|(*sourceConstructionBuilder).retainConfig|:=|descriptor,descriptorFailure":                     1,
-		"openRelativeNoFollow|(*sourceConstructionBuilder).rebindConfig|:=|comparison,openFailure":                           1,
-		"openRelativeNoFollow|(*sourceConstructionBuilder).retainPresentPackedRefs|:=|descriptor,descriptorFailure":          1,
-		"openRelativeNoFollow|(*sourceConstructionBuilder).rebindPackedRefs|:=|comparison,openFailure":                       1,
-		"openChildRoot|(*sourceConstructionBuilder).retainSourceDirectory|:=|root,rootFailure":                               1,
-		"openRelativeNoFollow|(*sourceConstructionBuilder).retainSourceDirectory|:=|descriptor,descriptorFailure":            1,
-		"openRootDirectoryDescriptor|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|:=|scan,openFailure":   1,
-		"openRelativeNoFollow|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|:=|descriptor,openFailure": 1,
+		"openRepositoryRoot|(*sourceConstructionBuilder).retainRepository|:=|root,failure":                                             1,
+		"openPhysicalRootDescriptor|(*sourceConstructionBuilder).retainRepositoryDescriptor|:=|physicalRoot,openFailure":               1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).retainRepositoryDescriptor|:=|next,nextFailure":                             1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).retainConfig|:=|descriptor,descriptorFailure":                               1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).rebindConfig|:=|comparison,openFailure":                                     1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).retainPresentPackedRefs|:=|descriptor,descriptorFailure":                    1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).rebindPackedRefs|:=|comparison,openFailure":                                 1,
+		"openChildRoot|(*sourceConstructionBuilder).retainSourceDirectory|:=|root,rootFailure":                                         1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).retainSourceDirectory|:=|descriptor,descriptorFailure":                      1,
+		"openRootDirectoryDescriptor|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|:=|scan,openFailure":             1,
+		"openRootDirectoryDescriptor|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|:=|scan,openFailure": 1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|:=|descriptor,openFailure":           1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|:=|descriptor,openFailure":                1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|:=|descriptor,openFailure":                   1,
+		"openPhysicalRootDescriptor|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|:=|physical,failure":             1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|:=|descriptor,openFailure":             1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|=|gitDescriptor,failure":               1,
+		"openRelativeNoFollow|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|=|objectsDescriptor,failure":           1,
 	}
 }
 
@@ -7616,8 +7792,8 @@ func sourceConstructionEscapeViolations(typedPackage *packages.Package) []string
 			)
 		}
 	}
-	if len(constructionFiles) != 4 {
-		violations = append(violations, "typed source-construction module did not contain exactly four files")
+	if len(constructionFiles) != 7 {
+		violations = append(violations, "typed source-construction module did not contain exactly seven files")
 	}
 	return violations
 }
@@ -7627,8 +7803,8 @@ func sourceConstructionDarwinContentReadViolations(
 	file *ast.File,
 ) []string {
 	allowed := map[string]int{
-		"ReadDir|readDirectoryBatch": 1,
-		"ReadAt|readExactForParse":   1,
+		"ReadDir|readDirectoryBatch":          1,
+		"ReadAt|readDarwinSourceDescriptorAt": 1,
 	}
 	readCalls := map[string]bool{
 		"Copy": true, "CopyBuffer": true, "CopyN": true,
@@ -7703,8 +7879,8 @@ func sourceConstructionDescriptorFileCapabilityViolations(
 		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|argument:runtime.KeepAlive":                      1,
 		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|fd:darwinFgetattrlist[arg0:int]":                  1,
 		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|argument:runtime.KeepAlive":                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|method:ReadAt":                                1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|argument:runtime.KeepAlive":                   1,
+		"source_primitives_darwin.go|readDarwinSourceDescriptorAt|method:ReadAt":                                              1,
+		"source_primitives_darwin.go|readDarwinSourceDescriptorAt|argument:runtime.KeepAlive":                                 1,
 		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|method:Stat":                           1,
 		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|argument:runtime.KeepAlive":            1,
 	}
@@ -7774,19 +7950,24 @@ func sourceConstructionDescriptorFileCapabilityViolations(
 			typedPackage,
 			descriptor,
 			map[string]int{
-				"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|composite":                                                                1,
-				"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|composite":                                                                                 1,
-				"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|composite":                                                               1,
-				"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|factory:(sourcePrimitives).openPhysicalRootDescriptor":             1,
-				"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|factory:(sourcePrimitives).openRelativeNoFollow":                   1,
-				"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|factory:(sourcePrimitives).openRelativeNoFollow":                                 1,
-				"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|factory:(sourcePrimitives).openRelativeNoFollow":                                 1,
-				"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|factory:(sourcePrimitives).openRelativeNoFollow":                      1,
-				"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|factory:(sourcePrimitives).openRelativeNoFollow":                             1,
-				"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|factory:(sourcePrimitives).openRelativeNoFollow":                        1,
-				"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|factory:(sourcePrimitives).openRootDirectoryDescriptor": 1,
-				"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|factory:(sourcePrimitives).openRelativeNoFollow":     1,
-				"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|factory:openDarwinSourceRelativeDescriptor":                                     1,
+				"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|composite":                                                                               1,
+				"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|composite":                                                                                                1,
+				"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|composite":                                                                              1,
+				"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|factory:(sourcePrimitives).openPhysicalRootDescriptor":                            1,
+				"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|factory:(sourcePrimitives).openRelativeNoFollow":                                  1,
+				"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|factory:(sourcePrimitives).openRelativeNoFollow":                                                1,
+				"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|factory:(sourcePrimitives).openRelativeNoFollow":                                                1,
+				"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|factory:(sourcePrimitives).openRelativeNoFollow":                                     1,
+				"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|factory:(sourcePrimitives).openRelativeNoFollow":                                            1,
+				"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|factory:(sourcePrimitives).openRelativeNoFollow":                                       1,
+				"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|factory:(sourcePrimitives).openRootDirectoryDescriptor":                1,
+				"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|factory:(sourcePrimitives).openRelativeNoFollow":                    1,
+				"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|factory:(sourcePrimitives).openRootDirectoryDescriptor": 1,
+				"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|factory:(sourcePrimitives).openRelativeNoFollow":                     1,
+				"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|factory:(sourcePrimitives).openRelativeNoFollow":                        1,
+				"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|factory:(sourcePrimitives).openPhysicalRootDescriptor":             1,
+				"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|factory:(sourcePrimitives).openRelativeNoFollow":                   3,
+				"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|factory:openDarwinSourceRelativeDescriptor":                                                    1,
 			},
 			"descriptor",
 		)...,
@@ -8171,407 +8352,522 @@ func sourceConstructionDirectExactOwnerResult(value types.Type, ownerType *types
 // explicit governance update instead of silently expanding the source seam.
 func sourceConstructionAllowedDescriptorOwnerUses() map[string]int {
 	return map[string]int{
-		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptDescriptorAcquisition|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acceptDescriptorAcquisition":                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptDescriptorAcquisition|pointer|field>function-type>function-declaration:acceptDescriptorAcquisition":                                                                                                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptDescriptorAcquisition|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acceptDescriptorAcquisition":                                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeFailedPackedRefs|selector:field:descriptor|assignment-=-left-0>function-declaration:closeFailedPackedRefs":                                                                                                                                                  1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeFailedPackedRefs|selector:field:descriptor|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:closeFailedPackedRefs":                                                                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeFailedPackedRefs|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:closeFailedPackedRefs":                                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|pointer|field>function-type>function-declaration:closeTransientDescriptor":                                                                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|selector:function:closeDescriptor|call-function:(sourcePrimitives).closeDescriptor>function-declaration:closeTransientDescriptor":                                                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|variable:descriptor|call-argument-0:(sourcePrimitives).closeDescriptor>function-declaration:closeTransientDescriptor":                                                                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|variable:descriptor|function-declaration:closeTransientDescriptor":                                                                                                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|array-or-slice|field>function-type>function-declaration:closeTransientDescriptors":                                                                                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|builtin:len|call-function:len>assignment-:=-right>function-declaration:closeTransientDescriptors":                                                                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|index|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-=-right>function-declaration:closeTransientDescriptors":                                                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-=-right>function-declaration:closeTransientDescriptors":                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|variable:descriptors|call-argument-0:len>assignment-:=-right>function-declaration:closeTransientDescriptors":                                                                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|function:validateSourceObservationRequest|call-function:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeDescriptor":                                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|pointer|field>function-type>function-declaration:observeDescriptor":                                                                                                                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|selector:function:acquireRawACL|call-function:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|selector:function:statDescriptor|call-function:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|selector:function:statFilesystem|call-function:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:rebindConfig":                                                                                                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindConfig":                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindConfig":                                                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindConfig":                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindConfig":                                                                                                    1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindConfig":                                                                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindConfig":                                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|function-declaration:rebindConfig":                                                                                                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:rebindPackedRefs":                                                                                                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindPackedRefs":                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindPackedRefs":                                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindPackedRefs":                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindPackedRefs":                                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindPackedRefs":                                                                                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindPackedRefs":                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|function-declaration:rebindPackedRefs":                                                                                                                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy|pointer|field>function-type>function-declaration:reobserveDescriptorBeforePolicy":                                                                                                                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy|selector:function:reobserveSourceDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy>return>function-declaration:reobserveDescriptorBeforePolicy":                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy>return>function-declaration:reobserveDescriptorBeforePolicy":                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainAbsentPackedRefs|selector:field:descriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainAbsentPackedRefs":                                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainAbsentPackedRefs|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainAbsentPackedRefs":                                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:retainConfig":                                                                                                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:field:descriptor|assignment-=-left-0>function-declaration:retainConfig":                                                                                                                                                                    1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:field:descriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainConfig":                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainConfig":                                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainConfig":                                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainConfig":                                                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:readExactForParse|call-function:(sourcePrimitives).readExactForParse>assignment-=-right>function-declaration:retainConfig":                                                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-=-right>function-declaration:retainConfig":                                                                  1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|assignment-=-right>function-declaration:retainConfig":                                                                                                                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainConfig":                                                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainConfig":                                                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-=-right>function-declaration:retainConfig":                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-1:(sourcePrimitives).readExactForParse>assignment-=-right>function-declaration:retainConfig":                                                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|function-declaration:retainConfig":                                                                                                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:field:descriptor|call-argument-2:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                                                                    1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:field:descriptor|call-argument-2:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefs|selector:field:descriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainPackedRefs":                                                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefs|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainPackedRefs":                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainPackedRefsContent":                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:field:descriptor|assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainPackedRefsContent":                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:function:readExactForParse|call-function:(sourcePrimitives).readExactForParse>assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:retainPackedRefsContent":                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|variable:descriptor|call-argument-1:(sourcePrimitives).readExactForParse>assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:retainPresentPackedRefs":                                                                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|selector:field:descriptor|assignment-=-left-0>function-declaration:retainPresentPackedRefs":                                                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainPresentPackedRefs":                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainPresentPackedRefs":                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|assignment-=-right>function-declaration:retainPresentPackedRefs":                                                                                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainPresentPackedRefs":                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainPresentPackedRefs":                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|function-declaration:retainPresentPackedRefs":                                                                                                                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:(sourcePrimitives).openPhysicalRootDescriptor|assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:append|assignment-=-right>function-declaration:retainRepositoryDescriptor":                                                                                                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:append|assignment-=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:make|assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:field:descriptor|assignment-=-left-0>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:field:descriptor|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainRepositoryDescriptor":                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>range-:=>function-declaration:retainRepositoryDescriptor":                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:retainRepositoryDescriptor":                                                                     3,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>range-:=>function-declaration:retainRepositoryDescriptor":                                                            2,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>return>function-declaration:retainRepositoryDescriptor":                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|assignment-=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                            2,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:parent|assignment-=-left-0>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainRepositoryDescriptor":                                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|function-declaration:retainRepositoryDescriptor":                                                                                                                                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|assignment-=-left-0>function-declaration:retainRepositoryDescriptor":                                                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|assignment-=-left-0>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:retainRepositoryDescriptor":                                                                                            3,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                   2,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>return>function-declaration:retainRepositoryDescriptor":                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainSourceDirectory":                                                                                                  1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|pointer|field>function-type>function-declaration:retainSourceDirectory":                                                                                                                                                                    1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:field:descriptor|assignment-=-left-0>function-declaration:retainSourceDirectory":                                                                                                                                                  1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainSourceDirectory":                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|assignment-=-right>function-declaration:retainSourceDirectory":                                                                                                                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainSourceDirectory":                                                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|function-declaration:retainSourceDirectory":                                                                                                                                                                            1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:parentDescriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:parentDescriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainSourceDirectory":                                                                                         1,
-		"source_construction_acquire.go|validateSourceObservationRequest|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:validateSourceObservationRequest":                                                                                                         1,
-		"source_construction_acquire.go|validateSourceObservationRequest|pointer|field>function-type>function-declaration:validateSourceObservationRequest":                                                                                                                                                                           1,
-		"source_construction_acquire.go|validateSourceObservationRequest|variable:descriptor|selector-receiver:kind>function-declaration:validateSourceObservationRequest":                                                                                                                                                            1,
-		"source_construction_acquire.go|validateSourceObservationRequest|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:validateSourceObservationRequest":                                                                                                      1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                                           1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|pointer|field>function-type>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                                                                                1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:captureSourceAdministrativeDirectory|call-function:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-=-right>function-declaration:captureOpenedSourceAdministrativeEntry":  1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                         1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:captureOpenedSourceAdministrativeEntry":                                             2,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry": 1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                              1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                  2,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                  1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-1:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                   1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|function-declaration:captureOpenedSourceAdministrativeEntry":                                                                                                                                        1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|pointer|field>function-type>function-declaration:captureSourceAdministrativeDirectory":                                                                                                                                    1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|selector:function:captureSourceAdministrativeEntry|call-function:(*sourceConstructionBuilder).captureSourceAdministrativeEntry>range-:=>function-declaration:captureSourceAdministrativeDirectory":                        1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":     1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|selector:function:readDirectoryBatch|call-function:(sourcePrimitives).readDirectoryBatch>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":                                                   1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":                                      1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|call-argument-1:(*sourceConstructionBuilder).captureSourceAdministrativeEntry>range-:=>function-declaration:captureSourceAdministrativeDirectory":                                                     1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|call-argument-1:(sourcePrimitives).readDirectoryBatch>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":                                                                  1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|function-declaration:captureSourceAdministrativeDirectory":                                                                                                                                            1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|selector-receiver:kind>function-declaration:captureSourceAdministrativeDirectory":                                                                                                                     1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|pointer|field>function-type>function-declaration:captureSourceAdministrativeEntry":                                                                                                                                            1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|selector:function:captureOpenedSourceAdministrativeEntry|call-function:(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry>return>function-declaration:captureSourceAdministrativeEntry":                      1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:captureSourceAdministrativeEntry":                                                             1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|variable:parent|call-argument-1:(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry>return>function-declaration:captureSourceAdministrativeEntry":                                                             1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|variable:parent|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:captureSourceAdministrativeEntry":                                                                               1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy|pointer|field>function-type>function-declaration:compareSourceDescriptorWithoutPolicy":                                                                                                                                    1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:compareSourceDescriptorWithoutPolicy":     1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:compareSourceDescriptorWithoutPolicy":                                      1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|function:validateSourceObservationRequest|call-function:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                   1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|pointer|field>function-type>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                                                                    1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|selector:function:acquireRawACL|call-function:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                             1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|selector:function:statDescriptor|call-function:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                           1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|selector:function:statFilesystem|call-function:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                           1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                       1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                      1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                      1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                       1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy|pointer|field>function-type>function-declaration:reobserveSourceDescriptorBeforePolicy":                                                                                                                                  1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:reobserveSourceDescriptorBeforePolicy":   1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:reobserveSourceDescriptorBeforePolicy":                                    1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|call:(sourcePrimitives).openRootDirectoryDescriptor|assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                                                          1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:field:descriptor|call-argument-0:(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                  1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:captureSourceAdministrativeDirectory|call-function:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":       1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                               1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:retainSourceAdministrativeInventory":                                                   3,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                         1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:compareSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":       1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":       1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                          1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:retainSourceAdministrativeInventory":                                                                              3,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                              1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-1:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                              1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                                    1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|function-declaration:retainSourceAdministrativeInventory":                                                                                                                                                    1,
-		"source_construction.go|(*sourceCloseTracker).closeConfig|selector:function:closeDescriptor|call-function:(*sourceCloseTracker).closeDescriptor>function-declaration:closeConfig":                                                                                                                                             1,
-		"source_construction.go|(*sourceCloseTracker).closeConfig|unary:&|call-argument-0:(*sourceCloseTracker).closeDescriptor>function-declaration:closeConfig":                                                                                                                                                                     1,
-		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|assignment-=-left-0>function-declaration:closeDescriptor":                                                                                                                                                                                               1,
-		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|call-argument-0:(sourceHandleCloser).closeDescriptor>function-declaration:closeDescriptor":                                                                                                                                                              1,
-		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|field>function-type>function-declaration:closeDescriptor":                                                                                                                                                                                               1,
-		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|function-declaration:closeDescriptor":                                                                                                                                                                                                                   1,
-		"source_construction.go|(*sourceCloseTracker).closeDescriptor|selector:function:closeDescriptor|call-function:(sourceHandleCloser).closeDescriptor>function-declaration:closeDescriptor":                                                                                                                                      1,
-		"source_construction.go|(*sourceCloseTracker).closeDescriptor|variable:owner|function-declaration:closeDescriptor":                                                                                                                                                                                                            1,
-		"source_construction.go|(*sourceCloseTracker).closePackedRefs|selector:function:closeDescriptor|call-function:(*sourceCloseTracker).closeDescriptor>function-declaration:closePackedRefs":                                                                                                                                     1,
-		"source_construction.go|(*sourceCloseTracker).closePackedRefs|unary:&|call-argument-0:(*sourceCloseTracker).closeDescriptor>function-declaration:closePackedRefs":                                                                                                                                                             1,
-		"source_construction.go|(*sourceCloseTracker).closeRootBundle|selector:function:closeDescriptor|call-function:(*sourceCloseTracker).closeDescriptor>function-declaration:closeRootBundle":                                                                                                                                     1,
-		"source_construction.go|(*sourceCloseTracker).closeRootBundle|unary:&|call-argument-0:(*sourceCloseTracker).closeDescriptor>function-declaration:closeRootBundle":                                                                                                                                                             1,
-		"source_construction.go|(*sourceConstructionOwner).validInitialConfig|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validInitialConfig":                                                                                                           1,
-		"source_construction.go|(*sourceConstructionOwner).validInitialConfig|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validInitialConfig":                                                                                                                                                        1,
-		"source_construction.go|(*sourceConstructionOwner).validInitialConfig|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validInitialConfig":                                                                                                  1,
-		"source_construction.go|(*sourceConstructionOwner).validPackedRefsRetention|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validPackedRefsRetention":                                                                                               1,
-		"source_construction.go|(*sourceConstructionOwner).validPackedRefsRetention|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validPackedRefsRetention":                                                                                                                                            1,
-		"source_construction.go|(*sourceConstructionOwner).validPackedRefsRetention|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validPackedRefsRetention":                                                                                      1,
-		"source_construction.go|(*sourceConstructionOwner).validResolvedPackedRefs|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validResolvedPackedRefs":                                                                                                 1,
-		"source_construction.go|(*sourceConstructionOwner).validResolvedPackedRefs|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validResolvedPackedRefs":                                                                                                                                              1,
-		"source_construction.go|(*sourceConstructionOwner).validResolvedPackedRefs|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validResolvedPackedRefs":                                                                                        1,
-		"source_construction.go|(directSourceHandleCloser).closeDescriptor|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                           1,
-		"source_construction.go|(directSourceHandleCloser).closeDescriptor|pointer|field>function-type>function-declaration:closeDescriptor":                                                                                                                                                                                          1,
-		"source_construction.go|(directSourceHandleCloser).closeDescriptor|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                               1,
-		"source_construction.go|(retainedSourceRoot).validOpenDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validOpenDirectory":                                                                                                                 1,
-		"source_construction.go|(retainedSourceRoot).validOpenDirectory|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validOpenDirectory":                                                                                                                                                              1,
-		"source_construction.go|(retainedSourceRoot).validOpenDirectory|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validOpenDirectory":                                                                                                        1,
-		"source_construction.go|(sourcePackedRefsSlot).valid|selector:field:descriptor|return>function-declaration:valid":                                                                                                                                                                                                             1,
-		"source_construction.go|<outside-function>|function-type|field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                                       1,
-		"source_construction.go|<outside-function>|interface|type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                                                           1,
-		"source_construction.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                         1,
-		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourceConfig>declaration:type":                                                                                                                                                                                                              1,
-		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourcePackedRefs>declaration:type":                                                                                                                                                                                                          1,
-		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                                                                1,
-		"source_construction.go|<outside-function>|struct|type-spec:retainedSourceConfig>declaration:type":                                                                                                                                                                                                                            1,
-		"source_construction.go|<outside-function>|struct|type-spec:retainedSourcePackedRefs>declaration:type":                                                                                                                                                                                                                        1,
-		"source_construction.go|<outside-function>|struct|type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                                                                              1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acquireRawACL":                                                                                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|pointer|field>function-type>function-declaration:acquireRawACL":                                                                                                                                                                                           1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:acquireRawACL":                                                                                                                                               1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:darwinFgetattrlist>assignment-:=-right>function-declaration:acquireRawACL":                                                             1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acquireRawACL":                                                                                                                           1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                        1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|pointer|field>function-type>function-declaration:closeDescriptor":                                                                                                                                                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|variable:owner|function-declaration:closeDescriptor":                                                                                                                                                                                                    1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                            1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:compareRootAndDescriptor":                                                                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|pointer|field>function-type>function-declaration:compareRootAndDescriptor":                                                                                                                                                                     1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:compareRootAndDescriptor":                                                                                                                    1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:file>selector-receiver:Stat>call-function:os.Stat>assignment-:=-right>function-declaration:compareRootAndDescriptor":                                                                                     1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:kind>function-declaration:compareRootAndDescriptor":                                                                                                                                                      1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:compareRootAndDescriptor":                                                                                                1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|pointer|field>function-type>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|unary:&|assignment-:=-right>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|variable:owner|return>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                                       3,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|variable:owner|selector-receiver:file>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|call:openDarwinSourceRelativeDescriptor|return>function-declaration:openRelativeNoFollow":                                                                                                                                                          1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:openRelativeNoFollow":                                                                                                           1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|pointer|field>function-type>function-declaration:openRelativeNoFollow":                                                                                                                                                                             2,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|variable:parent|selector-receiver:kind>function-declaration:openRelativeNoFollow":                                                                                                                                                                  1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|variable:parent|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:openRelativeNoFollow":                                                                                                            1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|pointer|field>function-type>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                               1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|unary:&|assignment-:=-right>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                               1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|return>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                                     7,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>assignment-=-left-0>function-declaration:openRootDirectoryDescriptor":                                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:openRootDirectoryDescriptor":                                                                                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                     2,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:requireDescriptorKind>assignment-:=-right>function-declaration:openRootDirectoryDescriptor":                              1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:probeRelativeKind":                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|pointer|field>function-type>function-declaration:probeRelativeKind":                                                                                                                                                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:probeRelativeKind":                                                                                                                                      1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Fstatat>assignment-:=-right>function-declaration:probeRelativeKind":                                                          1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:kind>function-declaration:probeRelativeKind":                                                                                                                                                                        1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:probeRelativeKind":                                                                                                                  1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readDirectoryBatch":                                                                                                               1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|pointer|field>function-type>function-declaration:readDirectoryBatch":                                                                                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:readDirectoryBatch":                                                                                                                                     1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:file>selector-receiver:ReadDir>call-function:os.ReadDir>assignment-:=-right>function-declaration:readDirectoryBatch":                                                                                                1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:kind>function-declaration:readDirectoryBatch":                                                                                                                                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readDirectoryBatch":                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactForParse":                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|pointer|field>function-type>function-declaration:readExactForParse":                                                                                                                                                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:readExactForParse":                                                                                                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|variable:owner|selector-receiver:file>selector-receiver:ReadAt>call-function:os.ReadAt>assignment-:=-right>function-declaration:readExactForParse":                                                                                                    1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactForParse":                                                                                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statDescriptor":                                                                                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|pointer|field>function-type>function-declaration:statDescriptor":                                                                                                                                                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:statDescriptor":                                                                                                                                             1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Fstat>assignment-:=-right>function-declaration:statDescriptor":                                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statDescriptor":                                                                                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statFilesystem":                                                                                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|pointer|field>function-type>function-declaration:statFilesystem":                                                                                                                                                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:statFilesystem":                                                                                                                                             1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Fstatfs>assignment-:=-right>function-declaration:statFilesystem":                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statFilesystem":                                                                                                                         1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|pointer|field>function-type>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                          2,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|unary:&|assignment-:=-right>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                          1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|return>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                                7,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                              1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|selector-receiver:file>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:requireDescriptorKind>assignment-:=-right>function-declaration:openDarwinSourceRelativeDescriptor":                                         1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:parent|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                             1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:parent|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Openat>assignment-:=-right>function-declaration:openDarwinSourceRelativeDescriptor":                                                  1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|pointer|field>function-declaration:closeDirect":                                                                                                                                                                                                                    1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|function-declaration:closeDirect":                                                                                                                                                                                                                   1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:closeFailure>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                3,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:closeFailure>return>function-declaration:closeDirect":                                                                                                                                                                             2,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:file>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                        1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:file>function-declaration:closeDirect":                                                                                                                                                                                            1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:file>selector-receiver:Close>call-function:os.Close>function-declaration:closeDirect":                                                                                                                                             1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:state>assignment-:=-right>function-declaration:closeDirect":                                                                                                                                                                       1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:state>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                       1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:state>function-declaration:closeDirect":                                                                                                                                                                                           1,
-		"source_primitives.go|(*ownedSourceDescriptor).validOpen|pointer|field>function-declaration:validOpen":                                                                                                                                                                                                                        1,
-		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|return>function-declaration:validOpen":                                                                                                                                                                                                                1,
-		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|selector-receiver:file>return>function-declaration:validOpen":                                                                                                                                                                                         1,
-		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|selector-receiver:kind>selector-receiver:valid>call-function:(sourceObservedKind).valid>return>function-declaration:validOpen":                                                                                                                        1,
-		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|selector-receiver:state>return>function-declaration:validOpen":                                                                                                                                                                                        1,
-		"source_primitives.go|<outside-function>|function-type|field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                                           11,
-		"source_primitives.go|<outside-function>|interface|type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                                                               1,
-		"source_primitives.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                             12,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptDescriptorAcquisition|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acceptDescriptorAcquisition":                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptDescriptorAcquisition|pointer|field>function-type>function-declaration:acceptDescriptorAcquisition":                                                                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptDescriptorAcquisition|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acceptDescriptorAcquisition":                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeFailedPackedRefs|selector:field:descriptor|assignment-=-left-0>function-declaration:closeFailedPackedRefs":                                                                                                                                                                       1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeFailedPackedRefs|selector:field:descriptor|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:closeFailedPackedRefs":                                                                                                                     1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeFailedPackedRefs|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:closeFailedPackedRefs":                                                                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|pointer|field>function-type>function-declaration:closeTransientDescriptor":                                                                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|selector:function:closeDescriptor|call-function:(sourcePrimitives).closeDescriptor>function-declaration:closeTransientDescriptor":                                                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|variable:descriptor|call-argument-0:(sourcePrimitives).closeDescriptor>function-declaration:closeTransientDescriptor":                                                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptor|variable:descriptor|function-declaration:closeTransientDescriptor":                                                                                                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|array-or-slice|field>function-type>function-declaration:closeTransientDescriptors":                                                                                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|builtin:len|call-function:len>assignment-:=-right>function-declaration:closeTransientDescriptors":                                                                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|index|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-=-right>function-declaration:closeTransientDescriptors":                                                                                                              1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-=-right>function-declaration:closeTransientDescriptors":                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).closeTransientDescriptors|variable:descriptors|call-argument-0:len>assignment-:=-right>function-declaration:closeTransientDescriptors":                                                                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|function:validateSourceObservationRequest|call-function:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|pointer|field>function-type>function-declaration:observeDescriptor":                                                                                                                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|selector:function:acquireRawACL|call-function:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|selector:function:statDescriptor|call-function:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|selector:function:statFilesystem|call-function:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).observeDescriptor|variable:descriptor|call-argument-1:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeDescriptor":                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:rebindConfig":                                                                                                                                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindConfig":                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindConfig":                                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindConfig":                                                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindConfig":                                                                                                                         1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindConfig":                                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindConfig":                                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindConfig|variable:comparison|function-declaration:rebindConfig":                                                                                                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:rebindPackedRefs":                                                                                                                                                              1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindPackedRefs":                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindPackedRefs":                                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindPackedRefs":                                                                              1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:rebindPackedRefs":                                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:rebindPackedRefs":                                                                                                                                     1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:rebindPackedRefs":                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).rebindPackedRefs|variable:comparison|function-declaration:rebindPackedRefs":                                                                                                                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy|pointer|field>function-type>function-declaration:reobserveDescriptorBeforePolicy":                                                                                                                                                                     1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy|selector:function:reobserveSourceDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy>return>function-declaration:reobserveDescriptorBeforePolicy":                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy>return>function-declaration:reobserveDescriptorBeforePolicy":                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainAbsentPackedRefs|selector:field:descriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainAbsentPackedRefs":                                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainAbsentPackedRefs|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainAbsentPackedRefs":                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:retainConfig":                                                                                                                                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:field:descriptor|assignment-=-left-0>function-declaration:retainConfig":                                                                                                                                                                                         1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:field:descriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainConfig":                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainConfig":                                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainConfig":                                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainConfig":                                                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:readExactForParse|call-function:(sourcePrimitives).readExactForParse>assignment-=-right>function-declaration:retainConfig":                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-=-right>function-declaration:retainConfig":                                                                                       1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|assignment-=-right>function-declaration:retainConfig":                                                                                                                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainConfig":                                                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainConfig":                                                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-=-right>function-declaration:retainConfig":                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|call-argument-1:(sourcePrimitives).readExactForParse>assignment-=-right>function-declaration:retainConfig":                                                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainConfig|variable:descriptor|function-declaration:retainConfig":                                                                                                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:field:descriptor|call-argument-2:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                                                                                         1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:field:descriptor|call-argument-2:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                                                                                     1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefs|selector:field:descriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainPackedRefs":                                                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefs|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainPackedRefs":                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainPackedRefsContent":                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:field:descriptor|assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainPackedRefsContent":                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:function:readExactForParse|call-function:(sourcePrimitives).readExactForParse>assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|selector:function:reobserveDescriptorBeforePolicy|call-function:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).reobserveDescriptorBeforePolicy>assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPackedRefsContent|variable:descriptor|call-argument-1:(sourcePrimitives).readExactForParse>assignment-:=-right>function-declaration:retainPackedRefsContent":                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:retainPresentPackedRefs":                                                                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|selector:field:descriptor|assignment-=-left-0>function-declaration:retainPresentPackedRefs":                                                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainPresentPackedRefs":                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainPresentPackedRefs":                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|assignment-=-right>function-declaration:retainPresentPackedRefs":                                                                                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainPresentPackedRefs":                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainPresentPackedRefs":                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainPresentPackedRefs|variable:descriptor|function-declaration:retainPresentPackedRefs":                                                                                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:(sourcePrimitives).openPhysicalRootDescriptor|assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:append|assignment-=-right>function-declaration:retainRepositoryDescriptor":                                                                                                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:append|assignment-=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|call:make|assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:field:descriptor|assignment-=-left-0>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:field:descriptor|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainRepositoryDescriptor":                                                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>range-:=>function-declaration:retainRepositoryDescriptor":                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:retainRepositoryDescriptor":                                                                                          3,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                 2,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>return>function-declaration:retainRepositoryDescriptor":                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|assignment-=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                                                 2,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:next|range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:parent|assignment-=-left-0>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                                              1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainRepositoryDescriptor":                                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:physicalRoot|function-declaration:retainRepositoryDescriptor":                                                                                                                                                                                     1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|assignment-=-left-0>function-declaration:retainRepositoryDescriptor":                                                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|assignment-=-left-0>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:retainRepositoryDescriptor":                                                                                                                 3,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>range-:=>function-declaration:retainRepositoryDescriptor":                                                                                                        2,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>return>function-declaration:retainRepositoryDescriptor":                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainSourceDirectory":                                                                                                                       1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|pointer|field>function-type>function-declaration:retainSourceDirectory":                                                                                                                                                                                         1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:field:descriptor|assignment-=-left-0>function-declaration:retainSourceDirectory":                                                                                                                                                                       1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:acceptDescriptorAcquisition|call-function:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainSourceDirectory":                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:observeDescriptor|call-function:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|assignment-=-right>function-declaration:retainSourceDirectory":                                                                                                                                                                              1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).acceptDescriptorAcquisition>function-declaration:retainSourceDirectory":                                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeDescriptor>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                              1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:descriptor|function-declaration:retainSourceDirectory":                                                                                                                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:parentDescriptor|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:parentDescriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:retainSourceDirectory":                                                                                                              1,
+		"source_construction_acquire.go|validateSourceObservationRequest|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:validateSourceObservationRequest":                                                                                                                              1,
+		"source_construction_acquire.go|validateSourceObservationRequest|pointer|field>function-type>function-declaration:validateSourceObservationRequest":                                                                                                                                                                                                1,
+		"source_construction_acquire.go|validateSourceObservationRequest|variable:descriptor|selector-receiver:kind>function-declaration:validateSourceObservationRequest":                                                                                                                                                                                 1,
+		"source_construction_acquire.go|validateSourceObservationRequest|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:validateSourceObservationRequest":                                                                                                                           1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                                                                1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|pointer|field>function-type>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                                                                                                     1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:captureSourceAdministrativeDirectory|call-function:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                       1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                              1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                  2,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                      1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                   1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:captureOpenedSourceAdministrativeEntry":                                                                                       2,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                                       1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|call-argument-1:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-=-right>function-declaration:captureOpenedSourceAdministrativeEntry":                                                        1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|variable:descriptor|function-declaration:captureOpenedSourceAdministrativeEntry":                                                                                                                                                             1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|pointer|field>function-type>function-declaration:captureSourceAdministrativeDirectory":                                                                                                                                                         1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|selector:function:captureSourceAdministrativeEntry|call-function:(*sourceConstructionBuilder).captureSourceAdministrativeEntry>range-:=>function-declaration:captureSourceAdministrativeDirectory":                                             1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":                          1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|selector:function:readDirectoryBatch|call-function:(sourcePrimitives).readDirectoryBatch>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":                                                                        1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":                                                           1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|call-argument-1:(*sourceConstructionBuilder).captureSourceAdministrativeEntry>range-:=>function-declaration:captureSourceAdministrativeDirectory":                                                                          1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|call-argument-1:(sourcePrimitives).readDirectoryBatch>assignment-:=-right>function-declaration:captureSourceAdministrativeDirectory":                                                                                       1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|function-declaration:captureSourceAdministrativeDirectory":                                                                                                                                                                 1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeDirectory|variable:descriptor|selector-receiver:kind>function-declaration:captureSourceAdministrativeDirectory":                                                                                                                                          1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|pointer|field>function-type>function-declaration:captureSourceAdministrativeEntry":                                                                                                                                                                 1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|selector:function:captureOpenedSourceAdministrativeEntry|call-function:(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry>return>function-declaration:captureSourceAdministrativeEntry":                                           1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|selector:function:probeRelativeKind|call-function:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:captureSourceAdministrativeEntry":                                                                                  1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|variable:parent|call-argument-1:(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry>return>function-declaration:captureSourceAdministrativeEntry":                                                                                  1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|variable:parent|call-argument-1:(sourcePrimitives).probeRelativeKind>assignment-:=-right>function-declaration:captureSourceAdministrativeEntry":                                                                                                    1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy|pointer|field>function-type>function-declaration:compareSourceDescriptorWithoutPolicy":                                                                                                                                                         1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:compareSourceDescriptorWithoutPolicy":                          1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:compareSourceDescriptorWithoutPolicy":                                                           1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|function:validateSourceObservationRequest|call-function:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                        1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|pointer|field>function-type>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                                                                                         1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|selector:function:acquireRawACL|call-function:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                  1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|selector:function:statDescriptor|call-function:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|selector:function:statFilesystem|call-function:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:(sourcePrimitives).acquireRawACL>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                            1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:(sourcePrimitives).statDescriptor>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                           1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:(sourcePrimitives).statFilesystem>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                           1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy|variable:descriptor|call-argument-1:validateSourceObservationRequest>assignment-:=-right>function-declaration:observeSourceDescriptorWithoutPolicy":                                                                                            1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy|pointer|field>function-type>function-declaration:reobserveSourceDescriptorBeforePolicy":                                                                                                                                                       1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:reobserveSourceDescriptorBeforePolicy":                        1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).reobserveSourceDescriptorBeforePolicy|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:reobserveSourceDescriptorBeforePolicy":                                                         1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|call:(sourcePrimitives).openRootDirectoryDescriptor|assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                                                                               1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:field:descriptor|call-argument-0:(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                       1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:captureSourceAdministrativeDirectory|call-function:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                            1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                    1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:retainSourceAdministrativeInventory":                                                                        3,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                              1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:compareSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                            1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                            1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                                               1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:retainSourceAdministrativeInventory":                                                                                                   3,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                                   1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-1:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                                   1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                                                         1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|variable:scan|function-declaration:retainSourceAdministrativeInventory":                                                                                                                                                                         1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                      1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|call:append|assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                        1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|call:make|assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                         1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                     1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                         1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|pointer|value-spec-type>declaration:var":                                                                                                                                                                                                      1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|selector:field:descriptor|assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                         1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                      1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                            2,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|selector:function:readExactAtForHash|call-function:(sourcePrimitives).readExactAtForHash>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                           1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|selector:function:readExactAtForParse|call-function:(sourcePrimitives).readExactAtForParse>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                         1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:descriptor|assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                2,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                             1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:descriptor|function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                                   1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                      1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:leaf|assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                     1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:leaf|assignment-=-left-0>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                     1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:leaf|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                   1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:leaf|call-argument-1:(sourcePrimitives).readExactAtForHash>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:leaf|call-argument-1:(sourcePrimitives).readExactAtForParse>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                               1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:leaf|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>assignment-:=-right>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                        1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:parent|assignment-=-left-0>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                   1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:transient|assignment-=-left-0>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                                                                                1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaim|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:captureSourceObjectAuxiliaryClaim":                                                                                             1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                            1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|call:append|assignment-=-right>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                                                              1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|call:make|assignment-:=-right>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                                                               1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                               1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|selector:field:descriptor|assignment-:=-right>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                                               1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                            1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:rebindSourceObjectAuxiliaryRow":                                  1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|variable:descriptor|assignment-=-right>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                                                      1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                   1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|variable:descriptor|function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                                                                         1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                            1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|variable:parent|assignment-=-left-0>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                                                         1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|variable:transient|assignment-=-left-0>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                                                                      1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).rebindSourceObjectAuxiliaryRow|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:rebindSourceObjectAuxiliaryRow":                                                                                                   1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaimInventory|selector:field:descriptor|call-argument-0:(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaimInventory":                                      1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaimInventory|selector:field:descriptor|call-argument-0:(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaimInventory":                                          1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaimInventory|selector:function:compareSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).compareSourceDescriptorWithoutPolicy>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaimInventory":           1,
+		"source_construction_object_claims.go|(*sourceConstructionBuilder).captureSourceObjectAuxiliaryClaimInventory|selector:function:compareSourceDirectoryBeforeWalk|call-function:(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk>assignment-=-right>function-declaration:captureSourceObjectAuxiliaryClaimInventory":                   1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|call:(sourcePrimitives).openRootDirectoryDescriptor|assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                                                                    1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:field:descriptor|call-argument-0:(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:captureSourceAdministrativeDirectory|call-function:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory": 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                         1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:closeTransientDescriptor|call-function:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                             3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                   1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:compareSourceDirectoryBeforeWalk|call-function:(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":         1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory": 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                                    1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptor>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                                                        3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|variable:scan|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                        1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|variable:scan|call-argument-1:(*sourceConstructionBuilder).captureSourceAdministrativeDirectory>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                        1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|variable:scan|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                                                              1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|variable:scan|function-declaration:captureRevalidatedSourceAdministrativeInventory":                                                                                                                                              1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk|pointer|field>function-type>function-declaration:compareSourceDirectoryBeforeWalk":                                                                                                                                                              1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:compareSourceDirectoryBeforeWalk":                               1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).compareSourceDirectoryBeforeWalk|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:compareSourceDirectoryBeforeWalk":                                                                1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|call:(sourcePrimitives).openPhysicalRootDescriptor|assignment-:=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                           1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|call:(sourcePrimitives).openRelativeNoFollow|assignment-:=-right>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                        1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|call:(sourcePrimitives).openRelativeNoFollow|assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                  2,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|call:append|assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                                   3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|call:append|assignment-=-right>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                          1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|call:make|assignment-:=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                                    1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                    3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                           1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|pointer|value-spec-type>declaration:var":                                                                                                                                                                                                    3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|selector:function:closeTransientDescriptors|call-function:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:revalidateSourceEnvelopePathBindings":                                                                 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                          3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:revalidateSourceEnvelopePathBindings":                       3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|selector:function:observeSourceDescriptorWithoutPolicy|call-function:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":              1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:descriptor|assignment-=-right>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                  2,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:descriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                               1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:descriptor|range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                                     2,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                        1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:gitDescriptor|assignment-=-left-0>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                       1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:gitDescriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                     1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:gitDescriptor|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                            1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:gitDescriptor|function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                                           2,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:gitDescriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:revalidateSourceEnvelopePathBindings":                                                                              1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:objectsDescriptor|assignment-=-left-0>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                   1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:objectsDescriptor|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:objectsDescriptor|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                        1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:objectsDescriptor|function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                                       2,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:objectsDescriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:revalidateSourceEnvelopePathBindings":                                                                          1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:parent|assignment-=-left-0>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                     1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:physical|assignment-:=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                            1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:physical|call-argument-0:(*sourceConstructionBuilder).observeSourceDescriptorWithoutPolicy>assignment-:=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                          1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:physical|function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                                                2,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:physical|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                   1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:repositoryDescriptor|assignment-=-left-0>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                       1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:repositoryDescriptor|call-argument-2:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                                     1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:transient|assignment-=-left-0>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                           3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:transient|assignment-=-left-0>range-:=>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                                                                  1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|variable:transient|call-argument-0:(*sourceConstructionBuilder).closeTransientDescriptors>function-declaration:revalidateSourceEnvelopePathBindings":                                                                                        1,
+		"source_construction.go|(*sourceCloseTracker).closeConfig|selector:function:closeDescriptor|call-function:(*sourceCloseTracker).closeDescriptor>function-declaration:closeConfig":                                                                                                                                                                  1,
+		"source_construction.go|(*sourceCloseTracker).closeConfig|unary:&|call-argument-0:(*sourceCloseTracker).closeDescriptor>function-declaration:closeConfig":                                                                                                                                                                                          1,
+		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|assignment-=-left-0>function-declaration:closeDescriptor":                                                                                                                                                                                                                    1,
+		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|call-argument-0:(sourceHandleCloser).closeDescriptor>function-declaration:closeDescriptor":                                                                                                                                                                                   1,
+		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|field>function-type>function-declaration:closeDescriptor":                                                                                                                                                                                                                    1,
+		"source_construction.go|(*sourceCloseTracker).closeDescriptor|pointer|function-declaration:closeDescriptor":                                                                                                                                                                                                                                        1,
+		"source_construction.go|(*sourceCloseTracker).closeDescriptor|selector:function:closeDescriptor|call-function:(sourceHandleCloser).closeDescriptor>function-declaration:closeDescriptor":                                                                                                                                                           1,
+		"source_construction.go|(*sourceCloseTracker).closeDescriptor|variable:owner|function-declaration:closeDescriptor":                                                                                                                                                                                                                                 1,
+		"source_construction.go|(*sourceCloseTracker).closePackedRefs|selector:function:closeDescriptor|call-function:(*sourceCloseTracker).closeDescriptor>function-declaration:closePackedRefs":                                                                                                                                                          1,
+		"source_construction.go|(*sourceCloseTracker).closePackedRefs|unary:&|call-argument-0:(*sourceCloseTracker).closeDescriptor>function-declaration:closePackedRefs":                                                                                                                                                                                  1,
+		"source_construction.go|(*sourceCloseTracker).closeRootBundle|selector:function:closeDescriptor|call-function:(*sourceCloseTracker).closeDescriptor>function-declaration:closeRootBundle":                                                                                                                                                          1,
+		"source_construction.go|(*sourceCloseTracker).closeRootBundle|unary:&|call-argument-0:(*sourceCloseTracker).closeDescriptor>function-declaration:closeRootBundle":                                                                                                                                                                                  1,
+		"source_construction.go|(*sourceConstructionOwner).validInitialConfig|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validInitialConfig":                                                                                                                                1,
+		"source_construction.go|(*sourceConstructionOwner).validInitialConfig|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validInitialConfig":                                                                                                                                                                             1,
+		"source_construction.go|(*sourceConstructionOwner).validInitialConfig|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validInitialConfig":                                                                                                                       1,
+		"source_construction.go|(*sourceConstructionOwner).validPackedRefsRetention|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validPackedRefsRetention":                                                                                                                    1,
+		"source_construction.go|(*sourceConstructionOwner).validPackedRefsRetention|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validPackedRefsRetention":                                                                                                                                                                 1,
+		"source_construction.go|(*sourceConstructionOwner).validPackedRefsRetention|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validPackedRefsRetention":                                                                                                           1,
+		"source_construction.go|(*sourceConstructionOwner).validResolvedPackedRefs|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validResolvedPackedRefs":                                                                                                                      1,
+		"source_construction.go|(*sourceConstructionOwner).validResolvedPackedRefs|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validResolvedPackedRefs":                                                                                                                                                                   1,
+		"source_construction.go|(*sourceConstructionOwner).validResolvedPackedRefs|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validResolvedPackedRefs":                                                                                                             1,
+		"source_construction.go|(directSourceHandleCloser).closeDescriptor|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                                                1,
+		"source_construction.go|(directSourceHandleCloser).closeDescriptor|pointer|field>function-type>function-declaration:closeDescriptor":                                                                                                                                                                                                               1,
+		"source_construction.go|(directSourceHandleCloser).closeDescriptor|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                                                    1,
+		"source_construction.go|(retainedSourceRoot).validOpenDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validOpenDirectory":                                                                                                                                      1,
+		"source_construction.go|(retainedSourceRoot).validOpenDirectory|selector:field:descriptor|selector-receiver:kind>return>function-declaration:validOpenDirectory":                                                                                                                                                                                   1,
+		"source_construction.go|(retainedSourceRoot).validOpenDirectory|selector:field:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>return>function-declaration:validOpenDirectory":                                                                                                                             1,
+		"source_construction.go|(sourcePackedRefsSlot).valid|selector:field:descriptor|return>function-declaration:valid":                                                                                                                                                                                                                                  1,
+		"source_construction.go|<outside-function>|function-type|field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                                                            1,
+		"source_construction.go|<outside-function>|interface|type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                                                                                1,
+		"source_construction.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                                              1,
+		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourceConfig>declaration:type":                                                                                                                                                                                                                                   1,
+		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourcePackedRefs>declaration:type":                                                                                                                                                                                                                               1,
+		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                                                                                     1,
+		"source_construction.go|<outside-function>|struct|type-spec:retainedSourceConfig>declaration:type":                                                                                                                                                                                                                                                 1,
+		"source_construction.go|<outside-function>|struct|type-spec:retainedSourcePackedRefs>declaration:type":                                                                                                                                                                                                                                             1,
+		"source_construction.go|<outside-function>|struct|type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                                                                                                   1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acquireRawACL":                                                                                                                                              1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|pointer|field>function-type>function-declaration:acquireRawACL":                                                                                                                                                                                                                1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:acquireRawACL":                                                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:darwinFgetattrlist>assignment-:=-right>function-declaration:acquireRawACL":                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:acquireRawACL":                                                                                                                                                1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                                             1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|pointer|field>function-type>function-declaration:closeDescriptor":                                                                                                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|variable:owner|function-declaration:closeDescriptor":                                                                                                                                                                                                                         1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeDescriptor|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceDescriptor).closeDirect>return>function-declaration:closeDescriptor":                                                                                                                                 1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:compareRootAndDescriptor":                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|pointer|field>function-type>function-declaration:compareRootAndDescriptor":                                                                                                                                                                                          1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:compareRootAndDescriptor":                                                                                                                                         1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:file>selector-receiver:Stat>call-function:os.Stat>assignment-:=-right>function-declaration:compareRootAndDescriptor":                                                                                                          1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:kind>function-declaration:compareRootAndDescriptor":                                                                                                                                                                           1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:descriptor|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:compareRootAndDescriptor":                                                                                                                     1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|pointer|field>function-type>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|unary:&|assignment-:=-right>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|variable:owner|return>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                                                            3,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|variable:owner|selector-receiver:file>function-declaration:openPhysicalRootDescriptor":                                                                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|call:openDarwinSourceRelativeDescriptor|return>function-declaration:openRelativeNoFollow":                                                                                                                                                                               1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:openRelativeNoFollow":                                                                                                                                1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|pointer|field>function-type>function-declaration:openRelativeNoFollow":                                                                                                                                                                                                  2,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|variable:parent|selector-receiver:kind>function-declaration:openRelativeNoFollow":                                                                                                                                                                                       1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRelativeNoFollow|variable:parent|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:openRelativeNoFollow":                                                                                                                                 1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|pointer|field>function-type>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|unary:&|assignment-:=-right>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|return>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                                                          7,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>assignment-=-left-0>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:openRootDirectoryDescriptor":                                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                                          2,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:requireDescriptorKind>assignment-:=-right>function-declaration:openRootDirectoryDescriptor":                                                   1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:probeRelativeKind":                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|pointer|field>function-type>function-declaration:probeRelativeKind":                                                                                                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:probeRelativeKind":                                                                                                                                                           1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Fstatat>assignment-:=-right>function-declaration:probeRelativeKind":                                                                               1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:kind>function-declaration:probeRelativeKind":                                                                                                                                                                                             1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|variable:parent|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:probeRelativeKind":                                                                                                                                       1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readDirectoryBatch":                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|pointer|field>function-type>function-declaration:readDirectoryBatch":                                                                                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:readDirectoryBatch":                                                                                                                                                          1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:file>selector-receiver:ReadDir>call-function:os.ReadDir>assignment-:=-right>function-declaration:readDirectoryBatch":                                                                                                                     1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:kind>function-declaration:readDirectoryBatch":                                                                                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readDirectoryBatch":                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactForParse":                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|pointer|field>function-type>function-declaration:readExactForParse":                                                                                                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|function:readDarwinSourceDescriptorAt|call-function:readDarwinSourceDescriptorAt>assignment-:=-right>function-declaration:readExactForParse":                                                                                                                               1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|variable:owner|call-argument-0:readDarwinSourceDescriptorAt>assignment-:=-right>function-declaration:readExactForParse":                                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactForParse":                                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForParse|function:readDarwinSourceDescriptorAt|call-function:readDarwinSourceDescriptorAt>assignment-:=-right>function-declaration:readExactAtForParse":                                                                                                                           1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForParse|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactAtForParse":                                                                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForParse|pointer|field>function-type>function-declaration:readExactAtForParse":                                                                                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForParse|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactAtForParse":                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForParse|variable:owner|call-argument-0:readDarwinSourceDescriptorAt>assignment-:=-right>function-declaration:readExactAtForParse":                                                                                                                                                1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForHash|function:readDarwinSourceDescriptorAt|call-function:readDarwinSourceDescriptorAt>assignment-:=-right>function-declaration:readExactAtForHash":                                                                                                                             1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForHash|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactAtForHash":                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForHash|pointer|field>function-type>function-declaration:readExactAtForHash":                                                                                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForHash|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:readExactAtForHash":                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForHash|variable:owner|call-argument-0:readDarwinSourceDescriptorAt>assignment-:=-right>function-declaration:readExactAtForHash":                                                                                                                                                  1,
+		"source_primitives_darwin.go|readDarwinSourceDescriptorAt|pointer|field>function-type>function-declaration:readDarwinSourceDescriptorAt":                                                                                                                                                                                                           1,
+		"source_primitives_darwin.go|readDarwinSourceDescriptorAt|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:readDarwinSourceDescriptorAt":                                                                                                                                                               1,
+		"source_primitives_darwin.go|readDarwinSourceDescriptorAt|variable:owner|selector-receiver:file>selector-receiver:ReadAt>call-function:os.ReadAt>assignment-:=-right>function-declaration:readDarwinSourceDescriptorAt":                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statDescriptor":                                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|pointer|field>function-type>function-declaration:statDescriptor":                                                                                                                                                                                                              1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:statDescriptor":                                                                                                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Fstat>assignment-:=-right>function-declaration:statDescriptor":                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statDescriptor":                                                                                                                                              1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statFilesystem":                                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|pointer|field>function-type>function-declaration:statFilesystem":                                                                                                                                                                                                              1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:statFilesystem":                                                                                                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Fstatfs>assignment-:=-right>function-declaration:statFilesystem":                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|variable:owner|selector-receiver:validOpen>call-function:(*ownedSourceDescriptor).validOpen>function-declaration:statFilesystem":                                                                                                                                              1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|pointer|field>function-type>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                                               2,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|unary:&|assignment-:=-right>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                                               1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|return>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                                                     7,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                   1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|selector-receiver:file>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                                                     1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:owner|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:requireDescriptorKind>assignment-:=-right>function-declaration:openDarwinSourceRelativeDescriptor":                                                              1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:parent|selector-receiver:file>call-argument-0:runtime.KeepAlive>function-declaration:openDarwinSourceRelativeDescriptor":                                                                                                                                                  1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|variable:parent|selector-receiver:file>selector-receiver:Fd>call-function:os.Fd>call-argument-0:int>call-argument-0:unix.Openat>assignment-:=-right>function-declaration:openDarwinSourceRelativeDescriptor":                                                                       1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|pointer|field>function-declaration:closeDirect":                                                                                                                                                                                                                                         1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|function-declaration:closeDirect":                                                                                                                                                                                                                                        1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:closeFailure>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                                     3,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:closeFailure>return>function-declaration:closeDirect":                                                                                                                                                                                                  2,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:file>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                                             1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:file>function-declaration:closeDirect":                                                                                                                                                                                                                 1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:file>selector-receiver:Close>call-function:os.Close>function-declaration:closeDirect":                                                                                                                                                                  1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:state>assignment-:=-right>function-declaration:closeDirect":                                                                                                                                                                                            1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:state>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                                            1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|variable:owner|selector-receiver:state>function-declaration:closeDirect":                                                                                                                                                                                                                1,
+		"source_primitives.go|(*ownedSourceDescriptor).validOpen|pointer|field>function-declaration:validOpen":                                                                                                                                                                                                                                             1,
+		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|return>function-declaration:validOpen":                                                                                                                                                                                                                                     1,
+		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|selector-receiver:file>return>function-declaration:validOpen":                                                                                                                                                                                                              1,
+		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|selector-receiver:kind>selector-receiver:valid>call-function:(sourceObservedKind).valid>return>function-declaration:validOpen":                                                                                                                                             1,
+		"source_primitives.go|(*ownedSourceDescriptor).validOpen|variable:owner|selector-receiver:state>return>function-declaration:validOpen":                                                                                                                                                                                                             1,
+		"source_primitives.go|<outside-function>|function-type|field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                                                                13,
+		"source_primitives.go|<outside-function>|interface|type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                                                                                    1,
+		"source_primitives.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                                                  14,
 	}
 }
 
 func sourceConstructionAllowedRootOwnerUses() map[string]int {
 	return map[string]int{
-		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptRootAcquisition|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:acceptRootAcquisition":                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptRootAcquisition|pointer|field>function-type>function-declaration:acceptRootAcquisition":                                                                                                                                  1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptRootAcquisition|variable:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:acceptRootAcquisition":                                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:field:root|call-argument-1:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                                        1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:field:root|call-argument-1:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                              1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|call:(sourcePrimitives).openRepositoryRoot|assignment-:=-right>function-declaration:retainRepository":                                                                                                         1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|selector:field:root|assignment-=-left-0>function-declaration:retainRepository":                                                                                                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|selector:function:acceptRootAcquisition|call-function:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainRepository":                                                               1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|variable:root|assignment-=-right>function-declaration:retainRepository":                                                                                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|variable:root|call-argument-0:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainRepository":                                                                                       1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|variable:root|function-declaration:retainRepository":                                                                                                                                                          1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:field:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                           1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|call:(sourcePrimitives).openChildRoot|assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                    1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:retainSourceDirectory":                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|pointer|field>function-type>function-declaration:retainSourceDirectory":                                                                                                                                  1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:field:root|assignment-=-left-0>function-declaration:retainSourceDirectory":                                                                                                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:acceptRootAcquisition|call-function:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainSourceDirectory":                                                     1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                      1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:parentRoot|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:retainSourceDirectory":                                                                   1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|assignment-=-right>function-declaration:retainSourceDirectory":                                                                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|call-argument-0:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainSourceDirectory":                                                                             1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                                                 1,
-		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|function-declaration:retainSourceDirectory":                                                                                                                                                1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:field:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                            1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:field:root|call-argument-1:(sourcePrimitives).openRootDirectoryDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                         1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":       1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:openRootDirectoryDescriptor|call-function:(sourcePrimitives).openRootDirectoryDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory": 1,
-		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|assignment-=-left-0>function-declaration:closeRoot":                                                                                                                                                                         1,
-		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|call-argument-0:(sourceHandleCloser).closeRoot>function-declaration:closeRoot":                                                                                                                                              1,
-		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|field>function-type>function-declaration:closeRoot":                                                                                                                                                                         1,
-		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|function-declaration:closeRoot":                                                                                                                                                                                             1,
-		"source_construction.go|(*sourceCloseTracker).closeRoot|selector:function:closeRoot|call-function:(sourceHandleCloser).closeRoot>function-declaration:closeRoot":                                                                                                                            1,
-		"source_construction.go|(*sourceCloseTracker).closeRoot|variable:owner|function-declaration:closeRoot":                                                                                                                                                                                      1,
-		"source_construction.go|(*sourceCloseTracker).closeRootBundle|selector:function:closeRoot|call-function:(*sourceCloseTracker).closeRoot>function-declaration:closeRootBundle":                                                                                                               1,
-		"source_construction.go|(*sourceCloseTracker).closeRootBundle|unary:&|call-argument-0:(*sourceCloseTracker).closeRoot>function-declaration:closeRootBundle":                                                                                                                                 1,
-		"source_construction.go|(directSourceHandleCloser).closeRoot|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                           1,
-		"source_construction.go|(directSourceHandleCloser).closeRoot|pointer|field>function-type>function-declaration:closeRoot":                                                                                                                                                                    1,
-		"source_construction.go|(directSourceHandleCloser).closeRoot|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                               1,
-		"source_construction.go|(retainedSourceRoot).validOpenDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>return>function-declaration:validOpenDirectory":                                                                                     1,
-		"source_construction.go|(retainedSourceRoot).validOpenDirectory|selector:field:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>return>function-declaration:validOpenDirectory":                                                                                  1,
-		"source_construction.go|<outside-function>|function-type|field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                     1,
-		"source_construction.go|<outside-function>|interface|type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                         1,
-		"source_construction.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                       1,
-		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                              1,
-		"source_construction.go|<outside-function>|struct|type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                                            1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                        1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|pointer|field>function-type>function-declaration:closeRoot":                                                                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|variable:owner|function-declaration:closeRoot":                                                                                                                                                                              1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                            1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:compareRootAndDescriptor":                                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|pointer|field>function-type>function-declaration:compareRootAndDescriptor":                                                                                                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:root|selector-receiver:root>call-argument-0:runtime.KeepAlive>function-declaration:compareRootAndDescriptor":                                                                                        1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:root|selector-receiver:root>selector-receiver:Lstat>call-function:os.Lstat>assignment-:=-right>function-declaration:compareRootAndDescriptor":                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:compareRootAndDescriptor":                                                                          1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openChildRoot":                                                                                             1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|pointer|field>function-type>function-declaration:openChildRoot":                                                                                                                                                         2,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|unary:&|assignment-:=-right>function-declaration:openChildRoot":                                                                                                                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:owner|return>function-declaration:openChildRoot":                                                                                                                                                               3,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:owner|selector-receiver:root>assignment-=-left-0>function-declaration:openChildRoot":                                                                                                                           1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:owner|selector-receiver:root>function-declaration:openChildRoot":                                                                                                                                               2,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:parent|selector-receiver:root>call-argument-0:runtime.KeepAlive>function-declaration:openChildRoot":                                                                                                            1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:parent|selector-receiver:root>selector-receiver:OpenRoot>call-function:os.OpenRoot>assignment-=-right>function-declaration:openChildRoot":                                                                      1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:parent|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openChildRoot":                                                                                              1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|pointer|field>function-type>function-declaration:openRepositoryRoot":                                                                                                                                               1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|unary:&|assignment-:=-right>function-declaration:openRepositoryRoot":                                                                                                                                               1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|variable:owner|return>function-declaration:openRepositoryRoot":                                                                                                                                                     3,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|variable:owner|selector-receiver:root>assignment-=-left-0>function-declaration:openRepositoryRoot":                                                                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|variable:owner|selector-receiver:root>function-declaration:openRepositoryRoot":                                                                                                                                     2,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openRootDirectoryDescriptor":                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|pointer|field>function-type>function-declaration:openRootDirectoryDescriptor":                                                                                                                             1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:root|selector-receiver:root>call-argument-0:runtime.KeepAlive>function-declaration:openRootDirectoryDescriptor":                                                                                  1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:root|selector-receiver:root>selector-receiver:Open>call-function:os.Open>assignment-=-right>function-declaration:openRootDirectoryDescriptor":                                                    1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openRootDirectoryDescriptor":                                                                    1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|pointer|field>function-declaration:closeDirect":                                                                                                                                                                                        1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|function-declaration:closeDirect":                                                                                                                                                                                       1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:closeFailure>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                    3,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:closeFailure>return>function-declaration:closeDirect":                                                                                                                                                 2,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:root>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                            1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:root>function-declaration:closeDirect":                                                                                                                                                                1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:root>selector-receiver:Close>call-function:os.Close>function-declaration:closeDirect":                                                                                                                 1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:state>assignment-:=-right>function-declaration:closeDirect":                                                                                                                                           1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:state>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                           1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:state>function-declaration:closeDirect":                                                                                                                                                               1,
-		"source_primitives.go|(*ownedSourceRoot).validOpen|pointer|field>function-declaration:validOpen":                                                                                                                                                                                            1,
-		"source_primitives.go|(*ownedSourceRoot).validOpen|variable:owner|return>function-declaration:validOpen":                                                                                                                                                                                    1,
-		"source_primitives.go|(*ownedSourceRoot).validOpen|variable:owner|selector-receiver:root>return>function-declaration:validOpen":                                                                                                                                                             1,
-		"source_primitives.go|(*ownedSourceRoot).validOpen|variable:owner|selector-receiver:state>return>function-declaration:validOpen":                                                                                                                                                            1,
-		"source_primitives.go|<outside-function>|function-type|field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                         5,
-		"source_primitives.go|<outside-function>|interface|type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                             1,
-		"source_primitives.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                           6,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptRootAcquisition|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:acceptRootAcquisition":                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptRootAcquisition|pointer|field>function-type>function-declaration:acceptRootAcquisition":                                                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).acceptRootAcquisition|variable:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:acceptRootAcquisition":                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:field:root|call-argument-1:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                                                                   1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainGit|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainGit":                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:field:root|call-argument-1:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainObjects|selector:function:retainSourceDirectory|call-function:(*sourceConstructionBuilder).retainSourceDirectory>return>function-declaration:retainObjects":                                                                                         1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|call:(sourcePrimitives).openRepositoryRoot|assignment-:=-right>function-declaration:retainRepository":                                                                                                                                    1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|selector:field:root|assignment-=-left-0>function-declaration:retainRepository":                                                                                                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|selector:function:acceptRootAcquisition|call-function:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainRepository":                                                                                          1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|variable:root|assignment-=-right>function-declaration:retainRepository":                                                                                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|variable:root|call-argument-0:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainRepository":                                                                                                                  1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepository|variable:root|function-declaration:retainRepository":                                                                                                                                                                                     1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:field:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                                           1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainRepositoryDescriptor|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainRepositoryDescriptor":                                                      1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|call:(sourcePrimitives).openChildRoot|assignment-:=-right>function-declaration:retainSourceDirectory":                                                                                                                               1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:retainSourceDirectory":                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|pointer|field>function-type>function-declaration:retainSourceDirectory":                                                                                                                                                             1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:field:root|assignment-=-left-0>function-declaration:retainSourceDirectory":                                                                                                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:acceptRootAcquisition|call-function:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainSourceDirectory":                                                                                1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                                                 1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:parentRoot|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:retainSourceDirectory":                                                                                              1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|assignment-=-right>function-declaration:retainSourceDirectory":                                                                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|call-argument-0:(*sourceConstructionBuilder).acceptRootAcquisition>function-declaration:retainSourceDirectory":                                                                                                        1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:retainSourceDirectory":                                                                                            1,
+		"source_construction_acquire.go|(*sourceConstructionBuilder).retainSourceDirectory|variable:root|function-declaration:retainSourceDirectory":                                                                                                                                                                           1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:field:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                       1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:field:root|call-argument-1:(sourcePrimitives).openRootDirectoryDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                                    1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                                  1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|selector:function:openRootDirectoryDescriptor|call-function:(sourcePrimitives).openRootDirectoryDescriptor>assignment-:=-right>function-declaration:retainSourceAdministrativeInventory":                            1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:field:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                            1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:field:root|call-argument-1:(sourcePrimitives).openRootDirectoryDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":                         1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory":       1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|selector:function:openRootDirectoryDescriptor|call-function:(sourcePrimitives).openRootDirectoryDescriptor>assignment-:=-right>function-declaration:captureRevalidatedSourceAdministrativeInventory": 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|selector:field:root|call-argument-1:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                                                   3,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).revalidateSourceEnvelopePathBindings|selector:function:compareRootAndDescriptor|call-function:(sourcePrimitives).compareRootAndDescriptor>assignment-=-right>function-declaration:revalidateSourceEnvelopePathBindings":                              3,
+		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|assignment-=-left-0>function-declaration:closeRoot":                                                                                                                                                                                                    1,
+		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|call-argument-0:(sourceHandleCloser).closeRoot>function-declaration:closeRoot":                                                                                                                                                                         1,
+		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|field>function-type>function-declaration:closeRoot":                                                                                                                                                                                                    1,
+		"source_construction.go|(*sourceCloseTracker).closeRoot|pointer|function-declaration:closeRoot":                                                                                                                                                                                                                        1,
+		"source_construction.go|(*sourceCloseTracker).closeRoot|selector:function:closeRoot|call-function:(sourceHandleCloser).closeRoot>function-declaration:closeRoot":                                                                                                                                                       1,
+		"source_construction.go|(*sourceCloseTracker).closeRoot|variable:owner|function-declaration:closeRoot":                                                                                                                                                                                                                 1,
+		"source_construction.go|(*sourceCloseTracker).closeRootBundle|selector:function:closeRoot|call-function:(*sourceCloseTracker).closeRoot>function-declaration:closeRootBundle":                                                                                                                                          1,
+		"source_construction.go|(*sourceCloseTracker).closeRootBundle|unary:&|call-argument-0:(*sourceCloseTracker).closeRoot>function-declaration:closeRootBundle":                                                                                                                                                            1,
+		"source_construction.go|(directSourceHandleCloser).closeRoot|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                                                      1,
+		"source_construction.go|(directSourceHandleCloser).closeRoot|pointer|field>function-type>function-declaration:closeRoot":                                                                                                                                                                                               1,
+		"source_construction.go|(directSourceHandleCloser).closeRoot|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                                                          1,
+		"source_construction.go|(retainedSourceRoot).validOpenDirectory|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>return>function-declaration:validOpenDirectory":                                                                                                                1,
+		"source_construction.go|(retainedSourceRoot).validOpenDirectory|selector:field:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>return>function-declaration:validOpenDirectory":                                                                                                             1,
+		"source_construction.go|<outside-function>|function-type|field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                                1,
+		"source_construction.go|<outside-function>|interface|type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                                                    1,
+		"source_construction.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourceHandleCloser>declaration:type":                                                                                                                                                                                  1,
+		"source_construction.go|<outside-function>|pointer|field>struct>type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                                                         1,
+		"source_construction.go|<outside-function>|struct|type-spec:retainedSourceRoot>declaration:type":                                                                                                                                                                                                                       1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|function:closeDirect|selector-member:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                                                   1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|pointer|field>function-type>function-declaration:closeRoot":                                                                                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|variable:owner|function-declaration:closeRoot":                                                                                                                                                                                                         1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).closeRoot|variable:owner|selector-receiver:closeDirect>call-function:(*ownedSourceRoot).closeDirect>return>function-declaration:closeRoot":                                                                                                                       1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:compareRootAndDescriptor":                                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|pointer|field>function-type>function-declaration:compareRootAndDescriptor":                                                                                                                                                              1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:root|selector-receiver:root>call-argument-0:runtime.KeepAlive>function-declaration:compareRootAndDescriptor":                                                                                                                   1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:root|selector-receiver:root>selector-receiver:Lstat>call-function:os.Lstat>assignment-:=-right>function-declaration:compareRootAndDescriptor":                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|variable:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:compareRootAndDescriptor":                                                                                                     1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openChildRoot":                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|pointer|field>function-type>function-declaration:openChildRoot":                                                                                                                                                                                    2,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|unary:&|assignment-:=-right>function-declaration:openChildRoot":                                                                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:owner|return>function-declaration:openChildRoot":                                                                                                                                                                                          3,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:owner|selector-receiver:root>assignment-=-left-0>function-declaration:openChildRoot":                                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:owner|selector-receiver:root>function-declaration:openChildRoot":                                                                                                                                                                          2,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:parent|selector-receiver:root>call-argument-0:runtime.KeepAlive>function-declaration:openChildRoot":                                                                                                                                       1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:parent|selector-receiver:root>selector-receiver:OpenRoot>call-function:os.OpenRoot>assignment-=-right>function-declaration:openChildRoot":                                                                                                 1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|variable:parent|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openChildRoot":                                                                                                                         1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|pointer|field>function-type>function-declaration:openRepositoryRoot":                                                                                                                                                                          1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|unary:&|assignment-:=-right>function-declaration:openRepositoryRoot":                                                                                                                                                                          1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|variable:owner|return>function-declaration:openRepositoryRoot":                                                                                                                                                                                3,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|variable:owner|selector-receiver:root>assignment-=-left-0>function-declaration:openRepositoryRoot":                                                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|variable:owner|selector-receiver:root>function-declaration:openRepositoryRoot":                                                                                                                                                                2,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|function:validOpen|selector-member:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openRootDirectoryDescriptor":                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|pointer|field>function-type>function-declaration:openRootDirectoryDescriptor":                                                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:root|selector-receiver:root>call-argument-0:runtime.KeepAlive>function-declaration:openRootDirectoryDescriptor":                                                                                                             1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:root|selector-receiver:root>selector-receiver:Open>call-function:os.Open>assignment-=-right>function-declaration:openRootDirectoryDescriptor":                                                                               1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|variable:root|selector-receiver:validOpen>call-function:(*ownedSourceRoot).validOpen>function-declaration:openRootDirectoryDescriptor":                                                                                               1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|pointer|field>function-declaration:closeDirect":                                                                                                                                                                                                                   1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|function-declaration:closeDirect":                                                                                                                                                                                                                  1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:closeFailure>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                               3,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:closeFailure>return>function-declaration:closeDirect":                                                                                                                                                                            2,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:root>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                       1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:root>function-declaration:closeDirect":                                                                                                                                                                                           1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:root>selector-receiver:Close>call-function:os.Close>function-declaration:closeDirect":                                                                                                                                            1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:state>assignment-:=-right>function-declaration:closeDirect":                                                                                                                                                                      1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:state>assignment-=-left-0>function-declaration:closeDirect":                                                                                                                                                                      1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|variable:owner|selector-receiver:state>function-declaration:closeDirect":                                                                                                                                                                                          1,
+		"source_primitives.go|(*ownedSourceRoot).validOpen|pointer|field>function-declaration:validOpen":                                                                                                                                                                                                                       1,
+		"source_primitives.go|(*ownedSourceRoot).validOpen|variable:owner|return>function-declaration:validOpen":                                                                                                                                                                                                               1,
+		"source_primitives.go|(*ownedSourceRoot).validOpen|variable:owner|selector-receiver:root>return>function-declaration:validOpen":                                                                                                                                                                                        1,
+		"source_primitives.go|(*ownedSourceRoot).validOpen|variable:owner|selector-receiver:state>return>function-declaration:validOpen":                                                                                                                                                                                       1,
+		"source_primitives.go|<outside-function>|function-type|field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                                    5,
+		"source_primitives.go|<outside-function>|interface|type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                                                        1,
+		"source_primitives.go|<outside-function>|pointer|field>function-type>field>interface>type-spec:sourcePrimitives>declaration:type":                                                                                                                                                                                      6,
 	}
 }
 
@@ -10420,12 +10716,15 @@ func sourceConstructionResolvedCallClosureViolations(
 	typedPackage *packages.Package,
 ) []string {
 	moduleFiles := map[string]bool{
-		"source_construction.go":              true,
-		"source_construction_acquire.go":      true,
-		"source_construction_inventory.go":    true,
-		"source_construction_object_paths.go": true,
-		"source_primitives.go":                true,
-		"source_primitives_darwin.go":         true,
+		"source_construction.go":                 true,
+		"source_construction_acquire.go":         true,
+		"source_construction_inventory.go":       true,
+		"source_construction_object_paths.go":    true,
+		"source_construction_auxiliary_bytes.go": true,
+		"source_construction_object_claims.go":   true,
+		"source_construction_revalidation.go":    true,
+		"source_primitives.go":                   true,
+		"source_primitives_darwin.go":            true,
 	}
 	allowedExternal := map[string]bool{
 		"bytes|(*bytes.Buffer).Bytes":     true,
@@ -10515,83 +10814,101 @@ func sourceConstructionResolvedCallClosureViolations(
 		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|github.com/vbonnet/dear-agent/internal/buildauthority|requireDescriptorKind|requireDescriptorKind(int(owner.file.Fd()),openKind)":                                                 1,
 	}
 	allowedSensitiveExternalSites := map[string]int{
+		"source_construction_object_claims.go|sourceObjectAuxiliaryClaimsMatchAdministration|context|Background|context.Background()":                                                                                                               1,
+		"source_construction_object_claims.go|sourceObjectAuxiliaryClaimInventoryValid|context|Background|context.Background()":                                                                                                                     1,
+		"source_construction_object_paths.go|sourceObjectPathTopologyValid|context|Background|context.Background()":                                                                                                                                 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).finishRevalidatedSourceAdministrativeInventory|sort|Slice|sort.Slice(capture.candidates,(func(left, right int) bool literal))":                                            1,
+		"source_primitives.go|(*sourceContentDigestState).consume|crypto/sha1|New|sha1.New()":                                                                                                                                                       1,
+		"source_primitives.go|(*sourceContentDigestState).consume|crypto/sha256|New|sha256.New()":                                                                                                                                                   1,
+		"source_primitives.go|(*sourceContentDigestState).consume|encoding|(encoding.BinaryAppender).AppendBinary|saver.AppendBinary(state.wire[:0])":                                                                                               2,
+		"source_primitives.go|(*sourceContentDigestState).consume|encoding|(encoding.BinaryUnmarshaler).UnmarshalBinary|restorer.UnmarshalBinary(state.wire[:state.wireN])":                                                                         2,
+		"source_primitives.go|(*sourceContentDigestState).consume|io|(io.Writer).Write|hasher.Write(content)":                                                                                                                                       2,
+		"source_primitives.go|(sourceContentDigestState).sum|crypto/sha1|New|sha1.New()":                                                                                                                                                            1,
+		"source_primitives.go|(sourceContentDigestState).sum|crypto/sha256|New|sha256.New()":                                                                                                                                                        1,
+		"source_primitives.go|(sourceContentDigestState).sum|encoding|(encoding.BinaryUnmarshaler).UnmarshalBinary|restorer.UnmarshalBinary(state.wire[:state.wireN])":                                                                              2,
+		"source_primitives.go|(sourceContentDigestState).sum|hash|(hash.Hash).Sum|hasher.Sum(digest[:0])":                                                                                                                                           2,
 		"filesystem_darwin.go|darwinFgetattrlistWithOptions|golang.org/x/sys/unix|Syscall6|unix.Syscall6(darwinSysFgetattrlist,uintptr(fd),uintptr(unsafe.Pointer(attributes)),uintptr(unsafe.Pointer(&buffer[0])),uintptr(len(buffer)),options,0)": 1,
-		"filesystem_darwin.go|requireDescriptorKind|golang.org/x/sys/unix|Fstat|unix.Fstat(fd,&stat)":                                                                                      1,
-		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"quoted value is missing opening quote\")":                                                                                  1,
-		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"unsupported quoted escape\")":                                                                                              1,
-		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"unterminated quoted escape\")":                                                                                             1,
-		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"unterminated quoted value\")":                                                                                              1,
-		"gitconfig.go|parseSourceConfigAssignment|fmt|Errorf|fmt.Errorf(\"assignment requires an explicit value\")":                                                                        1,
-		"gitconfig.go|parseSourceConfigAssignment|fmt|Errorf|fmt.Errorf(\"invalid variable name\")":                                                                                        1,
-		"gitconfig.go|parseSourceConfigSection|fmt|Errorf|fmt.Errorf(\"unexpected bytes after section header\")":                                                                           1,
-		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"empty section\")":                                                                                               1,
-		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"invalid section name\")":                                                                                        1,
-		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"invalid section separator\")":                                                                                   1,
-		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"subsection contains a control byte\")":                                                                          1,
-		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"subsection must be quoted\")":                                                                                   1,
-		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"unexpected bytes after subsection\")":                                                                           1,
-		"gitconfig.go|parseSourceConfigSyntax|fmt|Sprintf|fmt.Sprintf(\"source config assignment on line %d\",lineNumber + 1)":                                                             1,
-		"gitconfig.go|parseSourceConfigSyntax|fmt|Sprintf|fmt.Sprintf(\"source config line %d\",lineNumber + 1)":                                                                           1,
-		"gitconfig.go|parseSourceConfigSyntax|fmt|Sprintf|fmt.Sprintf(\"source config section on line %d\",lineNumber + 1)":                                                                1,
-		"gitconfig.go|parseSourceConfigValue|fmt|Errorf|fmt.Errorf(\"unterminated quoted value\")":                                                                                         1,
-		"gitconfig.go|parseSourceConfigValue|fmt|Errorf|fmt.Errorf(\"value contains a control byte\")":                                                                                     1,
-		"gitconfig.go|sourceConfigEscapedByte|fmt|Errorf|fmt.Errorf(\"unsupported or control-producing value escape\")":                                                                    1,
-		"gitconfig.go|sourceConfigEscapedByte|fmt|Errorf|fmt.Errorf(\"unterminated value escape\")":                                                                                        1,
-		"gitconfig.go|sourceConfigSectionClosing|fmt|Errorf|fmt.Errorf(\"unterminated section header\")":                                                                                   1,
-		"gitconfig.go|validateSourceConfigLineBytes|fmt|Errorf|fmt.Errorf(\"forbidden control byte 0x%02x\",value)":                                                                        1,
-		"gitconfig.go|validFullGitRefName|slices|ContainsFunc|slices.ContainsFunc([]byte(name),invalidGitRefByte)":                                                                         1,
-		"private_errors.go|failWith|fmt|Errorf|fmt.Errorf(\"%s: %w\",message,err)":                                                                                                         1,
-		"preflight_runner.go|(*nonSourceAuthorityContext).Deadline|context|(context.Context).Deadline|ctx.transaction.ctx.Deadline()":                                                      1,
-		"preflight_runner.go|(*nonSourceAuthorityContext).Done|context|(context.Context).Done|ctx.transaction.ctx.Done()":                                                                  1,
-		"preflight_runner.go|(*nonSourceAuthorityContext).Err|context|(context.Context).Deadline|transaction.ctx.Deadline()":                                                               1,
-		"preflight_runner.go|(*nonSourceAuthorityContext).Err|context|(context.Context).Err|transaction.ctx.Err()":                                                                         1,
-		"preflight_runner.go|(*nonSourceAuthorityContext).Err|errors|Is|errors.Is(callerError,context.Canceled)":                                                                           1,
-		"preflight_runner.go|(*nonSourceAuthorityContext).Value|context|(context.Context).Value|ctx.transaction.ctx.Value(key)":                                                            1,
-		"preflight_runner.go|nonSourceDeadlineReached|errors|Is|errors.Is(contextError,context.DeadlineExceeded)":                                                                          1,
-		"private_errors.go|(*privateFailure).Error|<builtin>|(error).Error|failure.raw.Error()":                                                                                            1,
-		"process.go|(realProcessScheduler).now|time|Now|time.Now()":                                                                                                                        1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).finishSourceAdministrativeInventory|sort|Slice|sort.Slice(capture.candidates,(func(left, right int) bool literal))": 1,
-		"source_construction_inventory.go|sourceAdministrativeCandidateIndex|sort|Search|sort.Search(len(candidates),(func(index int) bool literal))":                                      1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|os|(*os.File).Fd|owner.file.Fd()":                                                                              1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|os|(*os.File).Stat|descriptor.file.Stat()":                                                          1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|os|(*os.Root).Lstat|root.root.Lstat(\".\")":                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|os|SameFile|os.SameFile(rootInfo,descriptorInfo)":                                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|os|(*os.Root).OpenRoot|parent.root.OpenRoot(name)":                                                             1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|golang.org/x/sys/unix|Close|unix.Close(fd)":                                                       1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|golang.org/x/sys/unix|Open|unix.Open(physicalRootPath,flags,0)":                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|os|NewFile|os.NewFile(uintptr(fd),physicalRootPath)":                                              1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|os|OpenRoot|os.OpenRoot(locator.path)":                                                                    1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|os|(*os.File).Fd|owner.file.Fd()":                                                                1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|os|(*os.Root).Open|root.root.Open(\".\")":                                                        1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|golang.org/x/sys/unix|Fstatat|unix.Fstatat(int(parent.file.Fd()),name,&stat,unix.AT_SYMLINK_NOFOLLOW)":     1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|os|(*os.File).Fd|parent.file.Fd()":                                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|os|(*os.File).ReadDir|owner.file.ReadDir(sourceDirectoryReadBatchSize)":                                   1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|os|(*os.File).ReadAt|owner.file.ReadAt(content,0)":                                                         1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|golang.org/x/sys/unix|Fstat|unix.Fstat(int(owner.file.Fd()),&stat)":                                           1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|os|(*os.File).Fd|owner.file.Fd()":                                                                             1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|golang.org/x/sys/unix|Fstatfs|unix.Fstatfs(int(owner.file.Fd()),&filesystem)":                                 1,
-		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|os|(*os.File).Fd|owner.file.Fd()":                                                                             1,
-		"source_primitives_darwin.go|classifyDarwinSourceOpenFailure|errors|Is|errors.Is(err,fs.ErrNotExist)":                                                                              1,
-		"source_primitives_darwin.go|classifyDarwinSourceOpenFailure|errors|Is|errors.Is(err,unix.ELOOP)":                                                                                  1,
-		"source_primitives_darwin.go|classifyDarwinSourceOpenFailure|errors|Is|errors.Is(err,unix.ENOTDIR)":                                                                                1,
-		"source_primitives_darwin.go|classifyDarwinSourcePresenceFailure|errors|Is|errors.Is(err,fs.ErrNotExist)":                                                                          1,
-		"source_primitives_darwin.go|classifyDarwinSourcePresenceFailure|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                        1,
-		"source_primitives_darwin.go|classifyDarwinSourceWalkFailure|errors|Is|errors.Is(err,context.Canceled)":                                                                            1,
-		"source_primitives_darwin.go|classifyDarwinSourceWalkFailure|errors|Is|errors.Is(err,context.DeadlineExceeded)":                                                                    1,
-		"source_primitives_darwin.go|classifyDarwinSourceWalkFailure|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                            1,
-		"source_primitives_darwin.go|darwinSourceIOCause|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                                        1,
-		"source_primitives_darwin.go|darwinSourceIOCause|errors|Is|errors.Is(err,unix.ENOTSUP)":                                                                                            1,
-		"source_primitives_darwin.go|darwinSourceIOCause|errors|Is|errors.Is(err,unix.EOPNOTSUPP)":                                                                                         1,
-		"source_primitives_darwin.go|normalizeDarwinSourceDirectoryBatch|io/fs|(io/fs.DirEntry).Name|entry.Name()":                                                                         1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|golang.org/x/sys/unix|Close|unix.Close(fd)":                                                                        1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|golang.org/x/sys/unix|Openat|unix.Openat(int(parent.file.Fd()),name,flags,0)":                                      1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|os|(*os.File).Fd|owner.file.Fd()":                                                                                  1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|os|(*os.File).Fd|parent.file.Fd()":                                                                                 1,
-		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|os|NewFile|os.NewFile(uintptr(fd),name)":                                                                           1,
-		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|os|(*os.File).Close|owner.file.Close()":                                                                                 1,
-		"source_primitives.go|(*ownedSourceRoot).closeDirect|os|(*os.Root).Close|owner.root.Close()":                                                                                       1,
-		"source_primitives.go|sourceContextPrimitiveFailure|context|(context.Context).Err|ctx.Err()":                                                                                       1,
+		"filesystem_darwin.go|requireDescriptorKind|golang.org/x/sys/unix|Fstat|unix.Fstat(fd,&stat)":                                                                                                                                               1,
+		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"quoted value is missing opening quote\")":                                                                                                                                           1,
+		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"unsupported quoted escape\")":                                                                                                                                                       1,
+		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"unterminated quoted escape\")":                                                                                                                                                      1,
+		"gitconfig.go|parseConfigQuoted|fmt|Errorf|fmt.Errorf(\"unterminated quoted value\")":                                                                                                                                                       1,
+		"gitconfig.go|parseSourceConfigAssignment|fmt|Errorf|fmt.Errorf(\"assignment requires an explicit value\")":                                                                                                                                 1,
+		"gitconfig.go|parseSourceConfigAssignment|fmt|Errorf|fmt.Errorf(\"invalid variable name\")":                                                                                                                                                 1,
+		"gitconfig.go|parseSourceConfigSection|fmt|Errorf|fmt.Errorf(\"unexpected bytes after section header\")":                                                                                                                                    1,
+		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"empty section\")":                                                                                                                                                        1,
+		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"invalid section name\")":                                                                                                                                                 1,
+		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"invalid section separator\")":                                                                                                                                            1,
+		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"subsection contains a control byte\")":                                                                                                                                   1,
+		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"subsection must be quoted\")":                                                                                                                                            1,
+		"gitconfig.go|parseSourceConfigSectionBody|fmt|Errorf|fmt.Errorf(\"unexpected bytes after subsection\")":                                                                                                                                    1,
+		"gitconfig.go|parseSourceConfigSyntax|fmt|Sprintf|fmt.Sprintf(\"source config assignment on line %d\",lineNumber + 1)":                                                                                                                      1,
+		"gitconfig.go|parseSourceConfigSyntax|fmt|Sprintf|fmt.Sprintf(\"source config line %d\",lineNumber + 1)":                                                                                                                                    1,
+		"gitconfig.go|parseSourceConfigSyntax|fmt|Sprintf|fmt.Sprintf(\"source config section on line %d\",lineNumber + 1)":                                                                                                                         1,
+		"gitconfig.go|parseSourceConfigValue|fmt|Errorf|fmt.Errorf(\"unterminated quoted value\")":                                                                                                                                                  1,
+		"gitconfig.go|parseSourceConfigValue|fmt|Errorf|fmt.Errorf(\"value contains a control byte\")":                                                                                                                                              1,
+		"gitconfig.go|sourceConfigEscapedByte|fmt|Errorf|fmt.Errorf(\"unsupported or control-producing value escape\")":                                                                                                                             1,
+		"gitconfig.go|sourceConfigEscapedByte|fmt|Errorf|fmt.Errorf(\"unterminated value escape\")":                                                                                                                                                 1,
+		"gitconfig.go|sourceConfigSectionClosing|fmt|Errorf|fmt.Errorf(\"unterminated section header\")":                                                                                                                                            1,
+		"gitconfig.go|validateSourceConfigLineBytes|fmt|Errorf|fmt.Errorf(\"forbidden control byte 0x%02x\",value)":                                                                                                                                 1,
+		"gitconfig.go|validFullGitRefName|slices|ContainsFunc|slices.ContainsFunc([]byte(name),invalidGitRefByte)":                                                                                                                                  1,
+		"private_errors.go|failWith|fmt|Errorf|fmt.Errorf(\"%s: %w\",message,err)":                                                                                                                                                                  1,
+		"preflight_runner.go|(*nonSourceAuthorityContext).Deadline|context|(context.Context).Deadline|ctx.transaction.ctx.Deadline()":                                                                                                               1,
+		"preflight_runner.go|(*nonSourceAuthorityContext).Done|context|(context.Context).Done|ctx.transaction.ctx.Done()":                                                                                                                           1,
+		"preflight_runner.go|(*nonSourceAuthorityContext).Err|context|(context.Context).Deadline|transaction.ctx.Deadline()":                                                                                                                        1,
+		"preflight_runner.go|(*nonSourceAuthorityContext).Err|context|(context.Context).Err|transaction.ctx.Err()":                                                                                                                                  1,
+		"preflight_runner.go|(*nonSourceAuthorityContext).Err|errors|Is|errors.Is(callerError,context.Canceled)":                                                                                                                                    1,
+		"preflight_runner.go|(*nonSourceAuthorityContext).Value|context|(context.Context).Value|ctx.transaction.ctx.Value(key)":                                                                                                                     1,
+		"preflight_runner.go|nonSourceDeadlineReached|errors|Is|errors.Is(contextError,context.DeadlineExceeded)":                                                                                                                                   1,
+		"private_errors.go|(*privateFailure).Error|<builtin>|(error).Error|failure.raw.Error()":                                                                                                                                                     1,
+		"process.go|(realProcessScheduler).now|time|Now|time.Now()":                                                                                                                                                                                 1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).finishSourceAdministrativeInventory|sort|Slice|sort.Slice(capture.candidates,(func(left, right int) bool literal))":                                                          1,
+		"source_construction_inventory.go|sourceAdministrativeCandidateIndex|sort|Search|sort.Search(len(candidates),(func(index int) bool literal))":                                                                                               1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).acquireRawACL|os|(*os.File).Fd|owner.file.Fd()":                                                                                                                                       1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|os|(*os.File).Stat|descriptor.file.Stat()":                                                                                                                   1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|os|(*os.Root).Lstat|root.root.Lstat(\".\")":                                                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).compareRootAndDescriptor|os|SameFile|os.SameFile(rootInfo,descriptorInfo)":                                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openChildRoot|os|(*os.Root).OpenRoot|parent.root.OpenRoot(name)":                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|golang.org/x/sys/unix|Close|unix.Close(fd)":                                                                                                                1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|golang.org/x/sys/unix|Open|unix.Open(physicalRootPath,flags,0)":                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openPhysicalRootDescriptor|os|NewFile|os.NewFile(uintptr(fd),physicalRootPath)":                                                                                                       1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRepositoryRoot|os|OpenRoot|os.OpenRoot(locator.path)":                                                                                                                             1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|os|(*os.File).Fd|owner.file.Fd()":                                                                                                                         1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).openRootDirectoryDescriptor|os|(*os.Root).Open|root.root.Open(\".\")":                                                                                                                 1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|golang.org/x/sys/unix|Fstatat|unix.Fstatat(int(parent.file.Fd()),name,&stat,unix.AT_SYMLINK_NOFOLLOW)":                                                              1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).probeRelativeKind|os|(*os.File).Fd|parent.file.Fd()":                                                                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readDirectoryBatch|os|(*os.File).ReadDir|owner.file.ReadDir(sourceDirectoryReadBatchSize)":                                                                                            1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                                                                          1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactForParse|errors|Is|errors.Is(err,io.EOF)":                                                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForParse|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                                                                        1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForParse|errors|Is|errors.Is(err,io.EOF)":                                                                                                                                  1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForHash|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                                                                         1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).readExactAtForHash|errors|Is|errors.Is(err,io.EOF)":                                                                                                                                   1,
+		"source_primitives_darwin.go|readDarwinSourceDescriptorAt|os|(*os.File).ReadAt|owner.file.ReadAt(content,offset)":                                                                                                                           1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|golang.org/x/sys/unix|Fstat|unix.Fstat(int(owner.file.Fd()),&stat)":                                                                                                    1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statDescriptor|os|(*os.File).Fd|owner.file.Fd()":                                                                                                                                      1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|golang.org/x/sys/unix|Fstatfs|unix.Fstatfs(int(owner.file.Fd()),&filesystem)":                                                                                          1,
+		"source_primitives_darwin.go|(darwinSourcePrimitives).statFilesystem|os|(*os.File).Fd|owner.file.Fd()":                                                                                                                                      1,
+		"source_primitives_darwin.go|classifyDarwinSourceOpenFailure|errors|Is|errors.Is(err,fs.ErrNotExist)":                                                                                                                                       1,
+		"source_primitives_darwin.go|classifyDarwinSourceOpenFailure|errors|Is|errors.Is(err,unix.ELOOP)":                                                                                                                                           1,
+		"source_primitives_darwin.go|classifyDarwinSourceOpenFailure|errors|Is|errors.Is(err,unix.ENOTDIR)":                                                                                                                                         1,
+		"source_primitives_darwin.go|classifyDarwinSourcePresenceFailure|errors|Is|errors.Is(err,fs.ErrNotExist)":                                                                                                                                   1,
+		"source_primitives_darwin.go|classifyDarwinSourcePresenceFailure|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                                                                                 1,
+		"source_primitives_darwin.go|classifyDarwinSourceWalkFailure|errors|Is|errors.Is(err,context.Canceled)":                                                                                                                                     1,
+		"source_primitives_darwin.go|classifyDarwinSourceWalkFailure|errors|Is|errors.Is(err,context.DeadlineExceeded)":                                                                                                                             1,
+		"source_primitives_darwin.go|classifyDarwinSourceWalkFailure|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                                                                                     1,
+		"source_primitives_darwin.go|darwinSourceIOCause|errors|Is|errors.Is(err,fs.ErrPermission)":                                                                                                                                                 1,
+		"source_primitives_darwin.go|darwinSourceIOCause|errors|Is|errors.Is(err,unix.ENOTSUP)":                                                                                                                                                     1,
+		"source_primitives_darwin.go|darwinSourceIOCause|errors|Is|errors.Is(err,unix.EOPNOTSUPP)":                                                                                                                                                  1,
+		"source_primitives_darwin.go|normalizeDarwinSourceDirectoryBatch|io/fs|(io/fs.DirEntry).Name|entry.Name()":                                                                                                                                  1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|golang.org/x/sys/unix|Close|unix.Close(fd)":                                                                                                                                 1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|golang.org/x/sys/unix|Openat|unix.Openat(int(parent.file.Fd()),name,flags,0)":                                                                                               1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|os|(*os.File).Fd|owner.file.Fd()":                                                                                                                                           1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|os|(*os.File).Fd|parent.file.Fd()":                                                                                                                                          1,
+		"source_primitives_darwin.go|openDarwinSourceRelativeDescriptor|os|NewFile|os.NewFile(uintptr(fd),name)":                                                                                                                                    1,
+		"source_primitives.go|(*ownedSourceDescriptor).closeDirect|os|(*os.File).Close|owner.file.Close()":                                                                                                                                          1,
+		"source_primitives.go|(*ownedSourceRoot).closeDirect|os|(*os.Root).Close|owner.root.Close()":                                                                                                                                                1,
+		"source_primitives.go|sourceContextPrimitiveFailure|context|(context.Context).Err|ctx.Err()":                                                                                                                                                1,
 	}
 	allowedBodylessSites := map[string]int{
 		"private_errors.go|privateCauses|github.com/vbonnet/dear-agent/internal/buildauthority|" +
@@ -11038,7 +11355,9 @@ func sourceConstructionPackageInitializationViolations(
 		"bytes":                 true,
 		"context":               true,
 		"crypto/rand":           true,
+		"crypto/sha1":           true,
 		"crypto/sha256":         true,
+		"encoding":              true,
 		"encoding/binary":       true,
 		"encoding/hex":          true,
 		"encoding/json":         true,
@@ -11414,22 +11733,28 @@ func sourceConstructionReadOnlyParameterViolations(
 			"flags":    true,
 		},
 		"(*sourceConstructionBuilder).captureSourceAdministrativeEntry": {
-			"capture": true,
-			"parent":  true,
-			"prefix":  true,
-			"name":    true,
+			"capture":  true,
+			"parent":   true,
+			"prefix":   true,
+			"name":     true,
+			"presence": true,
+			"sealed":   true,
 		},
 		"(*sourceConstructionBuilder).captureSourceAdministrativeDirectory": {
 			"capture":    true,
 			"descriptor": true,
 			"prefix":     true,
 			"before":     true,
+			"presence":   true,
+			"sealed":     true,
 		},
 		"(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry": {
 			"capture":   true,
 			"parent":    true,
 			"name":      true,
 			"candidate": true,
+			"presence":  true,
+			"sealed":    true,
 		},
 		"(*sourceConstructionBuilder).finishSourceAdministrativeInventory": {
 			"capture": true,
@@ -12744,20 +13069,24 @@ func sourceConstructionAdministrativeEntryPathProved(
 	file *ast.File,
 ) bool {
 	if function == nil || function.Body == nil || file == nil ||
-		len(function.Body.List) != 10 {
+		len(function.Body.List) != 13 {
 		return false
 	}
+	info := typedPackage.TypesInfo
 	prefixObject := sourceConstructionNamedParameterObject(
-		typedPackage.TypesInfo,
+		info,
 		function,
 		"prefix",
 	)
 	nameObject := sourceConstructionNamedParameterObject(
-		typedPackage.TypesInfo,
+		info,
 		function,
 		"name",
 	)
-	if prefixObject == nil || nameObject == nil {
+	presenceObject := sourceConstructionNamedParameterObject(info, function, "presence")
+	sealedObject := sourceConstructionNamedParameterObject(info, function, "sealed")
+	if prefixObject == nil || nameObject == nil || presenceObject == nil ||
+		sealedObject == nil {
 		return false
 	}
 	assignment, ok := function.Body.List[0].(*ast.AssignStmt)
@@ -12769,11 +13098,11 @@ func sourceConstructionAdministrativeEntryPathProved(
 	if !ok || sourceConstructionCallFingerprint(call) !=
 		"sourceAdministrativeChildPath(builder.ctx,prefix,name)" || len(call.Args) != 3 ||
 		!sourceConstructionDirectObjectExpression(
-			typedPackage.TypesInfo,
+			info,
 			call.Args[1],
 			prefixObject,
 		) || !sourceConstructionDirectObjectExpression(
-		typedPackage.TypesInfo,
+		info,
 		call.Args[2],
 		nameObject,
 	) {
@@ -12783,21 +13112,38 @@ func sourceConstructionAdministrativeEntryPathProved(
 	if !ok || pathIdentifier.Name != "path" {
 		return false
 	}
-	pathObject := typedPackage.TypesInfo.Defs[pathIdentifier]
+	pathObject := info.Defs[pathIdentifier]
 	if pathObject == nil {
 		return false
 	}
+	sealedRowObject, presentObject, ok :=
+		sourceConstructionAdministrativeEntrySealedLookupProved(
+			info,
+			function.Body.List[2],
+			function.Body.List[3],
+			sealedObject,
+			pathObject,
+		)
+	if !ok {
+		return false
+	}
 	expectedNameUses := map[string]int{
-		"argument:2:sourceAdministrativeChildPath(builder.ctx,prefix,name)":                                 1,
-		"argument:2:builder.primitives.probeRelativeKind(builder.ctx,parent,name,sourceInitialWalkPresent)": 1,
-		"argument:2:builder.captureOpenedSourceAdministrativeEntry(capture,parent,name,candidate)":          1,
+		"argument:2:sourceAdministrativeChildPath(builder.ctx,prefix,name)":                 1,
+		"argument:2:builder.primitives.probeRelativeKind(builder.ctx,parent,name,presence)": 1,
+		"argument:2:builder.captureOpenedSourceAdministrativeEntry(capture,parent,name,candidate," +
+			"presence,sealed)": 1,
 	}
 	expectedPrefixUses := map[string]int{
 		"argument:1:sourceAdministrativeChildPath(builder.ctx,prefix,name)": 1,
 	}
 	observedNameUses := make(map[string]int)
 	observedPrefixUses := make(map[string]int)
-	pathUses := 0
+	pathCompositeUses := 0
+	pathLookupUses := 0
+	presenceUses := 0
+	sealedUses := 0
+	sealedRowUses := 0
+	presentUses := 0
 	parents := sourceConstructionParentNodes(file)
 	valid := true
 	ast.Inspect(function.Body, func(node ast.Node) bool {
@@ -12805,7 +13151,7 @@ func sourceConstructionAdministrativeEntryPathProved(
 		if !ok {
 			return true
 		}
-		object := typedPackage.TypesInfo.Uses[identifier]
+		object := info.Uses[identifier]
 		switch object {
 		case nameObject:
 			site := sourceConstructionDirectCallArgumentSite(identifier, parents)
@@ -12820,6 +13166,11 @@ func sourceConstructionAdministrativeEntryPathProved(
 				valid = false
 			}
 		case pathObject:
+			if sourceConstructionDirectCallArgumentSite(identifier, parents) ==
+				"argument:1:sourceAdministrativeRowByPath(sealed.rows,path)" {
+				pathLookupUses++
+				return true
+			}
 			keyValue, ok := parents[identifier].(*ast.KeyValueExpr)
 			if !ok || keyValue.Value != identifier {
 				valid = false
@@ -12829,12 +13180,21 @@ func sourceConstructionAdministrativeEntryPathProved(
 			if !keyOK || key.Name != "path" {
 				valid = false
 			} else {
-				pathUses++
+				pathCompositeUses++
 			}
+		case presenceObject:
+			presenceUses++
+		case sealedObject:
+			sealedUses++
+		case sealedRowObject:
+			sealedRowUses++
+		case presentObject:
+			presentUses++
 		}
 		return true
 	})
-	if !valid || pathUses != 1 {
+	if !valid || pathCompositeUses != 1 || pathLookupUses != 1 ||
+		presenceUses != 2 || sealedUses != 4 || sealedRowUses != 2 || presentUses != 2 {
 		return false
 	}
 	for site, want := range expectedNameUses {
@@ -12848,11 +13208,99 @@ func sourceConstructionAdministrativeEntryPathProved(
 		}
 	}
 	return sourceConstructionAdministrativeEntryTailProved(
-		typedPackage.TypesInfo,
+		info,
 		function,
 		nameObject,
 		pathObject,
+		presenceObject,
+		sealedObject,
+		sealedRowObject,
 	)
+}
+
+func sourceConstructionAdministrativeEntrySealedLookupProved(
+	info *types.Info,
+	declaration ast.Stmt,
+	statement ast.Stmt,
+	sealedObject types.Object,
+	pathObject types.Object,
+) (types.Object, types.Object, bool) {
+	decl, ok := declaration.(*ast.DeclStmt)
+	if !ok || decl.Decl == nil {
+		return nil, nil, false
+	}
+	generation, ok := decl.Decl.(*ast.GenDecl)
+	if !ok || generation.Tok != token.VAR || len(generation.Specs) != 1 {
+		return nil, nil, false
+	}
+	rowSpec, ok := generation.Specs[0].(*ast.ValueSpec)
+	if !ok || len(rowSpec.Names) != 1 || len(rowSpec.Values) != 0 ||
+		rowSpec.Names[0].Name != "sealedRow" || types.ExprString(rowSpec.Type) !=
+		"sourceAdministrativeRow" {
+		return nil, nil, false
+	}
+	sealedRowObject := info.Defs[rowSpec.Names[0]]
+	branch, ok := statement.(*ast.IfStmt)
+	if sealedRowObject == nil || !ok || branch.Init != nil || branch.Else != nil ||
+		len(branch.Body.List) != 3 || !sourceConstructionObjectNilComparison(
+		info,
+		branch.Cond,
+		sealedObject,
+		token.NEQ,
+	) {
+		return nil, nil, false
+	}
+	presentDecl, ok := branch.Body.List[0].(*ast.DeclStmt)
+	if !ok || presentDecl.Decl == nil {
+		return nil, nil, false
+	}
+	presentGeneration, ok := presentDecl.Decl.(*ast.GenDecl)
+	if !ok || presentGeneration.Tok != token.VAR || len(presentGeneration.Specs) != 1 {
+		return nil, nil, false
+	}
+	presentSpec, ok := presentGeneration.Specs[0].(*ast.ValueSpec)
+	if !ok || len(presentSpec.Names) != 1 || len(presentSpec.Values) != 0 ||
+		presentSpec.Names[0].Name != "present" || types.ExprString(presentSpec.Type) != "bool" {
+		return nil, nil, false
+	}
+	presentObject := info.Defs[presentSpec.Names[0]]
+	assignment, ok := branch.Body.List[1].(*ast.AssignStmt)
+	if presentObject == nil || !ok || assignment.Tok != token.ASSIGN ||
+		len(assignment.Lhs) != 2 || len(assignment.Rhs) != 1 ||
+		!sourceConstructionDirectObjectExpression(info, assignment.Lhs[0], sealedRowObject) ||
+		!sourceConstructionDirectObjectExpression(info, assignment.Lhs[1], presentObject) {
+		return nil, nil, false
+	}
+	lookup, ok := assignment.Rhs[0].(*ast.CallExpr)
+	if !ok || sourceConstructionCallFingerprint(lookup) !=
+		"sourceAdministrativeRowByPath(sealed.rows,path)" || len(lookup.Args) != 2 ||
+		!sourceConstructionSelectorChainProved(info, lookup.Args[0], sealedObject, "rows") ||
+		!sourceConstructionDirectObjectExpression(info, lookup.Args[1], pathObject) {
+		return nil, nil, false
+	}
+	absent, ok := branch.Body.List[2].(*ast.IfStmt)
+	if !ok || absent.Init != nil || absent.Else != nil || len(absent.Body.List) != 2 {
+		return nil, nil, false
+	}
+	notPresent, ok := sourceConstructionUnparenthesizedExpression(absent.Cond).(*ast.UnaryExpr)
+	if !ok || notPresent.Op != token.NOT || !sourceConstructionDirectObjectExpression(
+		info,
+		notPresent.X,
+		presentObject,
+	) {
+		return nil, nil, false
+	}
+	add, ok := absent.Body.List[0].(*ast.ExprStmt)
+	if !ok {
+		return nil, nil, false
+	}
+	addCall, ok := add.X.(*ast.CallExpr)
+	if !ok || sourceConstructionCallFingerprint(addCall) !=
+		"builder.outcome.addPrimitive(newSourcePrimitiveFailure(OperationCompare, CauseUnstable))" ||
+		!sourceConstructionSingleBooleanReturnProved(absent.Body.List[1], "false") {
+		return nil, nil, false
+	}
+	return sealedRowObject, presentObject, true
 }
 
 func sourceConstructionAdministrativeEntryTailProved(
@@ -12860,10 +13308,24 @@ func sourceConstructionAdministrativeEntryTailProved(
 	function *ast.FuncDecl,
 	nameObject types.Object,
 	pathObject types.Object,
+	presenceObject types.Object,
+	sealedObject types.Object,
+	sealedRowObject types.Object,
 ) bool {
 	statements := function.Body.List
-	probeAssignment, ok := statements[4].(*ast.AssignStmt)
-	if !ok || probeAssignment.Tok != token.DEFINE || len(probeAssignment.Lhs) != 3 {
+	probeAssignment, ok := statements[6].(*ast.AssignStmt)
+	if !ok || probeAssignment.Tok != token.DEFINE || len(probeAssignment.Lhs) != 3 ||
+		len(probeAssignment.Rhs) != 1 {
+		return false
+	}
+	probe, ok := probeAssignment.Rhs[0].(*ast.CallExpr)
+	if !ok || sourceConstructionCallFingerprint(probe) !=
+		"builder.primitives.probeRelativeKind(builder.ctx,parent,name,presence)" ||
+		len(probe.Args) != 4 || !sourceConstructionDirectObjectExpression(
+		info,
+		probe.Args[2],
+		nameObject,
+	) || !sourceConstructionDirectObjectExpression(info, probe.Args[3], presenceObject) {
 		return false
 	}
 	kind, ok := probeAssignment.Lhs[0].(*ast.Ident)
@@ -12871,7 +13333,16 @@ func sourceConstructionAdministrativeEntryTailProved(
 		return false
 	}
 	kindObject := info.Defs[kind]
-	candidateAssignment, ok := statements[7].(*ast.AssignStmt)
+	if !sourceConstructionAdministrativeEntrySealedKindProved(
+		info,
+		statements[9],
+		sealedObject,
+		sealedRowObject,
+		kindObject,
+	) {
+		return false
+	}
+	candidateAssignment, ok := statements[10].(*ast.AssignStmt)
 	if !ok || candidateAssignment.Tok != token.DEFINE ||
 		len(candidateAssignment.Lhs) != 1 || len(candidateAssignment.Rhs) != 1 ||
 		kindObject == nil || !sourceConstructionAdministrativeCandidateConstructionProved(
@@ -12887,7 +13358,7 @@ func sourceConstructionAdministrativeEntryTailProved(
 		return false
 	}
 	candidateObject := info.Defs[candidate]
-	branch, ok := statements[8].(*ast.IfStmt)
+	branch, ok := statements[11].(*ast.IfStmt)
 	if candidateObject == nil || !ok || branch.Init != nil || branch.Else != nil ||
 		types.ExprString(branch.Cond) !=
 			"kind == sourceObservedSymlink || kind == sourceObservedSpecial" ||
@@ -12906,18 +13377,20 @@ func sourceConstructionAdministrativeEntryTailProved(
 	if !ok || len(trueReturn.Results) != 1 || types.ExprString(trueReturn.Results[0]) != "true" {
 		return false
 	}
-	finalReturn, ok := statements[9].(*ast.ReturnStmt)
+	finalReturn, ok := statements[12].(*ast.ReturnStmt)
 	if !ok || len(finalReturn.Results) != 1 {
 		return false
 	}
 	opened, ok := finalReturn.Results[0].(*ast.CallExpr)
 	if !ok || sourceConstructionCallFingerprint(opened) !=
-		"builder.captureOpenedSourceAdministrativeEntry(capture,parent,name,candidate)" ||
-		len(opened.Args) != 4 || !sourceConstructionDirectObjectExpression(
+		"builder.captureOpenedSourceAdministrativeEntry(capture,parent,name,candidate,"+
+			"presence,sealed)" || len(opened.Args) != 6 || !sourceConstructionDirectObjectExpression(
 		info,
 		opened.Args[2],
 		nameObject,
-	) || !sourceConstructionDirectObjectExpression(info, opened.Args[3], candidateObject) {
+	) || !sourceConstructionDirectObjectExpression(info, opened.Args[3], candidateObject) ||
+		!sourceConstructionDirectObjectExpression(info, opened.Args[4], presenceObject) ||
+		!sourceConstructionDirectObjectExpression(info, opened.Args[5], sealedObject) {
 		return false
 	}
 	return sourceConstructionAdministrativeBooleanReturnsProved(
@@ -12925,6 +13398,50 @@ func sourceConstructionAdministrativeEntryTailProved(
 		trueReturn,
 		finalReturn,
 	)
+}
+
+func sourceConstructionAdministrativeEntrySealedKindProved(
+	info *types.Info,
+	statement ast.Stmt,
+	sealedObject types.Object,
+	sealedRowObject types.Object,
+	kindObject types.Object,
+) bool {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Init != nil || branch.Else != nil || len(branch.Body.List) != 2 ||
+		types.ExprString(branch.Cond) != "sealed != nil && kind != sealedRow.kind" {
+		return false
+	}
+	condition, ok := sourceConstructionUnparenthesizedExpression(branch.Cond).(*ast.BinaryExpr)
+	if !ok || condition.Op != token.LAND || !sourceConstructionObjectNilComparison(
+		info,
+		condition.X,
+		sealedObject,
+		token.NEQ,
+	) {
+		return false
+	}
+	mismatch, ok := sourceConstructionUnparenthesizedExpression(condition.Y).(*ast.BinaryExpr)
+	if !ok || mismatch.Op != token.NEQ || !sourceConstructionDirectObjectExpression(
+		info,
+		mismatch.X,
+		kindObject,
+	) || !sourceConstructionSelectorChainProved(
+		info,
+		mismatch.Y,
+		sealedRowObject,
+		"kind",
+	) {
+		return false
+	}
+	add, ok := branch.Body.List[0].(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	addCall, ok := add.X.(*ast.CallExpr)
+	return ok && sourceConstructionCallFingerprint(addCall) ==
+		"builder.outcome.addPrimitive(newSourcePrimitiveFailure(OperationCompare, CauseUnstable))" &&
+		sourceConstructionSingleBooleanReturnProved(branch.Body.List[1], "false")
 }
 
 func sourceConstructionAdministrativeCandidateConstructionProved(
@@ -12983,35 +13500,42 @@ func sourceConstructionAdministrativeOpenedPathProved(
 	file *ast.File,
 ) bool {
 	if function == nil || function.Body == nil || file == nil ||
-		len(function.Body.List) != 14 {
+		len(function.Body.List) != 15 {
 		return false
 	}
+	info := typedPackage.TypesInfo
 	nameObject := sourceConstructionNamedParameterObject(
-		typedPackage.TypesInfo,
+		info,
 		function,
 		"name",
 	)
 	candidateObject := sourceConstructionNamedParameterObject(
-		typedPackage.TypesInfo,
+		info,
 		function,
 		"candidate",
 	)
-	if nameObject == nil || candidateObject == nil {
+	presenceObject := sourceConstructionNamedParameterObject(info, function, "presence")
+	sealedObject := sourceConstructionNamedParameterObject(info, function, "sealed")
+	if nameObject == nil || candidateObject == nil || presenceObject == nil ||
+		sealedObject == nil {
 		return false
 	}
-	const nameSite = "argument:2:builder.primitives.openRelativeNoFollow(builder.ctx,parent,name,candidate.row.kind,sourceInitialWalkPresent)"
+	const nameSite = "argument:2:builder.primitives.openRelativeNoFollow(builder.ctx,parent,name,candidate.row.kind,presence)"
 	expectedCandidateUses := map[string]int{
-		"argument:3:builder.primitives.openRelativeNoFollow(builder.ctx,parent,name,candidate.row.kind,sourceInitialWalkPresent)":                     1,
+		"argument:3:builder.primitives.openRelativeNoFollow(builder.ctx,parent,name,candidate.row.kind,presence)":                                     1,
 		"argument:1:builder.observeSourceDescriptorWithoutPolicy(descriptor,candidate.row.kind)":                                                      1,
+		"argument:1:sourceAdministrativeRowByPath(sealed.rows,candidate.row.path)":                                                                    1,
 		"binary:candidate.row.kind == sourceObservedRegular":                                                                                          1,
 		"argument:1:capture.chargeRegular(builder.ctx,candidate.row.path,observation.evidence.snapshot.size,builder.owner.config.claim.objectFormat)": 1,
 		"binary:candidate.row.kind == sourceObservedDirectory":                                                                                        2,
 		"assignment:candidate.row.evidence":                                                                                                           1,
 		"assignment:candidate.acl":                                                                                                                    1,
 		"argument:1:append(capture.candidates,candidate)":                                                                                             1,
-		"argument:2:builder.captureSourceAdministrativeDirectory(capture,descriptor,candidate.row.path,observation)":                                  1,
+		"argument:2:builder.captureSourceAdministrativeDirectory(capture,descriptor,candidate.row.path,observation,presence,sealed)":                  1,
 	}
 	nameUses := 0
+	presenceUses := 0
+	sealedUses := 0
 	observedCandidateUses := make(map[string]int)
 	valid := true
 	parents := sourceConstructionParentNodes(file)
@@ -13020,7 +13544,7 @@ func sourceConstructionAdministrativeOpenedPathProved(
 		if !ok {
 			return true
 		}
-		object := typedPackage.TypesInfo.Uses[current]
+		object := info.Uses[current]
 		if object == candidateObject {
 			site := sourceConstructionAdministrativeCandidateUseSite(current, parents)
 			observedCandidateUses[site]++
@@ -13030,6 +13554,12 @@ func sourceConstructionAdministrativeOpenedPathProved(
 			return true
 		}
 		if object != nameObject {
+			if object == presenceObject {
+				presenceUses++
+			}
+			if object == sealedObject {
+				sealedUses++
+			}
 			return true
 		}
 		if sourceConstructionDirectCallArgumentSite(current, parents) != nameSite {
@@ -13039,7 +13569,7 @@ func sourceConstructionAdministrativeOpenedPathProved(
 		}
 		return true
 	})
-	if !valid || nameUses != 1 {
+	if !valid || nameUses != 1 || presenceUses != 2 || sealedUses != 3 {
 		return false
 	}
 	for site, want := range expectedCandidateUses {
@@ -13048,16 +13578,20 @@ func sourceConstructionAdministrativeOpenedPathProved(
 		}
 	}
 	if !sourceConstructionAdministrativeOpenedMiddleProved(
-		typedPackage.TypesInfo,
+		info,
 		function,
 		candidateObject,
+		presenceObject,
+		sealedObject,
 	) {
 		return false
 	}
 	return sourceConstructionAdministrativeOpenedTailProved(
-		typedPackage.TypesInfo,
+		info,
 		function,
 		candidateObject,
+		presenceObject,
+		sealedObject,
 	)
 }
 
@@ -13065,6 +13599,8 @@ func sourceConstructionAdministrativeOpenedMiddleProved(
 	info *types.Info,
 	function *ast.FuncDecl,
 	candidateObject types.Object,
+	presenceObject types.Object,
+	sealedObject types.Object,
 ) bool {
 	statements := function.Body.List
 	descriptorAssignment, ok := statements[0].(*ast.AssignStmt)
@@ -13078,7 +13614,8 @@ func sourceConstructionAdministrativeOpenedMiddleProved(
 	if !descriptorOK || !failureOK || !callOK || descriptor.Name != "descriptor" ||
 		openFailure.Name != "openFailure" || sourceConstructionCallFingerprint(openCall) !=
 		"builder.primitives.openRelativeNoFollow(builder.ctx,parent,name,"+
-			"candidate.row.kind,sourceInitialWalkPresent)" {
+			"candidate.row.kind,presence)" || len(openCall.Args) != 5 ||
+		!sourceConstructionDirectObjectExpression(info, openCall.Args[4], presenceObject) {
 		return false
 	}
 	descriptorObject := info.Defs[descriptor]
@@ -13125,23 +13662,31 @@ func sourceConstructionAdministrativeOpenedMiddleProved(
 	observationObject := info.Defs[observation]
 	failureObject := info.Defs[failure]
 	if observationObject == nil || failureObject == nil ||
-		!sourceConstructionAdministrativeObservationGuardProved(
+		!sourceConstructionAdministrativeSealedObservationProved(
 			info,
 			statements[4],
+			failureObject,
+			sealedObject,
+			candidateObject,
+			observationObject,
+		) ||
+		!sourceConstructionAdministrativeObservationGuardProved(
+			info,
+			statements[5],
 			failureObject,
 			"failure == nil && candidate.row.kind == sourceObservedRegular",
 			"capture.chargeRegular(builder.ctx,candidate.row.path,"+
 				"observation.evidence.snapshot.size,builder.owner.config.claim.objectFormat)",
 		) || !sourceConstructionAdministrativeObservationGuardProved(
 		info,
-		statements[5],
+		statements[6],
 		failureObject,
 		"failure == nil && candidate.row.kind == sourceObservedDirectory",
 		"validateInitialSourceChild(builder.ctx,builder.owner.git.root.evidence,"+
 			"observation.evidence)",
 	) || !sourceConstructionAdministrativeObservationFailureProved(
 		info,
-		statements[6],
+		statements[7],
 		failureObject,
 		descriptorObject,
 	) {
@@ -13149,14 +13694,14 @@ func sourceConstructionAdministrativeOpenedMiddleProved(
 	}
 	if !sourceConstructionSelectorAssignmentProved(
 		info,
-		statements[7],
+		statements[8],
 		candidateObject,
 		[]string{"row", "evidence"},
 		observationObject,
 		[]string{"evidence"},
 	) || !sourceConstructionSelectorAssignmentProved(
 		info,
-		statements[8],
+		statements[9],
 		candidateObject,
 		[]string{"acl"},
 		observationObject,
@@ -13164,7 +13709,7 @@ func sourceConstructionAdministrativeOpenedMiddleProved(
 	) {
 		return false
 	}
-	appendAssignment, ok := statements[9].(*ast.AssignStmt)
+	appendAssignment, ok := statements[10].(*ast.AssignStmt)
 	if !ok || appendAssignment.Tok != token.ASSIGN || len(appendAssignment.Lhs) != 1 ||
 		len(appendAssignment.Rhs) != 1 || types.ExprString(appendAssignment.Lhs[0]) !=
 		"capture.candidates" {
@@ -13174,6 +13719,117 @@ func sourceConstructionAdministrativeOpenedMiddleProved(
 	return ok && sourceConstructionCallFingerprint(appendCall) ==
 		"append(capture.candidates,candidate)" && len(appendCall.Args) == 2 &&
 		sourceConstructionDirectObjectExpression(info, appendCall.Args[1], candidateObject)
+}
+
+func sourceConstructionAdministrativeSealedObservationProved(
+	info *types.Info,
+	statement ast.Stmt,
+	failureObject types.Object,
+	sealedObject types.Object,
+	candidateObject types.Object,
+	observationObject types.Object,
+) bool {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Init != nil || len(branch.Body.List) != 2 ||
+		types.ExprString(branch.Cond) != "failure == nil && sealed != nil" {
+		return false
+	}
+	condition, ok := sourceConstructionUnparenthesizedExpression(branch.Cond).(*ast.BinaryExpr)
+	if !ok || condition.Op != token.LAND || !sourceConstructionObjectNilComparison(
+		info,
+		condition.X,
+		failureObject,
+		token.EQL,
+	) || !sourceConstructionObjectNilComparison(info, condition.Y, sealedObject, token.NEQ) {
+		return false
+	}
+	lookupAssignment, ok := branch.Body.List[0].(*ast.AssignStmt)
+	if !ok || lookupAssignment.Tok != token.DEFINE || len(lookupAssignment.Lhs) != 2 ||
+		len(lookupAssignment.Rhs) != 1 {
+		return false
+	}
+	sealedRow, rowOK := lookupAssignment.Lhs[0].(*ast.Ident)
+	present, presentOK := lookupAssignment.Lhs[1].(*ast.Ident)
+	lookup, callOK := lookupAssignment.Rhs[0].(*ast.CallExpr)
+	if !rowOK || !presentOK || !callOK || sealedRow.Name != "sealedRow" ||
+		present.Name != "present" || sourceConstructionCallFingerprint(lookup) !=
+		"sourceAdministrativeRowByPath(sealed.rows,candidate.row.path)" ||
+		len(lookup.Args) != 2 || !sourceConstructionSelectorChainProved(
+		info,
+		lookup.Args[0],
+		sealedObject,
+		"rows",
+	) || !sourceConstructionSelectorChainProved(
+		info,
+		lookup.Args[1],
+		candidateObject,
+		"row",
+		"path",
+	) {
+		return false
+	}
+	sealedRowObject := info.Defs[sealedRow]
+	presentObject := info.Defs[present]
+	comparison, ok := branch.Body.List[1].(*ast.IfStmt)
+	if sealedRowObject == nil || presentObject == nil || !ok || comparison.Init != nil ||
+		len(comparison.Body.List) != 1 {
+		return false
+	}
+	notPresent, ok := sourceConstructionUnparenthesizedExpression(comparison.Cond).(*ast.UnaryExpr)
+	if !ok || notPresent.Op != token.NOT || !sourceConstructionDirectObjectExpression(
+		info,
+		notPresent.X,
+		presentObject,
+	) {
+		return false
+	}
+	absentAssignment, ok := comparison.Body.List[0].(*ast.AssignStmt)
+	if !ok || absentAssignment.Tok != token.ASSIGN || len(absentAssignment.Lhs) != 1 ||
+		len(absentAssignment.Rhs) != 1 || !sourceConstructionDirectObjectExpression(
+		info,
+		absentAssignment.Lhs[0],
+		failureObject,
+	) {
+		return false
+	}
+	absentFailure, ok := absentAssignment.Rhs[0].(*ast.CallExpr)
+	if !ok || sourceConstructionCallFingerprint(absentFailure) !=
+		"newSourcePrimitiveFailure(OperationCompare,CauseUnstable)" {
+		return false
+	}
+	alternative, ok := comparison.Else.(*ast.BlockStmt)
+	if !ok || len(alternative.List) != 1 {
+		return false
+	}
+	compareAssignment, ok := alternative.List[0].(*ast.AssignStmt)
+	if !ok || compareAssignment.Tok != token.ASSIGN || len(compareAssignment.Lhs) != 1 ||
+		len(compareAssignment.Rhs) != 1 || !sourceConstructionDirectObjectExpression(
+		info,
+		compareAssignment.Lhs[0],
+		failureObject,
+	) {
+		return false
+	}
+	compare, ok := compareAssignment.Rhs[0].(*ast.CallExpr)
+	return ok && sourceConstructionCallFingerprint(compare) ==
+		"compareRevalidatedSourceAdministrativeEvidence(builder.ctx,"+
+			"builder.owner.config.claim.objectFormat,sealedRow.evidence,"+
+			"observation.evidence,sealedRow)" && len(compare.Args) == 5 &&
+		sourceConstructionSelectorChainProved(
+			info,
+			compare.Args[2],
+			sealedRowObject,
+			"evidence",
+		) && sourceConstructionSelectorChainProved(
+		info,
+		compare.Args[3],
+		observationObject,
+		"evidence",
+	) && sourceConstructionDirectObjectExpression(
+		info,
+		compare.Args[4],
+		sealedRowObject,
+	)
 }
 
 func sourceConstructionOpenedNilDescriptorFailureProved(
@@ -13358,9 +14014,11 @@ func sourceConstructionAdministrativeOpenedTailProved(
 	info *types.Info,
 	function *ast.FuncDecl,
 	candidateObject types.Object,
+	presenceObject types.Object,
+	sealedObject types.Object,
 ) bool {
 	statements := function.Body.List
-	capturedAssignment, ok := statements[10].(*ast.AssignStmt)
+	capturedAssignment, ok := statements[11].(*ast.AssignStmt)
 	if !ok || capturedAssignment.Tok != token.DEFINE ||
 		len(capturedAssignment.Lhs) != 1 || len(capturedAssignment.Rhs) != 1 ||
 		types.ExprString(capturedAssignment.Rhs[0]) != "true" {
@@ -13371,7 +14029,7 @@ func sourceConstructionAdministrativeOpenedTailProved(
 		return false
 	}
 	capturedObject := info.Defs[captured]
-	recursion, ok := statements[11].(*ast.IfStmt)
+	recursion, ok := statements[12].(*ast.IfStmt)
 	if capturedObject == nil || !ok || recursion.Init != nil || recursion.Else != nil ||
 		types.ExprString(recursion.Cond) !=
 			"candidate.row.kind == sourceObservedDirectory" || len(recursion.Body.List) != 1 {
@@ -13389,10 +14047,13 @@ func sourceConstructionAdministrativeOpenedTailProved(
 	}
 	recurse, ok := recurseAssignment.Rhs[0].(*ast.CallExpr)
 	if !ok || sourceConstructionCallFingerprint(recurse) !=
-		"builder.captureSourceAdministrativeDirectory(capture,descriptor,candidate.row.path,observation)" {
+		"builder.captureSourceAdministrativeDirectory(capture,descriptor,candidate.row.path,"+
+			"observation,presence,sealed)" || len(recurse.Args) != 6 ||
+		!sourceConstructionDirectObjectExpression(info, recurse.Args[4], presenceObject) ||
+		!sourceConstructionDirectObjectExpression(info, recurse.Args[5], sealedObject) {
 		return false
 	}
-	closeAssignment, ok := statements[12].(*ast.AssignStmt)
+	closeAssignment, ok := statements[13].(*ast.AssignStmt)
 	if !ok || closeAssignment.Tok != token.DEFINE || len(closeAssignment.Lhs) != 1 ||
 		len(closeAssignment.Rhs) != 1 {
 		return false
@@ -13405,7 +14066,7 @@ func sourceConstructionAdministrativeOpenedTailProved(
 		return false
 	}
 	closeFailedObject := info.Defs[closeFailed]
-	finalReturn, ok := statements[13].(*ast.ReturnStmt)
+	finalReturn, ok := statements[14].(*ast.ReturnStmt)
 	if closeFailedObject == nil || !ok || len(finalReturn.Results) != 1 {
 		return false
 	}
@@ -13442,19 +14103,21 @@ func sourceConstructionAdministrativeDirectoryDispatchProved(
 	captureObject := sourceConstructionNamedParameterObject(info, function, "capture")
 	descriptorObject := sourceConstructionNamedParameterObject(info, function, "descriptor")
 	beforeObject := sourceConstructionNamedParameterObject(info, function, "before")
+	presenceObject := sourceConstructionNamedParameterObject(info, function, "presence")
+	sealedObject := sourceConstructionNamedParameterObject(info, function, "sealed")
 	prefixObject := sourceConstructionNamedParameterObject(
 		info,
 		function,
 		"prefix",
 	)
 	if captureObject == nil || descriptorObject == nil || beforeObject == nil ||
-		prefixObject == nil {
+		presenceObject == nil || sealedObject == nil || prefixObject == nil {
 		return false
 	}
 	initial, ok := function.Body.List[0].(*ast.IfStmt)
 	if !ok || initial.Init != nil || initial.Else != nil ||
 		types.ExprString(initial.Cond) !=
-			`capture == nil || descriptor == nil || prefix == "" || descriptor.kind != sourceObservedDirectory` ||
+			`capture == nil || descriptor == nil || prefix == "" || descriptor.kind != sourceObservedDirectory || !validSourceAdministrativeCaptureMode(presence, sealed)` ||
 		len(initial.Body.List) != 2 {
 		return false
 	}
@@ -13514,8 +14177,8 @@ func sourceConstructionAdministrativeDirectoryDispatchProved(
 	}
 	dispatchCall, ok := sourceConstructionUnparenthesizedExpression(negated.X).(*ast.CallExpr)
 	if !ok || sourceConstructionCallFingerprint(dispatchCall) !=
-		"builder.captureSourceAdministrativeEntry(capture,descriptor,prefix,name)" ||
-		len(dispatchCall.Args) != 4 || !sourceConstructionDirectObjectExpression(
+		"builder.captureSourceAdministrativeEntry(capture,descriptor,prefix,name,presence,sealed)" ||
+		len(dispatchCall.Args) != 6 || !sourceConstructionDirectObjectExpression(
 		info,
 		dispatchCall.Args[0],
 		captureObject,
@@ -13531,6 +14194,14 @@ func sourceConstructionAdministrativeDirectoryDispatchProved(
 		info,
 		dispatchCall.Args[3],
 		rangeNameObject,
+	) || !sourceConstructionDirectObjectExpression(
+		info,
+		dispatchCall.Args[4],
+		presenceObject,
+	) || !sourceConstructionDirectObjectExpression(
+		info,
+		dispatchCall.Args[5],
+		sealedObject,
 	) || !sourceConstructionSingleBooleanReturnProved(
 		dispatchFailure.Body.List[0],
 		"false",
@@ -13617,6 +14288,8 @@ func sourceConstructionAdministrativeDirectoryDispatchProved(
 		prefixObject:    2,
 		namesObject:     1,
 		rangeNameObject: 1,
+		presenceObject:  2,
+		sealedObject:    2,
 	}
 	gotUses := make(map[types.Object]int)
 	for identifier, object := range info.Uses {
@@ -13749,12 +14422,15 @@ func sourceConstructionAdministrativeRowMutationViolations(
 		return []string{"typed buildauthority package is unavailable for administrative row mutation audit"}
 	}
 	allowedComposites := map[string]int{
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|sourceAdministrativeCandidate": 1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|sourceAdministrativeRow":       1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|sourceAdministrativeCandidate":    1,
-		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|sourceAdministrativeRow":          1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|sourceAdministrativeCandidate":                1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).retainSourceAdministrativeInventory|sourceAdministrativeRow":                      1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|sourceAdministrativeCandidate":                   1,
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|sourceAdministrativeRow":                         1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|sourceAdministrativeCandidate": 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).captureRevalidatedSourceAdministrativeInventory|sourceAdministrativeRow":       1,
 	}
 	allowedAssignments := map[string]int{
+		"source_construction_inventory.go|(*sourceConstructionBuilder).captureSourceAdministrativeEntry|sourceAdministrativeRow|sealedRow=sourceAdministrativeRowByPath(sealed.rows,path)":                                    1,
 		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|row.evidence|candidate.row.evidence=observation.evidence":                                                       1,
 		"source_construction_inventory.go|(*sourceConstructionBuilder).captureOpenedSourceAdministrativeEntry|candidate.acl|candidate.acl=observation.acl":                                                                    1,
 		"source_construction_inventory.go|classifySourceAdministrativeCandidates|row.class|candidate.row.class=classifySourceAdministrativePath(candidate.row.path,sourceAdministrativeEntryKind(candidate.row.kind),format)": 1,
@@ -13763,6 +14439,7 @@ func sourceConstructionAdministrativeRowMutationViolations(
 		"source_construction_inventory.go|(*sourceAdministrativeInventory).validateRows|sourceAdministrativeRow|fixed.objects=row":                                                                                            1,
 		"source_construction_inventory.go|(*sourceAdministrativeInventory).validateRows|sourceAdministrativeRow|fixed.packedRefs=row":                                                                                         1,
 		"source_construction_inventory.go|(*sourceConstructionBuilder).finishSourceAdministrativeInventory|sourceAdministrativeRow|rows[index]=capture.candidates[index].row":                                                 1,
+		"source_construction_revalidation.go|(*sourceConstructionBuilder).finishRevalidatedSourceAdministrativeInventory|sourceAdministrativeRow|rows[index]=capture.candidates[index].row":                                   1,
 	}
 	allowedAddresses := map[string]int{
 		"source_construction_inventory.go|classifySourceAdministrativeCandidates|sourceAdministrativeCandidate|&candidates[index]":      1,
@@ -17387,6 +18064,24 @@ func sourceConstructionAllowPrimitiveMethods(
 		"readExactForParse": {
 			parameters: []string{"context.Context", "*ownedSourceDescriptor", "[]byte"},
 			results:    []string{"*sourcePrimitiveFailure"},
+		},
+		"readExactAtForParse": {
+			parameters: []string{
+				"context.Context",
+				"*ownedSourceDescriptor",
+				"int64",
+				"[]byte",
+			},
+			results: []string{"*sourcePrimitiveFailure"},
+		},
+		"readExactAtForHash": {
+			parameters: []string{
+				"context.Context",
+				"*ownedSourceDescriptor",
+				"int64",
+				"[]byte",
+			},
+			results: []string{"*sourcePrimitiveFailure"},
 		},
 		"hashBytes": {
 			parameters: []string{"context.Context", "[]byte"},

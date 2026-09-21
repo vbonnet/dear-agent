@@ -237,6 +237,8 @@ func (builder *sourceConstructionBuilder) retainSourceAdministrativeInventory() 
 		scan,
 		".git",
 		rootObservation,
+		sourceInitialWalkPresent,
+		nil,
 	)
 	closeFailed := builder.closeTransientDescriptor(scan)
 	if !walked || closeFailed {
@@ -392,9 +394,12 @@ func (builder *sourceConstructionBuilder) captureSourceAdministrativeDirectory(
 	descriptor *ownedSourceDescriptor,
 	prefix string,
 	before sourceDescriptorObservation,
+	presence sourcePresenceMode,
+	sealed *sourceAdministrativeInventory,
 ) bool {
 	if capture == nil || descriptor == nil || prefix == "" ||
-		descriptor.kind != sourceObservedDirectory {
+		descriptor.kind != sourceObservedDirectory ||
+		!validSourceAdministrativeCaptureMode(presence, sealed) {
 		builder.failInvariant()
 		return false
 	}
@@ -408,7 +413,14 @@ func (builder *sourceConstructionBuilder) captureSourceAdministrativeDirectory(
 			return false
 		}
 		for _, name := range names {
-			if !builder.captureSourceAdministrativeEntry(capture, descriptor, prefix, name) {
+			if !builder.captureSourceAdministrativeEntry(
+				capture,
+				descriptor,
+				prefix,
+				name,
+				presence,
+				sealed,
+			) {
 				return false
 			}
 		}
@@ -439,11 +451,25 @@ func (builder *sourceConstructionBuilder) captureSourceAdministrativeEntry(
 	parent *ownedSourceDescriptor,
 	prefix string,
 	name string,
+	presence sourcePresenceMode,
+	sealed *sourceAdministrativeInventory,
 ) bool {
 	path, failure := sourceAdministrativeChildPath(builder.ctx, prefix, name)
 	if failure != nil {
 		builder.outcome.addPrimitive(failure)
 		return false
+	}
+	var sealedRow sourceAdministrativeRow
+	if sealed != nil {
+		var present bool
+		sealedRow, present = sourceAdministrativeRowByPath(sealed.rows, path)
+		if !present {
+			builder.outcome.addPrimitive(newSourcePrimitiveFailure(
+				OperationCompare,
+				CauseUnstable,
+			))
+			return false
+		}
 	}
 	if capture.descendants >= maxRepositoryEntries {
 		builder.outcome.addPrimitive(newSourcePrimitiveFailure(OperationWalk, CauseLimit))
@@ -455,7 +481,7 @@ func (builder *sourceConstructionBuilder) captureSourceAdministrativeEntry(
 		builder.ctx,
 		parent,
 		name,
-		sourceInitialWalkPresent,
+		presence,
 	)
 	if failure != nil {
 		builder.outcome.addPrimitive(failure)
@@ -463,6 +489,13 @@ func (builder *sourceConstructionBuilder) captureSourceAdministrativeEntry(
 	}
 	if !present || !kind.valid() {
 		builder.failInvariant()
+		return false
+	}
+	if sealed != nil && kind != sealedRow.kind {
+		builder.outcome.addPrimitive(newSourcePrimitiveFailure(
+			OperationCompare,
+			CauseUnstable,
+		))
 		return false
 	}
 	candidate := sourceAdministrativeCandidate{row: sourceAdministrativeRow{
@@ -478,6 +511,8 @@ func (builder *sourceConstructionBuilder) captureSourceAdministrativeEntry(
 		parent,
 		name,
 		candidate,
+		presence,
+		sealed,
 	)
 }
 
@@ -486,13 +521,15 @@ func (builder *sourceConstructionBuilder) captureOpenedSourceAdministrativeEntry
 	parent *ownedSourceDescriptor,
 	name string,
 	candidate sourceAdministrativeCandidate,
+	presence sourcePresenceMode,
+	sealed *sourceAdministrativeInventory,
 ) bool {
 	descriptor, openFailure := builder.primitives.openRelativeNoFollow(
 		builder.ctx,
 		parent,
 		name,
 		candidate.row.kind,
-		sourceInitialWalkPresent,
+		presence,
 	)
 	if descriptor == nil {
 		if openFailure == nil {
@@ -511,6 +548,23 @@ func (builder *sourceConstructionBuilder) captureOpenedSourceAdministrativeEntry
 		descriptor,
 		candidate.row.kind,
 	)
+	if failure == nil && sealed != nil {
+		sealedRow, present := sourceAdministrativeRowByPath(
+			sealed.rows,
+			candidate.row.path,
+		)
+		if !present {
+			failure = newSourcePrimitiveFailure(OperationCompare, CauseUnstable)
+		} else {
+			failure = compareRevalidatedSourceAdministrativeEvidence(
+				builder.ctx,
+				builder.owner.config.claim.objectFormat,
+				sealedRow.evidence,
+				observation.evidence,
+				sealedRow,
+			)
+		}
+	}
 	if failure == nil && candidate.row.kind == sourceObservedRegular {
 		failure = capture.chargeRegular(
 			builder.ctx,
@@ -546,10 +600,20 @@ func (builder *sourceConstructionBuilder) captureOpenedSourceAdministrativeEntry
 			descriptor,
 			candidate.row.path,
 			observation,
+			presence,
+			sealed,
 		)
 	}
 	closeFailed := builder.closeTransientDescriptor(descriptor)
 	return captured && !closeFailed
+}
+
+func validSourceAdministrativeCaptureMode(
+	presence sourcePresenceMode,
+	sealed *sourceAdministrativeInventory,
+) bool {
+	return (presence == sourceInitialWalkPresent && sealed == nil) ||
+		(presence == sourceRevalidatePresent && sealed != nil)
 }
 
 func (capture *sourceAdministrativeCapture) chargeRegular(
