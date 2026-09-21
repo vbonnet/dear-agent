@@ -16,13 +16,11 @@
 package safegit
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/url"
 	"os/exec"
+	"strings"
 )
 
 // stackProbeTimeout bounds the stack-membership query. It is a single
@@ -127,93 +125,38 @@ func mergeArgsForTransport(stacked bool, prNum int, repo, headSHA string) []stri
 	return BuildMergeArgs(prNum, repo, headSHA)
 }
 
-// errRemoteHeadAdvanced reports that the branch moved past the merged commit,
-// so deleting it would discard work that the merge never contained.
-var errRemoteHeadAdvanced = errors.New("remote head advanced past the merged commit")
-
-// deleteRemoteHeadBranch removes the merged head branch from the provider.
+// remoteHeadDeletionCovered reports whether the provider deletes merged head
+// branches on its own for this repository.
 //
-// The GraphQL route passes --delete-branch, which deletes the remote branch as
-// well as the local one. The async REST route has no such flag, and
-// delete_branch_on_merge cannot be assumed: safe-merge --repo can target a
-// repository where that setting is off, and the local post-merge cleanup only
-// touches local git state. So the async route deletes the remote head itself.
+// The GraphQL route passes --delete-branch; the async REST route has no such
+// flag, and safe-merge deliberately does not delete the branch itself. GitHub's
+// ref deletion takes no compare-and-swap, so a read-then-delete would still
+// erase a branch that advanced between the two calls, destroying commits the
+// merge never contained. A pull request opened from a fork makes it worse: the
+// head branch lives in another repository, so a delete issued against the base
+// repo either misses or removes an unrelated same-named ref.
 //
-// The deletion is conditional on the live ref still pointing at mergedSHA. An
-// async merge can complete between confirmation polls, and anything that
-// advances the branch in that gap would otherwise be destroyed by an
-// unconditional delete. GitHub's ref deletion takes no compare-and-swap, so
-// this is a read followed by a delete rather than an atomic lease: it narrows
-// the window instead of closing it, and it fails safe by leaving the branch.
-//
-// A branch the repository setting already removed is not an error, so a missing
-// ref is success.
-func deleteRemoteHeadBranch(ctx context.Context, repo, branch, mergedSHA string) error {
-	if branch == "" {
-		return fmt.Errorf("deleting remote head: no branch resolved")
-	}
-	if !validGitOID(mergedSHA) {
-		return fmt.Errorf("deleting remote head %q: a merged commit is required to guard the delete", branch)
-	}
+// delete_branch_on_merge has neither problem: the provider applies it to the
+// real head repository, atomically, as part of the merge. So the system asks
+// whether that is on, and when it is not, it says the branch remains instead of
+// racing to remove it.
+func remoteHeadDeletionCovered(ctx context.Context, repo string) (bool, error) {
 	repoPath, err := escapedRepoPath(repo)
 	if err != nil {
-		return err
+		return false, err
 	}
-	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stackProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stackProbeTimeout)
 	defer cancel()
-
-	live, err := readRemoteHeadOID(deleteCtx, repoPath, branch)
-	if err != nil {
-		if errors.Is(err, errRemoteHeadMissing) {
-			return nil
-		}
-		return fmt.Errorf("deleting remote head %q: %w", branch, err)
-	}
-	if live != mergedSHA {
-		return fmt.Errorf("%w: %s is at %s, not the merged %s",
-			errRemoteHeadAdvanced, branch, live, mergedSHA)
-	}
-
-	cmd := exec.CommandContext(deleteCtx, "gh", "api", "-X", "DELETE",
-		fmt.Sprintf("repos/%s/git/refs/heads/%s", repoPath, url.PathEscape(branch)))
-	cmd.WaitDelay = stackProbeWaitDelay
-	if _, err := runCommand(cmd); err != nil {
-		if ctxErr := deleteCtx.Err(); ctxErr != nil {
-			return fmt.Errorf("deleting remote head %q: %w", branch, ctxErr)
-		}
-		if isMissingRefResponse([]byte(err.Error())) {
-			return nil
-		}
-		return fmt.Errorf("deleting remote head %q: %w", branch, err)
-	}
-	return nil
-}
-
-// errRemoteHeadMissing reports that the ref is already gone, which the
-// repository's own delete_branch_on_merge can cause.
-var errRemoteHeadMissing = errors.New("remote head is already deleted")
-
-// readRemoteHeadOID resolves the commit a remote branch currently points at.
-func readRemoteHeadOID(ctx context.Context, repoPath, branch string) (string, error) {
-	cmd := exec.CommandContext(ctx, "gh", "api", liveRefEndpoint(repoPath, branch))
+	cmd := exec.CommandContext(probeCtx, "gh", "api",
+		fmt.Sprintf("repos/%s", repoPath),
+		"--jq", ".delete_branch_on_merge")
 	cmd.WaitDelay = stackProbeWaitDelay
 	out, err := runCommand(cmd)
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return "", ctxErr
+		if ctxErr := probeCtx.Err(); ctxErr != nil {
+			return false, ctxErr
 		}
-		if isMissingRefResponse([]byte(err.Error())) {
-			return "", errRemoteHeadMissing
-		}
-		return "", err
+		return false, fmt.Errorf("reading delete_branch_on_merge for %s: %w", repo, err)
 	}
-	return parseLiveRefOID(out, "refs/heads/"+branch)
-}
-
-// isMissingRefResponse reports whether the provider answered that the ref is
-// already gone.
-func isMissingRefResponse(out []byte) bool {
-	lower := bytes.ToLower(out)
-	return bytes.Contains(lower, []byte("not found")) ||
-		bytes.Contains(lower, []byte("reference does not exist"))
+	return strings.TrimSpace(string(out)) == "true", nil
 }

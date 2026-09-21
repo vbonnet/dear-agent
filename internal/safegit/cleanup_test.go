@@ -712,11 +712,9 @@ case "$*" in
   "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{"message":"Updating pull request branch."}' ;;
-  "api repos/owner/repo/git/ref/heads%2Fcleanup-topic")
-    printf '%s\n' '{"ref":"refs/heads/cleanup-topic","object":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"commit"}}' ;;
-  "api -X DELETE repos/owner/repo/git/refs/heads/cleanup-topic")
-    printf '%s\n' delete-remote >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
-    printf '%s\n' '{}' ;;
+  "api repos/owner/repo --jq .delete_branch_on_merge")
+    printf '%s\n' retention-check >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
+    printf '%s\n' true ;;
   "api repos/owner/repo/pulls/42")
     if [ "${SAFEGIT_ATTEMPT_MERGE_STACKED:-}" = "1" ]; then
       printf '%s\n' '{"number":42,"stack":{"id":7,"number":43,"position":1,"size":2}}'
@@ -809,10 +807,10 @@ esac
 	}
 	if outcome == attemptMergeOutcomeSuccess {
 		wantOrder += "confirm\n"
-		// The async route has no --delete-branch, so it removes the remote head
-		// itself once the merge is confirmed.
+		// The async route has no --delete-branch, so it reports whether the
+		// provider will remove the remote head rather than deleting it itself.
 		if stacked {
-			wantOrder += "delete-remote\n"
+			wantOrder += "retention-check\n"
 		}
 	}
 	if got, want := string(order), wantOrder; got != want {

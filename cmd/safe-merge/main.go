@@ -170,7 +170,9 @@ asynchronous REST merge instead, because the provider refuses the auto-merge
 mutation for those. Either way the exact head SHA is pinned, and diagnostics
 name the interface that was actually used.
 
-Post-merge: local worktree and branch are cleaned up automatically.
+Post-merge: local worktree and branch are cleaned up automatically. The remote
+branch is left to the repository's delete_branch_on_merge setting; when that is
+off, the stacked route says so rather than deleting the branch itself.
 `
 
 // WatchInterval is re-exported to allow overriding in tests.

@@ -2,7 +2,6 @@ package safegit
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +180,51 @@ func TestMergeArgsForTransport_MakesNoProviderCall(t *testing.T) {
 	}
 }
 
+func TestRemoteHeadDeletionCovered_ReadsTheProviderSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply string
+		want  bool
+	}{
+		{name: "enabled", reply: "true", want: true},
+		{name: "disabled", reply: "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			script := "#!/bin/sh\nprintf '%s\\n' '" + tc.reply + "'\n"
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+				t.Fatalf("write fake gh: %v", err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			got, err := remoteHeadDeletionCovered(context.Background(), "o/r")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("remoteHeadDeletionCovered() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// An unreadable setting must not be reported as "the provider will clean up".
+func TestRemoteHeadDeletionCovered_ReportsProbeFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	covered, err := remoteHeadDeletionCovered(context.Background(), "o/r")
+	if err == nil {
+		t.Fatal("an unreadable delete_branch_on_merge must be reported, not assumed")
+	}
+	if covered {
+		t.Fatal("a failed probe must not claim the provider deletes merged branches")
+	}
+}
+
 // The stack probe runs on every merge, so an unbounded wait here would stall
 // every merge, not just this one. It must bound pipe draining the way the other
 // mandatory provider read does.
@@ -204,96 +248,5 @@ func TestResolveStackMembership_BoundsDescendantHeldPipe(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("stack probe blocked on a descendant-held pipe; it must set a " +
 			"finite WaitDelay or a hung credential helper stalls every merge")
-	}
-}
-
-func TestDeleteRemoteHeadBranch_RequiresABranch(t *testing.T) {
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "", mergedOID); err == nil {
-		t.Fatal("deleting an unnamed remote head must be an error, not a silent no-op")
-	}
-}
-
-func TestDeleteRemoteHeadBranch_TreatsAlreadyDeletedAsSuccess(t *testing.T) {
-	dir := t.TempDir()
-	// delete_branch_on_merge may have removed it first; that is not a failure.
-	script := "#!/bin/sh\nprintf '%s\\n' 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", mergedOID); err != nil {
-		t.Fatalf("an already-deleted remote head must be success; got %v", err)
-	}
-}
-
-func TestDeleteRemoteHeadBranch_EscapesSlashesInBranchName(t *testing.T) {
-	// A slash-bearing branch must not be split into a different ref path.
-	deleted := fakeGHRefServer(t, "fix/some-topic", mergedOID)
-
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "fix/some-topic", mergedOID); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got, err := os.ReadFile(deleted)
-	if err != nil {
-		t.Fatalf("read recorded delete args: %v", err)
-	}
-	if !strings.Contains(string(got), "refs/heads/fix%2Fsome-topic") {
-		t.Fatalf("branch name must be path-escaped so it cannot address a different ref; got %s", got)
-	}
-}
-
-const mergedOID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-
-func fakeGHRefServer(t *testing.T, branch, refOID string) (deletedMarker string) {
-	t.Helper()
-	dir := t.TempDir()
-	deletedMarker = filepath.Join(dir, "deleted")
-	script := `#!/bin/sh
-for a in "$@"; do
-  if [ "$a" = "DELETE" ]; then
-    printf '%s' "$*" > ` + deletedMarker + `
-    printf '{}'
-    exit 0
-  fi
-done
-printf '{"ref":"refs/heads/` + branch + `","object":{"sha":"` + refOID + `","type":"commit"}}'
-`
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return deletedMarker
-}
-
-func TestDeleteRemoteHeadBranch_RequiresAMergedCommit(t *testing.T) {
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", ""); err == nil {
-		t.Fatal("deleting without a merged commit must be an error — an unguarded " +
-			"delete can discard commits pushed after the merge")
-	}
-}
-
-// An async merge can complete between confirmation polls. If the branch moved
-// in that gap, deleting it would destroy work the merge never contained.
-func TestDeleteRemoteHeadBranch_RefusesWhenBranchAdvanced(t *testing.T) {
-	deleted := fakeGHRefServer(t, "topic", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-
-	err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", mergedOID)
-	if !errors.Is(err, errRemoteHeadAdvanced) {
-		t.Fatalf("error = %v, want errRemoteHeadAdvanced", err)
-	}
-	if _, statErr := os.Stat(deleted); statErr == nil {
-		t.Fatal("an advanced branch must not be deleted — that discards post-merge commits")
-	}
-}
-
-func TestDeleteRemoteHeadBranch_DeletesWhenStillAtMergedCommit(t *testing.T) {
-	deleted := fakeGHRefServer(t, "topic", mergedOID)
-
-	if err := deleteRemoteHeadBranch(context.Background(), "o/r", "topic", mergedOID); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, statErr := os.Stat(deleted); statErr != nil {
-		t.Fatal("a branch still at the merged commit must be deleted")
 	}
 }

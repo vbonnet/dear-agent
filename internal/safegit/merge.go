@@ -422,14 +422,13 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
 				fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
 			fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
-			// The async route carries no --delete-branch, and the repository
-			// setting that would cover it cannot be assumed for an arbitrary
-			// --repo target, so remove the remote head explicitly. The merge is
-			// already confirmed, so a failure here is a warning, never a result.
+			// The async route carries no --delete-branch. safe-merge does not
+			// delete the remote head itself: the provider offers no atomic
+			// conditional delete, and a fork's head lives in another repository.
+			// Report instead, so a surviving branch is visible rather than
+			// silently left behind or unsafely removed.
 			if stacked {
-				if err := deleteRemoteHeadBranch(ctx, cfg.Repo, headInfo.Branch, headInfo.SHA); err != nil {
-					fmt.Fprintf(os.Stderr, "safe-merge: cleanup: %v\n", err)
-				}
+				reportRemoteHeadRetention(ctx, cfg.Repo, headInfo.Branch)
 			}
 		},
 	)
@@ -448,6 +447,22 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		}
 	}
 	return nil
+}
+
+// reportRemoteHeadRetention tells the caller whether the merged head branch
+// will survive, so branch cleanup is an informed decision rather than a
+// surprise. It never fails the merge: the merge is confirmed by this point.
+func reportRemoteHeadRetention(ctx context.Context, repo, branch string) {
+	covered, err := remoteHeadDeletionCovered(ctx, repo)
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr,
+			"safe-merge: could not determine whether %s deletes merged branches: %v\n", repo, err)
+	case !covered:
+		fmt.Fprintf(os.Stderr,
+			"safe-merge: note: remote branch %q remains; %s does not delete merged branches\n",
+			branch, repo)
+	}
 }
 
 type mergeResult struct {
