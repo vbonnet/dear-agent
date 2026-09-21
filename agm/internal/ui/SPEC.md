@@ -19,9 +19,11 @@ themes, hierarchy views, tables, JSON output, and cleanup selection.
 
 **UI-05** When an operator form or picker has no valid choices, the system shall return an explicit error instead of presenting an unusable interaction.
 
-**UI-06** When cleanup is confirmed, the system shall return the selected archive and delete actions without performing hidden extra selections.
+**UI-06** When cleanup options have duplicate names or other display collisions, the system shall keep each visible option and action bound to its distinct stable session ID and return only the selected archive and delete targets.
 
 **UI-07** When confirmation is disabled by configuration, the system shall follow the configured non-interactive default deterministically.
+
+**UI-08** When an operator confirms batch cleanup, the system shall show every selected target with its stable session ID and the irreversible-delete warning in both standard and accessible terminal modes before accepting input; if that list cannot be displayed, the system shall not confirm.
 
 ## BDD Traceability
 

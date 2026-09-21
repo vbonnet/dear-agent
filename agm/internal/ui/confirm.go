@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -64,19 +66,25 @@ func DidYouMean(input string, matches []fuzzy.Match, cfg *Config) (string, error
 
 // ConfirmCleanup confirms batch archive/delete operations
 func ConfirmCleanup(toArchive, toDelete []string, cfg *Config) (bool, error) {
+	return confirmCleanupWithIO(toArchive, toDelete, cfg, os.Stderr, os.Stdin)
+}
+
+func confirmCleanupWithIO(toArchive, toDelete []string, cfg *Config, out io.Writer, in io.Reader) (bool, error) {
 	if len(toArchive) == 0 && len(toDelete) == 0 {
 		return false, fmt.Errorf("no sessions selected")
+	}
+	if _, err := fmt.Fprintln(out, cleanupConfirmationDescription(toArchive, toDelete)); err != nil {
+		return false, fmt.Errorf("display cleanup targets: %w", err)
 	}
 
 	var confirmed bool
 	err := huh.NewConfirm().
-		Title("Confirm cleanup").
-		Description(cleanupConfirmationDescription(toArchive, toDelete)).
+		Title("Confirm cleanup (deletions cannot be undone)").
 		Affirmative("Yes, proceed").
 		Negative("Cancel").
 		Value(&confirmed).
 		WithTheme(getTheme(cfg.UI.Theme)).
-		Run()
+		RunAccessible(out, in)
 
 	return confirmed, err
 }

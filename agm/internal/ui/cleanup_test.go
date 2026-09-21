@@ -281,7 +281,7 @@ func TestCleanupOptions_DuplicateNamesResolveBySessionID(t *testing.T) {
 	}
 	unique := &Session{Manifest: &manifest.Manifest{SessionID: "unique-id", Name: "unique-name"}}
 	uniqueChoices := buildCleanupOptions([]*Session{unique}, nil)
-	if uniqueChoices.stopped[0].Key != formatCleanupOption(unique) {
+	if uniqueChoices.stopped[0].Key != cleanupOptionLabel(unique) {
 		t.Fatalf("unique label changed: %q", uniqueChoices.stopped[0].Key)
 	}
 
@@ -294,5 +294,33 @@ func TestCleanupOptions_DuplicateNamesResolveBySessionID(t *testing.T) {
 	}
 	if result.ToDelete[0] == archivedA {
 		t.Fatal("archive-a shadowed the selected archive-b")
+	}
+}
+
+func TestCleanupOptions_SuffixShapedProjectCannotCollideWithOtherID(t *testing.T) {
+	updated := time.Now().Add(-48 * time.Hour)
+	makeSession := func(id, project string) *Session {
+		return &Session{
+			Manifest: &manifest.Manifest{
+				SessionID: id,
+				Name:      "shared-name",
+				Context:   manifest.Context{Project: project},
+			},
+			UpdatedAt: updated,
+		}
+	}
+	a := makeSession("archive-a", "/x")
+	b := makeSession("archive-b", "/x")
+	c := makeSession("archive-c", "/x [ID: archive-a]")
+	choices := buildCleanupOptions(nil, []*Session{a, b, c})
+	seen := make(map[string]struct{}, len(choices.archived))
+	for _, option := range choices.archived {
+		if _, exists := seen[option.Key]; exists {
+			t.Fatalf("different session IDs share picker key %q", option.Key)
+		}
+		seen[option.Key] = struct{}{}
+	}
+	if got := choices.result(nil, []string{choices.archived[0].Value}); len(got.ToDelete) != 1 || got.ToDelete[0] != a {
+		t.Fatalf("selection resolved to %v, want only archive-a", got.ToDelete)
 	}
 }

@@ -74,32 +74,19 @@ func buildCleanupOptions(stopped, archived []*Session) cleanupOptions {
 		archived: make([]huh.Option[string], len(archived)),
 		byID:     make(map[string]*Session, len(stopped)+len(archived)),
 	}
-	stoppedLabels := make([]string, len(stopped))
-	archivedLabels := make([]string, len(archived))
-	labelCounts := make(map[string]int, len(stopped)+len(archived))
 	for i, s := range stopped {
-		stoppedLabels[i] = formatCleanupOption(s)
-		labelCounts[stoppedLabels[i]]++
-	}
-	for i, s := range archived {
-		archivedLabels[i] = formatCleanupOption(s)
-		labelCounts[archivedLabels[i]]++
-	}
-	labelFor := func(label, id string) string {
-		if labelCounts[label] > 1 {
-			return fmt.Sprintf("%s [ID: %s]", label, id)
-		}
-		return label
-	}
-	for i, s := range stopped {
-		choices.stopped[i] = huh.NewOption(labelFor(stoppedLabels[i], s.SessionID), s.SessionID)
+		choices.stopped[i] = huh.NewOption(cleanupOptionLabel(s), s.SessionID)
 		choices.byID[s.SessionID] = s
 	}
 	for i, s := range archived {
-		choices.archived[i] = huh.NewOption(labelFor(archivedLabels[i], s.SessionID), s.SessionID)
+		choices.archived[i] = huh.NewOption(cleanupOptionLabel(s), s.SessionID)
 		choices.byID[s.SessionID] = s
 	}
 	return choices
+}
+
+func cleanupOptionLabel(s *Session) string {
+	return fmt.Sprintf("[ID: %q] %q", s.SessionID, formatCleanupOption(s))
 }
 
 func (choices cleanupOptions) result(toArchive, toDelete []string) *CleanupResult {
