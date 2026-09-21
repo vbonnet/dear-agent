@@ -12,6 +12,7 @@
 # RELATED-SPEC: cmd/gate-health/SPEC.md
 # RELATED-SPEC: cmd/bead-health/SPEC.md
 # RELATED-SPEC: cmd/sweep-health/SPEC.md
+# RELATED-SPEC: internal/gcloghealth/SPEC.md
 # RELATED-SPEC: pkg/recoveryloop/SPEC.md
 Feature: Observability package guardrails
   Observability packages must keep executable SPEC traceability because quota,
@@ -28,6 +29,7 @@ Feature: Observability package guardrails
       | cmd/gate-health               |
       | cmd/bead-health               |
       | cmd/sweep-health              |
+      | internal/gcloghealth          |
       | cmd/jaeger-health             |
       | pkg/absencealarm              |
       | cmd/merge-health              |
@@ -57,4 +59,6 @@ Feature: Observability package guardrails
       | cmd/gate-health             | GHC-03         | exit 2                  |
       | cmd/bead-health             | BH-05          | in the future           |
       | cmd/sweep-health            | SWEEP-05       | in the future           |
+      | internal/gcloghealth        | GCLH-02        | disk-watchdog           |
+      | internal/gcloghealth        | GCLH-10        | completion record       |
       | pkg/recoveryloop            | RL-21          | bound execution with a timeout |

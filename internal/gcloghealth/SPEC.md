@@ -37,6 +37,8 @@ both sides pin one literal JSONL fixture.
 
 ## Traceability
 
+- Executable BDD feature: `agm/test/bdd/features/observability_package_guardrails.feature`
+  validates co-located ownership and critical source/fallback requirements.
 - `scan_test.go` exercises source filtering, rejection reasons, explicit
   errors, future timestamps, widening, indeterminate history, legacy proof,
   historical mixed logs, malformed records, and the shared producer fixture.
