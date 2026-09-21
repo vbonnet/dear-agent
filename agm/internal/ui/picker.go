@@ -14,15 +14,7 @@ func SessionPicker(sessions []*Session, cfg *Config) (*Session, error) {
 		return nil, fmt.Errorf("no sessions available")
 	}
 
-	// Build options
-	options := make([]huh.Option[string], len(sessions))
-	sessionMap := make(map[string]*Session)
-
-	for i, s := range sessions {
-		label := formatSessionOption(s, cfg)
-		options[i] = huh.NewOption(label, s.Name)
-		sessionMap[s.Name] = s
-	}
+	options, sessionsByID := sessionPickerOptions(sessions, cfg)
 
 	// Create form with picker
 	var selected string
@@ -42,7 +34,29 @@ func SessionPicker(sessions []*Session, cfg *Config) (*Session, error) {
 	}
 
 	// Return selected session
-	return sessionMap[selected], nil
+	return sessionsByID[selected], nil
+}
+
+// sessionPickerOptions keeps display labels separate from the selected identity.
+func sessionPickerOptions(sessions []*Session, cfg *Config) ([]huh.Option[string], map[string]*Session) {
+	labels := make([]string, len(sessions))
+	labelCounts := make(map[string]int, len(sessions))
+	for i, s := range sessions {
+		labels[i] = formatSessionOption(s, cfg)
+		labelCounts[labels[i]]++
+	}
+
+	options := make([]huh.Option[string], len(sessions))
+	sessionsByID := make(map[string]*Session, len(sessions))
+	for i, s := range sessions {
+		label := labels[i]
+		if labelCounts[label] > 1 {
+			label += fmt.Sprintf(" [ID: %s]", s.SessionID)
+		}
+		options[i] = huh.NewOption(label, s.SessionID)
+		sessionsByID[s.SessionID] = s
+	}
+	return options, sessionsByID
 }
 
 // formatSessionOption formats a session for display in the picker

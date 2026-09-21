@@ -623,6 +623,11 @@ err := huh.NewSpinner().
     Run()
 ```
 
+The general session picker displays names but keys options and returned
+manifests by stable SessionID. The bare command likewise projects batch status
+by SessionID and passes the selected ID to `performResume`, so same-name rows
+cannot redirect a resume.
+
 ---
 
 ## Error Handling Architecture

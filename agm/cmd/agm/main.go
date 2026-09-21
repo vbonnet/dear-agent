@@ -602,7 +602,7 @@ func handleNoArgs(ctx context.Context, adapter *dolt.Adapter, matchingSessions [
 	if len(matchingSessions) == 1 {
 		// Single session - resume it directly
 		fmt.Printf("Resuming session: %s\n", matchingSessions[0].Name)
-		return performResume(ctx, adapter, matchingSessions[0])
+		return performResume(ctx, adapter, matchingSessions[0].SessionID)
 	}
 
 	// Multiple sessions - show picker
@@ -613,19 +613,7 @@ func handleNoArgs(ctx context.Context, adapter *dolt.Adapter, matchingSessions [
 // Use 'agm session resume <name>' or 'agm session new <name>' instead
 
 func showSessionPicker(ctx context.Context, adapter *dolt.Adapter, sessions []*manifest.Manifest, uiCfg *ui.Config) error {
-	// Convert to UI sessions with status
-	uiSessions := make([]*ui.Session, len(sessions))
-
-	// Batch compute statuses for efficiency (use injected tmuxClient)
-	statuses := session.ComputeStatusBatch(sessions, tmuxClient)
-
-	for i, m := range sessions {
-		uiSessions[i] = &ui.Session{
-			Manifest:  m,
-			Status:    statuses[m.Name],
-			UpdatedAt: m.UpdatedAt,
-		}
-	}
+	uiSessions := pickerSessions(sessions, tmuxClient)
 
 	// Show interactive picker
 	selected, err := ui.SessionPicker(uiSessions, uiCfg)
@@ -634,18 +622,31 @@ func showSessionPicker(ctx context.Context, adapter *dolt.Adapter, sessions []*m
 	}
 
 	fmt.Printf("Resuming session: %s\n", selected.Name)
-	return performResume(ctx, adapter, selected.Manifest)
+	return performResume(ctx, adapter, selected.SessionID)
+}
+
+func pickerSessions(sessions []*manifest.Manifest, tmux session.TmuxInterface) []*ui.Session {
+	statuses := session.ComputeStatusBatchByID(sessions, tmux)
+	uiSessions := make([]*ui.Session, len(sessions))
+	for i, m := range sessions {
+		uiSessions[i] = &ui.Session{
+			Manifest:  m,
+			Status:    statuses[m.SessionID],
+			UpdatedAt: m.UpdatedAt,
+		}
+	}
+	return uiSessions
 }
 
 // performResume runs the full resume workflow for an already-selected session.
 // The bare `agm` default command resolved the session from the current directory
 // (or the interactive picker), so we delegate to the same resumeResolvedSession
 // helper that backs `agm session resume` rather than reimplementing the workflow.
-func performResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest) error {
+func performResume(ctx context.Context, adapter *dolt.Adapter, sessionID string) error {
 	// Reconstruct the manifest path the same way resolveSessionIdentifier does,
 	// so resumeResolvedSession can update last-activity and auto-commit.
-	manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
-	return resumeResolvedSession(ctx, adapter, m.SessionID, manifestPath)
+	manifestPath := filepath.Join(cfg.SessionsDir, sessionID, "manifest.yaml")
+	return resumeResolvedSession(ctx, adapter, sessionID, manifestPath)
 }
 
 func runNewSessionFlow(suggestedName *string) error {
