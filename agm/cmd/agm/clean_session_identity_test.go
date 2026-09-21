@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,7 @@ func TestCleanupConfirmationLabels_KeepSelectedIDsAndEscapeNames(t *testing.T) {
 
 func TestCleanupDispatch_DuplicateNamesUseSelectedManifests(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", root)
 	previousCfg := cfg
 	cfg = &config.Config{SessionsDir: filepath.Join(root, "sessions")}
 	t.Cleanup(func() { cfg = previousCfg })
@@ -102,16 +104,27 @@ func TestCleanupDispatch_DuplicateNamesUseSelectedManifests(t *testing.T) {
 	stopped := makeSession("stopped-id", "")
 	archivedA := makeSession("archive-a", manifest.LifecycleArchived)
 	archivedB := makeSession("archive-b", manifest.LifecycleArchived)
+	listed, err := adapter.ListSessions(&dolt.SessionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]*manifest.Manifest, len(listed))
+	for _, m := range listed {
+		byID[m.SessionID] = m
+	}
 
 	selected := &ui.CleanupResult{
-		ToArchive: []*ui.Session{{Manifest: stopped}},
-		ToDelete:  []*ui.Session{{Manifest: archivedB}},
+		ToArchive: []*ui.Session{{Manifest: byID[stopped.SessionID], UpdatedAt: byID[stopped.SessionID].UpdatedAt}},
+		ToDelete:  []*ui.Session{{Manifest: byID[archivedB.SessionID], UpdatedAt: byID[archivedB.SessionID].UpdatedAt}},
 	}
-	if err := archiveSessionManifest(adapter, selected.ToArchive[0].Manifest); err != nil {
-		t.Fatalf("archive selected session: %v", err)
+	checker := &strictCleanupChecker{}
+	if applied, _, err := applyCleanupSelection(context.Background(), adapter, selected.ToArchive[0],
+		cleanupArchive, 0, checker); err != nil || !applied {
+		t.Fatalf("archive selected session: applied=%t, err=%v", applied, err)
 	}
-	if err := deleteSessionManifest(selected.ToDelete[0].Manifest); err != nil {
-		t.Fatalf("delete selected session directory: %v", err)
+	if applied, _, err := applyCleanupSelection(context.Background(), adapter, selected.ToDelete[0],
+		cleanupDelete, 0, checker); err != nil || !applied {
+		t.Fatalf("delete selected session directory: applied=%t, err=%v", applied, err)
 	}
 
 	stored, err := adapter.GetSession(stopped.SessionID)

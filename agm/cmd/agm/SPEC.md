@@ -153,6 +153,8 @@ Provide a production-ready CLI that:
 
 **CLI-67** When `agm admin doctor` starts after configuration load, the command shall project one retained physical HOME from the loaded runtime authority before its initial session-path selection, Claude-history existence check, installation checks, and per-harness health checks, use that same snapshot throughout those checks, and fail before them if the authority is unavailable.
 
+**CLI-68** After `agm admin clean` confirms a selected archive or deletion, the command shall acquire that session's stable-ID lifecycle lock, reload the selected ID, reject a changed or no-longer-eligible snapshot, and require a strict current tmux-absence check before mutation. A skipped target shall not count as cleaned; a storage or tmux-probe failure shall preserve its manifest and directory.
+
 ## Requirements
 
 ### Functional Requirements

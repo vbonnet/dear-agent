@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
@@ -70,6 +75,10 @@ Examples:
 			fmt.Println("Cancelled.")
 			return nil
 		}
+		strictTmux, ok := tmuxClient.(session.StrictSessionExistenceChecker)
+		if !ok {
+			return fmt.Errorf("cleanup requires a strict tmux session checker")
+		}
 
 		// Perform cleanup operations
 		archived := 0
@@ -77,8 +86,12 @@ Examples:
 
 		// Archive stopped sessions
 		for _, s := range result.ToArchive {
-			if err := archiveSessionManifest(adapter, s.Manifest); err != nil {
+			applied, reason, err := applyCleanupSelection(cmd.Context(), adapter, s,
+				cleanupArchive, uiCfg.Defaults.CleanupThresholdDays, strictTmux)
+			if err != nil {
 				ui.PrintWarning(fmt.Sprintf("Failed to archive %s: %v", s.Name, err))
+			} else if !applied {
+				ui.PrintWarning(fmt.Sprintf("Skipped archive of %s: %s", s.Name, reason))
 			} else {
 				archived++
 				fmt.Printf("📦 Archived: %s\n", s.Name)
@@ -87,8 +100,12 @@ Examples:
 
 		// Delete archived sessions
 		for _, s := range result.ToDelete {
-			if err := deleteSessionManifest(s.Manifest); err != nil {
+			applied, reason, err := applyCleanupSelection(cmd.Context(), adapter, s,
+				cleanupDelete, uiCfg.Defaults.ArchiveThresholdDays, strictTmux)
+			if err != nil {
 				ui.PrintWarning(fmt.Sprintf("Failed to delete %s: %v", s.Name, err))
+			} else if !applied {
+				ui.PrintWarning(fmt.Sprintf("Skipped deletion of %s: %s", s.Name, reason))
 			} else {
 				deleted++
 				fmt.Printf("🗑️  Deleted: %s\n", s.Name)
@@ -100,6 +117,99 @@ Examples:
 		ui.PrintSuccess(fmt.Sprintf("Cleanup complete: %d archived, %d deleted", archived, deleted))
 		return nil
 	},
+}
+
+type cleanupAction uint8
+
+const (
+	cleanupArchive cleanupAction = iota
+	cleanupDelete
+)
+
+// applyCleanupSelection never acts on the manifest held across the interactive
+// picker and confirmation. It shares the lifecycle lock with archive and resume.
+func applyCleanupSelection(ctx context.Context, adapter *dolt.Adapter, selected *ui.Session,
+	action cleanupAction, thresholdDays int, checker session.StrictSessionExistenceChecker) (bool, string, error) {
+	if err := validateCleanupSelection(selected, checker); err != nil {
+		return false, "", err
+	}
+	var applied bool
+	var reason string
+	err := ops.WithSessionLockContext(ctx, selected.SessionID, func() error {
+		var operationErr error
+		applied, reason, operationErr = applyLockedCleanupSelection(ctx, adapter, selected,
+			action, thresholdDays, checker)
+		return operationErr
+	})
+	return applied, reason, err
+}
+
+func validateCleanupSelection(selected *ui.Session, checker session.StrictSessionExistenceChecker) error {
+	if selected == nil || selected.Manifest == nil || selected.SessionID == "" {
+		return fmt.Errorf("cleanup selection has no stable session ID")
+	}
+	if id := selected.SessionID; id == "." || id == ".." || filepath.Base(id) != id || filepath.IsAbs(id) {
+		return fmt.Errorf("cleanup session ID %q is not a single path component", id)
+	}
+	if checker == nil {
+		return fmt.Errorf("strict tmux probe is required")
+	}
+	return nil
+}
+
+func applyLockedCleanupSelection(ctx context.Context, adapter *dolt.Adapter, selected *ui.Session,
+	action cleanupAction, thresholdDays int, checker session.StrictSessionExistenceChecker) (bool, string, error) {
+	id := selected.SessionID
+	current, err := adapter.GetSession(id)
+	if err != nil {
+		return false, "", fmt.Errorf("reload session %s: %w", id, err)
+	}
+	if current == nil || current.SessionID != id {
+		return false, "", fmt.Errorf("reload session %s: stable identity missing", id)
+	}
+	reason, err := cleanupEligibility(current, selected, action, thresholdDays)
+	if err != nil || reason != "" {
+		return false, reason, err
+	}
+	active, err := checker.HasSessionStrict(ctx, session.TmuxSessionName(current))
+	if err != nil {
+		return false, "", fmt.Errorf("check tmux session %s: %w", id, err)
+	}
+	if active {
+		return false, "session has an active tmux pane", nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, "", err
+	}
+	if action == cleanupArchive {
+		err = archiveSessionManifest(adapter, current)
+	} else {
+		err = deleteSessionManifest(current)
+	}
+	return err == nil, "", err
+}
+
+func cleanupEligibility(current *manifest.Manifest, selected *ui.Session,
+	action cleanupAction, thresholdDays int) (string, error) {
+	if !current.UpdatedAt.Equal(selected.UpdatedAt) || !reflect.DeepEqual(current, selected.Manifest) {
+		return "session changed after selection", nil
+	}
+	if thresholdDays > 0 && !current.UpdatedAt.Before(time.Now().AddDate(0, 0, -thresholdDays)) {
+		return "session no longer meets the age threshold", nil
+	}
+	switch action {
+	case cleanupArchive:
+		if current.Lifecycle != manifest.LifecycleLegacy {
+			return "session is no longer stopped", nil
+		}
+	case cleanupDelete:
+		if current.Lifecycle != manifest.LifecycleArchived {
+			return "session is no longer archived", nil
+		}
+	default:
+		return "", fmt.Errorf("unknown cleanup action %d", action)
+	}
+	return "", nil
 }
 
 func cleanupConfirmationLabels(sessions []*ui.Session) []string {
