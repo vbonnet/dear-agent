@@ -76,11 +76,13 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-30** When the set of commits a push would publish cannot be determined, the system shall report the skipped scan on the diagnostic stream and shall allow the push to proceed.
 
-**SAFEGIT-31** When a pull request belongs to a stack, the system shall merge it through the asynchronous REST merge endpoint anchored to the exact head SHA, since the provider refuses the GraphQL merge mutation for stacked pull requests and every gate would otherwise pass while the merge failed at the transport.
+**SAFEGIT-31** When a pull request belongs to a stack and clears every merge gate, the system shall complete the merge at the exact gated head, since a pull request that satisfies every gate shall not be left unmergeable by the provider interface the system chose.
 
-**SAFEGIT-32** When stack membership cannot be resolved, the system shall block the merge rather than assume a transport, since either default can merge through a path the provider refuses.
+**SAFEGIT-32** When the system cannot determine which merge interface a pull request requires, the system shall block the merge rather than assume one, since either assumption can merge through a path the provider refuses.
 
-**SAFEGIT-33** When the system resolves stack membership, the system shall complete that resolution before the base-freshness gate runs, so that no provider round trip separates the freshness proof from the merge; a probe in that position would let the target branch advance unchecked for the probe's timeout and defeat the gate's protection.
+**SAFEGIT-33** When the system merges a pull request, the base-freshness proof shall be the last provider observation the system makes before the merge, since any intervening round trip lets the target branch advance unobserved for that call's duration and voids the proof.
+
+**SAFEGIT-34** When a merge attempt fails or remains incomplete, the system shall report the interface it actually used, since naming an operation that was never attempted hides the actionable failure.
 
 ## BDD Traceability
 

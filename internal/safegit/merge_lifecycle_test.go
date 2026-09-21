@@ -12,7 +12,7 @@ import (
 )
 
 func TestMergeResultHeadChangeUsesTerminalSentinel(t *testing.T) {
-	err := validateMergeResult(mergeResult{State: "MERGED", HeadRefOid: "changed"}, "abc123")
+	err := validateMergeResult(mergeResult{State: "MERGED", HeadRefOid: "changed"}, "abc123", "gh pr merge")
 	if !errors.Is(err, errMergeHeadChanged) {
 		t.Fatalf("validateMergeResult() error = %v, want errMergeHeadChanged", err)
 	}
@@ -23,7 +23,7 @@ func TestConfirmMergedWithinSurvivesCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := confirmMergedWithin(ctx, 10*time.Second, 42, "owner/repo", "abc123"); err != nil {
+	if err := confirmMergedWithin(ctx, 10*time.Second, 42, "owner/repo", "abc123", "gh pr merge"); err != nil {
 		t.Fatalf("confirmMergedWithin() error = %v", err)
 	}
 }
@@ -31,7 +31,7 @@ func TestConfirmMergedWithinSurvivesCallerCancellation(t *testing.T) {
 func TestConfirmMergedWithinBoundsBlockingProviderQuery(t *testing.T) {
 	installMergeConfirmationFakeGH(t, `exec sleep 2`)
 	err := confirmMergedWithin(context.Background(), 50*time.Millisecond,
-		42, "owner/repo", "abc123")
+		42, "owner/repo", "abc123", "gh pr merge")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("confirmMergedWithin() error = %v, want context.DeadlineExceeded", err)
 	}
@@ -40,7 +40,7 @@ func TestConfirmMergedWithinBoundsBlockingProviderQuery(t *testing.T) {
 func TestConfirmMergedWithinBoundsDescendantHeldPipe(t *testing.T) {
 	installMergeConfirmationFakeGH(t, `sleep 3 &`)
 	err := confirmMergedWithin(context.Background(), 30*time.Second,
-		42, "owner/repo", "abc123")
+		42, "owner/repo", "abc123", "gh pr merge")
 	if !errors.Is(err, exec.ErrWaitDelay) {
 		t.Fatalf("confirmMergedWithin() error = %v, want exec.ErrWaitDelay", err)
 	}

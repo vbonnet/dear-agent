@@ -89,6 +89,16 @@ func BuildAsyncMergeArgs(prNum int, repo, headSHA string) []string {
 	}
 }
 
+// transportName labels the provider interface a merge attempt used, so a
+// failure or a pending confirmation reports the operation that was actually
+// attempted rather than one the attempt never made.
+func transportName(stacked bool) string {
+	if stacked {
+		return "asynchronous REST merge"
+	}
+	return "gh pr merge"
+}
+
 // mergeArgsForTransport builds the argv for an already-resolved transport.
 // Membership is resolved before the base-freshness gate rather than here, so
 // the freshness proof stays the last provider read before the mutation: a probe

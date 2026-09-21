@@ -405,7 +405,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	}
 	confirm := func() error {
 		return confirmMergedWithin(ctx, mergeConfirmationCommandTimeout,
-			cfg.PRNumber, cfg.Repo, headInfo.SHA)
+			cfg.PRNumber, cfg.Repo, headInfo.SHA, transportName(stacked))
 	}
 	confirmCompletion := func() error {
 		// Keep provider acceptance, exact-head polling, and cleanup in one
@@ -430,7 +430,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		switch failure.stage {
 		case providerMergeCommandStage:
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+failure.err.Error())
-			return fmt.Errorf("gh pr merge failed: %w", failure.err)
+			return fmt.Errorf("%s failed: %w", transportName(stacked), failure.err)
 		case providerMergeConfirmationStage:
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", failure.err.Error())
 			return failure.err
@@ -459,7 +459,7 @@ func confirmMergedWithin(
 	parent context.Context,
 	timeout time.Duration,
 	prNum int,
-	repo, expectedHeadSHA string,
+	repo, expectedHeadSHA, transport string,
 ) error {
 	confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	defer cancel()
@@ -480,17 +480,17 @@ func confirmMergedWithin(
 	if err := json.Unmarshal(out, &result); err != nil {
 		return fmt.Errorf("parsing merge completion state: %w", err)
 	}
-	return validateMergeResult(result, expectedHeadSHA)
+	return validateMergeResult(result, expectedHeadSHA, transport)
 }
 
-func validateMergeResult(result mergeResult, expectedHeadSHA string) error {
+func validateMergeResult(result mergeResult, expectedHeadSHA, transport string) error {
 	if result.HeadRefOid != expectedHeadSHA {
 		return fmt.Errorf("%w: expected %s, got %s", errMergeHeadChanged,
 			expectedHeadSHA, result.HeadRefOid)
 	}
 	if result.State != "MERGED" {
-		return fmt.Errorf("%w: auto-merge accepted but PR remains %s; waiting for GitHub to complete it",
-			errMergePending,
+		return fmt.Errorf("%w: %s accepted but PR remains %s; waiting for GitHub to complete it",
+			errMergePending, transport,
 			strings.ToLower(result.State))
 	}
 	return nil
