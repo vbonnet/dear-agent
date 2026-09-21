@@ -394,11 +394,14 @@ func TestRun_ExplicitSandboxErrorIsDiagnostic(t *testing.T) {
 
 func TestRun_IndeterminateTailIsNotNeverRan(t *testing.T) {
 	now := fixedTime()
-	var lines []string
+	lines := []string{fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+		now.Add(-5*time.Minute).Format(time.RFC3339))}
 	for range 12 {
 		lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive","reason":"chatter"}`,
 			now.Add(-time.Minute).Format(time.RFC3339)))
 	}
+	lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive","reason":"backdated"}`,
+		now.Add(-48*time.Hour).Format(time.RFC3339)))
 	logPath := writeLog(t, lines...)
 	d := defaultDeps()
 	d.now = fixedTime
@@ -410,5 +413,34 @@ func TestRun_IndeterminateTailIsNotNeverRan(t *testing.T) {
 	})
 	if !strings.Contains(out, "undetermined") || strings.Contains(out, "no completed") {
 		t.Fatalf("output = %q, want explicit uncertainty", out)
+	}
+}
+
+func TestRun_StaleCompletionInCappedTailIsNotDefinitiveLatest(t *testing.T) {
+	now := fixedTime()
+	lines := []string{fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+		now.Add(-5*time.Minute).Format(time.RFC3339))}
+	for range 12 {
+		lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive","reason":"chatter"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)))
+	}
+	lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+		now.Add(-48*time.Hour).Format(time.RFC3339)))
+	logPath := writeLog(t, lines...)
+	d := defaultDeps()
+	d.now = fixedTime
+	d.maxLogScanBytes, d.maxLogMaxBytes = 128, 256
+	var report Report
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath, "--json"}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "degraded" || report.LatestSweepAt != "" ||
+		!strings.Contains(report.Error, "undetermined") {
+		t.Fatalf("report = %+v, want uncertainty without latest-sweep claim", report)
 	}
 }

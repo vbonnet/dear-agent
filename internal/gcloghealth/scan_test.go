@@ -121,6 +121,58 @@ func TestScanMarksCappedRecentHistoryIndeterminate(t *testing.T) {
 	}
 }
 
+func TestScanBackdatedTailCannotHideRecentCompletion(t *testing.T) {
+	now := testNow()
+	recent := now.Add(-5 * time.Minute)
+	lines := []string{testRecord(recent, CompletedOperation, "")}
+	for range 12 {
+		lines = append(lines, testRecord(now.Add(-time.Minute), "gc_archive", `,"reason":"chatter"`))
+	}
+	lines = append(lines, testRecord(now.Add(-48*time.Hour), "gc_archive", `,"reason":"backdated"`))
+	p := testLog(t, lines...)
+	opts := testOptions(now)
+	opts.InitialBytes, opts.MaxBytes = 128, 4096
+	s, err := Scan(p, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, _ := s.Proof()
+	if !proof.Equal(recent) || s.Indeterminate {
+		t.Fatalf("summary = %+v, proof = %v, want hidden recent completion", s, proof)
+	}
+
+	opts.MaxBytes = 256
+	s, err = Scan(p, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, _ = s.Proof()
+	if !s.Truncated || !s.Indeterminate || !proof.IsZero() {
+		t.Fatalf("summary = %+v, proof = %v, want bounded uncertainty", s, proof)
+	}
+}
+
+func TestScanCappedStaleCompletionIsNotDefinitiveLatest(t *testing.T) {
+	now := testNow()
+	stale := now.Add(-48 * time.Hour)
+	lines := []string{testRecord(now.Add(-5*time.Minute), CompletedOperation, "")}
+	for range 12 {
+		lines = append(lines, testRecord(now.Add(-time.Minute), "gc_archive", `,"reason":"chatter"`))
+	}
+	lines = append(lines, testRecord(stale, CompletedOperation, ""))
+	p := testLog(t, lines...)
+	opts := testOptions(now)
+	opts.InitialBytes, opts.MaxBytes = 128, 256
+	s, err := Scan(p, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, _ := s.Proof()
+	if !s.Truncated || !s.Indeterminate || !s.LastSuccess.Equal(stale) || !proof.IsZero() {
+		t.Fatalf("summary = %+v, proof = %v, want stale observation but uncertain latest", s, proof)
+	}
+}
+
 func TestScanLegacyReapRequiresWholeLog(t *testing.T) {
 	now := testNow()
 	reap := testRecord(now.Add(-time.Minute), "sandbox_gc_reap", "")

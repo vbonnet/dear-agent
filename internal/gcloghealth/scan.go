@@ -72,6 +72,11 @@ type Summary struct {
 // Proof returns qualified scheduled-reaper evidence. Reap fallback is safe
 // only after a complete scan has found no modern completion record.
 func (s Summary) Proof() (time.Time, bool) {
+	// A stale completion in a capped tail is an observation, not proof that
+	// no fresher completion exists in unseen earlier bytes.
+	if s.Indeterminate {
+		return time.Time{}, false
+	}
 	if !s.LastSuccess.IsZero() {
 		return s.LastSuccess, false
 	}
@@ -137,15 +142,14 @@ func ignoredSourceSet(sources []string) map[string]bool {
 }
 
 func scanIsComplete(s Summary, opts Options) bool {
-	if !s.Truncated || !s.LastSuccess.IsZero() {
+	if !s.Truncated {
 		return true
 	}
-	// A reap in a truncated window is not yet legacy proof: a modern
-	// completion outside that window would disqualify the fallback.
-	if !s.LastReap.IsZero() && !s.HasCompletion {
-		return false
-	}
-	return opts.MaxAge <= 0 || (!s.OldestSeen.IsZero() && opts.Now.Sub(s.OldestSeen) > opts.MaxAge)
+	// A recent completion is positive proof. Event timestamps elsewhere in a
+	// byte tail cannot prove that unseen earlier bytes contain no fresh proof:
+	// a clock rollback or backdated append breaks that assumed ordering.
+	return opts.MaxAge > 0 && !s.LastSuccess.IsZero() &&
+		opts.Now.Sub(s.LastSuccess) <= opts.MaxAge
 }
 
 func scanWindow(path string, now time.Time, window int64, ignored map[string]bool) (Summary, error) {

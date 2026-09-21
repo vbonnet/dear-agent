@@ -3,11 +3,13 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
 - Reaper-liveness evidence: `cmd/disk-watchdog/reaper_liveness_test.go` (DW-17..DW-23),
   `cmd/disk-watchdog/reaper_liveness_review_test.go` (DW-19, DW-24, DW-25),
   `cmd/disk-watchdog/reaper_liveness_bounds_test.go` (DW-26), and
   `cmd/disk-watchdog/reaper_liveness_honesty_test.go` (DW-27 through DW-31:
-  widening past the tail, undetermined-is-not-never, self-produced heartbeats
+  widening past the tail, backdated records and capped stale completions,
+  undetermined-is-not-never, self-produced heartbeats
   ignored and liveness read before remediation, a refused reap latching the
   brake, and a negative window rejected as a usage error). The producer half of
   the refusal and producer-tag wire contracts is pinned in
@@ -109,9 +111,9 @@ would worsen an outage rather than resolve it.
 
 **DW-26** When scanning the sandbox-GC log, the system shall read at most a bounded tail of the file and shall resume at the first whole record inside that tail, so per-tick work does not grow with total log history and a long-lived host cannot starve later disk samples.
 
-**DW-27** When the bounded tail contains no proof of a completed sweep and records older than the tail exist, the system shall widen the scanned window until it finds proof, reaches the start of the file, reads a record older than the reaper-liveness window, or reaches a hard byte cap — because record volume is not bounded by elapsed time and enough unrelated session-GC records can push a heartbeat that is well inside the SLA out of a fixed tail.
+**DW-27** When the bounded tail contains no qualified completion inside the reaper-liveness window and earlier bytes exist, the system shall widen the scanned window until it finds recent proof, reaches the start of the file, or reaches a hard byte cap — because record volume is not bounded by elapsed time and a backdated tail record cannot certify unseen history.
 
-**DW-28** When the widening scan reaches its hard byte cap without proof of a completed sweep and without reading back past the reaper-liveness window, the system shall classify the reaper as stale and shall report the condition as undetermined liveness rather than as a reaper that never completed a sweep, because absent and could-not-determine are different findings with different causes.
+**DW-28** When the widening scan reaches its hard byte cap with unread earlier bytes and no recent qualified completion, the system shall classify the reaper as stale and shall report undetermined liveness rather than a definitive never-completed or latest-stale-sweep claim, because event timestamps do not prove append order.
 
 **DW-29** When evaluating reaper liveness, the system shall ignore sandbox-GC records this watchdog's own remediation produced (identified by the producer tag it sets on the sweeps it invokes), and shall evaluate liveness before invoking remediation on the same tick, so that a remediating watchdog cannot accept its own sweep as proof that the scheduled reaper is alive. A record with no producer tag is not attributed to this watchdog.
 

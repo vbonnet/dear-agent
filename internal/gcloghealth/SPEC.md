@@ -21,9 +21,9 @@ both sides pin one literal JSONL fixture.
 
 **GCLH-05** When a record is more than five minutes ahead of evaluation time, the observer shall not accept it as liveness proof and shall retain future-completion evidence for the sweep-health command's DOWN policy.
 
-**GCLH-06** When the initial whole-record tail has no valid proof but recent unscanned history might contain one, the observer shall widen the scan up to a configured hard byte cap.
+**GCLH-06** When a truncated whole-record tail has no qualified completion inside the liveness window, the observer shall widen the scan until it finds one, reaches the file start, or reaches the configured hard byte cap.
 
-**GCLH-07** When a widened scan reaches the hard cap without resolving recent unscanned history, the observer shall mark the result indeterminate instead of declaring that no sweep ever happened.
+**GCLH-07** When a widened scan reaches the hard cap with unread earlier bytes and no recent qualified completion, the observer shall mark the result indeterminate instead of declaring that no sweep ever happened or that an observed stale completion was the latest.
 
 **GCLH-08** When a record is malformed or oversized, the observer shall skip that record and continue with later whole records; when reading or seeking fails, the observer shall return the I/O error.
 
@@ -35,13 +35,16 @@ both sides pin one literal JSONL fixture.
 
 **GCLH-12** When the watchdog's own modern completion is present beside a historical untagged reap, the observer shall use that completion only to disqualify legacy fallback, never as scheduled-reaper success.
 
+**GCLH-13** When a truncated tail contains a backdated record, the observer shall not treat the minimum observed event timestamp as proof that unseen earlier bytes cannot contain a recent completion.
+
 ## Traceability
 
 - Executable BDD feature: `agm/test/bdd/features/observability_package_guardrails.feature`
   validates co-located ownership and critical source/fallback requirements.
 - `scan_test.go` exercises source filtering, rejection reasons, explicit
-  errors, future timestamps, widening, indeterminate history, legacy proof,
-  historical mixed logs, malformed records, and the shared producer fixture.
+  errors, future timestamps, widening, indeterminate history, backdated
+  records, legacy proof, historical mixed logs, malformed records, and the
+  shared producer fixture.
 - `agm/internal/gclog/gclog_test.go` verifies the producer's wire fields
   against `testdata/wire.jsonl` without an illegal `agm/internal` import.
 - `agm/internal/ops/sandbox_gc_test.go` verifies that the per-sandbox reap
