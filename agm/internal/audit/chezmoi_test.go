@@ -1,6 +1,9 @@
 package audit
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,13 +85,45 @@ func TestCheckChezmoiDrift_NoBinary(t *testing.T) {
 	assert.Nil(t, issues)
 }
 
-// TestCheckChezmoiDrift_SmokeWhenInstalled runs against the host's chezmoi if
-// it's installed. We don't assert on the issue list (it depends on host
-// state); we just verify the check runs without error.
+// TestCheckChezmoiDrift_SmokeWhenInstalled exercises the installed chezmoi
+// against a synthetic source and home, independent of host dotfiles.
 func TestCheckChezmoiDrift_SmokeWhenInstalled(t *testing.T) {
 	if !chezmoiInstalled() {
 		t.Skip("chezmoi not installed")
 	}
-	_, err := checkChezmoiDrift()
-	assert.NoError(t, err)
+
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	data := filepath.Join(root, "data")
+	source := filepath.Join(data, "chezmoi")
+	require.NoError(t, os.MkdirAll(home, 0o700))
+	require.NoError(t, os.MkdirAll(source, 0o700))
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_DATA_HOME", data)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "CHEZMOI_") {
+			t.Setenv(key, "")
+			require.NoError(t, os.Unsetenv(key))
+		}
+	}
+
+	const target = ".agm-audit-smoke"
+	require.NoError(t, os.WriteFile(filepath.Join(source, "dot_agm-audit-smoke"), []byte("managed\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(home, target), []byte("managed\n"), 0o644))
+
+	issues, err := checkChezmoiDrift()
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+
+	require.NoError(t, os.WriteFile(filepath.Join(home, target), []byte("local edit\n"), 0o644))
+	issues, err = checkChezmoiDrift()
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, IssueChezmoiDrift, issues[0].Type)
+	assert.Equal(t, SeverityWarning, issues[0].Severity)
+	assert.Equal(t, "/"+target, issues[0].Path)
 }
