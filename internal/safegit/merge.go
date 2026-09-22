@@ -345,23 +345,16 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		fmt.Fprintln(os.Stderr, "safe-merge: ✓ expected reviewers have fresh reviews")
 	}
 
-	headInfo := prHeadResult{
-		SHA:    attemptState.HeadRefOid,
-		Branch: attemptState.HeadRefName,
-		Repo:   attemptState.HeadRepo(),
-	}
+	headInfo := prHeadResult{SHA: attemptState.HeadRefOid, Branch: attemptState.HeadRefName, Repo: attemptState.HeadRepo()}
 	if headInfo.SHA == "" || headInfo.Branch == "" {
 		return fmt.Errorf("state gate returned no headRefOid or headRefName; cannot anchor merge")
 	}
 
-	// Resolve the merge transport before Gate 5. GitHub refuses the GraphQL
-	// merge mutation for stacked PRs, so the transport has to be known, but this
-	// probe is a provider round trip: running it after the freshness proof would
-	// let the base advance unchecked for the probe's whole timeout.
-	stacked, err := resolveStackMembership(ctx, cfg.PRNumber, cfg.Repo)
+	// Runs before Gate 5 so no provider round trip separates the freshness
+	// proof from the merge. See resolveMergeTransport.
+	stacked, err := resolveMergeTransport(ctx, cfg.PRNumber, cfg.Repo)
 	if err != nil {
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge transport: "+err.Error())
-		return fmt.Errorf("selecting merge transport: %w", err)
+		return err
 	}
 
 	// Gate 5: independently resolve the live base and prove it is an ancestor of
@@ -451,22 +444,6 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		}
 	}
 	return nil
-}
-
-// reportRemoteHeadRetention tells the caller whether the merged head branch
-// will survive, so branch cleanup is an informed decision rather than a
-// surprise. It never fails the merge: the merge is confirmed by this point.
-func reportRemoteHeadRetention(ctx context.Context, headRepo, branch string) {
-	survives, err := remoteHeadSurvives(ctx, headRepo, branch)
-	switch {
-	case err != nil:
-		fmt.Fprintf(os.Stderr,
-			"safe-merge: could not determine whether remote branch %q remains: %v\n", branch, err)
-	case survives:
-		fmt.Fprintf(os.Stderr,
-			"safe-merge: note: remote branch %q still exists in %s after the merge\n",
-			branch, headRepo)
-	}
 }
 
 type mergeResult struct {
@@ -1157,9 +1134,5 @@ func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 	if raw.HeadRefOid == "" {
 		return prHeadResult{}, fmt.Errorf("PR #%d has no headRefOid — cannot anchor merge", prNum)
 	}
-	head := prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName}
-	if raw.HeadRepositoryOwner.Login != "" && raw.HeadRepository.Name != "" {
-		head.Repo = raw.HeadRepositoryOwner.Login + "/" + raw.HeadRepository.Name
-	}
-	return head, nil
+	return prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName, Repo: joinRepo(raw.HeadRepositoryOwner.Login, raw.HeadRepository.Name)}, nil
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
@@ -113,6 +114,21 @@ func transportName(stacked bool) string {
 	return "gh pr merge"
 }
 
+// resolveMergeTransport determines which provider interface the merge must use.
+//
+// It runs before the base-freshness gate: GitHub refuses the GraphQL merge
+// mutation for stacked pull requests, so the interface has to be known, but the
+// probe is a provider round trip. Running it after the freshness proof would
+// let the target branch advance unchecked for the probe's whole timeout.
+func resolveMergeTransport(ctx context.Context, prNum int, repo string) (bool, error) {
+	stacked, err := resolveStackMembership(ctx, prNum, repo)
+	if err != nil {
+		appendAuditEntry(repo, prNum, "error", "merge transport: "+err.Error())
+		return false, fmt.Errorf("selecting merge transport: %w", err)
+	}
+	return stacked, nil
+}
+
 // mergeArgsForTransport builds the argv for an already-resolved transport.
 // Membership is resolved before the base-freshness gate rather than here, so
 // the freshness proof stays the last provider read before the mutation: a probe
@@ -169,4 +185,20 @@ func isMissingRefResponse(out []byte) bool {
 	lower := bytes.ToLower(out)
 	return bytes.Contains(lower, []byte("not found")) ||
 		bytes.Contains(lower, []byte("reference does not exist"))
+}
+
+// reportRemoteHeadRetention tells the caller whether the merged head branch
+// will survive, so branch cleanup is an informed decision rather than a
+// surprise. It never fails the merge: the merge is confirmed by this point.
+func reportRemoteHeadRetention(ctx context.Context, headRepo, branch string) {
+	survives, err := remoteHeadSurvives(ctx, headRepo, branch)
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr,
+			"safe-merge: could not determine whether remote branch %q remains: %v\n", branch, err)
+	case survives:
+		fmt.Fprintf(os.Stderr,
+			"safe-merge: note: remote branch %q still exists in %s after the merge\n",
+			branch, headRepo)
+	}
 }

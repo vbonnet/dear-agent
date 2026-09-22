@@ -67,10 +67,15 @@ type PRState struct {
 // HeadRepo returns the owner/name of the repository holding the head branch,
 // which differs from the base repository for a fork pull request.
 func (s PRState) HeadRepo() string {
-	if s.HeadRepositoryOwner.Login == "" || s.HeadRepository.Name == "" {
+	return joinRepo(s.HeadRepositoryOwner.Login, s.HeadRepository.Name)
+}
+
+// joinRepo renders owner/name, or empty when either half is unknown.
+func joinRepo(owner, name string) string {
+	if owner == "" || name == "" {
 		return ""
 	}
-	return s.HeadRepositoryOwner.Login + "/" + s.HeadRepository.Name
+	return owner + "/" + name
 }
 
 // Blocker is one exact merge blocker plus its exact remediation.
