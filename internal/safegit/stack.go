@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,24 +35,37 @@ const stackProbeTimeout = mergeConfirmationCommandTimeout
 const stackProbeWaitDelay = mergeConfirmationCommandWaitDelay
 
 // stackMembership is the subset of the PR payload that decides the transport.
-// A nil Stack means the PR merges through the ordinary GraphQL path.
+// Stack is a non-pointer RawMessage so an explicit null can be told apart from
+// a field the host never sent: absent leaves it nil while "stack": null leaves
+// the literal bytes. A *json.RawMessage cannot make that distinction, because
+// encoding/json nils the pointer for an explicit null too, which would conflate
+// "not stacked" with "this API version has no such concept". The second must
+// not silently pick a transport the provider may refuse.
 type stackMembership struct {
-	Stack *struct {
-		ID       int `json:"id"`
-		Number   int `json:"number"`
-		Position int `json:"position"`
-		Size     int `json:"size"`
-	} `json:"stack"`
+	Stack json.RawMessage `json:"stack"`
 }
 
+// errStackFieldAbsent reports a payload that carries no stack field at all, so
+// membership is undetermined rather than negative.
+var errStackFieldAbsent = errors.New("PR payload carries no stack field, so the merge transport is undetermined")
+
 // parseStackMembership reports whether a PR payload places the PR in a stack.
-// An absent or null `stack` key means it does not.
+// An explicit null means not stacked; an absent field is an error, because
+// guessing the ordinary route for a stacked PR recreates the failure this
+// routing exists to prevent.
 func parseStackMembership(payload []byte) (bool, error) {
 	var m stackMembership
 	if err := json.Unmarshal(payload, &m); err != nil {
 		return false, fmt.Errorf("parsing PR stack membership: %w", err)
 	}
-	return m.Stack != nil, nil
+	if m.Stack == nil {
+		return false, errStackFieldAbsent
+	}
+	trimmed := bytes.TrimSpace(m.Stack)
+	if string(trimmed) == "null" {
+		return false, nil
+	}
+	return true, nil
 }
 
 // resolveStackMembership asks GitHub whether the PR belongs to a stack. A

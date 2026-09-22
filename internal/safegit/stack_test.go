@@ -2,6 +2,7 @@ package safegit
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,13 +21,24 @@ func TestParseStackMembership_NullStackIsNotStacked(t *testing.T) {
 	}
 }
 
-func TestParseStackMembership_AbsentStackIsNotStacked(t *testing.T) {
+// A host or API version that never sends the field leaves membership unknown.
+// Treating that as "not stacked" would route a stacked PR to the mutation
+// GitHub refuses, recreating the failure this routing exists to prevent.
+func TestParseStackMembership_AbsentStackIsUndetermined(t *testing.T) {
 	stacked, err := parseStackMembership([]byte(`{"number":1510}`))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, errStackFieldAbsent) {
+		t.Fatalf("error = %v, want errStackFieldAbsent", err)
 	}
 	if stacked {
-		t.Fatal("an absent stack key must not be read as stack membership")
+		t.Fatal("an undetermined payload must not claim stack membership either")
+	}
+}
+
+func TestParseStackMembership_AbsentFieldBlocksTheMerge(t *testing.T) {
+	fakeGHStackProbe(t, `{"number":1510}`)
+
+	if _, err := resolveStackMembership(context.Background(), 1510, "o/r"); err == nil {
+		t.Fatal("an undetermined transport must block the merge per SAFEGIT-32")
 	}
 }
 
