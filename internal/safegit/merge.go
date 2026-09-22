@@ -410,8 +410,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		// Success from `gh pr merge --auto` only means it was queued.
 		return waitForMergeCompletion(ctx, cfg.WatchTimeout, cfg.WatchInterval, confirm)
 	}
-	// A single bounded exact-head read, used only to tell an accepted merge
-	// apart from a rejected one when the provider command exits nonzero.
+	probeIndeterminate := indeterminateProbe(ctx, cfg.WatchInterval, confirm)
 	failure := runProviderMergeTransaction(
 		ctx,
 		headInfo.Branch,
@@ -430,7 +429,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 				reportRemoteHeadRetention(ctx, headInfo.Repo, headInfo.Branch)
 			}
 		},
-		confirm,
+		probeIndeterminate,
 	)
 	if failure != nil {
 		mergeSpan.RecordError(failure.err)

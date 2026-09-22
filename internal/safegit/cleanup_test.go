@@ -773,6 +773,7 @@ esac
 		attemptMergeMarkerEnv+"="+marker,
 		attemptMergeConfirmCountEnv+"="+confirmCount,
 		attemptMergeTransportEnv+"="+transportFile,
+		indeterminateConfirmWindowEnv+"=50ms",
 		"SAFE_MERGE_AUDIT_DIR="+auditDir,
 	)
 	if stacked {

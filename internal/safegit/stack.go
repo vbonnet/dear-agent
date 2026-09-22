@@ -188,10 +188,10 @@ func remoteHeadSurvives(ctx context.Context, headRepo, branch string) (bool, err
 		}
 		if isMissingRefResponse([]byte(err.Error())) {
 			// A 404 is ambiguous: the provider answers it both for a ref that is
-			// gone and for one the token cannot see, which a private fork head
-			// produces after the merge. Only an accessible repository makes the
-			// absence evidence of deletion.
-			if accessErr := confirmRepoAccessible(probeCtx, repoPath); accessErr != nil {
+			// gone and for one the credential may not read, which a private fork
+			// head produces after the merge. Only proven ref-read access makes
+			// the absence evidence of deletion.
+			if accessErr := confirmRefReadAccess(probeCtx, repoPath); accessErr != nil {
 				return false, fmt.Errorf(
 					"remote head %q in %s is unreadable, so its absence is not proof of deletion: %w",
 					branch, headRepo, accessErr)
@@ -203,17 +203,21 @@ func remoteHeadSurvives(ctx context.Context, headRepo, branch string) (bool, err
 	return true, nil
 }
 
-// confirmRepoAccessible establishes that the token can see the repository, so a
-// missing ref inside it means the ref is gone rather than hidden.
-func confirmRepoAccessible(ctx context.Context, repoPath string) error {
-	cmd := exec.CommandContext(ctx, "gh", "api", "repos/"+repoPath, "--jq", ".full_name")
+// confirmRefReadAccess establishes that the credential can read Git refs in the
+// repository, so a missing ref inside it means the ref is gone rather than
+// hidden. Repository metadata is not enough: a fine-grained token can read
+// metadata while lacking Contents, in which case the ref request 404s for
+// authorization reasons and the branch may well survive.
+func confirmRefReadAccess(ctx context.Context, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "gh", "api",
+		fmt.Sprintf("repos/%s/git/refs/heads?per_page=1", repoPath))
 	cmd.WaitDelay = stackProbeWaitDelay
 	out, err := runCommand(cmd)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(string(out)) == "" {
-		return fmt.Errorf("repository %s returned no identity", repoPath)
+		return fmt.Errorf("listing refs in %s returned nothing", repoPath)
 	}
 	return nil
 }

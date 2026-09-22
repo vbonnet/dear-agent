@@ -63,6 +63,39 @@ type providerMergeFailure struct {
 	err   error
 }
 
+// indeterminateConfirmWindowEnv lets tests shorten the indeterminate-outcome
+// poll. The helper that exercises the transaction runs as a subprocess, so a
+// package variable cannot reach it.
+const indeterminateConfirmWindowEnv = "SAFEGIT_INDETERMINATE_CONFIRM_WINDOW"
+
+// indeterminateConfirmWindow bounds the poll that separates an accepted merge
+// from a rejected one after a nonzero provider exit.
+func indeterminateConfirmWindow(fallback time.Duration) time.Duration {
+	if v := os.Getenv(indeterminateConfirmWindowEnv); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return fallback
+}
+
+// indeterminateConfirmTimeout bounds the poll that distinguishes an accepted
+// merge from a rejected one after the provider command exits nonzero. It is
+// short because a genuinely rejected merge pays the whole window before its
+// failure is reported.
+const indeterminateConfirmTimeout = 45 * time.Second
+
+// indeterminateProbe builds the bounded poll that separates an accepted merge
+// from a rejected one. Polling rather than a single read, because an accepted
+// async merge completes out of band: the first observation after a lost
+// response is commonly still OPEN.
+func indeterminateProbe(ctx context.Context, interval time.Duration, confirm func() error) func() error {
+	return func() error {
+		return waitForMergeCompletion(ctx,
+			indeterminateConfirmWindow(indeterminateConfirmTimeout), interval, confirm)
+	}
+}
+
 // runProviderMergeTransaction owns the provider-mutation lifetime: it captures
 // local cleanup context, runs the provider, requires exact-head confirmation,
 // records confirmation, and only then attempts best-effort local cleanup.

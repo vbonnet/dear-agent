@@ -207,9 +207,9 @@ func TestRemoteHeadSurvives_ReadsTheRefItself(t *testing.T) {
 			want:   true,
 		},
 		{
-			// Absent ref, and the repository is readable, so absence is proof.
+			// Absent ref, and refs are readable, so the absence is proof.
 			name: "ref already deleted",
-			script: "#!/bin/sh\ncase \"$*\" in\n  *full_name*) printf '%s\\n' 'o/r' ;;\n" +
+			script: "#!/bin/sh\ncase \"$*\" in\n  *refs/heads?per_page=1*) printf '%s\\n' '[{\"ref\":\"refs/heads/main\"}]' ;;\n" +
 				"  *) printf '%s\\n' 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\nesac\n",
 		},
 	} {
@@ -297,6 +297,31 @@ func TestRemoteHeadSurvives_AmbiguousNotFoundIsUnknown(t *testing.T) {
 	if err == nil {
 		t.Fatal("an inaccessible repository makes a missing ref ambiguous; it must " +
 			"be reported as unknown rather than classified as deleted")
+	}
+	if survives {
+		t.Fatal("an ambiguous result must not claim the branch survives either")
+	}
+}
+
+// A fine-grained credential can read repository metadata while lacking
+// Contents, in which case the ref request 404s for authorization reasons and
+// the branch may well survive. Metadata access is not ref-read access.
+func TestRemoteHeadSurvives_MetadataAccessIsNotRefAccess(t *testing.T) {
+	dir := t.TempDir()
+	// repos/<r> succeeds; anything touching refs is refused.
+	// git/ref/<x> is the single-ref read and git/refs/... the listing; both are
+	// refused, while plain repository metadata succeeds.
+	script := "#!/bin/sh\ncase \"$*\" in\n  *git/ref*) printf '%s\\n' 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n" +
+		"  *) printf '%s\\n' '{\"full_name\":\"o/r\"}' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	survives, err := remoteHeadSurvives(context.Background(), "o/private-fork", "topic")
+	if err == nil {
+		t.Fatal("metadata access must not be accepted as proof that a missing ref " +
+			"is deleted; the outcome is unknown")
 	}
 	if survives {
 		t.Fatal("an ambiguous result must not claim the branch survives either")
