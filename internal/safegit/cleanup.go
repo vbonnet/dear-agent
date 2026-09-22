@@ -72,6 +72,9 @@ func runProviderMergeTransaction(
 	mergeArgs []string,
 	confirm func() error,
 	onConfirmed func(),
+	// Optional: a bounded exact-head read used only to tell an accepted merge
+	// apart from a rejected one when the provider command exits nonzero.
+	probeIndeterminate ...func() error,
 ) *providerMergeFailure {
 	plan := prepareCleanupPlan(ctx, branch)
 	if err := ctx.Err(); err != nil {
@@ -81,11 +84,21 @@ func runProviderMergeTransaction(
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
 	if err := mergeCmd.Run(); err != nil {
+		// A nonzero exit does not prove the provider rejected the mutation. The
+		// request can be accepted while the response is lost, which the async
+		// route makes likelier because it completes out of band. Ask the
+		// provider before calling the attempt failed: reporting failure on an
+		// accepted merge skips cleanup and invites watch mode to retry it.
 		if ctx.Err() == nil {
-			return &providerMergeFailure{stage: providerMergeCommandStage, err: err}
+			if len(probeIndeterminate) == 0 || probeIndeterminate[0] == nil ||
+				probeIndeterminate[0]() != nil {
+				return &providerMergeFailure{stage: providerMergeCommandStage, err: err}
+			}
+			fmt.Fprintln(os.Stderr,
+				"safe-merge: provider command failed but the merge is confirmed at the gated head; continuing")
 		}
-		// Cancellation can race with provider acceptance. Treat the outcome as
-		// indeterminate until exact-head confirmation establishes provider truth.
+		// Cancellation can race with provider acceptance too. Either way the
+		// outcome is indeterminate until exact-head confirmation establishes it.
 	}
 	if err := confirm(); err != nil {
 		return &providerMergeFailure{stage: providerMergeConfirmationStage, err: err}

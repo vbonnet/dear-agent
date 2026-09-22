@@ -195,8 +195,10 @@ func TestRemoteHeadSurvives_ReadsTheRefItself(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "ref already deleted",
-			script: "#!/bin/sh\nprintf '%s\\n' 'gh: Not Found (HTTP 404)' >&2\nexit 1\n",
+			// Absent ref, and the repository is readable, so absence is proof.
+			name: "ref already deleted",
+			script: "#!/bin/sh\ncase \"$*\" in\n  *full_name*) printf '%s\\n' 'o/r' ;;\n" +
+				"  *) printf '%s\\n' 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\nesac\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -264,5 +266,27 @@ func TestResolveStackMembership_BoundsDescendantHeldPipe(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("stack probe blocked on a descendant-held pipe; it must set a " +
 			"finite WaitDelay or a hung credential helper stalls every merge")
+	}
+}
+
+// GitHub answers 404 both for a ref that is gone and for one the token cannot
+// see. A private fork head produces the latter, and treating it as deletion
+// would silently drop the retention report this exists to produce.
+func TestRemoteHeadSurvives_AmbiguousNotFoundIsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	// Both the ref read and the repository read are refused.
+	script := "#!/bin/sh\nprintf '%s\\n' 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	survives, err := remoteHeadSurvives(context.Background(), "o/private-fork", "topic")
+	if err == nil {
+		t.Fatal("an inaccessible repository makes a missing ref ambiguous; it must " +
+			"be reported as unknown rather than classified as deleted")
+	}
+	if survives {
+		t.Fatal("an ambiguous result must not claim the branch survives either")
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // stackProbeTimeout bounds the stack-membership query. It is a single
@@ -172,11 +173,35 @@ func remoteHeadSurvives(ctx context.Context, headRepo, branch string) (bool, err
 			return false, ctxErr
 		}
 		if isMissingRefResponse([]byte(err.Error())) {
+			// A 404 is ambiguous: the provider answers it both for a ref that is
+			// gone and for one the token cannot see, which a private fork head
+			// produces after the merge. Only an accessible repository makes the
+			// absence evidence of deletion.
+			if accessErr := confirmRepoAccessible(probeCtx, repoPath); accessErr != nil {
+				return false, fmt.Errorf(
+					"remote head %q in %s is unreadable, so its absence is not proof of deletion: %w",
+					branch, headRepo, accessErr)
+			}
 			return false, nil
 		}
 		return false, fmt.Errorf("reading remote head %q in %s: %w", branch, headRepo, err)
 	}
 	return true, nil
+}
+
+// confirmRepoAccessible establishes that the token can see the repository, so a
+// missing ref inside it means the ref is gone rather than hidden.
+func confirmRepoAccessible(ctx context.Context, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "gh", "api", "repos/"+repoPath, "--jq", ".full_name")
+	cmd.WaitDelay = stackProbeWaitDelay
+	out, err := runCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return fmt.Errorf("repository %s returned no identity", repoPath)
+	}
+	return nil
 }
 
 // isMissingRefResponse reports whether the provider answered that the ref is

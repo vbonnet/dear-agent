@@ -86,6 +86,10 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-35** When the system completes a merge through an interface that does not itself delete the merged head branch, the system shall observe whether that branch still exists in the repository holding it and shall report a branch that survives, rather than deleting it, since the provider offers no atomic conditional deletion and a configured auto-deletion setting records an intention rather than an outcome.
 
+**SAFEGIT-36** When a provider merge command exits nonzero while the request may still have been accepted, the system shall confirm the merge at the exact gated head before classifying the attempt as failed, since a lost response on an out-of-band merge would otherwise skip cleanup and invite a retry of a merge that already completed.
+
+**SAFEGIT-37** When the system cannot read a merged head branch because the repository holding it is inaccessible, the system shall report the outcome as unknown rather than as deleted, since the provider answers alike for a ref that is absent and one the credential cannot see.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

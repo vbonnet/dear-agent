@@ -885,3 +885,52 @@ func assertPrimaryUsable(t *testing.T, primary string) {
 	}
 	gittest.Run(t, primary, "status", "--porcelain")
 }
+
+// A nonzero provider exit does not prove the merge was rejected: the request
+// can be accepted while the response is lost, which the async route makes
+// likelier because it completes out of band. Reporting failure there would skip
+// cleanup and invite watch mode to retry a merge that already landed.
+func TestProviderMergeConfirmsIndeterminateCommandFailure(t *testing.T) {
+	fixture := newCleanupFixture(t)
+	missingProvider := filepath.Join(t.TempDir(), "provider-that-fails")
+
+	confirmed := 0
+	onConfirmed := 0
+	failure := runProviderMergeTransaction(
+		context.Background(),
+		fixture.branch,
+		[]string{missingProvider},
+		func() error {
+			confirmed++
+			return nil
+		},
+		func() { onConfirmed++ },
+		// The provider accepted the merge; only the response was lost.
+		func() error { return nil },
+	)
+	if failure != nil {
+		t.Fatalf("provider merge failure = %#v, want success: an accepted merge "+
+			"must not be reported as failed because its response was lost", failure)
+	}
+	if confirmed != 1 || onConfirmed != 1 {
+		t.Fatalf("confirmed=%d onConfirmed=%d, want 1 and 1", confirmed, onConfirmed)
+	}
+}
+
+// The rescue must not fire when the provider genuinely rejected the mutation.
+func TestProviderMergeKeepsFailureWhenProbeDisagrees(t *testing.T) {
+	fixture := newCleanupFixture(t)
+	missingProvider := filepath.Join(t.TempDir(), "provider-that-fails")
+
+	failure := runProviderMergeTransaction(
+		context.Background(),
+		fixture.branch,
+		[]string{missingProvider},
+		func() error { return nil },
+		nil,
+		func() error { return errors.New("PR is still open") },
+	)
+	if failure == nil || failure.stage != providerMergeCommandStage {
+		t.Fatalf("provider merge failure = %#v, want command-stage failure", failure)
+	}
+}
