@@ -170,8 +170,11 @@ asynchronous REST merge instead, because the provider refuses the auto-merge
 mutation for those. Either way the exact head SHA is pinned, and diagnostics
 name the interface that was actually used.
 
-Post-merge: local worktree and branch are cleaned up automatically. The ordinary
-route asks GitHub to delete the remote branch too (gh pr merge --delete-branch).
+Post-merge: the local worktree is removed and local branch deletion is attempted
+on a best-effort basis; a squash merge leaves the gated head off the local base,
+so git refuses to delete a topic branch it cannot see as merged and the branch
+stays. The ordinary route asks GitHub to delete the remote branch
+(gh pr merge --delete-branch).
 The stacked route cannot, and does not delete it itself; instead it reads the
 head ref in the repository that holds it and says so if the branch survives,
 whatever the repository's auto-deletion setting claims.

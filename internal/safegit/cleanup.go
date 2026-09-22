@@ -116,6 +116,11 @@ func runProviderMergeTransaction(
 	mergeCmd := exec.CommandContext(ctx, mergeArgs[0], mergeArgs[1:]...)
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
+	// A successful indeterminate probe is itself an exact-head confirmation, so
+	// it stands in for the confirmation below rather than being repeated: a
+	// second full poll can fail on a later provider read or an expiring caller
+	// deadline and turn an already-proven merge into a reported failure.
+	confirmed := false
 	if err := mergeCmd.Run(); err != nil {
 		// A nonzero exit does not prove the provider rejected the mutation. The
 		// request can be accepted while the response is lost, which the async
@@ -127,14 +132,17 @@ func runProviderMergeTransaction(
 				probeIndeterminate[0]() != nil {
 				return &providerMergeFailure{stage: providerMergeCommandStage, err: err}
 			}
+			confirmed = true
 			fmt.Fprintln(os.Stderr,
 				"safe-merge: provider command failed but the merge is confirmed at the gated head; continuing")
 		}
 		// Cancellation can race with provider acceptance too. Either way the
 		// outcome is indeterminate until exact-head confirmation establishes it.
 	}
-	if err := confirm(); err != nil {
-		return &providerMergeFailure{stage: providerMergeConfirmationStage, err: err}
+	if !confirmed {
+		if err := confirm(); err != nil {
+			return &providerMergeFailure{stage: providerMergeConfirmationStage, err: err}
+		}
 	}
 	if onConfirmed != nil {
 		onConfirmed()

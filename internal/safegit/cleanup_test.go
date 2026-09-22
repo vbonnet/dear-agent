@@ -913,8 +913,14 @@ func TestProviderMergeConfirmsIndeterminateCommandFailure(t *testing.T) {
 		t.Fatalf("provider merge failure = %#v, want success: an accepted merge "+
 			"must not be reported as failed because its response was lost", failure)
 	}
-	if confirmed != 1 || onConfirmed != 1 {
-		t.Fatalf("confirmed=%d onConfirmed=%d, want 1 and 1", confirmed, onConfirmed)
+	// The probe already proved the merge at the exact gated head, so the
+	// confirmation must not run again: a second poll can fail on a later
+	// provider read and turn an already-proven merge into a reported failure.
+	if confirmed != 0 {
+		t.Fatalf("confirm ran %d extra time(s) after a successful indeterminate probe", confirmed)
+	}
+	if onConfirmed != 1 {
+		t.Fatalf("onConfirmed=%d, want 1", onConfirmed)
 	}
 }
 
