@@ -345,7 +345,11 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		fmt.Fprintln(os.Stderr, "safe-merge: ✓ expected reviewers have fresh reviews")
 	}
 
-	headInfo := prHeadResult{SHA: attemptState.HeadRefOid, Branch: attemptState.HeadRefName}
+	headInfo := prHeadResult{
+		SHA:    attemptState.HeadRefOid,
+		Branch: attemptState.HeadRefName,
+		Repo:   attemptState.HeadRepo(),
+	}
 	if headInfo.SHA == "" || headInfo.Branch == "" {
 		return fmt.Errorf("state gate returned no headRefOid or headRefName; cannot anchor merge")
 	}
@@ -428,7 +432,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 			// Report instead, so a surviving branch is visible rather than
 			// silently left behind or unsafely removed.
 			if stacked {
-				reportRemoteHeadRetention(ctx, cfg.Repo, headInfo.Branch)
+				reportRemoteHeadRetention(ctx, headInfo.Repo, headInfo.Branch)
 			}
 		},
 	)
@@ -452,16 +456,16 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 // reportRemoteHeadRetention tells the caller whether the merged head branch
 // will survive, so branch cleanup is an informed decision rather than a
 // surprise. It never fails the merge: the merge is confirmed by this point.
-func reportRemoteHeadRetention(ctx context.Context, repo, branch string) {
-	covered, err := remoteHeadDeletionCovered(ctx, repo)
+func reportRemoteHeadRetention(ctx context.Context, headRepo, branch string) {
+	survives, err := remoteHeadSurvives(ctx, headRepo, branch)
 	switch {
 	case err != nil:
 		fmt.Fprintf(os.Stderr,
-			"safe-merge: could not determine whether %s deletes merged branches: %v\n", repo, err)
-	case !covered:
+			"safe-merge: could not determine whether remote branch %q remains: %v\n", branch, err)
+	case survives:
 		fmt.Fprintf(os.Stderr,
-			"safe-merge: note: remote branch %q remains; %s does not delete merged branches\n",
-			branch, repo)
+			"safe-merge: note: remote branch %q still exists in %s after the merge\n",
+			branch, headRepo)
 	}
 }
 
@@ -1125,20 +1129,27 @@ func parseSoak(data []byte, now time.Time) error {
 type prHeadResult struct {
 	SHA    string
 	Branch string
+	Repo   string
 }
 
 func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 	out, err := runCommand(exec.Command("gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
-		"--json", "headRefName,headRefOid",
+		"--json", "headRefName,headRefOid,headRepository,headRepositoryOwner",
 	))
 	if err != nil {
 		return prHeadResult{}, err
 	}
 	var raw struct {
-		HeadRefName string `json:"headRefName"`
-		HeadRefOid  string `json:"headRefOid"`
+		HeadRefName    string `json:"headRefName"`
+		HeadRepository struct {
+			Name string `json:"name"`
+		} `json:"headRepository"`
+		HeadRepositoryOwner struct {
+			Login string `json:"login"`
+		} `json:"headRepositoryOwner"`
+		HeadRefOid string `json:"headRefOid"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return prHeadResult{}, err
@@ -1146,5 +1157,9 @@ func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 	if raw.HeadRefOid == "" {
 		return prHeadResult{}, fmt.Errorf("PR #%d has no headRefOid — cannot anchor merge", prNum)
 	}
-	return prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName}, nil
+	head := prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName}
+	if raw.HeadRepositoryOwner.Login != "" && raw.HeadRepository.Name != "" {
+		head.Repo = raw.HeadRepositoryOwner.Login + "/" + raw.HeadRepository.Name
+	}
+	return head, nil
 }

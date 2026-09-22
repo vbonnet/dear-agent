@@ -681,8 +681,8 @@ merge_body() {
 	git -C "$SAFEGIT_CLEANUP_PRIMARY" worktree remove --force -- "$SAFEGIT_CLEANUP_CALLER"
 }
 case "$*" in
-  "pr view 42 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid")
-    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
+  "pr view 42 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner")
+    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","headRepository":{"name":"repo"},"headRepositoryOwner":{"login":"owner"}}' ;;
   "pr view 42 --repo owner/repo --json baseRefName")
     printf '%s\n' '{"baseRefName":"main"}' ;;
   "pr view 42 --repo owner/repo --json baseRefName,headRefOid")
@@ -712,9 +712,10 @@ case "$*" in
   "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{"message":"Updating pull request branch."}' ;;
-  "api repos/owner/repo --jq .delete_branch_on_merge")
+  "api repos/owner/repo/git/ref/heads%2Fcleanup-topic")
     printf '%s\n' retention-check >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
-    printf '%s\n' true ;;
+    printf '%s\n' 'gh: Not Found (HTTP 404)' >&2
+    exit 1 ;;
   "api repos/owner/repo/pulls/42")
     if [ "${SAFEGIT_ATTEMPT_MERGE_STACKED:-}" = "1" ]; then
       printf '%s\n' '{"number":42,"stack":{"id":7,"number":43,"position":1,"size":2}}'

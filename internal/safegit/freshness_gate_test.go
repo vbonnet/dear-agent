@@ -32,8 +32,8 @@ func TestAttemptMergeDryRunRejectsHeadThatMissesLiveBase(t *testing.T) {
 	installRequiredCheckFakeGH(t, `
 printf '%s\n' "$*" >> "$FAKE_CALL_LOG"
 case "$*" in
-  "pr view 7 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid")
-    printf '%s\n' '{"number":7,"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","baseRefName":"main","headRefName":"topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
+  "pr view 7 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner")
+    printf '%s\n' '{"number":7,"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","baseRefName":"main","headRefName":"topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","headRepository":{"name":"repo"},"headRepositoryOwner":{"login":"owner"}}' ;;
   "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
   "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[]]' ;;
   "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;

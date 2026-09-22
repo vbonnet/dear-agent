@@ -54,6 +54,23 @@ type PRState struct {
 	BaseRefName      string `json:"baseRefName"`
 	HeadRefName      string `json:"headRefName"`
 	HeadRefOid       string `json:"headRefOid"`
+	// A fork PR's head branch lives in another repository, so post-merge
+	// observations about that branch must address the head repo, not the base.
+	HeadRepository struct {
+		Name string `json:"name"`
+	} `json:"headRepository"`
+	HeadRepositoryOwner struct {
+		Login string `json:"login"`
+	} `json:"headRepositoryOwner"`
+}
+
+// HeadRepo returns the owner/name of the repository holding the head branch,
+// which differs from the base repository for a fork pull request.
+func (s PRState) HeadRepo() string {
+	if s.HeadRepositoryOwner.Login == "" || s.HeadRepository.Name == "" {
+		return ""
+	}
+	return s.HeadRepositoryOwner.Login + "/" + s.HeadRepository.Name
 }
 
 // Blocker is one exact merge blocker plus its exact remediation.
@@ -76,7 +93,7 @@ func FetchPRState(ctx context.Context, prNum int, repo string) (PRState, error) 
 	out, err := runCommand(exec.CommandContext(ctx, "gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
-		"--json", "number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid",
+		"--json", "number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner",
 	))
 	if err != nil {
 		return PRState{}, fmt.Errorf("gh pr view failed: %w", err)

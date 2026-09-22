@@ -180,48 +180,64 @@ func TestMergeArgsForTransport_MakesNoProviderCall(t *testing.T) {
 	}
 }
 
-func TestRemoteHeadDeletionCovered_ReadsTheProviderSetting(t *testing.T) {
+// The question is whether the ref still exists, not whether the repository was
+// configured to remove it: branch-reaper exists because that setting missed 14
+// of 1032 merged branches.
+func TestRemoteHeadSurvives_ReadsTheRefItself(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		reply string
-		want  bool
+		name   string
+		script string
+		want   bool
 	}{
-		{name: "enabled", reply: "true", want: true},
-		{name: "disabled", reply: "false"},
+		{
+			name:   "ref still present",
+			script: "#!/bin/sh\nprintf '%s' '{\"ref\":\"refs/heads/topic\",\"object\":{\"sha\":\"a\",\"type\":\"commit\"}}'\n",
+			want:   true,
+		},
+		{
+			name:   "ref already deleted",
+			script: "#!/bin/sh\nprintf '%s\\n' 'gh: Not Found (HTTP 404)' >&2\nexit 1\n",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			script := "#!/bin/sh\nprintf '%s\\n' '" + tc.reply + "'\n"
-			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(tc.script), 0o700); err != nil {
 				t.Fatalf("write fake gh: %v", err)
 			}
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-			got, err := remoteHeadDeletionCovered(context.Background(), "o/r")
+			got, err := remoteHeadSurvives(context.Background(), "o/r", "topic")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("remoteHeadDeletionCovered() = %v, want %v", got, tc.want)
+				t.Fatalf("remoteHeadSurvives() = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-// An unreadable setting must not be reported as "the provider will clean up".
-func TestRemoteHeadDeletionCovered_ReportsProbeFailure(t *testing.T) {
+func TestRemoteHeadSurvives_RequiresAHeadRepository(t *testing.T) {
+	if _, err := remoteHeadSurvives(context.Background(), "", "topic"); err == nil {
+		t.Fatal("a fork head lives in another repository, so an unresolved head " +
+			"repo must be an error rather than a read against the base repo")
+	}
+}
+
+func TestRemoteHeadSurvives_ReportsProbeFailure(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gh"),
+		[]byte("#!/bin/sh\nprintf '%s\\n' 'gh: Bad credentials (HTTP 401)' >&2\nexit 1\n"), 0o700); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	covered, err := remoteHeadDeletionCovered(context.Background(), "o/r")
+	survives, err := remoteHeadSurvives(context.Background(), "o/r", "topic")
 	if err == nil {
-		t.Fatal("an unreadable delete_branch_on_merge must be reported, not assumed")
+		t.Fatal("an unreadable ref must be reported, not treated as deleted")
 	}
-	if covered {
-		t.Fatal("a failed probe must not claim the provider deletes merged branches")
+	if survives {
+		t.Fatal("a failed probe must not claim the branch survives")
 	}
 }
 
