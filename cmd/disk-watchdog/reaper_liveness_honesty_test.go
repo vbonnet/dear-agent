@@ -84,11 +84,11 @@ func gcThenSweep(gcJSON, sweepJSON string) func(context.Context, string, ...stri
 
 // --- the watchdog must not answer its own liveness question ---
 
-// Remediation runs `agm sandbox gc --reap` on every breached tick, so the
-// records it writes are proof this watchdog ran a sweep — never proof the
-// hourly schedule is alive. Counting them means a dead schedule reads as
-// healthy for as long as disk pressure lasts, which is exactly when the
-// leading indicator matters most.
+// When authenticated transport restores destructive execution after SGC-18
+// containment, remediation can again write a completion record. Such records
+// prove this watchdog ran a sweep — never that the hourly schedule is alive.
+// Counting them means a dead schedule reads as healthy for as long as disk
+// pressure lasts, which is exactly when the leading indicator matters most.
 func TestCheckGCHealth_IgnoresItsOwnRemediationHeartbeats(t *testing.T) {
 	now := time.Now()
 	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,

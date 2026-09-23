@@ -61,12 +61,12 @@ artifacts:
     tokens:
       __HOME__: ${HOME}
 
-  # Hourly sandbox-dir GC (ce-uxju): `agm sandbox gc --reap --json` reaps
-  # ~/.agm/sandboxes dirs of archived/dead sessions behind the sandboxgc
-  # safety gates (live-session, live-process, mount-inside, path allowlist).
-  # Staging this plist does NOT activate it — activation is an ask-gated
-  # `launchctl bootstrap` after an operator-reviewed `agm sandbox gc` dry run
-  # (see the plist header and ~/.agm/cleanup-runbook.md).
+  # Hourly sandbox-dir GC (ce-uxju). The template still requests
+  # `agm sandbox gc --reap --json`, but SGC-18 currently makes that request
+  # fail before endpoint or candidate access until session-store transport is
+  # authenticated. `agm sandbox gc` remains the read-only diagnostic path.
+  # Staging this plist does NOT activate it; activation is ask-gated (see the
+  # plist header and ~/.agm/cleanup-runbook.md).
   - name: com.dear-agent.sandbox-gc
     source: deploy/launchd/com.dear-agent.sandbox-gc.plist
     deployed: ~/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist
