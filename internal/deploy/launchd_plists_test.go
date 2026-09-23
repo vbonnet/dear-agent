@@ -3,6 +3,7 @@ package deploy
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -63,4 +64,85 @@ func TestDeployLaunchdPlistsSetWorkingDirectory(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("no user-scoped launchd templates found in deploy/launchd")
 	}
+}
+
+// TestMergeloopPlistPinsBackpressureCap asserts the mergeloop launchd template
+// passes an explicit --cap, and that the value stays inside the tick budget.
+//
+// Without this, a later template cleanup could drop the argument pair while
+// every test still passed, silently restoring DefaultCap (50). That default sat
+// just above the live open-PR count, and a tick ABOVE the cap is skipped in
+// full, so the loop would go quiet exactly when the backlog most needed
+// draining.
+//
+// The upper bound matters as much as the lower one. ListOpen projects required
+// checks per PR sequentially at roughly 3.4s per PR, so the 600s StartInterval
+// fits about 175. A cap far above that does not remove the silence, it only
+// changes its shape: one tick would run past its own interval instead of being
+// skipped. Raising it further needs bounded or incremental projection first.
+func TestMergeloopPlistPinsBackpressureCap(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "deploy", "launchd", "com.dear-agent.mergeloop.plist"))
+	if err != nil {
+		t.Fatalf("read mergeloop template: %v", err)
+	}
+	args := programArguments(t, string(raw))
+
+	idx := -1
+	for i, a := range args {
+		if a == "--cap" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("template does not pass --cap, so the loop inherits DefaultCap and a "+
+			"queue above it silences every tick; ProgramArguments = %v", args)
+	}
+	if idx+1 >= len(args) {
+		t.Fatal("--cap is the last argument, so no value follows it")
+	}
+	cap, err := strconv.Atoi(args[idx+1])
+	if err != nil {
+		t.Fatalf("--cap value %q is not a number", args[idx+1])
+	}
+	if cap <= 50 {
+		t.Errorf("--cap = %d, which is not clear of the default (50) or the live queue; "+
+			"a burst of new PRs would skip every tick", cap)
+	}
+	if cap > 175 {
+		t.Errorf("--cap = %d exceeds the measured 10-minute tick budget (~175 PRs at ~3.4s "+
+			"per PR); a tick would run past its own interval", cap)
+	}
+}
+
+// programArguments extracts the ProgramArguments string values from a launchd
+// plist template without pulling in a plist parser.
+func programArguments(t *testing.T, content string) []string {
+	t.Helper()
+	start := strings.Index(content, "<key>ProgramArguments</key>")
+	if start < 0 {
+		t.Fatal("template has no ProgramArguments")
+	}
+	open := strings.Index(content[start:], "<array>")
+	closeIdx := strings.Index(content[start:], "</array>")
+	if open < 0 || closeIdx < 0 || closeIdx < open {
+		t.Fatal("template has a malformed ProgramArguments array")
+	}
+	block := content[start+open : start+closeIdx]
+
+	var out []string
+	for rest := block; ; {
+		i := strings.Index(rest, "<string>")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len("<string>"):]
+		j := strings.Index(rest, "</string>")
+		if j < 0 {
+			break
+		}
+		out = append(out, rest[:j])
+		rest = rest[j:]
+	}
+	return out
 }

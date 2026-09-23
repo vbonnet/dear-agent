@@ -20,6 +20,18 @@ or member applicability, stop for a product decision. Existing
 harness- or implementation-local `SPEC.md` files are audit candidates, not
 permission to delete or merge anything.
 
+## Implementation projections
+
+Use the contract model's canonical
+[implementation projection rules](../spec-governance/skills/write-spec/references/contract-model.md#implementation-projections)
+when an implementation directory adapts a contract owned elsewhere. That
+reference explains how to discover whether an ownership projection is
+permitted without importing another repository's rules. For this repository,
+[`SCB-28` and `SCB-29`](../internal/speccoverage/SPEC.md) own the exact
+`SPEC.owner` declaration and inherited coverage constraints. The pointer is
+traceability, not a second normative contract; a distinct observable requires
+a neutral product or domain owner.
+
 ## Start here
 
 1. Read the canonical [`write-spec` workflow](../spec-governance/skills/write-spec/SKILL.md).
@@ -35,6 +47,17 @@ For a read-only corpus review, use the canonical
 [`audit-specs` skill](../spec-governance/skills/audit-specs/SKILL.md). Its
 inventories and HTML reports are maintainer-review evidence only; they do not
 authorize a product SPEC migration.
+
+## Migration and retirement
+
+Before deleting or relocating a governed contract or `SPEC.owner` edge, follow
+the contract model's canonical
+[migration boundary](../spec-governance/skills/write-spec/references/contract-model.md#migration-boundary).
+It defines how to discover and follow structural guard evidence, stable-ID
+handling, reciprocal BDD links, conformance evidence, and mandatory semantic
+review. For this repository, [`SPEC-GUARD-22` and
+`SPEC-GUARD-23`](../internal/specguard/SPEC.md) own the exact retirement and
+relocation admission rules, including the conservative false-positive boundary.
 
 ## Evidence boundary
 

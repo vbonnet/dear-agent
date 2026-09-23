@@ -2,9 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   com.dear-agent.recovery-loop: self-heal dead or wedged fleet background jobs (cmd/recovery-loop).
-  Consumes absence-alarm escalation journal, attempts recovery via kickstart,
-  re-bootstrap, and reinstall, enforces snooze expiry policies, journals all attempts,
-  and escalates on consecutive failures.
+  Reads pulse truth from the absence-alarm heartbeat, attempts recovery via kickstart,
+  re-bootstrap, and reinstall, verifies the condition cleared before recording a
+  recovery, enforces snooze expiry policies, journals all attempts, and escalates
+  on consecutive failures to clear. The absence-alarm escalation journal is an
+  output (human-needed records), never an input.
 -->
 <plist version="1.0">
 <dict>
