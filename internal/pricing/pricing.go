@@ -36,6 +36,16 @@ var table = []ModelPrice{
 	// Anthropic — Claude Fable (Mythos-class, most capable; 1M context, 128k max output)
 	{Model: "fable", InputPerMillion: 10.00, OutputPerMillion: 50.00},
 
+	// Anthropic — Claude Opus 5.5. Needs its own row: Lookup falls back to a
+	// substring scan and "claude-opus-5-5" contains "opus", so without this it
+	// resolves to the Claude 4.x Opus row and prices at $15/$75 — not a zero a
+	// caller could detect, but a confident number ~3.75x the real input rate.
+	// Opus 5.5 is cheaper than Opus 5 ($4/$20 against $5/$25) despite being
+	// newer, so it cannot inherit that row either. Fast mode ($8/$40, Claude API
+	// only) is a second band this single-rate table does not express; see
+	// docs/model-registry.md.
+	{Model: "claude-opus-5-5", InputPerMillion: 4.00, OutputPerMillion: 20.00, Source: "https://platform.claude.com/docs/en/about-claude/pricing", AsOf: "2026-09-23"},
+
 	// Anthropic — Claude 4.x
 	{Model: "opus", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 	{Model: "sonnet", InputPerMillion: 3.00, OutputPerMillion: 15.00},

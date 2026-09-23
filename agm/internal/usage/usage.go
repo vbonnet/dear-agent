@@ -35,6 +35,7 @@ type Pricing struct {
 var (
 	opusPricing   = Pricing{InputPerM: 15.00, OutputPerM: 75.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75}
 	opus5Pricing  = pricingFromCosttrack("claude-opus-5")
+	opus55Pricing = pricingFromCosttrack("claude-opus-5-5")
 	sonnetPricing = Pricing{InputPerM: 3.00, OutputPerM: 15.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75}
 	haikuPricing  = Pricing{InputPerM: 1.00, OutputPerM: 5.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25}
 	// Fable pricing is not public; treat it at the Opus frontier tier as a
@@ -59,6 +60,10 @@ func pricingFromCosttrack(model string) Pricing {
 func PriceFor(model string) Pricing {
 	m := strings.ToLower(model)
 	switch {
+	// "claude-opus-5-5" also contains "opus-5", so the more specific arm has to
+	// come first or every Opus 5.5 transcript costs 25% over at Opus 5 rates.
+	case strings.Contains(m, "opus-5-5"):
+		return opus55Pricing
 	case strings.Contains(m, "opus-5"):
 		return opus5Pricing
 	case strings.Contains(m, "opus"):

@@ -8,6 +8,7 @@ model_aliases:
   latest-sonnet: "claude-sonnet-4"
   latest-opus:   "claude-opus-4"
   opus-5:        "claude-opus-5"
+  opus-5-5:      "claude-opus-5-5"
 
 subagent_preference: "in_harness"
 

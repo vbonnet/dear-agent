@@ -1,6 +1,6 @@
 # Model Pricing Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-09-23 -->
 
 ## Purpose
 
@@ -28,10 +28,14 @@ other model families.
 
 **PRICING-08** When OpenRouter model-family defaults are selected, the system shall use the provider's current canonical model slug rather than an unverified shorthand identifier.
 
+**PRICING-09** When a model identifier is a more specific form of an existing alias, such as a point release of a registered generation, the system shall carry its own rate row so the substring scan cannot resolve it to the less specific family rate.
+
+**PRICING-10** When a model's rate is recorded, the system shall store the rate-card source and the as-of date the rate was read from that source.
+
 ## BDD Traceability
 
-- `agm/test/bdd/features/quota_parity.feature`
-- `agm/test/bdd/features/model_family_parity.feature`
+- Feature: `agm/test/bdd/features/quota_parity.feature`
+- Feature: `agm/test/bdd/features/model_family_parity.feature`
 
 ## Package Test Traceability
 
