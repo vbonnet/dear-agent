@@ -285,10 +285,15 @@ func TestInheritedLocaleWhitespaceIsNotUsable(t *testing.T) {
 				"keeps the pane in UTF-8", padded)
 		}
 	}
-	// An all-blank value is not a locale at all, so it falls through to the
-	// next variable rather than being treated as a name.
-	if effectiveLocaleName(lookupOf("   ")) != "" {
-		t.Error("an all-blank locale value must read as unset")
+	// A whitespace-only value is SET, which is what libc sees, and it names no
+	// installed locale. Skipping past it to a usable LC_CTYPE declared the
+	// environment fine while libc had already fallen back to ASCII.
+	if got := effectiveLocaleName(lookupOf("   ")); got != "   " {
+		t.Errorf("effectiveLocaleName(whitespace) = %q, want it reported as set", got)
+	}
+	if localeIsUsableUTF8With(lookupOf("   "), installed) {
+		t.Error("a whitespace-only LC_ALL must not read as usable: it is set, and it " +
+			"names no installed locale, so libc has already fallen back to ASCII")
 	}
 }
 

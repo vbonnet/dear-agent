@@ -337,13 +337,16 @@ func localeIsUsableUTF8With(lookup func(string) (string, bool), enumerate func()
 // set to a non-empty string, which is the one POSIX actually uses.
 func effectiveLocaleName(lookup func(string) (string, bool)) string {
 	for _, name := range localeEnvVars {
-		// The emptiness test tolerates whitespace, because an all-blank value
-		// is not a locale. The RETURNED value does not get trimmed: libc reads
-		// the environment byte for byte, so LC_ALL=" C.utf8 " is rejected and
-		// falls back to ASCII. Normalizing it here turned it into the
-		// installed spelling and suppressed the pin, which is the same
-		// byte-corruption path the exact comparison was added to close.
-		if value, ok := lookup(name); ok && strings.TrimSpace(value) != "" {
+		// Only an exactly empty value counts as unset, which is what libc
+		// does. A whitespace-only LC_ALL is SET, and it names no installed
+		// locale, so treating it as unset skipped past it to a usable
+		// LC_CTYPE and declared the environment fine while libc had already
+		// fallen back to ASCII.
+		//
+		// The value is returned untrimmed for the same reason: libc reads the
+		// environment byte for byte. Normalizing it turned a padded spelling
+		// into the installed one and suppressed the pin.
+		if value, ok := lookup(name); ok && value != "" {
 			return value
 		}
 	}
