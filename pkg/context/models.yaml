@@ -142,6 +142,44 @@ models:
       self_eval_quality: medium
       long_context: true
 
+  - model_id: "claude-opus-5-5"
+    provider: "anthropic"
+    max_context_tokens: 1000000
+    sweet_spot_threshold: 0.50
+    warning_threshold: 0.60
+    danger_threshold: 0.75
+    critical_threshold: 0.85
+    benchmark_sources:
+      - "Anthropic Claude Opus 5.5 model documentation (read 2026-09-23)"
+    notes: "1M-token context window, 128K max output; same window as Opus 5, so thresholds are carried over unchanged. Reasoning effort defaults to medium rather than Opus 5's high, which lowers tokens spent per turn at a given prompt but does not change the window."
+    confidence: "MEDIUM"
+    last_updated: "2026-09-23T00:00:00Z"
+    capabilities:
+      context_stability: medium
+      self_eval_quality: medium
+      long_context: true
+
+  # GetModel normalizes only case and underscores, so it cannot reach the
+  # unqualified row above from the provider-qualified spelling Pi and
+  # OpenRouter use. Without this alias those callers fall through to the 200K
+  # "default" row and mis-report context percentages and compaction thresholds.
+  - model_id: "anthropic/claude-opus-5-5"
+    provider: "anthropic"
+    max_context_tokens: 1000000
+    sweet_spot_threshold: 0.50
+    warning_threshold: 0.60
+    danger_threshold: 0.75
+    critical_threshold: 0.85
+    benchmark_sources:
+      - "Anthropic Claude Opus 5.5 model documentation (read 2026-09-23)"
+    notes: "Provider-qualified alias of claude-opus-5-5; must stay in step with it."
+    confidence: "MEDIUM"
+    last_updated: "2026-09-23T00:00:00Z"
+    capabilities:
+      context_stability: medium
+      self_eval_quality: medium
+      long_context: true
+
   - model_id: "anthropic/claude-opus-5"
     provider: "anthropic"
     max_context_tokens: 1000000

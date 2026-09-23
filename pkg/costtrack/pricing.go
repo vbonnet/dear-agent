@@ -82,6 +82,18 @@ var (
 		CacheRead:  0.50,  // $0.50 per 1M tokens (0.1x input, this file's standard cache-read ratio)
 	}
 
+	// Claude Opus 5.5. Cheaper than Opus 5 despite being the newer model, so an
+	// entry copied from Claude5Opus5 would overstate every report by 25%. Cache
+	// reads are 0.05x input here, not this file's usual 0.1x. Fast mode prices at
+	// $8/$40 on the Claude API only; this entry is the standard band the fleet
+	// launches with. Source: platform.claude.com pricing (2026-09-23).
+	ClaudeOpus55 = Pricing{
+		Input:      4.00,  // $4 per 1M tokens
+		Output:     20.00, // $20 per 1M tokens
+		CacheWrite: 5.00,  // $5.00 per 1M tokens (1.25x input, this file's standard cache-write ratio)
+		CacheRead:  0.20,  // $0.20 per 1M tokens (0.05x input, per the published rate)
+	}
+
 	// Gemini 2.0 Flash (free tier available)
 	Gemini20FlashExp = Pricing{
 		Input:      0.00, // Free tier (up to limits)
@@ -125,6 +137,8 @@ var PricingTable = map[string]Pricing{
 	"claude-opus-4-6":            Claude4Opus4_6,
 	"claude-opus-4-8":            Claude4Opus4_8,
 	"claude-opus-5":              Claude5Opus5,
+	"claude-opus-5-5":            ClaudeOpus55,
+	"anthropic/claude-opus-5-5":  ClaudeOpus55,           // OpenRouter and Pi provider-qualified naming
 	"anthropic/claude-opus-5":    Claude5Opus5,           // OpenRouter and Pi provider-qualified naming
 	"claude-sonnet-4-5@20250929": Claude35Sonnet20241022, // Vertex AI naming
 	"gemini-2.0-flash-exp":       Gemini20FlashExp,

@@ -189,3 +189,22 @@ func TestCollectEmptyRoot(t *testing.T) {
 		t.Errorf("got %d entries, want 0", len(entries))
 	}
 }
+
+// TestPriceForOpus55 guards the ordering of PriceFor's substring switch.
+// "claude-opus-5-5" contains "opus-5", so it matches the Opus 5 arm and prices
+// at $5/$25 unless a more specific arm is checked first. The failure is silent
+// and systematically high: every Opus 5.5 transcript would be costed 25% over.
+func TestPriceForOpus55(t *testing.T) {
+	got := PriceFor("claude-opus-5-5")
+
+	if got.InputPerM != 4.00 || got.OutputPerM != 20.00 {
+		t.Errorf("PriceFor(claude-opus-5-5) = $%.2f/$%.2f, want $4.00/$20.00", got.InputPerM, got.OutputPerM)
+	}
+	if opus5 := PriceFor("claude-opus-5"); got == opus5 {
+		t.Error("claude-opus-5-5 matched the opus-5 arm; the more specific case must be checked first")
+	}
+	// The generic "opus" arm is the other way this can go wrong.
+	if opus4x := PriceFor("claude-opus-4-8"); got == opus4x {
+		t.Error("claude-opus-5-5 matched the generic opus arm")
+	}
+}

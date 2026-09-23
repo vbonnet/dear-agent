@@ -70,6 +70,7 @@ type contextDetectorCache struct {
 // getModelContextWindow uses longest-prefix matching to ensure correctness.
 var modelContextWindows = map[string]int{
 	// Opus 5, Opus 4.8+, and 4.6 have a 1M context window by default.
+	"claude-opus-5-5": extendedContextWindowTokens,
 	"claude-opus-5":   extendedContextWindowTokens,
 	"claude-opus-4-8": extendedContextWindowTokens,
 	"claude-opus-4-6": extendedContextWindowTokens,
@@ -450,7 +451,7 @@ func piKnownNativeModelContextWindow(model string) (int, bool) {
 
 func piKnownDirectModelContextWindow(model string) (int, bool) {
 	switch model {
-	case "claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6":
+	case "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6":
 		return extendedContextWindowTokens, true
 	case "gpt-5.3-chat-latest", "gpt-5.3-codex-spark":
 		return 128000, true
@@ -477,7 +478,7 @@ func piKnownDirectModelContextWindow(model string) (int, bool) {
 // be collapsed into direct-provider defaults.
 func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
 	switch route {
-	case "anthropic/claude-fable-5", "anthropic/claude-opus-5":
+	case "anthropic/claude-fable-5", "anthropic/claude-opus-5-5", "anthropic/claude-opus-5":
 		return extendedContextWindowTokens, true
 	case "openai/gpt-5.3-codex", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano":
 		return 400000, true

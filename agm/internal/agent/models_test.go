@@ -2,6 +2,7 @@ package agent
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -328,6 +329,50 @@ func TestOpenRouterProvidesRequestedOpenModelFamilies(t *testing.T) {
 	for _, family := range want {
 		if !slices.Contains(got, family) {
 			t.Fatalf("openrouter model aliases missing family %q; got %v", family, got)
+		}
+	}
+}
+
+// TestClaudeCodeResolvesOpus55 pins the Claude Opus 5.5 registration so a
+// supervisor or worker can select it by alias. The identifier "claude-opus-5-5"
+// is the exact string Anthropic publishes; the "-5-5" spelling matters because
+// "claude-opus-5.5" is not an accepted id and would be passed through to the
+// harness verbatim and rejected there.
+func TestClaudeCodeResolvesOpus55(t *testing.T) {
+	cases := map[string]string{
+		"opus5.5":         "claude-opus-5-5",
+		"opus55":          "claude-opus-5-5",
+		"claude-opus-5-5": "claude-opus-5-5",
+	}
+	for alias, want := range cases {
+		if got := ResolveModelFullName("claude-code", alias); got != want {
+			t.Errorf("ResolveModelFullName(claude-code, %q) = %q, want %q", alias, got, want)
+		}
+	}
+}
+
+// TestOpus55NeverSpelledWithADot guards the one-character mistake that makes
+// the registration useless. AGM passes FullName straight to the harness, so a
+// dotted spelling anywhere in the tables reaches the API and is rejected at
+// launch time rather than failing here.
+func TestOpus55NeverSpelledWithADot(t *testing.T) {
+	for harness, specs := range HarnessModels {
+		for _, spec := range specs {
+			if strings.Contains(spec.FullName, "opus-5.5") {
+				t.Errorf("%s alias %q resolves to %q; the id is claude-opus-5-5", harness, spec.Alias, spec.FullName)
+			}
+		}
+	}
+}
+
+// TestOpus55RoutesThroughPiAndOpenRouter keeps model-family parity total. Both
+// aggregators address Anthropic models by a provider-qualified route, so an
+// Opus 5.5 that exists only under claude-code is unreachable from any spawn
+// that lands on a different harness.
+func TestOpus55RoutesThroughPiAndOpenRouter(t *testing.T) {
+	for _, harness := range []string{"pi-cli", "openrouter"} {
+		if got := ResolveModelFullName(harness, "opus5.5"); got != "anthropic/claude-opus-5-5" {
+			t.Errorf("ResolveModelFullName(%s, opus5.5) = %q, want anthropic/claude-opus-5-5", harness, got)
 		}
 	}
 }

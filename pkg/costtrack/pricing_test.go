@@ -235,3 +235,32 @@ func TestAllAliasesResolveToKnownModels(t *testing.T) {
 		})
 	}
 }
+
+// TestClaudeOpus55Pricing pins Opus 5.5's own rate card. It is cheaper than
+// Opus 5 ($4/$20 against $5/$25) despite being the newer model, so an entry
+// copied from Opus 5 would overstate every cost report by 25%. The
+// provider-qualified spelling that OpenRouter and Pi emit must resolve to the
+// same rate, or the same session prices differently depending on which harness
+// reported it.
+func TestClaudeOpus55Pricing(t *testing.T) {
+	got, ok := PricingTable["claude-opus-5-5"]
+	if !ok {
+		t.Fatal("claude-opus-5-5 is absent from PricingTable")
+	}
+	if got.Input != 4.00 || got.Output != 20.00 {
+		t.Errorf("claude-opus-5-5 = $%.2f/$%.2f, want $4.00/$20.00", got.Input, got.Output)
+	}
+	if got.CacheRead != 0.20 {
+		t.Errorf("claude-opus-5-5 cache read = $%.2f, want $0.20 (0.05x input)", got.CacheRead)
+	}
+	if opus5 := PricingTable["claude-opus-5"]; got.Input == opus5.Input {
+		t.Errorf("claude-opus-5-5 carries Opus 5's input rate ($%.2f); it is cheaper, not the same", opus5.Input)
+	}
+	qualified, ok := PricingTable["anthropic/claude-opus-5-5"]
+	if !ok {
+		t.Fatal("anthropic/claude-opus-5-5 is absent; OpenRouter and Pi spellings would price at zero")
+	}
+	if qualified != got {
+		t.Errorf("anthropic/claude-opus-5-5 = %+v, want the same rate as claude-opus-5-5 (%+v)", qualified, got)
+	}
+}

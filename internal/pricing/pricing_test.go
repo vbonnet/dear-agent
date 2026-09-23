@@ -121,3 +121,28 @@ func TestOpusCostsMoreThanSonnet(t *testing.T) {
 			opus.OutputPerMillion, sonnet.OutputPerMillion)
 	}
 }
+
+// TestOpus55DoesNotInheritOpus4xRate covers PRICING-12. Lookup falls back to a
+// substring scan, and "claude-opus-5-5" contains "opus", so without its own row
+// it silently resolves to the Claude 4.x Opus rate of $15/$75 — not a zero that
+// a caller can detect as missing, but a confident number that is nearly four
+// times the real input price. A wrong-but-plausible rate is worse than an
+// unknown one because nothing downstream flags it.
+func TestOpus55DoesNotInheritOpus4xRate(t *testing.T) {
+	got := Lookup("claude-opus-5-5")
+
+	if got == UnknownModel {
+		t.Fatal("claude-opus-5-5 is unpriced; it needs its own rate row")
+	}
+	if got.InputPerMillion != 4.00 || got.OutputPerMillion != 20.00 {
+		t.Errorf("claude-opus-5-5 = $%.2f/$%.2f per Mtok, want $4.00/$20.00",
+			got.InputPerMillion, got.OutputPerMillion)
+	}
+	if opus4x := Lookup("claude-opus-4-8"); got.InputPerMillion == opus4x.InputPerMillion {
+		t.Errorf("claude-opus-5-5 resolved to the Claude 4.x Opus row ($%.2f input); the substring scan swallowed it",
+			opus4x.InputPerMillion)
+	}
+	if got.Source == "" || got.AsOf == "" {
+		t.Errorf("claude-opus-5-5 row is missing provenance: Source=%q AsOf=%q (PRICING-10)", got.Source, got.AsOf)
+	}
+}
