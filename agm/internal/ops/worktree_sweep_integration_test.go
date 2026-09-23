@@ -64,6 +64,56 @@ func TestRealSweepDeps_Discover(t *testing.T) {
 	}
 }
 
+func TestRealSweepDeps_DiscoverMultipleAndDottedHusks(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "myrepo")
+	mainCheckout := filepath.Join(base, "myrepo-main")
+	if err := os.MkdirAll(mainCheckout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	git(t, base, "init", "-b", "main", mainCheckout)
+	if err := os.WriteFile(filepath.Join(mainCheckout, "f"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, mainCheckout, "add", "f")
+	git(t, mainCheckout, "commit", "-m", "init")
+
+	// Create a dotted standalone husk inside repoDir that sorts lexically first.
+	dottedHusk := filepath.Join(repoDir, ".git-husk")
+	git(t, base, "init", "-b", "main", dottedHusk)
+	if err := os.WriteFile(filepath.Join(dottedHusk, "f"), []byte("husk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dottedHusk, "add", "f")
+	git(t, dottedHusk, "commit", "-m", "husk-init")
+
+	// Create two independent worktrees under repoDir.
+	wt1 := filepath.Join(repoDir, "feat1")
+	wt2 := filepath.Join(repoDir, "feat2")
+	git(t, mainCheckout, "worktree", "add", "-b", "branch1", wt1)
+	git(t, mainCheckout, "worktree", "add", "-b", "branch2", wt2)
+
+	got, err := (RealSweepDeps{}).Discover(base)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 discovered worktrees, got %d: %+v", len(got), got)
+	}
+
+	branches := map[string]bool{}
+	for _, wt := range got {
+		branches[wt.Branch] = true
+	}
+	if !branches["branch1"] || !branches["branch2"] {
+		t.Fatalf("expected branch1 and branch2, got: %+v", got)
+	}
+}
+
 func TestRealSweepDeps_DeleteBranchPreservesRemoteRef(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

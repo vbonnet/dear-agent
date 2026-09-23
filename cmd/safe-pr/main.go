@@ -258,9 +258,21 @@ var runPreflightFull = func(dir string, transaction *safepr.WorktreeTransaction)
 	if err != nil {
 		return fmt.Errorf("preflight-full resolve safe-pr executable: %w", err)
 	}
+
+	// preflight.sh records the gate it died on here. Without it a failure
+	// reaches the operator as a bare exit status and the only way to learn
+	// what broke is to re-run the whole race suite (ce-2sgej DoD 4).
+	gateDir, err := os.MkdirTemp("", "safe-pr-preflight")
+	if err != nil {
+		return fmt.Errorf("preflight-full create gate report directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(gateDir) }()
+	gateLog := filepath.Join(gateDir, "failed-gate")
+
 	cmd := exec.CommandContext(ctx, executable, preflightGuardVerb, dir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), preflightGateLogEnv+"="+gateLog)
 	if err := protectTransactionCommand(transaction, cmd); err != nil {
 		return err
 	}
@@ -268,9 +280,61 @@ var runPreflightFull = func(dir string, transaction *safepr.WorktreeTransaction)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("preflight-full failed — fix issues before creating PR (timed out after %s)", preflightTimeout)
 		}
-		return fmt.Errorf("preflight-full failed — fix issues before creating PR: %w", err)
+		return describePreflightFailure(gateLog, err)
 	}
 	return nil
+}
+
+// preflightGateLogEnv names the file scripts/preflight.sh writes its failing
+// gate to. The first line is the gate name; any further lines are details the
+// gate collected, such as the names of failing tests.
+const preflightGateLogEnv = "PREFLIGHT_GATE_LOG"
+
+// preflightGateDetailLimit bounds how many detail lines reach the error so a
+// suite that fails wholesale does not bury the gate name.
+const preflightGateDetailLimit = 10
+
+// describePreflightFailure turns a preflight exit into an error that names the
+// gate that failed. It falls back to the raw exit status when the gate report
+// is missing, so a preflight that dies before recording anything still surfaces.
+func describePreflightFailure(gateLog string, runErr error) error {
+	gate, details := readPreflightGateReport(gateLog)
+	if gate == "" {
+		return fmt.Errorf("preflight-full failed — fix issues before creating PR: %w", runErr)
+	}
+	if len(details) == 0 {
+		return fmt.Errorf("preflight-full failed at gate %q — fix it before creating PR", gate)
+	}
+	return fmt.Errorf("preflight-full failed at gate %q — fix it before creating PR:\n  %s",
+		gate, strings.Join(details, "\n  "))
+}
+
+// readPreflightGateReport reads the gate name and its detail lines. A missing
+// or unreadable report is not itself an error: the caller falls back to the
+// process exit status.
+func readPreflightGateReport(gateLog string) (string, []string) {
+	raw, err := os.ReadFile(gateLog)
+	if err != nil {
+		return "", nil
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	gate := strings.TrimSpace(lines[0])
+	if gate == "" {
+		return "", nil
+	}
+	var details []string
+	for _, line := range lines[1:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if len(details) == preflightGateDetailLimit {
+			details = append(details, "(further detail lines omitted)")
+			break
+		}
+		details = append(details, trimmed)
+	}
+	return gate, details
 }
 
 // runPreflightGuard is the protected preflight child. ExtraFiles are placed at

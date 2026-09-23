@@ -42,8 +42,8 @@ func TestRecorderRunsNodesAttempts(t *testing.T) {
 
 	// runs: exactly one row, succeeded.
 	var (
-		runID   string
-		state   string
+		runID string
+		state string
 	)
 	if err := ss.DB().QueryRow(`SELECT run_id, state FROM runs`).Scan(&runID, &state); err != nil {
 		t.Fatalf("query runs: %v", err)
@@ -123,6 +123,7 @@ func TestRecorderRunsNodesAttempts(t *testing.T) {
 // workflow we expect:
 //   - run-level: pending→running, running→succeeded (2 rows)
 //   - per node: pending→running, running→succeeded (2 rows × 2 nodes = 4)
+//
 // Total: 6.
 func TestAuditEventsEveryTransition(t *testing.T) {
 	ss := openTestState(t)
@@ -309,6 +310,13 @@ func TestAuditEventsResumeDoesNotDuplicate(t *testing.T) {
 	).Scan(&beforeNodeRows); err != nil {
 		t.Fatalf("count node audit rows: %v", err)
 	}
+	var beforeRunRows int
+	if err := ss2.DB().QueryRow(
+		`SELECT COUNT(*) FROM audit_events WHERE run_id = ? AND node_id IS NULL`,
+		runID,
+	).Scan(&beforeRunRows); err != nil {
+		t.Fatalf("count run audit rows: %v", err)
+	}
 
 	r2 := NewRunner(&fakeAI{})
 	r2.UseSQLiteState(ss2)
@@ -326,6 +334,28 @@ func TestAuditEventsResumeDoesNotDuplicate(t *testing.T) {
 	if afterNodeRows != beforeNodeRows {
 		t.Errorf("resume added %d node-level audit rows, want 0",
 			afterNodeRows-beforeNodeRows)
+	}
+	events, err := Logs(context.Background(), ss2.DB(), runID, LogsOptions{})
+	if err != nil {
+		t.Fatalf("Logs after resume: %v", err)
+	}
+	runTransitions := map[string]int{}
+	for _, event := range events {
+		if event.NodeID == "" {
+			runTransitions[event.FromState+"->"+event.ToState]++
+		}
+	}
+	for transition, want := range map[string]int{
+		"pending->running":   1,
+		"succeeded->running": 1,
+		"running->succeeded": 2,
+	} {
+		if got := runTransitions[transition]; got != want {
+			t.Errorf("run transition %s count = %d, want %d; all=%v", transition, got, want, runTransitions)
+		}
+	}
+	if got := len(events) - afterNodeRows; got != beforeRunRows+2 {
+		t.Errorf("resume added %d run-level audit rows, want explicit reopen + terminal", got-beforeRunRows)
 	}
 }
 

@@ -16,9 +16,31 @@ import (
 // the only authority permitted to answer a must-reach-human escalation.
 const HumanSessionID = "human"
 
+const defaultPostCommitEffectTimeout = 10 * time.Second
+
 // ErrAwaitTimeout is returned by Await when the escalation did not resolve in
 // time. The escalation remains in-flight; only the worker's wait ended.
 var ErrAwaitTimeout = errors.New("escalation: await timed out")
+
+// CommittedEffectError reports that state committed but a required
+// post-commit notification or dispatch failed. Callers must not retry the state
+// transition as though it were rolled back; inspect the returned Escalation and
+// retry/reconcile the external effect instead.
+type CommittedEffectError struct {
+	EscalationID string
+	Phase        Phase
+	Err          error
+}
+
+func (e *CommittedEffectError) Error() string {
+	return fmt.Sprintf(
+		"escalation %s committed phase %s but a post-commit effect failed: %v",
+		e.EscalationID, e.Phase, e.Err,
+	)
+}
+
+// Unwrap exposes the underlying effect failure.
+func (e *CommittedEffectError) Unwrap() error { return e.Err }
 
 // SessionGraph answers "who should this session escalate to" — the spawn
 // hierarchy, supplied by AGM's Dolt session adapter. A ParentRef with Kind
@@ -70,6 +92,9 @@ type Config struct {
 	// MaxHops bounds chain length; once exceeded the escalation is dispatched to
 	// the human rather than routed further. Default 16.
 	MaxHops int
+	// PostCommitEffectTimeout bounds each individual delivery, human dispatch,
+	// and audit write after state commits. Default 10 seconds per effect.
+	PostCommitEffectTimeout time.Duration
 	// VROOMEntry, if set, is where an orphaned chain (a session with no parent
 	// that is not itself a VROOM node) is routed so it still reaches the mesh.
 	// If nil, orphaned chains go straight to the human.
@@ -88,6 +113,48 @@ type Config struct {
 // extent its Store and Sink are.
 type Engine struct {
 	cfg Config
+}
+
+// transitionEffect is one externally visible action to perform after a state
+// transition has committed. Store mutation callbacks only build these plans;
+// they never message, dispatch, or log, so a losing concurrent mutation has no
+// effects to undo.
+type transitionEffect struct {
+	kind       transitionEffectKind
+	to         string
+	message    EscalationMessage
+	event      EscalationEvent
+	bestEffort bool
+}
+
+type transitionEffectKind uint8
+
+const (
+	transitionDeliver transitionEffectKind = iota
+	transitionDispatchHuman
+	transitionRecordEvent
+)
+
+type transitionPlan struct {
+	effects []transitionEffect
+}
+
+func (p *transitionPlan) deliver(to string, msg EscalationMessage, bestEffort bool) {
+	p.effects = append(p.effects, transitionEffect{
+		kind: transitionDeliver, to: to, message: msg, bestEffort: bestEffort,
+	})
+}
+
+func (p *transitionPlan) dispatchHuman() {
+	p.effects = append(p.effects, transitionEffect{kind: transitionDispatchHuman})
+}
+
+func (p *transitionPlan) record(ev EscalationEvent) {
+	p.effects = append(p.effects, transitionEffect{kind: transitionRecordEvent, event: ev})
+}
+
+func (p *transitionPlan) append(other transitionPlan) {
+	p.effects = append(p.effects, other.effects...)
 }
 
 // NewEngine validates cfg and returns an Engine.
@@ -115,6 +182,9 @@ func NewEngine(cfg Config) (*Engine, error) {
 	}
 	if cfg.MaxHops <= 0 {
 		cfg.MaxHops = 16
+	}
+	if cfg.PostCommitEffectTimeout <= 0 {
+		cfg.PostCommitEffectTimeout = defaultPostCommitEffectTimeout
 	}
 	return &Engine{cfg: cfg}, nil
 }
@@ -180,7 +250,10 @@ func (e *Engine) Raise(ctx context.Context, req RaiseRequest) (*Escalation, erro
 	esc.ClassifierReason = verdict.Reason
 	esc.Topic = verdict.Topic
 
-	e.emit(ctx, esc, PhaseRaised, eventFields{from: esc.OriginSessionID, fromRole: esc.OriginRole})
+	var plan transitionPlan
+	plan.record(e.event(esc, PhaseRaised, eventFields{
+		from: esc.OriginSessionID, fromRole: esc.OriginRole,
+	}))
 
 	if verdict.Disposition == DispAutoResolve {
 		esc.Answer = verdict.Answer
@@ -189,39 +262,45 @@ func (e *Engine) Raise(ctx context.Context, req RaiseRequest) (*Escalation, erro
 		esc.Phase = PhaseAutoResolved
 		esc.ResolvedAt = now
 		esc.UpdatedAt = now
-		e.emit(ctx, esc, PhaseAutoResolved, eventFields{
+		plan.record(e.event(esc, PhaseAutoResolved, eventFields{
 			from: "auto", answer: verdict.Answer, latency: 0,
-		})
-		if err := e.cfg.Store.Put(ctx, esc); err != nil {
+		}))
+		if err := e.cfg.Store.Create(ctx, esc); err != nil {
 			return nil, err
 		}
-		return esc, nil
+		return e.finishTransition(ctx, esc, plan)
 	}
 
 	// Route the first hop: from the origin to its supervisor.
-	if err := e.advance(ctx, esc); err != nil {
+	routePlan, err := e.planAdvance(ctx, esc)
+	if err != nil {
 		return nil, err
 	}
-	if err := e.cfg.Store.Put(ctx, esc); err != nil {
+	plan.append(routePlan)
+	if err := e.cfg.Store.Create(ctx, esc); err != nil {
 		return nil, err
 	}
-	return esc, nil
+	return e.finishTransition(ctx, esc, plan)
 }
 
-// advance moves the escalation one hop up from its current holder, delivering it
-// to the next node (or to the human when the chain ends or loops). It mutates
-// esc and emits the transition event but does not persist (callers Put).
-func (e *Engine) advance(ctx context.Context, esc *Escalation) error {
-	from := esc.CurrentSessionID
-	fromRole := esc.CurrentRole
+type advanceTarget struct {
+	parent          ParentRef
+	humanReason     string
+	registryMembers []ParentRef
+	useRegistry     bool
+}
 
+// resolveAdvanceTarget performs hierarchy and registry reads before a Store
+// mutation begins. The resulting proposal is revalidated against the latest
+// committed holder before it is applied.
+func (e *Engine) resolveAdvanceTarget(ctx context.Context, esc *Escalation) (advanceTarget, error) {
 	if len(esc.Chain) > e.cfg.MaxHops {
-		return e.dispatchToHuman(ctx, esc, from, fromRole, "hop limit reached")
+		return advanceTarget{humanReason: "hop limit reached"}, nil
 	}
 
-	pref, err := e.cfg.Graph.Parent(ctx, from)
+	pref, err := e.cfg.Graph.Parent(ctx, esc.CurrentSessionID)
 	if err != nil {
-		return fmt.Errorf("escalation: lookup parent of %q: %w", from, err)
+		return advanceTarget{}, fmt.Errorf("escalation: lookup parent of %q: %w", esc.CurrentSessionID, err)
 	}
 
 	// No parent, or a cycle: fall back to the VROOM entry if configured, else
@@ -230,18 +309,48 @@ func (e *Engine) advance(ctx context.Context, esc *Escalation) error {
 		if e.cfg.VROOMEntry != nil && !esc.CurrentKind.IsVROOM() && !inChain(esc.Chain, e.cfg.VROOMEntry.SessionID) {
 			pref = *e.cfg.VROOMEntry
 		} else {
-			return e.dispatchToHuman(ctx, esc, from, fromRole, "no further supervisor in the chain")
+			return advanceTarget{humanReason: "no further supervisor in the chain"}, nil
 		}
 	}
+
+	target := advanceTarget{parent: pref}
+	if pref.Kind.IsVROOM() && e.cfg.Registry != nil {
+		target.useRegistry = true
+		// Registry membership is an optional liveness hint. Failure degrades to
+		// the durable single-node route.
+		target.registryMembers, _ = e.cfg.Registry.Members(ctx)
+	}
+	return target, nil
+}
+
+// planAdvance moves the escalation one hop up from its current holder and
+// returns the effects to perform only after the caller commits the new state.
+func (e *Engine) planAdvance(ctx context.Context, esc *Escalation) (transitionPlan, error) {
+	target, err := e.resolveAdvanceTarget(ctx, esc)
+	if err != nil {
+		return transitionPlan{}, err
+	}
+	return e.planAdvanceTo(esc, target), nil
+}
+
+// planAdvanceTo applies a pre-resolved routing target without calling any
+// external collaborator. It is safe to call from a Store mutation.
+func (e *Engine) planAdvanceTo(esc *Escalation, target advanceTarget) transitionPlan {
+	from := esc.CurrentSessionID
+	fromRole := esc.CurrentRole
+	if target.humanReason != "" {
+		return e.planDispatchToHuman(esc, from, fromRole, target.humanReason)
+	}
+	pref := target.parent
 
 	// Reaching the VROOM mesh runs a programmatic confer across the live trio
 	// when a registry is configured; otherwise it falls back to delivering to the
 	// single node, which confers via peer messaging (pre-ce-es7z behaviour).
 	if pref.Kind.IsVROOM() {
-		if e.cfg.Registry != nil {
-			return e.beginConfer(ctx, esc, pref, from, fromRole)
+		if target.useRegistry {
+			return e.planBeginConfer(esc, pref, from, fromRole, target.registryMembers)
 		}
-		return e.routeSingleVROOM(ctx, esc, pref, from, fromRole)
+		return e.planRouteSingleVROOM(esc, pref, from, fromRole)
 	}
 
 	esc.Chain = append(esc.Chain, pref.SessionID)
@@ -251,30 +360,29 @@ func (e *Engine) advance(ctx context.Context, esc *Escalation) error {
 	esc.UpdatedAt = e.now()
 	esc.Phase = PhaseRouted
 
-	if err := e.cfg.Messenger.Deliver(ctx, pref.SessionID, e.message(esc, from, fromRole, "")); err != nil {
-		return fmt.Errorf("escalation: deliver to %q: %w", pref.SessionID, err)
-	}
-	e.emit(ctx, esc, PhaseRouted, eventFields{
+	var plan transitionPlan
+	plan.deliver(pref.SessionID, e.message(esc, from, fromRole, ""), false)
+	plan.record(e.event(esc, PhaseRouted, eventFields{
 		from: from, fromRole: fromRole, to: pref.SessionID, toRole: pref.Role,
-	})
-	return nil
+	}))
+	return plan
 }
 
-// dispatchToHuman surfaces the escalation to the human. It is not a terminal
+// planDispatchToHuman moves an escalation to the human and defers dispatch and
+// logging until after the state transition commits. It is not a terminal
 // phase: the human answers later via Answer(HumanSessionID, ...).
-func (e *Engine) dispatchToHuman(ctx context.Context, esc *Escalation, from, fromRole, reason string) error {
+func (e *Engine) planDispatchToHuman(esc *Escalation, from, fromRole, reason string) transitionPlan {
 	esc.CurrentSessionID = HumanSessionID
 	esc.CurrentRole = "human"
 	esc.CurrentKind = NodeHuman
 	esc.Phase = PhaseDispatchedToHuman
 	esc.UpdatedAt = e.now()
-	if err := e.cfg.Human.ToHuman(ctx, esc); err != nil {
-		return fmt.Errorf("escalation: dispatch to human: %w", err)
-	}
-	e.emit(ctx, esc, PhaseDispatchedToHuman, eventFields{
+	var plan transitionPlan
+	plan.dispatchHuman()
+	plan.record(e.event(esc, PhaseDispatchedToHuman, eventFields{
 		from: from, fromRole: fromRole, to: HumanSessionID, toRole: "human", note: reason,
-	})
-	return nil
+	}))
+	return plan
 }
 
 // Answer records a terminal answer and returns it to the origin session. It is
@@ -285,84 +393,125 @@ func (e *Engine) Answer(ctx context.Context, id, bySessionID, byRole, answer str
 	if strings.TrimSpace(answer) == "" {
 		return nil, fmt.Errorf("escalation: answer text is required")
 	}
-	esc, err := e.cfg.Store.Get(ctx, id)
+	if strings.TrimSpace(bySessionID) == "" {
+		return nil, fmt.Errorf("escalation: answerer session id is required")
+	}
+	var plan transitionPlan
+	esc, err := e.cfg.Store.Update(ctx, id, func(current *Escalation) error {
+		if current.resolved() {
+			return fmt.Errorf("escalation %s is already %s", id, current.Phase)
+		}
+		// The human may override an in-flight escalation. Every non-human actor
+		// must still hold the latest committed state; this closes the race where
+		// a supervisor forwards and then answers from its stale view.
+		if bySessionID != HumanSessionID && !current.isHolder(bySessionID) {
+			return fmt.Errorf(
+				"escalation %s is currently held by %q, not %q — only the holder or human may answer it",
+				id, current.CurrentSessionID, bySessionID)
+		}
+		// During a programmatic confer, a trio member must vote rather than answer
+		// unilaterally — the quorum, not a single supervisor, decides. The human may
+		// still answer directly (an override of the in-flight confer).
+		if current.Confer != nil && current.Phase == PhaseConferring &&
+			bySessionID != HumanSessionID && current.Confer.isMember(bySessionID) {
+			return fmt.Errorf(
+				"escalation %s is in a VROOM trio confer — cast a vote (`escalate vote %s approve|reject`), "+
+					"do not answer unilaterally", id, id)
+		}
+		if current.MustReachHuman && bySessionID != HumanSessionID {
+			return fmt.Errorf(
+				"escalation %s must reach the human (%s): a node below the human may not answer it.\n"+
+					"The right way: `escalate forward` with your recommendation so the human decides.\n"+
+					"Because: %s", id, current.Topic, current.ClassifierReason)
+		}
+
+		now := e.now()
+		current.Answer = answer
+		current.AnsweredBy = bySessionID
+		current.AnsweredByRole = byRole
+		current.Phase = PhaseAnswered
+		current.ResolvedAt = now
+		current.UpdatedAt = now
+
+		// Answer delivery remains best-effort, matching the pre-atomic behavior.
+		if current.OriginSessionID != "" && current.OriginSessionID != bySessionID {
+			plan.deliver(current.OriginSessionID, e.message(current, bySessionID, byRole, answer), true)
+		}
+		plan.record(e.event(current, PhaseAnswered, eventFields{
+			from: bySessionID, fromRole: byRole, answer: answer,
+			latency: now.Sub(current.CreatedAt).Milliseconds(),
+		}))
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if esc.resolved() {
-		return nil, fmt.Errorf("escalation %s is already %s", id, esc.Phase)
-	}
-	// During a programmatic confer, a trio member must vote rather than answer
-	// unilaterally — the quorum, not a single supervisor, decides. The human may
-	// still answer directly (an override of the in-flight confer).
-	if esc.Confer != nil && esc.Phase == PhaseConferring &&
-		bySessionID != HumanSessionID && esc.Confer.isMember(bySessionID) {
-		return nil, fmt.Errorf(
-			"escalation %s is in a VROOM trio confer — cast a vote (`escalate vote %s approve|reject`), "+
-				"do not answer unilaterally", id, id)
-	}
-	if esc.MustReachHuman && bySessionID != HumanSessionID {
-		return nil, fmt.Errorf(
-			"escalation %s must reach the human (%s): a node below the human may not answer it.\n"+
-				"The right way: `escalate forward` with your recommendation so the human decides.\n"+
-				"Because: %s", id, esc.Topic, esc.ClassifierReason)
-	}
-
-	now := e.now()
-	esc.Answer = answer
-	esc.AnsweredBy = bySessionID
-	esc.AnsweredByRole = byRole
-	esc.Phase = PhaseAnswered
-	esc.ResolvedAt = now
-	esc.UpdatedAt = now
-
-	// Return the answer to the worker that raised it (async delivery; harmless
-	// for blocking mode, whose Await reads the Store).
-	if esc.OriginSessionID != "" && esc.OriginSessionID != bySessionID {
-		_ = e.cfg.Messenger.Deliver(ctx, esc.OriginSessionID, e.message(esc, bySessionID, byRole, answer))
-	}
-
-	e.emit(ctx, esc, PhaseAnswered, eventFields{
-		from: bySessionID, fromRole: byRole, answer: answer,
-		latency: now.Sub(esc.CreatedAt).Milliseconds(),
-	})
-	if err := e.cfg.Store.Put(ctx, esc); err != nil {
-		return nil, err
-	}
-	return esc, nil
+	return e.finishTransition(ctx, esc, plan)
 }
 
 // Forward escalates one more hop up the chain. From a VROOM node (already
 // conferring) it dispatches to the human; otherwise it advances to the next
 // supervisor. Only the node currently holding the escalation may forward it.
 func (e *Engine) Forward(ctx context.Context, id, fromSessionID, fromRole, note string) (*Escalation, error) {
-	esc, err := e.cfg.Store.Get(ctx, id)
+	if strings.TrimSpace(fromSessionID) == "" {
+		return nil, fmt.Errorf("escalation: forwarding session id is required")
+	}
+	snapshot, err := e.cfg.Store.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if esc.resolved() {
-		return nil, fmt.Errorf("escalation %s is already %s", id, esc.Phase)
+	if snapshot.resolved() {
+		return nil, fmt.Errorf("escalation %s is already %s", id, snapshot.Phase)
 	}
-	if fromSessionID != "" && !esc.isHolder(fromSessionID) {
+	if !snapshot.isHolder(fromSessionID) {
 		return nil, fmt.Errorf(
 			"escalation %s is currently held by %q, not %q — only the holder may forward it",
-			id, esc.CurrentSessionID, fromSessionID)
+			id, snapshot.CurrentSessionID, fromSessionID)
+	}
+	var target advanceTarget
+	if !snapshot.CurrentKind.IsVROOM() {
+		target, err = e.resolveAdvanceTarget(ctx, snapshot)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	if esc.CurrentKind.IsVROOM() {
-		// The trio conferred and could not answer → escalate to the human.
-		if err := e.dispatchToHuman(ctx, esc, fromSessionID, fromRole, note); err != nil {
-			return nil, err
+	var plan transitionPlan
+	esc, err := e.cfg.Store.Update(ctx, id, func(current *Escalation) error {
+		if current.resolved() {
+			return fmt.Errorf("escalation %s is already %s", id, current.Phase)
 		}
-	} else {
-		if err := e.advance(ctx, esc); err != nil {
-			return nil, err
+		if !current.isHolder(fromSessionID) {
+			return fmt.Errorf(
+				"escalation %s is currently held by %q, not %q — only the holder may forward it",
+				id, current.CurrentSessionID, fromSessionID)
 		}
-	}
-	if err := e.cfg.Store.Put(ctx, esc); err != nil {
+
+		if current.CurrentKind.IsVROOM() {
+			// The trio conferred and could not answer → escalate to the human.
+			plan = e.planDispatchToHuman(current, fromSessionID, fromRole, note)
+			return nil
+		}
+		if !sameAdvanceBase(snapshot, current) {
+			return fmt.Errorf("escalation %s changed while its route was being planned; retry", id)
+		}
+		plan = e.planAdvanceTo(current, target)
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	return esc, nil
+	return e.finishTransition(ctx, esc, plan)
+}
+
+func sameAdvanceBase(snapshot, current *Escalation) bool {
+	return snapshot.ID == current.ID &&
+		snapshot.Phase == current.Phase &&
+		snapshot.CurrentSessionID == current.CurrentSessionID &&
+		snapshot.CurrentRole == current.CurrentRole &&
+		snapshot.CurrentKind == current.CurrentKind &&
+		snapshot.UpdatedAt.Equal(current.UpdatedAt) &&
+		slices.Equal(snapshot.Chain, current.Chain)
 }
 
 // Await blocks (polling the Store) until the escalation reaches a terminal phase
@@ -438,11 +587,10 @@ type eventFields struct {
 	latency  int64
 }
 
-// emit builds and records an EscalationEvent for a transition. Logging failures
-// are intentionally swallowed: the escalation must proceed even if the audit
-// sink is temporarily unwritable (the OTel span still fires). A dropped audit
-// line is a known, bounded loss; a wedged escalation is not.
-func (e *Engine) emit(ctx context.Context, esc *Escalation, phase Phase, f eventFields) {
+// event snapshots one transition before its post-commit effects run. Keeping
+// the snapshot in the transition plan preserves raised/routed field values even
+// when the committed record has already advanced to a later phase.
+func (e *Engine) event(esc *Escalation, phase Phase, f eventFields) EscalationEvent {
 	ev := EscalationEvent{
 		EscalationID:     esc.ID,
 		Timestamp:        e.now(),
@@ -477,7 +625,58 @@ func (e *Engine) emit(ctx context.Context, esc *Escalation, phase Phase, f event
 			ev.ClassifierReason = f.note
 		}
 	}
-	_ = e.cfg.Logger.Record(ctx, ev)
+	return ev
+}
+
+// emit builds and records an EscalationEvent for a transition. Logging failures
+// are intentionally swallowed: the escalation must proceed even if the audit
+// sink is temporarily unwritable (the OTel span still fires). A dropped audit
+// line is a known, bounded loss; a wedged escalation is not.
+func (e *Engine) emit(ctx context.Context, esc *Escalation, phase Phase, f eventFields) {
+	_ = e.cfg.Logger.Record(ctx, e.event(esc, phase, f))
+}
+
+// finishTransition performs only the effects owned by a committed state
+// transition. Required effect failures return the committed state together
+// with an explicit error so callers never mistake a successful retry for safe.
+func (e *Engine) finishTransition(ctx context.Context, esc *Escalation, plan transitionPlan) (*Escalation, error) {
+	// Once state commits, request cancellation must not silently suppress its
+	// notification or audit. Preserve trace values and detach cancellation;
+	// applyTransition gives every effect its own fresh bound.
+	effectParent := context.Background()
+	if ctx != nil {
+		effectParent = context.WithoutCancel(ctx)
+	}
+	if err := e.applyTransition(effectParent, esc, plan); err != nil {
+		return esc, &CommittedEffectError{EscalationID: esc.ID, Phase: esc.Phase, Err: err}
+	}
+	return esc, nil
+}
+
+func (e *Engine) applyTransition(ctx context.Context, esc *Escalation, plan transitionPlan) error {
+	var effectErr error
+	for _, effect := range plan.effects {
+		effectCtx, cancel := context.WithTimeout(ctx, e.cfg.PostCommitEffectTimeout)
+		switch effect.kind {
+		case transitionDeliver:
+			if err := e.cfg.Messenger.Deliver(effectCtx, effect.to, effect.message); err != nil && !effect.bestEffort {
+				effectErr = errors.Join(effectErr, fmt.Errorf("deliver to %q: %w", effect.to, err))
+			}
+		case transitionDispatchHuman:
+			// HumanDispatch is an external trust boundary and may retain or mutate
+			// its input. Give it a private copy so the caller's committed snapshot
+			// remains stable after finishTransition returns.
+			if err := e.cfg.Human.ToHuman(effectCtx, cloneEscalation(esc)); err != nil {
+				effectErr = errors.Join(effectErr, fmt.Errorf("dispatch to human: %w", err))
+			}
+		case transitionRecordEvent:
+			_ = e.cfg.Logger.Record(effectCtx, effect.event)
+		default:
+			effectErr = errors.Join(effectErr, fmt.Errorf("unknown transition effect kind %d", effect.kind))
+		}
+		cancel()
+	}
+	return effectErr
 }
 
 func inChain(chain []string, id string) bool {

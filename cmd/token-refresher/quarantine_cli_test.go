@@ -79,7 +79,7 @@ func TestRun_LostResponseQuarantinesAndExits4(t *testing.T) {
 	if !strings.Contains(stderr.String(), "UNKNOWN") {
 		t.Errorf("stderr should explain the unknown outcome, got: %s", stderr.String())
 	}
-	for _, selector := range []string{`-credentials "` + canonicalCredentialsPath(creds) + `"`, `-quarantine "` + quar + `"`} {
+	for _, selector := range []string{`-credentials ` + shellQuote(canonicalCredentialsPath(creds)), `-quarantine ` + shellQuote(quar)} {
 		if !strings.Contains(stderr.String(), selector) {
 			t.Errorf("stderr recovery command missing %s: %s", selector, stderr.String())
 		}
@@ -153,7 +153,7 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 	}
 }
 
-func TestRun_ClearQuarantineKeepsMarkerWhenAlertCannotRearm(t *testing.T) {
+func TestRun_ClearQuarantineSucceedsWhenDefaultStateDirUnavailable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	if err := os.WriteFile(filepath.Join(home, ".local"), []byte("blocks state directory"), 0o600); err != nil {
@@ -166,11 +166,11 @@ func TestRun_ClearQuarantineKeepsMarkerWhenAlertCannotRearm(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"-clear-quarantine", "-quarantine", quar}, &stdout, &stderr)
-	if code != exitError {
-		t.Fatalf("exit code = %d, want %d", code, exitError)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr: %s", code, exitOK, stderr.String())
 	}
-	if _, err := os.Stat(quar); err != nil {
-		t.Fatalf("quarantine marker was removed before alert re-arm succeeded: %v", err)
+	if _, err := os.Stat(quar); !os.IsNotExist(err) {
+		t.Fatalf("quarantine marker was not removed: %v", err)
 	}
 }
 
@@ -258,6 +258,7 @@ func TestRun_CadenceWithDisabledQuarantineConfirmsDurableStop(t *testing.T) {
 	code := run([]string{
 		"-cadence", "-credentials", creds, "-endpoint", srv.URL,
 		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", "",
+		"-state-dir", t.TempDir(),
 	}, &stdout, &stderr)
 
 	if code != exitOK {
@@ -298,6 +299,7 @@ func TestRun_CadenceWithCustomQuarantineAndFailedSharedStopEscalates(t *testing.
 	code := run([]string{
 		"-cadence", "-credentials", creds, "-endpoint", srv.URL,
 		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", quarantine,
+		"-state-dir", t.TempDir(),
 	}, &stdout, &stderr)
 
 	if code != exitNotPersisted {
@@ -459,7 +461,7 @@ func TestCadenceExit_QuarantinedKeepsScheduleAlive(t *testing.T) {
 	stateDir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, &stderr); got != exitOK {
+	if got := cadenceExit(exitQuarantined, stateDir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
 		t.Errorf("cadence exit = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, deathSentinelName)); err != nil {

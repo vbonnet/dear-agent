@@ -103,7 +103,7 @@ func TestHandleEventNoMatch(t *testing.T) {
 	registry := NewTriggerRegistry()
 	registry.Register("/nonexistent/engram.ai.md", []engram.TriggerSpec{
 		{
-			On:       "phase.completed",
+			On:       "wayfinder.phase.completed",
 			Priority: 50,
 		},
 	})

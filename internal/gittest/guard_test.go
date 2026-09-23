@@ -26,6 +26,8 @@ var allowedUnsandboxedGitTests = map[string]map[int]string{
 			"without which the isolation assertion would pass vacuously",
 		209: "positive control: executes a production-style inherited-environment command after HardenRepo " +
 			"to prove command-scope host-hook configuration was replaced",
+		259: "lifecycle regression: builds production-style inherited-environment commands after HardenRepo " +
+			"to verify effective maintenance controls and trace that commits cannot start detached maintenance",
 	},
 	"agm/cmd/agm/scan_test.go": {118: "read-only capability probe: `git rev-parse --git-dir` decides whether to skip " +
 		"tests that deliberately read the INVOKING repository. Sandboxing the probe would answer a " +

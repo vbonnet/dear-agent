@@ -65,6 +65,11 @@ override BUILD_STAMP_FLAGS = $(if $(_INVALID_EXTRA_GO_LDFLAGS),$(error EXTRA_GO_
 # this registry with the recipes so a new governed build cannot bypass it.
 override _GOVERNED_BUILD_TARGETS := \
 	health-check \
+	build-absence-alarm \
+	build-recovery-loop \
+	build-retro-lint \
+	build-merge-health \
+	build-gate-health \
 	build-reaper-e2e \
 	build-routing-guard \
 	build-stamp-test-probe \
@@ -173,6 +178,16 @@ override _GOVERNED_BUILD_TARGETS := \
 #   install-disk-watchdog   Install disk-watchdog to ~/go/bin
 #   install-disk-watchdog-launchagent   Stage the disk-watchdog launch agent (5-min tick)
 #   uninstall-disk-watchdog-launchagent Remove the disk-watchdog launch agent
+#   build-absence-alarm             Build absence-alarm: alarm on missing positive events
+#   install-absence-alarm           Install absence-alarm to ~/go/bin
+#   install-absence-alarm-launchagent   Stage the absence-alarm launch agent (10-min tick)
+#   uninstall-absence-alarm-launchagent Remove the absence-alarm launch agent
+#   build-recovery-loop             Build recovery-loop: self-heal dead or wedged fleet jobs
+#   install-recovery-loop           Install recovery-loop to ~/go/bin
+#   install-recovery-loop-launchagent   Stage the recovery-loop launch agent (10-min tick)
+#   uninstall-recovery-loop-launchagent Remove the recovery-loop launch agent
+#   build-retro-lint                Build retro-lint: enforce machine-verifiable guards for DEAR retros
+#   install-retro-lint              Install retro-lint to ~/go/bin
 #   build-override-ledger-helper        Build the fixed privileged Unix ledger append helper
 #   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Unix)
 #   install-override-audit-launchdaemon Install the macOS dangerous-override audit
@@ -191,8 +206,12 @@ override _GOVERNED_BUILD_TARGETS := \
 #   install-vroom-prompt-gen Install vroom-prompt-gen to ~/go/bin
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
+#   build-gate-health       Build gate-health: systemic merge-gate failure probe
+#   install-gate-health     Install gate-health to ~/go/bin
 #   build-merge-audit       Build merge-audit: safe-merge P6 detection tier
 #   install-merge-audit     Install merge-audit to ~/go/bin
+#   build-merge-health      Build merge-health: merge-pipeline absence probe (jaeger-health sibling)
+#   install-merge-health    Install merge-health to ~/go/bin
 #   install-token-refresher-launchagent   Schedule the OAuth token-refresher idle backstop (macOS, ce-cs3v)
 #   uninstall-token-refresher-launchagent Remove the token-refresher launch agent
 #   build-dear-deploy       Build dear-deploy: atomic host-artifact deployer (cmd/dear-deploy)
@@ -211,6 +230,11 @@ override _GOVERNED_BUILD_TARGETS := \
 
 .PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-external-pr-reviewer install-external-pr-reviewer build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-pr-blockers install-pr-blockers build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
+.PHONY: build-absence-alarm install-absence-alarm install-absence-alarm-launchagent uninstall-absence-alarm-launchagent
+.PHONY: build-recovery-loop install-recovery-loop install-recovery-loop-launchagent uninstall-recovery-loop-launchagent
+.PHONY: build-retro-lint install-retro-lint
+.PHONY: build-merge-health install-merge-health
+.PHONY: build-gate-health install-gate-health
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
@@ -855,6 +879,25 @@ build-merge-audit:
 install-merge-audit: build-merge-audit
 	$(call install-go-bin,bin/merge-audit)
 
+build-merge-health:
+	@echo "Building merge-health..."
+	@mkdir -p bin
+	go build $(BUILD_STAMP_FLAGS) -o bin/merge-health ./cmd/merge-health/
+	@echo "Built: bin/merge-health"
+
+install-merge-health: build-merge-health
+	$(call install-go-bin,bin/merge-health)
+# Build gate-health: the systemic merge-gate failure probe. Sibling of
+# jaeger-health and merge-health, sharing their exit contract so absence-alarm
+# can schedule it as a command pulse. See cmd/gate-health/SPEC.md.
+build-gate-health:
+	@echo "Building gate-health..."
+	go build $(BUILD_STAMP_FLAGS) -o bin/gate-health ./cmd/gate-health/
+	@echo "Built: bin/gate-health"
+
+install-gate-health: build-gate-health
+	$(call install-go-bin,bin/gate-health)
+
 # Build dear-deploy: the write-side counterpart to drift-check. It deploys host
 # artifacts (launchd plists, Claude Code hooks) from deploy/manifest.yaml through
 # the principle-9 atomic sequence (stage -> verify -> activate). There is no
@@ -1082,6 +1125,78 @@ uninstall-disk-watchdog-launchagent:
 	@launchctl bootout gui/$$(id -u)/com.dear-agent.disk-watchdog 2>/dev/null || true
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist
 	@echo "Removed: com.dear-agent.disk-watchdog launch agent"
+
+build-absence-alarm:
+	@echo "Building absence-alarm..."
+	@mkdir -p bin
+	go build $(BUILD_STAMP_FLAGS) -o bin/absence-alarm ./cmd/absence-alarm/
+	@echo "Built: bin/absence-alarm"
+
+install-absence-alarm: build-absence-alarm
+	$(call install-go-bin,bin/absence-alarm)
+
+install-absence-alarm-launchagent: install-absence-alarm install-jaeger-health install-merge-health
+	@mkdir -p $(HOME)/Library/LaunchAgents
+	@mkdir -p $(HOME)/.local/state/dear-agent
+	@mkdir -p $(HOME)/.config/dear-agent
+	@[ -f $(HOME)/.config/dear-agent/absence-alarm-pulses.json ] || \
+		cp deploy/absence-alarm/pulses.json $(HOME)/.config/dear-agent/absence-alarm-pulses.json
+	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.absence-alarm.plist \
+		> $(HOME)/Library/LaunchAgents/com.dear-agent.absence-alarm.plist
+	@if [ ! -f $(HOME)/.local/state/dear-agent/absence-alarm.heartbeat.json ]; then \
+		printf '{"tick_time":"%s","results":[],"alarming":0}\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			> $(HOME)/.local/state/dear-agent/absence-alarm.heartbeat.json; \
+		echo "Seeded: $(HOME)/.local/state/dear-agent/absence-alarm.heartbeat.json"; \
+	fi
+	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.absence-alarm.plist"
+	@echo "Review the pulse set: $(HOME)/.config/dear-agent/absence-alarm-pulses.json"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.absence-alarm.plist"
+
+uninstall-absence-alarm-launchagent:
+	@launchctl bootout gui/$$(id -u)/com.dear-agent.absence-alarm 2>/dev/null || true
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.absence-alarm.plist
+	@echo "Removed: com.dear-agent.absence-alarm launch agent"
+
+build-recovery-loop:
+	@echo "Building recovery-loop..."
+	@mkdir -p bin
+	go build $(BUILD_STAMP_FLAGS) -o bin/recovery-loop ./cmd/recovery-loop/
+	@echo "Built: bin/recovery-loop"
+
+install-recovery-loop: build-recovery-loop
+	$(call install-go-bin,bin/recovery-loop)
+
+install-recovery-loop-launchagent: install-recovery-loop
+	@mkdir -p $(HOME)/Library/LaunchAgents
+	@mkdir -p $(HOME)/.local/state/dear-agent
+	@mkdir -p $(HOME)/.config/dear-agent
+	@[ -f $(HOME)/.config/dear-agent/recovery-loop-jobs.json ] || \
+		cp deploy/recovery-loop/jobs.json $(HOME)/.config/dear-agent/recovery-loop-jobs.json
+	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.recovery-loop.plist \
+		> $(HOME)/Library/LaunchAgents/com.dear-agent.recovery-loop.plist
+	@if [ ! -f $(HOME)/.local/state/dear-agent/recovery-loop.heartbeat.json ]; then \
+		printf '{"tick_time":"%s","results":[],"recovered":0,"failed":0,"human_needed":0,"healthy":0,"snoozed":0}\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			> $(HOME)/.local/state/dear-agent/recovery-loop.heartbeat.json; \
+		echo "Seeded: $(HOME)/.local/state/dear-agent/recovery-loop.heartbeat.json"; \
+	fi
+	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.recovery-loop.plist"
+	@echo "Review the critical jobs set: $(HOME)/.config/dear-agent/recovery-loop-jobs.json"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.recovery-loop.plist"
+
+uninstall-recovery-loop-launchagent:
+	@launchctl bootout gui/$$(id -u)/com.dear-agent.recovery-loop 2>/dev/null || true
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.recovery-loop.plist
+	@echo "Removed: com.dear-agent.recovery-loop launch agent"
+
+build-retro-lint:
+	@echo "Building retro-lint..."
+	go build $(BUILD_STAMP_FLAGS) -o bin/retro-lint ./cmd/retro-lint/
+	@echo "Built: bin/retro-lint"
+
+install-retro-lint: build-retro-lint
+	$(call install-go-bin,bin/retro-lint)
 
 # On Unix systems without macOS authopen, authorized uses append through this
 # one-purpose root-owned helper. Installation is an explicit operator action:

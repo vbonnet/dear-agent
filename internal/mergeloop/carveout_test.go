@@ -132,3 +132,35 @@ func TestClassify_CompleteRoutineFileListStaysGreen(t *testing.T) {
 		t.Errorf("Classify() = StateBlockedPolicy (%s), want a complete routine list to stay mergeable", got.Reason)
 	}
 }
+
+// TestClassify_MergeloopDeploymentConfigIsCarvedOut pins a gap found while
+// raising the loop's own backpressure cap.
+//
+// The agent-control-surface carve-out is spelled `**/mergeloop/**`, which
+// requires a path SEGMENT named mergeloop. The launchd template that configures
+// the running loop is `deploy/launchd/com.dear-agent.mergeloop.plist`, where
+// "mergeloop" appears only inside the filename. A PR changing only that file
+// therefore classified as green, and the loop could autonomously merge a change
+// to the very control that decides how much work it accepts, or whether it runs
+// at all.
+func TestClassify_MergeloopDeploymentConfigIsCarvedOut(t *testing.T) {
+	paths := []string{
+		"deploy/launchd/com.dear-agent.mergeloop.plist",
+		"deploy/launchd/com.dear-agent.loop-tick.plist",
+	}
+	for _, path := range paths {
+		pr := PR{
+			Number: 1, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+			Checks:       []Check{reqCheck("ci", CheckPass)},
+			ChangedFiles: []string{path},
+		}
+		cls := NewPolicy().Classify(pr, 0, false)
+		if cls.State != StateBlockedPolicy {
+			t.Errorf("Classify(%s) = %v, want %v: the loop must not autonomously merge "+
+				"changes to its own deployment configuration", path, cls.State, StateBlockedPolicy)
+		}
+		if !strings.Contains(cls.Reason, path) {
+			t.Errorf("reason should name the offending path, got %q", cls.Reason)
+		}
+	}
+}

@@ -30,7 +30,7 @@ func TestInjectWritesFile(t *testing.T) {
 		},
 	}
 
-	err := injector.Inject(tmpDir, "phase.started", engrams)
+	err := injector.Inject(tmpDir, "wayfinder.phase.started", engrams)
 	if err != nil {
 		t.Fatalf("Inject failed: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestInjectWritesFile(t *testing.T) {
 	}
 
 	// Check first engram
-	if !strings.Contains(content, "<!-- Event: phase.started -->") {
+	if !strings.Contains(content, "<!-- Event: wayfinder.phase.started -->") {
 		t.Error("Missing event comment")
 	}
 	if !strings.Contains(content, "## Error Handling in Go") {
@@ -127,7 +127,7 @@ func TestInjectOverwrites(t *testing.T) {
 		},
 	}
 
-	err := injector.Inject(tmpDir, "phase.started", firstEngrams)
+	err := injector.Inject(tmpDir, "wayfinder.phase.started", firstEngrams)
 	if err != nil {
 		t.Fatalf("First inject failed: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestInjectEmpty(t *testing.T) {
 	injector := NewFileInjector()
 
 	// Inject with empty engram list
-	err := injector.Inject(tmpDir, "phase.started", nil)
+	err := injector.Inject(tmpDir, "wayfinder.phase.started", nil)
 	if err != nil {
 		t.Fatalf("Inject with empty list failed: %v", err)
 	}

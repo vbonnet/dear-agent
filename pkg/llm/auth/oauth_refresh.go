@@ -183,6 +183,9 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 		if creds.ClaudeAIOAuth.RefreshToken == "" {
 			return errors.New("no refresh token available in credentials file")
 		}
+		if r.OnAttempt != nil {
+			r.OnAttempt(creds.ClaudeAIOAuth.RefreshToken)
+		}
 
 		// Refuse to re-present a token an earlier ambiguous refresh may already
 		// have spent. Checked under the lock and against the token we are about

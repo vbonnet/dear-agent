@@ -9,13 +9,13 @@ import (
 func TestMatchExact(t *testing.T) {
 	r := NewTriggerRegistry()
 	r.Register("engrams/go-errors.ai.md", []engram.TriggerSpec{
-		{On: "phase.started", Match: map[string]interface{}{"phase": "implementation"}, Priority: 80},
+		{On: "wayfinder.phase.started", Match: map[string]any{"phase": "implementation"}, Priority: 80},
 	})
 
 	m := NewTriggerMatcher(r)
 	results := m.Match(TriggerEvent{
-		Type: "phase.started",
-		Data: map[string]interface{}{"phase": "implementation"},
+		Type: "wayfinder.phase.started",
+		Data: map[string]any{"phase": "implementation"},
 	})
 
 	if len(results) != 1 {
@@ -29,8 +29,8 @@ func TestMatchExact(t *testing.T) {
 func TestMatchArray(t *testing.T) {
 	r := NewTriggerRegistry()
 	r.Register("engrams/testing.ai.md", []engram.TriggerSpec{
-		{On: "phase.started", Match: map[string]interface{}{
-			"phase": []interface{}{"testing", "qa", "validation"},
+		{On: "wayfinder.phase.started", Match: map[string]any{
+			"phase": []any{"testing", "qa", "validation"},
 		}, Priority: 70},
 	})
 
@@ -38,8 +38,8 @@ func TestMatchArray(t *testing.T) {
 
 	// Should match "qa" from the array.
 	results := m.Match(TriggerEvent{
-		Type: "phase.started",
-		Data: map[string]interface{}{"phase": "qa"},
+		Type: "wayfinder.phase.started",
+		Data: map[string]any{"phase": "qa"},
 	})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result for 'qa', got %d", len(results))
@@ -47,8 +47,8 @@ func TestMatchArray(t *testing.T) {
 
 	// Should match "testing" from the array.
 	results = m.Match(TriggerEvent{
-		Type: "phase.started",
-		Data: map[string]interface{}{"phase": "testing"},
+		Type: "wayfinder.phase.started",
+		Data: map[string]any{"phase": "testing"},
 	})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result for 'testing', got %d", len(results))
@@ -58,13 +58,13 @@ func TestMatchArray(t *testing.T) {
 func TestMatchNoMatch(t *testing.T) {
 	r := NewTriggerRegistry()
 	r.Register("engrams/go-errors.ai.md", []engram.TriggerSpec{
-		{On: "phase.started", Match: map[string]interface{}{"phase": "design"}, Priority: 80},
+		{On: "wayfinder.phase.started", Match: map[string]any{"phase": "design"}, Priority: 80},
 	})
 
 	m := NewTriggerMatcher(r)
 	results := m.Match(TriggerEvent{
-		Type: "phase.started",
-		Data: map[string]interface{}{"phase": "implementation"},
+		Type: "wayfinder.phase.started",
+		Data: map[string]any{"phase": "implementation"},
 	})
 
 	if len(results) != 0 {
@@ -75,13 +75,13 @@ func TestMatchNoMatch(t *testing.T) {
 func TestMatchEmptyMatch(t *testing.T) {
 	r := NewTriggerRegistry()
 	r.Register("engrams/always-on.ai.md", []engram.TriggerSpec{
-		{On: "phase.started", Match: nil, Priority: 50},
+		{On: "wayfinder.phase.started", Match: nil, Priority: 50},
 	})
 
 	m := NewTriggerMatcher(r)
 	results := m.Match(TriggerEvent{
-		Type: "phase.started",
-		Data: map[string]interface{}{"phase": "anything"},
+		Type: "wayfinder.phase.started",
+		Data: map[string]any{"phase": "anything"},
 	})
 
 	if len(results) != 1 {
@@ -95,19 +95,19 @@ func TestMatchEmptyMatch(t *testing.T) {
 func TestMatchPrioritySorting(t *testing.T) {
 	r := NewTriggerRegistry()
 	r.Register("engrams/low-pri.ai.md", []engram.TriggerSpec{
-		{On: "phase.started", Match: nil, Priority: 10},
+		{On: "wayfinder.phase.started", Match: nil, Priority: 10},
 	})
 	r.Register("engrams/high-pri.ai.md", []engram.TriggerSpec{
-		{On: "phase.started", Match: nil, Priority: 90},
+		{On: "wayfinder.phase.started", Match: nil, Priority: 90},
 	})
 	r.Register("engrams/mid-pri.ai.md", []engram.TriggerSpec{
-		{On: "phase.started", Match: nil, Priority: 50},
+		{On: "wayfinder.phase.started", Match: nil, Priority: 50},
 	})
 
 	m := NewTriggerMatcher(r)
 	results := m.Match(TriggerEvent{
-		Type: "phase.started",
-		Data: map[string]interface{}{},
+		Type: "wayfinder.phase.started",
+		Data: map[string]any{},
 	})
 
 	if len(results) != 3 {
@@ -127,16 +127,16 @@ func TestMatchPrioritySorting(t *testing.T) {
 func TestMatchMultipleTriggers(t *testing.T) {
 	r := NewTriggerRegistry()
 	r.Register("engrams/go-patterns.ai.md", []engram.TriggerSpec{
-		{On: "task.assigned", Match: map[string]interface{}{"lang": "go"}, Priority: 70},
+		{On: "task.assigned", Match: map[string]any{"lang": "go"}, Priority: 70},
 	})
 	r.Register("engrams/error-handling.ai.md", []engram.TriggerSpec{
-		{On: "task.assigned", Match: map[string]interface{}{"lang": "go"}, Priority: 60},
+		{On: "task.assigned", Match: map[string]any{"lang": "go"}, Priority: 60},
 	})
 
 	m := NewTriggerMatcher(r)
 	results := m.Match(TriggerEvent{
 		Type: "task.assigned",
-		Data: map[string]interface{}{"lang": "go"},
+		Data: map[string]any{"lang": "go"},
 	})
 
 	if len(results) != 2 {
