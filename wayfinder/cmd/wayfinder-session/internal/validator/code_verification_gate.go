@@ -2,17 +2,17 @@
 package validator
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/boundedexec"
 )
 
 const (
@@ -37,6 +37,16 @@ type CodeVerificationCache struct {
 // Returns ValidationError if any verification check fails.
 // This is Gate 9: Working Code Verification.
 func validateCodeDeliverables(phaseName, projectDir string) error {
+	// ADR-001 scopes the build and test commands to BUILD completion: they are
+	// evidence that an implementation works. Every other phase delivers prose,
+	// so running the project's whole toolchain there verifies nothing about the
+	// deliverable while costing the full build and test suite of whatever
+	// repository the session happens to live in.
+	if !phaseRunsCodeVerification(phaseName) {
+		fmt.Fprintf(os.Stderr, "ℹ️  Gate 9: %s has no code deliverables - skipping build and test verification\n", phaseName)
+		return nil
+	}
+
 	// Find all code files in project directory
 	codeFiles, err := findCodeFiles(projectDir)
 	if err != nil {
@@ -109,6 +119,13 @@ func validateCodeDeliverables(phaseName, projectDir string) error {
 
 	fmt.Fprintf(os.Stderr, "✓ Gate 9 verification passed\n")
 	return nil
+}
+
+// phaseRunsCodeVerification reports whether a phase produces code deliverables,
+// and therefore whether Gate 9 should shell out to the project's toolchain.
+// See ADR-001: the gate verifies BUILD completion.
+func phaseRunsCodeVerification(phaseName string) bool {
+	return phaseName == "BUILD"
 }
 
 // findCodeFiles recursively finds all code files in project directory.
@@ -281,116 +298,131 @@ func detectLanguage(filePaths []string) (string, error) {
 	return maxLang, nil
 }
 
-// runBuildCommand executes build command with timeout and security checks.
-// Returns ValidationError if build fails or times out.
-func runBuildCommand(projectDir, language string) error {
-	var cmd *exec.Cmd
+// gateCommand names the fixed build and test command for a language, or
+// reports that the language needs no such step.
+type gateCommand struct {
+	name string
+	args []string
+	skip bool
+}
 
-	// Determine build command from language
+// buildCommandFor returns the fixed build command for a language.
+func buildCommandFor(language string) (gateCommand, bool) {
 	switch language {
 	case "go":
-		cmd = exec.Command("go", "build", "./...")
+		return gateCommand{name: "go", args: []string{"build", "./..."}}, true
 	case "python":
-		// Python is interpreted, no build step needed
-		return nil
+		// Python is interpreted, no build step needed.
+		return gateCommand{skip: true}, true
 	case "javascript":
-		// Check if package.json has build script
-		cmd = exec.Command("npm", "run", "build")
+		return gateCommand{name: "npm", args: []string{"run", "build"}}, true
 	case "rust":
-		cmd = exec.Command("cargo", "build")
+		return gateCommand{name: "cargo", args: []string{"build"}}, true
 	case "c++":
-		// Check if Makefile exists
-		cmd = exec.Command("make", "build")
+		return gateCommand{name: "make", args: []string{"build"}}, true
 	default:
-		// Unsupported language - graceful degradation
+		return gateCommand{}, false
+	}
+}
+
+// testCommandFor returns the fixed test command for a language.
+func testCommandFor(language string) (gateCommand, bool) {
+	switch language {
+	case "go":
+		return gateCommand{name: "go", args: []string{"test", "./..."}}, true
+	case "python":
+		return gateCommand{name: "pytest"}, true
+	case "javascript":
+		return gateCommand{name: "npm", args: []string{"test"}}, true
+	case "rust":
+		return gateCommand{name: "cargo", args: []string{"test"}}, true
+	case "c++":
+		return gateCommand{name: "make", args: []string{"test"}}, true
+	default:
+		return gateCommand{}, false
+	}
+}
+
+// runBuildCommand executes the build command under a real wall-clock bound.
+// Returns ValidationError if the build fails or times out.
+func runBuildCommand(projectDir, language string) error {
+	spec, supported := buildCommandFor(language)
+	if !supported {
 		fmt.Fprintf(os.Stderr, "⚠️  Unsupported language: %s - skipping build verification\n", language)
 		return nil
 	}
+	if spec.skip {
+		return nil
+	}
 
-	// Set working directory
-	cmd.Dir = projectDir
+	res := boundedexec.Command{
+		Dir:     projectDir,
+		Label:   "Gate 9 build",
+		Name:    spec.name,
+		Args:    spec.args,
+		Timeout: buildTimeoutMinutes * time.Minute,
+	}.Run()
 
-	// Apply the SPEC-defined five-minute timeout.
-	ctx, cancel := context.WithTimeout(context.Background(), buildTimeoutMinutes*time.Minute)
-	defer cancel()
-
-	// Execute with timeout
-	cmdWithTimeout := exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
-	cmdWithTimeout.Dir = projectDir
-
-	output, err := cmdWithTimeout.CombinedOutput()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return NewValidationError(
-				"complete phase",
-				fmt.Sprintf("❌ Gate 9 Failed: Build Verification\n\nBuild timeout (%d minutes)", buildTimeoutMinutes),
-				"Optimize build performance or increase timeout in V2",
-			)
-		}
-
+	if res.TimedOut {
 		return NewValidationError(
 			"complete phase",
-			fmt.Sprintf("❌ Gate 9 Failed: Build Verification\n\nBuild command failed: %s\n\nExit code: %v\nOutput:\n%s", strings.Join(cmd.Args, " "), err, string(output)),
-			fmt.Sprintf("Resolution:\nFix build errors before completing phase\n\nRun: %s", strings.Join(cmd.Args, " ")),
+			fmt.Sprintf("❌ Gate 9 Failed: Build Verification\n\nBuild timeout (%d minutes)", buildTimeoutMinutes),
+			"Optimize build performance or increase timeout in V2",
+		)
+	}
+	if res.Err != nil {
+		line := spec.commandLine()
+		return NewValidationError(
+			"complete phase",
+			fmt.Sprintf("❌ Gate 9 Failed: Build Verification\n\nBuild command failed: %s\n\nExit code: %v\nOutput:\n%s", line, res.Err, res.Output),
+			fmt.Sprintf("Resolution:\nFix build errors before completing phase\n\nRun: %s", line),
 		)
 	}
 
 	return nil
 }
 
-// runTestCommand executes test command with test hygiene enforcement.
-// Returns ValidationError if tests fail, skip, or timeout.
+// runTestCommand executes the test command under a real wall-clock bound, with
+// test hygiene enforcement.
+// Returns ValidationError if tests fail, skip, or time out.
 func runTestCommand(projectDir, language string) error {
-	var cmd *exec.Cmd
-
-	// Determine test command from language
-	switch language {
-	case "go":
-		cmd = exec.Command("go", "test", "./...")
-	case "python":
-		cmd = exec.Command("pytest")
-	case "javascript":
-		cmd = exec.Command("npm", "test")
-	case "rust":
-		cmd = exec.Command("cargo", "test")
-	case "c++":
-		cmd = exec.Command("make", "test")
-	default:
-		// Unsupported language - graceful degradation
+	spec, supported := testCommandFor(language)
+	if !supported {
 		fmt.Fprintf(os.Stderr, "⚠️  Unsupported language: %s - skipping test verification\n", language)
 		return nil
 	}
 
-	// Set working directory
-	cmd.Dir = projectDir
+	res := boundedexec.Command{
+		Dir:     projectDir,
+		Label:   "Gate 9 test hygiene",
+		Name:    spec.name,
+		Args:    spec.args,
+		Timeout: testTimeoutMinutes * time.Minute,
+	}.Run()
 
-	// Apply the SPEC-defined ten-minute timeout.
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeoutMinutes*time.Minute)
-	defer cancel()
-
-	// Execute with timeout
-	cmdWithTimeout := exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
-	cmdWithTimeout.Dir = projectDir
-
-	output, err := cmdWithTimeout.CombinedOutput()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return NewValidationError(
-				"complete phase",
-				fmt.Sprintf("❌ Gate 9 Failed: Test Hygiene Verification\n\nTest timeout (%d minutes)", testTimeoutMinutes),
-				"Optimize test performance or increase timeout in V2",
-			)
-		}
-
-		// Test hygiene gate: exit code non-zero = failures OR skips
+	if res.TimedOut {
 		return NewValidationError(
 			"complete phase",
-			fmt.Sprintf("❌ Gate 9 Failed: Test Hygiene Verification\n\nTest command failed: %s\n\nExit code: %v\nOutput:\n%s", strings.Join(cmd.Args, " "), err, string(output)),
-			testHygieneRemediation(strings.Join(cmd.Args, " ")),
+			fmt.Sprintf("❌ Gate 9 Failed: Test Hygiene Verification\n\nTest timeout (%d minutes)", testTimeoutMinutes),
+			"Optimize test performance or increase timeout in V2",
+		)
+	}
+	if res.Err != nil {
+		// Test hygiene gate: exit code non-zero = failures OR skips
+		line := spec.commandLine()
+		return NewValidationError(
+			"complete phase",
+			fmt.Sprintf("❌ Gate 9 Failed: Test Hygiene Verification\n\nTest command failed: %s\n\nExit code: %v\nOutput:\n%s", line, res.Err, res.Output),
+			testHygieneRemediation(line),
 		)
 	}
 
 	return nil
+}
+
+// commandLine renders the command the way an operator would retype it.
+func (g gateCommand) commandLine() string {
+	return strings.TrimSpace(g.name + " " + strings.Join(g.args, " "))
 }
 
 // testHygieneRemediation returns remediation message for test hygiene gate failures.
