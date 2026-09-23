@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +126,10 @@ func TestGoCacheBudgetRejectsNonFiniteAndOverflow(t *testing.T) {
 		{"positive infinity", math.Inf(1)},
 		{"negative infinity", math.Inf(-1)},
 		{"beyond int64 bytes", math.MaxFloat64},
+		// float64(math.MaxInt64) rounds up to 2^63, so this input passes a
+		// check written against float64(math.MaxInt64)/GiB while its product
+		// is one past int64 and converts to MinInt64.
+		{"the rounded int64 boundary", float64(math.MaxInt64) / (1 << 30)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := goCacheMaxBytes(tc.gb); err == nil {
@@ -238,5 +243,37 @@ func TestExpansionStillRefusesNonCacheChildren(t *testing.T) {
 	}
 	if !strings.Contains(res.Skipped[parent], "not a proven") {
 		t.Errorf("Skipped[%s] = %q, want a not-a-cache reason", parent, res.Skipped[parent])
+	}
+}
+
+// GOCACHE can be persisted with `go env -w`, where os.Getenv cannot see it,
+// and the launchd job passes only PATH, HOME and DOLT_PORT, so it cannot see a
+// shell-only override either. The default must ask the toolchain for the
+// effective setting rather than guess the conventional path.
+func TestDefaultGoCacheDirsUsesEffectiveGoEnv(t *testing.T) {
+	t.Setenv("GOCACHE", "")
+	t.Setenv("GOLANGCI_LINT_CACHE", "")
+
+	want := effectiveGoEnv("GOCACHE")
+	if want == "" {
+		t.Skip("no usable go toolchain on PATH to report an effective GOCACHE")
+	}
+	dirs := strings.Split(defaultGoCacheDirs(), ",")
+	if !slices.Contains(dirs, want) {
+		t.Errorf("defaultGoCacheDirs() = %v, want it to include the effective GOCACHE %q", dirs, want)
+	}
+}
+
+// The toolchain query must not become a hard dependency: a host with no usable
+// go on PATH still gets the conventional location rather than an empty scan.
+func TestEffectiveGoEnvFallsBackQuietly(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if got := effectiveGoEnv("GOCACHE"); got != "" {
+		t.Errorf("effectiveGoEnv() = %q with no go on PATH, want an empty fallback", got)
+	}
+	t.Setenv("GOCACHE", "")
+	t.Setenv("GOLANGCI_LINT_CACHE", "")
+	if dirs := defaultGoCacheDirs(); dirs == "" {
+		t.Error("defaultGoCacheDirs() went empty without a toolchain, want the conventional locations")
 	}
 }

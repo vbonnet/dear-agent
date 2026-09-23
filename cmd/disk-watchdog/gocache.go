@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
@@ -234,8 +237,17 @@ func defaultGoCacheDirs() string {
 	cacheHome, err := os.UserCacheDir()
 	if goCache := os.Getenv("GOCACHE"); goCache != "" {
 		add(goCache)
-	} else if err == nil {
-		add(filepath.Join(cacheHome, "go-build"))
+	} else {
+		// os.Getenv cannot see a GOCACHE persisted with `go env -w`, and the
+		// launchd job passes only PATH, HOME and DOLT_PORT, so it cannot see a
+		// shell-only override either. `go env GOCACHE` reports the effective
+		// setting, which is the cache Go actually writes. The conventional
+		// location stays as the fallback for a host with no usable toolchain.
+		if effective := effectiveGoEnv("GOCACHE"); effective != "" {
+			add(effective)
+		} else if err == nil {
+			add(filepath.Join(cacheHome, "go-build"))
+		}
 	}
 	if lintCache := os.Getenv("GOLANGCI_LINT_CACHE"); lintCache != "" {
 		add(lintCache)
@@ -326,10 +338,18 @@ func goCacheMaxBytes(gb float64) (int64, error) {
 		return 0, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget must be finite (pass an empty -go-cache-dirs to disable the trim)", gb)
 	case gb < 0:
 		return 0, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget cannot be negative (pass an empty -go-cache-dirs to disable the trim)", gb)
-	case gb > float64(math.MaxInt64)/supervisor.GiB:
+	}
+	// Validate the SCALED value, not the input against a scaled limit.
+	// float64(math.MaxInt64) rounds up to 2^63, so comparing gb against
+	// float64(math.MaxInt64)/GiB admits exactly 8589934592 GiB, whose product
+	// is 2^63: one past int64, which converts to MinInt64 here. Every proven
+	// cache would then read as over a negative budget and be emptied on the
+	// next breached tick, which is the failure the check exists to prevent.
+	scaled := gb * supervisor.GiB
+	if scaled >= float64(math.MaxInt64) {
 		return 0, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget does not fit in a byte count", gb)
 	}
-	return int64(gb * supervisor.GiB), nil
+	return int64(scaled), nil
 }
 
 // xdgCacheHome returns the base directory preflight resolves its lint cache
@@ -384,4 +404,22 @@ func expandCacheRoots(dirs []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// goEnvTimeout bounds the toolchain query. The watchdog runs on a breached
+// tick, so a hung `go` must not hold the reclaim it is about to perform.
+const goEnvTimeout = 5 * time.Second
+
+// effectiveGoEnv returns `go env <name>`, or "" when the toolchain is absent,
+// slow, or reports nothing. Every failure path is a silent fallback: this is
+// discovery, and a host without a usable `go` on PATH is an ordinary case
+// rather than an error worth failing a disk-pressure tick over.
+func effectiveGoEnv(name string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), goEnvTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "go", "env", name).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
