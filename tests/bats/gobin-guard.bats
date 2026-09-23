@@ -561,3 +561,26 @@ EOF
 	done
 	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "2"
 }
+
+# A symlink immediately cancelled by `..` must still fail closed.
+#
+# The concern is that lexical normalization erases the link before `cd -P` can
+# see it. It does not: `cd -P` resolves the link FIRST and then applies `..`,
+# so it lands in the link target's parent while the lexical form lands in the
+# link's own parent. The two disagree and the marker is refused, which is the
+# safe outcome, and this test pins that they keep disagreeing.
+@test "a symlink cancelled by .. still fails closed" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/real" "$state/holder"
+	ln -s "$state/real" "$state/holder/link"
+	guard_alarm="$state/holder/link/../guard-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	# Refused on both runs, so neither suppressed the second record.
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "2"
+}
