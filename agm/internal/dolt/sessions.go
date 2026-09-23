@@ -964,20 +964,25 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 	// a caller comparing two manifest snapshots would see no change at all and
 	// could archive or remove a child whose hierarchy moved underneath it.
 	//
-	// Version the children first, while they still point at this parent. If
-	// the delete below then fails, those rows carry a bumped timestamp and no
-	// detach, which makes a revalidating caller skip them. That is the safe
-	// direction to be wrong in.
-	if _, err := a.conn.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+	// Versioning and deleting share one transaction. Done as two statements, a
+	// LinkSessionParent committing between them attaches a child that the
+	// cascade then detaches unversioned, which is the same defect one race
+	// narrower.
+	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
+	if err != nil {
+		return fmt.Errorf("failed to begin delete of session %s: %w", sessionID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
 		`UPDATE agm_sessions SET updated_at = ? WHERE parent_session_id = ? AND workspace = ?`,
 		time.Now(), sessionID, a.workspace,
 	); err != nil {
 		return fmt.Errorf("failed to version children of session %s before delete: %w", sessionID, err)
 	}
 
-	query := `DELETE FROM agm_sessions WHERE id = ? AND workspace = ?`
-
-	result, err := a.conn.Exec(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
+	result, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`DELETE FROM agm_sessions WHERE id = ? AND workspace = ?`, sessionID, a.workspace)
 	if err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
@@ -989,6 +994,10 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 
 	if rowsAffected == 0 {
 		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delete of session %s: %w", sessionID, err)
 	}
 
 	return nil
