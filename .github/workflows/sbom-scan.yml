@@ -12,22 +12,27 @@ on:
       - "**/package.json"
   pull_request:
     # Keep this workflow triggered for every PR because the repository ruleset
-    # requires the "Vulnerability Scan" context. The expensive jobs skip below
-    # on pull_request, so this emits the required context without running Trivy.
+    # requires the "Vulnerability Scan" context. Non-required full-repository
+    # jobs skip below; the required job still runs its credential-free advisory
+    # Trivy scan so the context reflects an actual policy evaluation.
     branches: [main]
   release:
     types: [created]
   schedule:
-    # Weekly scan on Mondays at 00:00 UTC
-    - cron: '0 0 * * 1'
+    # Daily alert reconciliation and full repository scan, offset from the
+    # start-of-hour congestion window documented by GitHub Actions.
+    - cron: '41 0 * * *'
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A routine main push must not cancel the only daily provider-alert audit.
+  group: >-
+    ${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        && 'sweep' || (github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   changes:
@@ -38,7 +43,7 @@ jobs:
     name: Generate SBOM
     # SBOM artifacts are consumed for release/compliance, not per-PR review.
     # Skip on pull_request to save a Trivy run on every PR; still generated
-    # on push to main, on release, and on the weekly schedule.
+    # on push to main, on release, and on the daily schedule.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -80,19 +85,19 @@ jobs:
   # unrelated work, the exact failure mode ce-lz9ny hit with govulncheck.
   #
   # The scoping: a PR that changes no dependency manifest or lockfile cannot
-  # introduce a dependency vulnerability. Such a PR gets the advisory scan
-  # (findings still land in the Security tab) but is not blocked by it. A PR
-  # that DOES touch go.mod / go.sum / package.json / *.lock is gated exactly as
-  # strictly as before — this weakens nothing for the changes that can actually
-  # cause the failure.
+  # introduce a dependency vulnerability. Such a PR gets the advisory scan and
+  # a retained SARIF artifact, but is not blocked by it. A PR that DOES touch
+  # go.mod / go.sum / package.json / *.lock is gated exactly as strictly as
+  # before — this weakens nothing for changes that can actually cause failure.
   #
   # The catch, stated plainly: this is manifest-scoping, not true baseline
   # diffing — Trivy has no --baseline-commit. A PR that bumps one dependency is
   # still blocked by an unrelated pre-existing CRITICAL elsewhere in the tree.
   # Closing that gap needs a checked-in baseline; tracked separately. What
   # catches the debt in the meantime is the unchanged full blocking scan on
-  # push-to-main, on release, and on the weekly schedule, plus the main-health
-  # watchdog that files a retro when main goes red.
+  # push-to-main, on release, and on the daily schedule, plus the main-health
+  # watchdog that files an incident brief when main goes red; that brief can
+  # later seed a DEAR retrospective.
   vulnerability-scan:
     name: Vulnerability Scan
     needs: changes
@@ -105,9 +110,28 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+
+      - name: Build vulnerability policy
+        run: go build -o "$RUNNER_TEMP/vulnerability-policy" ./cmd/vulnerability-policy
+        env:
+          GOWORK: "off"
+
+      - name: Project vulnerability policy
+        id: vulnerability-policy
+        run: '"$RUNNER_TEMP/vulnerability-policy" project >> "$GITHUB_OUTPUT"'
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -116,16 +140,19 @@ jobs:
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
+          severity: ${{ steps.vulnerability-policy.outputs.report-severities }}
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
+      - name: Stage Trivy results
+        uses: actions/upload-artifact@v7
         if: always()
         with:
-          sarif_file: 'trivy-results.sarif'
+          name: trivy-results
+          path: trivy-results.sarif
+          retention-days: 1
+          if-no-files-found: error
 
       # Blocking pass. Runs unconditionally off pull_request (push to main,
-      # release, weekly schedule), on any PR that touches a dependency manifest
+      # release, daily schedule), on any PR that touches a dependency manifest
       # or lockfile, and on any PR where the detector did not succeed — an
       # unknowable change set means "scan", never "skip".
       - name: Run Trivy with exit code
@@ -138,8 +165,7 @@ jobs:
           scan-type: 'fs'
           scan-ref: '.'
           exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
+          severity: ${{ steps.vulnerability-policy.outputs.block-severities }}
 
       - name: Explain non-blocking pass
         if: >-
@@ -149,15 +175,105 @@ jobs:
         run: |
           echo "::notice ::Vulnerability Scan is advisory for this PR: no dependency"
           echo "::notice ::manifest or lockfile changed, so it cannot introduce a new"
-          echo "::notice ::dependency vulnerability. Findings above are recorded in the"
-          echo "::notice ::Security tab. The full blocking scan runs on push to main,"
-          echo "::notice ::on release, and weekly."
+          echo "::notice ::dependency vulnerability. The SARIF report is retained as a"
+          echo "::notice ::workflow artifact. Trusted non-PR runs publish SARIF to the"
+          echo "::notice ::Security tab and run the full blocking scan."
+
+  publish-vulnerability-sarif:
+    name: Publish Vulnerability SARIF
+    # Never place a GitHub write token in the job that runs PR-authored code.
+    # This job consumes only the staged SARIF data on trusted non-PR events.
+    needs: vulnerability-scan
+    if: >-
+      ${{ !cancelled()
+      && github.event_name != 'pull_request'
+      && (github.event_name == 'release'
+      || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Download Trivy results
+        uses: actions/download-artifact@v8
+        with:
+          name: trivy-results
+          path: ${{ runner.temp }}/trivy-results
+
+      - name: Publish Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ runner.temp }}/trivy-results/trivy-results.sarif
+          wait-for-processing: true
+
+  provider-vulnerability-audit:
+    name: Provider Vulnerability Policy Audit
+    # Keep provider-read scope away from pull-request-authored code. This job
+    # runs only for trusted main, schedule, and manual-dispatch revisions, and
+    # only after the current Trivy SARIF was published for provider retrieval.
+    needs: publish-vulnerability-sarif
+    if: >-
+      ${{ !cancelled()
+      && needs['publish-vulnerability-sarif'].result == 'success'
+      && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: read
+      vulnerability-alerts: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
+
+      - name: Build vulnerability policy
+        run: go build -o "$RUNNER_TEMP/vulnerability-policy" ./cmd/vulnerability-policy
+        env:
+          GOWORK: "off"
+
+      - name: Fetch provider vulnerability alerts
+        id: provider_alerts
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/${REPO}/dependabot/alerts?state=open&per_page=100" \
+            > "$RUNNER_TEMP/dependabot-alerts.json"
+          gh api --paginate --slurp \
+            "repos/${REPO}/code-scanning/alerts?state=open&tool_name=Trivy&per_page=100" \
+            > "$RUNNER_TEMP/code-scanning-alerts.json"
+
+      - name: Run vulnerability policy canary
+        id: policy_canary
+        if: ${{ !cancelled() && steps.provider_alerts.outcome == 'success' }}
+        run: '"$RUNNER_TEMP/vulnerability-policy" self-test'
+
+      - name: Audit provider vulnerability alerts
+        if: ${{ !cancelled() && steps.provider_alerts.outcome == 'success' && steps.policy_canary.outcome == 'success' }}
+        run: |
+          "$RUNNER_TEMP/vulnerability-policy" audit \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --dependabot "$RUNNER_TEMP/dependabot-alerts.json" \
+            --code-scanning "$RUNNER_TEMP/code-scanning-alerts.json"
 
   go-vulnerability-check:
     name: Go Vulnerability Check
     # On pull_request this is fully redundant with the required `govulncheck`
     # job in ci.yml (identical -scan package invocation + allowlist). Run it
-    # only off-PR so the weekly schedule still catches vulns disclosed against
+    # only off-PR so the daily schedule still catches vulns disclosed against
     # unchanged dependencies, without paying for a third govulncheck per PR.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
