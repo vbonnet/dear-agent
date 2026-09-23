@@ -233,7 +233,16 @@ func (s *Summary) observe(line []byte, horizon time.Time, ignored map[string]boo
 		return
 	}
 	s.noteOldest(e.Timestamp, horizon)
-	if e.Operation == CompletedOperation && !e.Timestamp.IsZero() {
+	// A completion dated beyond the skew horizon is not evidence that GC ran.
+	// Setting HasCompletion from one made Proof() suppress an otherwise valid
+	// legacy reap, so the watchdog reported that GC never completed, which is
+	// the opposite of DW-22's requirement to ignore future records.
+	//
+	// LastFutureCompletionAt below is deliberately still recorded: whether a
+	// log contains a future-dated completion is sweep-health's own DOWN
+	// signal, and a separate question from whether GC completed.
+	if e.Operation == CompletedOperation && !e.Timestamp.IsZero() &&
+		!e.Timestamp.After(horizon) {
 		s.HasCompletion = true
 	}
 	if !admitted(e, ignored) {

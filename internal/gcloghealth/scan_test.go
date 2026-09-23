@@ -273,3 +273,50 @@ func TestScanProducerWireFixture(t *testing.T) {
 		t.Fatalf("summary = %+v, proof = %v fallback=%v", s, proof, fallback)
 	}
 }
+
+// A completion dated beyond the clock-skew horizon is not evidence that GC
+// ran, and must not disqualify an otherwise valid legacy reap.
+//
+// HasCompletion was set before the horizon rejection, so a future-dated
+// completion made Proof() suppress the reap and the disk-watchdog reported
+// that GC never completed. DW-22 requires future records to be ignored.
+// sweep-health still needs LastFutureCompletionAt for its own DOWN policy,
+// which is a separate question from whether GC completed, so that must
+// survive.
+func TestScanFutureCompletionDoesNotDisqualifyLegacyReap(t *testing.T) {
+	now := testNow()
+	future := now.Add(30 * time.Minute)
+	p := testLog(t,
+		testRecord(now.Add(-time.Minute), "sandbox_gc_reap", ""),
+		testRecord(future, CompletedOperation, ""),
+	)
+
+	s, err := Scan(p, testOptions(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.HasCompletion {
+		t.Error("a future-dated completion set HasCompletion; DW-22 requires it to be ignored")
+	}
+	proof, fallback := s.Proof()
+	if proof.IsZero() || !fallback {
+		t.Errorf("proof=%v fallback=%v, want the legacy reap accepted: summary %+v", proof, fallback, s)
+	}
+	if !s.LastFutureCompletionAt.Equal(future) {
+		t.Errorf("LastFutureCompletionAt = %v, want %v retained for sweep-health's DOWN policy",
+			s.LastFutureCompletionAt, future)
+	}
+
+	// A completion inside the horizon still disqualifies the reap.
+	inside := testLog(t,
+		testRecord(now.Add(-time.Minute), "sandbox_gc_reap", ""),
+		testRecord(now.Add(-30*time.Second), CompletedOperation, ""),
+	)
+	s, err = Scan(inside, testOptions(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.HasCompletion {
+		t.Error("a completion inside the horizon must still set HasCompletion")
+	}
+}

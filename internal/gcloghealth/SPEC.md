@@ -37,6 +37,8 @@ both sides pin one literal JSONL fixture.
 
 **GCLH-13** When a truncated tail contains a backdated record, the observer shall not treat the minimum observed event timestamp as proof that unseen earlier bytes cannot contain a recent completion.
 
+**GCLH-14** When a completion record is dated beyond the clock-skew horizon, the observer shall not count it as a completion for the purpose of disqualifying legacy reap fallback, while still retaining it as the latest future-dated completion for consumers whose policy is about clock correctness rather than liveness.
+
 ## Traceability
 
 - Executable BDD feature: `agm/test/bdd/features/observability_package_guardrails.feature`
