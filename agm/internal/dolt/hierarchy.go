@@ -323,15 +323,18 @@ func (a *Adapter) DetachChild(sessionID string) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	// updated_at advances with the detach, exactly as it does when
-	// LinkSessionParent attaches one. Every revalidation that asks whether a
-	// session changed since it was snapshotted compares updated_at, and
-	// GetSession deliberately omits parent_session_id pending migration 007,
-	// so a detach that left the timestamp alone was invisible on both sides of
-	// that comparison. A child detached while a confirmation prompt was open
-	// then looked unchanged and cleanup archived or deleted it.
-	query := `UPDATE agm_sessions SET parent_session_id = NULL, updated_at = ? WHERE id = ? AND workspace = ?`
-	result, err := a.conn.Exec(query, time.Now(), sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
+	// The detach advances updated_at AND rotates tmux_session_revision,
+	// exactly as LinkSessionParent does when attaching one.
+	//
+	// updated_at alone is not enough. agm_sessions.updated_at is a bare
+	// TIMESTAMP (001_initial_schema.sql), so it carries second precision on
+	// Dolt: a detach in the same second as the preceding update writes an
+	// identical value. Since GetSession omits parent_session_id, a caller
+	// comparing two manifests would still see them as equal and could archive
+	// or delete a child whose hierarchy changed. The revision is a UUID and
+	// is projected into the manifest, so it cannot collide.
+	query := `UPDATE agm_sessions SET parent_session_id = NULL, updated_at = ?, tmux_session_revision = ? WHERE id = ? AND workspace = ?`
+	result, err := a.conn.Exec(query, time.Now(), uuid.NewString(), sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to detach child session %s: %w", sessionID, err)
 	}

@@ -30,7 +30,7 @@
 
 **DOLTR-14** When AGM creates or updates a session, the Dolt adapter shall reject lifecycle and outcome values outside the manifest-owned closed vocabulary. When it decodes a persisted session status or metadata outcome, it shall accept legacy empty status and `active` as the empty lifecycle, but shall return an error for every other unknown nonempty status or outcome instead of coercing or erasing it.
 
-**DOLTR-15** When a mutation detaches a session from its parent, whether through the explicit detach operation or through the hierarchy foreign key's delete cascade, the adapter shall advance that session's compared timestamp in the same transaction as the detach, so a caller holding a manifest snapshot observes the change rather than comparing two snapshots that are equal only because the parent link is not projected.
+**DOLTR-15** When a mutation detaches a session from its parent, whether through the explicit detach operation or through the hierarchy foreign key's delete cascade, the adapter shall advance that session's compared timestamp and rotate its compared revision in the same transaction as the detach, since the timestamp column carries second precision and can collide with the preceding update, so a caller holding a manifest snapshot observes the change rather than comparing two snapshots that are equal only because the parent link is not projected.
 
 ## BDD Traceability
 

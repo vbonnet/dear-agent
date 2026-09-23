@@ -67,6 +67,17 @@ func TestDetachChildAdvancesUpdatedAt(t *testing.T) {
 			"a snapshot taken before the detach compares equal and cleanup treats "+
 			"the session as unchanged", detached.UpdatedAt, linked.UpdatedAt)
 	}
+	// updated_at is a bare TIMESTAMP and carries second precision on Dolt, so
+	// a detach in the same second as the preceding update writes an identical
+	// value. The rotated revision is the guarantee that does not collide.
+	if detached.Tmux.SessionRevision == linked.Tmux.SessionRevision {
+		t.Errorf("tmux_session_revision unchanged at %q: updated_at alone collides "+
+			"within a second, so the comparison can still accept a stale snapshot",
+			detached.Tmux.SessionRevision)
+	}
+	if detached.Tmux.SessionRevision == "" {
+		t.Error("detach left an empty revision, which cannot distinguish anything")
+	}
 
 	gotParent, err := adapter.GetParent(child.SessionID)
 	if err != nil {
@@ -136,6 +147,10 @@ func TestDeleteSessionVersionsDetachedChildren(t *testing.T) {
 	if !after.UpdatedAt.After(linked.UpdatedAt) {
 		t.Errorf("child updated_at = %v, want it advanced past %v: the cascade detach "+
 			"must be visible to a caller revalidating a snapshot", after.UpdatedAt, linked.UpdatedAt)
+	}
+	if after.Tmux.SessionRevision == linked.Tmux.SessionRevision {
+		t.Errorf("cascade left tmux_session_revision at %q; second-precision updated_at "+
+			"is not enough on its own", after.Tmux.SessionRevision)
 	}
 
 	// Only the parent's own children are versioned; an unrelated session is

@@ -974,11 +974,41 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
-		`UPDATE agm_sessions SET updated_at = ? WHERE parent_session_id = ? AND workspace = ?`,
-		time.Now(), sessionID, a.workspace,
-	); err != nil {
-		return fmt.Errorf("failed to version children of session %s before delete: %w", sessionID, err)
+	// Each child gets its own rotated revision, not just a new timestamp:
+	// updated_at is a bare TIMESTAMP and collides within a second. Rows are
+	// listed and updated individually because generating a distinct UUID per
+	// row in one statement is not portable across Dolt and the SQLite adapter
+	// the tests use. Child counts are small and this is already inside the
+	// transaction.
+	rows, err := tx.Query( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT id FROM agm_sessions WHERE parent_session_id = ? AND workspace = ?`,
+		sessionID, a.workspace)
+	if err != nil {
+		return fmt.Errorf("failed to list children of session %s before delete: %w", sessionID, err)
+	}
+	var children []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("failed to scan child of session %s: %w", sessionID, err)
+		}
+		children = append(children, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("failed to read children of session %s: %w", sessionID, err)
+	}
+	rows.Close()
+
+	for _, child := range children {
+		if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+			`UPDATE agm_sessions SET updated_at = ?, tmux_session_revision = ? WHERE id = ? AND workspace = ?`,
+			time.Now(), uuid.NewString(), child, a.workspace,
+		); err != nil {
+			return fmt.Errorf("failed to version child %s of session %s before delete: %w",
+				child, sessionID, err)
+		}
 	}
 
 	result, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
