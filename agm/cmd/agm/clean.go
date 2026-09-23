@@ -89,16 +89,24 @@ Examples:
 		for _, s := range result.ToArchive {
 			applied, reason, err := applyCleanupSelection(cmd.Context(), adapter, s,
 				cleanupArchive, uiCfg.Defaults.CleanupThresholdDays, strictTmux)
-			if cleanupCanceled(cmd.Context(), err) {
-				return cleanupCancellation(cmd.Context(), err, archived, deleted)
-			}
-			if err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to archive %s: %v", s.Name, err))
-			} else if !applied {
-				ui.PrintWarning(fmt.Sprintf("Skipped archive of %s: %s", s.Name, reason))
-			} else {
+			// A completed mutation is counted before cancellation is reported.
+			// archiveSessionManifest is not context-aware, so a signal arriving
+			// mid-call still returns applied=true, and reporting the interrupt
+			// first would understate what actually happened and claim the
+			// current target was untouched when it was not.
+			switch {
+			case err == nil && applied:
 				archived++
 				fmt.Printf("📦 Archived: %s\n", s.Name)
+			case cleanupCanceled(cmd.Context(), err):
+				return cleanupCancellation(cmd.Context(), err, archived, deleted)
+			case err != nil:
+				ui.PrintWarning(fmt.Sprintf("Failed to archive %s: %v", s.Name, err))
+			default:
+				ui.PrintWarning(fmt.Sprintf("Skipped archive of %s: %s", s.Name, reason))
+			}
+			if cleanupCanceled(cmd.Context(), nil) {
+				return cleanupCancellation(cmd.Context(), nil, archived, deleted)
 			}
 		}
 
@@ -106,16 +114,21 @@ Examples:
 		for _, s := range result.ToDelete {
 			applied, reason, err := applyCleanupSelection(cmd.Context(), adapter, s,
 				cleanupDelete, uiCfg.Defaults.ArchiveThresholdDays, strictTmux)
-			if cleanupCanceled(cmd.Context(), err) {
-				return cleanupCancellation(cmd.Context(), err, archived, deleted)
-			}
-			if err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to delete %s: %v", s.Name, err))
-			} else if !applied {
-				ui.PrintWarning(fmt.Sprintf("Skipped deletion of %s: %s", s.Name, reason))
-			} else {
+			// Counted before the interrupt, for the same reason as the archive
+			// loop above: os.RemoveAll is not context-aware.
+			switch {
+			case err == nil && applied:
 				deleted++
 				fmt.Printf("🗑️  Deleted: %s\n", s.Name)
+			case cleanupCanceled(cmd.Context(), err):
+				return cleanupCancellation(cmd.Context(), err, archived, deleted)
+			case err != nil:
+				ui.PrintWarning(fmt.Sprintf("Failed to delete %s: %v", s.Name, err))
+			default:
+				ui.PrintWarning(fmt.Sprintf("Skipped deletion of %s: %s", s.Name, reason))
+			}
+			if cleanupCanceled(cmd.Context(), nil) {
+				return cleanupCancellation(cmd.Context(), nil, archived, deleted)
 			}
 		}
 

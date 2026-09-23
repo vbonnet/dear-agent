@@ -958,6 +958,23 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
+	// Migration 007 declares ON DELETE SET NULL, so deleting a parent detaches
+	// its children without going through DetachChild and therefore without
+	// advancing their updated_at. GetSession also omits parent_session_id, so
+	// a caller comparing two manifest snapshots would see no change at all and
+	// could archive or remove a child whose hierarchy moved underneath it.
+	//
+	// Version the children first, while they still point at this parent. If
+	// the delete below then fails, those rows carry a bumped timestamp and no
+	// detach, which makes a revalidating caller skip them. That is the safe
+	// direction to be wrong in.
+	if _, err := a.conn.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`UPDATE agm_sessions SET updated_at = ? WHERE parent_session_id = ? AND workspace = ?`,
+		time.Now(), sessionID, a.workspace,
+	); err != nil {
+		return fmt.Errorf("failed to version children of session %s before delete: %w", sessionID, err)
+	}
+
 	query := `DELETE FROM agm_sessions WHERE id = ? AND workspace = ?`
 
 	result, err := a.conn.Exec(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer

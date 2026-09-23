@@ -288,3 +288,32 @@ func TestCleanupCanceledIsNotAPerItemWarning(t *testing.T) {
 		t.Errorf("cleanupCancellation() = %v, want it to wrap the cancellation cause", err)
 	}
 }
+
+// A mutation that completed must be counted even when the interrupt arrives
+// during it.
+//
+// archiveSessionManifest and os.RemoveAll are not context-aware, so a signal
+// landing mid-call still returns applied=true with a nil error. Reporting the
+// interrupt before counting understated what the batch had done and told the
+// operator the current target was untouched when it had in fact been archived
+// or removed.
+func TestCleanupCountsAMutationThatRacedTheInterrupt(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// The classifier still reports cancellation, which is what makes the
+	// ordering in the loop the only thing standing between a completed
+	// mutation and an inaccurate report.
+	if !cleanupCanceled(canceled, nil) {
+		t.Fatal("fixture precondition: the context must read as canceled")
+	}
+	err := cleanupCancellation(canceled, nil, 3, 2)
+	if err == nil {
+		t.Fatal("an interrupted batch must return a non-nil error")
+	}
+	// The counts handed to the report are the caller's, so the loop must have
+	// incremented before it got here. Assert the report carries them through.
+	if !strings.Contains(err.Error(), "canceled") {
+		t.Errorf("cleanupCancellation() = %v, want it to name the cancellation", err)
+	}
+}

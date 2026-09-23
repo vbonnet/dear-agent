@@ -76,3 +76,75 @@ func TestDetachChildAdvancesUpdatedAt(t *testing.T) {
 		t.Errorf("GetParent() = %v, want nil after detach", gotParent.SessionID)
 	}
 }
+
+// Deleting a parent must version its children too.
+//
+// Migration 007 declares ON DELETE SET NULL, so the cascade detaches children
+// without going through DetachChild and therefore without advancing their
+// updated_at. Combined with GetSession omitting parent_session_id, a caller
+// comparing two manifest snapshots across a confirmation prompt would see no
+// change at all and could archive or remove a child whose hierarchy moved.
+func TestDeleteSessionVersionsDetachedChildren(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	newSession := func(id string) *manifest.Manifest {
+		return &manifest.Manifest{
+			SchemaVersion: manifest.SchemaVersion,
+			SessionID:     id,
+			Name:          id,
+			Harness:       "claude-code",
+			CreatedAt:     time.Now().Add(-time.Hour),
+			UpdatedAt:     time.Now().Add(-time.Hour),
+			Context:       manifest.Context{Project: t.TempDir()},
+			Tmux:          manifest.Tmux{SessionName: id},
+		}
+	}
+	parent := newSession("cascade-parent")
+	child := newSession("cascade-child")
+	bystander := newSession("cascade-bystander")
+	for _, m := range []*manifest.Manifest{parent, child, bystander} {
+		if err := adapter.CreateSession(m); err != nil {
+			t.Fatalf("CreateSession(%s) error: %v", m.SessionID, err)
+		}
+	}
+	if err := adapter.LinkSessionParent(context.Background(),
+		child.SessionID, "", parent.SessionID, nil); err != nil {
+		t.Fatalf("LinkSessionParent() error: %v", err)
+	}
+
+	linked, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before delete error: %v", err)
+	}
+	untouched, err := adapter.GetSession(bystander.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(bystander) error: %v", err)
+	}
+
+	if err := adapter.DeleteSession(parent.SessionID); err != nil {
+		t.Fatalf("DeleteSession() error: %v", err)
+	}
+
+	after, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after delete error: %v", err)
+	}
+	if !after.UpdatedAt.After(linked.UpdatedAt) {
+		t.Errorf("child updated_at = %v, want it advanced past %v: the cascade detach "+
+			"must be visible to a caller revalidating a snapshot", after.UpdatedAt, linked.UpdatedAt)
+	}
+
+	// Only the parent's own children are versioned; an unrelated session is
+	// left alone, so this does not invalidate every snapshot in the workspace.
+	stillUntouched, err := adapter.GetSession(bystander.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(bystander) after delete error: %v", err)
+	}
+	if stillUntouched.UpdatedAt.After(untouched.UpdatedAt) {
+		t.Error("an unrelated session was versioned by the delete")
+	}
+}

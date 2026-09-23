@@ -153,7 +153,11 @@ Provide a production-ready CLI that:
 
 **CLI-67** When `agm admin doctor` starts after configuration load, the command shall project one retained physical HOME from the loaded runtime authority before its initial session-path selection, Claude-history existence check, installation checks, and per-harness health checks, use that same snapshot throughout those checks, and fail before them if the authority is unavailable.
 
-**CLI-68** When `agm admin clean` confirms a selected archive or deletion, the command shall acquire that session's stable-ID lifecycle lock, reload the selected ID, reject a changed or no-longer-eligible snapshot, and require a strict current tmux-absence check before mutation. A skipped target shall not count as cleaned; a storage or tmux-probe failure shall preserve its manifest and directory.
+**CLI-68** When `agm admin clean` confirms a selected archive or deletion, the command shall acquire that session's stable-ID lifecycle lock, reload the selected ID, reject a changed or no-longer-eligible snapshot, and require a strict current tmux-absence check before mutation. A skipped target shall not count as cleaned; a storage or tmux-probe failure shall preserve its manifest and directory. The fence is the lifecycle lock together with the compared timestamp, so a writer that takes neither is not excluded by this requirement.
+
+**CLI-69** When a mutation detaches a session from its parent, whether explicitly or through the hierarchy foreign key's delete cascade, the system shall advance that session's compared timestamp, so a caller holding a snapshot across a confirmation prompt observes the change rather than comparing two snapshots that are equal only because the parent link is not projected.
+
+**CLI-70** When `agm admin clean` is interrupted, the command shall count every mutation that completed before it stops, shall report the counts and that the remaining selections were not touched, and shall exit nonzero. A completed mutation shall be counted before the interrupt is reported, because the archive and directory-removal paths are not cancellation-aware and can complete after the signal arrives.
 
 ## Requirements
 
