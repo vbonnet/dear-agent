@@ -43,11 +43,11 @@ guard narrows but cannot atomically eliminate state changes after the read.
 
 **NCK-14** When a scan reports a stuck pull request, the system shall include that pull request's actual base identity in text and structured evidence.
 
-**NCK-15** When a scan resolves required-check policy for multiple bases, the system shall bound all policy reads by one shared total deadline and shall not begin a later base read after that context ends.
+**NCK-15** When a scan resolves required-check policy for multiple bases, the system shall bound all policy reads by one shared total deadline sized for the number of admitted bases and bounded above, and shall not begin a later base read after that context ends.
 
 **NCK-16** When a pull-request listing contains drafts, the system shall distinguish listed pull requests from eligible non-draft pull requests without claiming unread drafts have healthy CI.
 
-**NCK-17** When a stuck pull request is considered for a write-capable retrigger, the system shall resolve non-mutating tree evidence and completely re-read check-runs, then use a fresh read of that numbered pull request as the final provider observation before writes and require complete evidence that it remains open and non-draft on the scanned base ref, head ref, and head SHA, with matching nonzero base/head repository identities belonging to the target repository.
+**NCK-17** When a stuck pull request is considered for a write-capable retrigger, the system shall require complete, currently valid evidence that the target it is about to mutate is still the target it classified: open, non-draft, on the scanned base ref, head ref and head SHA, with matching nonzero base and head repository identities belonging to the target repository, and observed no earlier than the classification it acts on.
 
 **NCK-18** When retriggering is a dry run, the system shall completely re-read check-runs and current pull-request identity and return before tree, commit, or ref operations; when `--dry-run` is supplied without `--trigger`, the system shall reject the flags before provider access.
 

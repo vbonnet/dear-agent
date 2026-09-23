@@ -65,12 +65,16 @@ func TestResolveRequiredChecksByBaseSharesOneDeadlineAcrossBases(t *testing.T) {
 }
 
 func TestFetchRequiredChecksByBaseWithinOwnsOneTotalDeadline(t *testing.T) {
-	timeout := time.Minute
-	started := time.Now()
+	perBase := time.Minute
 	prs := []PR{
 		{Number: 2, BaseRefName: "zeta"},
 		{Number: 1, BaseRefName: "alpha"},
 	}
+	// One shared deadline, still owned by the constructor, but sized for the
+	// bases actually admitted rather than for a single call. Two distinct
+	// bases, each of which performs two sequential provider reads.
+	timeout := requiredChecksScanBudget(perBase, 2)
+	started := time.Now()
 	var first context.Context
 	fetch := func(got context.Context, repo, _ string) (map[string]bool, error) {
 		if repo != "owner/repo" {
@@ -98,7 +102,7 @@ func TestFetchRequiredChecksByBaseWithinOwnsOneTotalDeadline(t *testing.T) {
 		context.Background(),
 		"owner/repo",
 		prs,
-		timeout,
+		perBase,
 		fetch,
 	); err != nil {
 		t.Fatalf("fetchRequiredChecksByBaseWithin() error = %v", err)
@@ -291,5 +295,66 @@ func TestResolveRequiredChecksByBaseStopsBeforeNextFetchAfterCancellation(t *tes
 	}
 	if got.byBase != nil {
 		t.Fatalf("caller cancellation leaked partial policies %#v", got.byBase)
+	}
+}
+
+// The scan-wide deadline must be sized for the bases actually admitted.
+//
+// Each base performs two sequential provider reads, so reusing the
+// single-call allowance as one shared budget let a stacked queue exhaust it
+// while every individual request stayed inside its normal allowance. A
+// timeout aborts before any check-run classification, so the recovery scanner
+// goes offline rather than degrading.
+func TestRequiredChecksScanBudgetScalesWithBases(t *testing.T) {
+	const perCall = 20 * time.Second
+	for _, tc := range []struct {
+		bases int
+		want  time.Duration
+	}{
+		{bases: 0, want: perCall},
+		{bases: 1, want: perCall},
+		{bases: 4, want: 4 * perCall},
+		{bases: maxRequiredChecksScanBases, want: maxRequiredChecksScanBases * perCall},
+		// Bounded, so a pathological listing cannot make the scan hang.
+		{bases: maxRequiredChecksScanBases + 50, want: maxRequiredChecksScanBases * perCall},
+	} {
+		if got := requiredChecksScanBudget(perCall, tc.bases); got != tc.want {
+			t.Errorf("requiredChecksScanBudget(%s, %d) = %s, want %s", perCall, tc.bases, got, tc.want)
+		}
+	}
+}
+
+// Several bases, each consuming most of a per-call allowance, must all resolve
+// rather than the later ones being cut off by a budget sized for one.
+func TestMultipleBasesEachGetTheirOwnAllowance(t *testing.T) {
+	prs := []PR{
+		{Number: 1, BaseRefName: "main"},
+		{Number: 2, BaseRefName: "release"},
+		{Number: 3, BaseRefName: "staging"},
+		{Number: 4, BaseRefName: "next"},
+	}
+	perCall := 60 * time.Millisecond
+	fetched := 0
+	resolved, err := fetchRequiredChecksByBaseWithin(context.Background(), "owner/repo", prs, perCall,
+		func(ctx context.Context, _, base string) (map[string]bool, error) {
+			// Most of one per-call allowance, as a real pair of reads would be.
+			select {
+			case <-time.After(perCall * 3 / 4):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			fetched++
+			return map[string]bool{"CI": true}, nil
+		})
+	if err != nil {
+		t.Fatalf("fetchRequiredChecksByBaseWithin() error = %v, want every base resolved", err)
+	}
+	if fetched != 4 {
+		t.Errorf("fetched %d bases, want 4", fetched)
+	}
+	for _, base := range []string{"main", "release", "staging", "next"} {
+		if resolved.byBase[base] == nil {
+			t.Errorf("base %q missing from the resolved policy", base)
+		}
 	}
 }

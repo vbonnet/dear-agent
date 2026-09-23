@@ -37,15 +37,62 @@ func fetchRequiredChecksByBaseWithin(
 	ctx context.Context,
 	repo string,
 	prs []PR,
-	timeout time.Duration,
+	perBaseTimeout time.Duration,
 	fetch func(context.Context, string, string) (map[string]bool, error),
 ) (RequiredChecksByBase, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	bases, err := distinctBases(prs)
+	if err != nil {
+		return RequiredChecksByBase{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, requiredChecksScanBudget(perBaseTimeout, len(bases)))
 	defer cancel()
 
-	return resolveRequiredChecksByBase(ctx, prs, func(ctx context.Context, base string) (map[string]bool, error) {
+	return resolveRequiredChecksForBases(ctx, bases, func(ctx context.Context, base string) (map[string]bool, error) {
 		return fetch(ctx, repo, base)
 	})
+}
+
+// maxRequiredChecksScanBases bounds how far the scan-wide budget can grow. The
+// budget scales with work, but a pathological listing must not be able to make
+// a recovery scan run indefinitely.
+const maxRequiredChecksScanBases = 32
+
+// requiredChecksScanBudget sizes the shared deadline for the bases actually
+// admitted.
+//
+// Each base performs two sequential provider reads, so reusing the single-call
+// allowance as one budget for the whole loop let a stacked queue exhaust it
+// even when every individual request completed inside its normal allowance.
+// Any timeout aborts before check-run classification or retriggering, so the
+// recovery scanner became unavailable rather than slower.
+func requiredChecksScanBudget(perBase time.Duration, bases int) time.Duration {
+	if bases < 1 {
+		bases = 1
+	}
+	if bases > maxRequiredChecksScanBases {
+		bases = maxRequiredChecksScanBases
+	}
+	return perBase * time.Duration(bases)
+}
+
+// distinctBases returns the sorted distinct non-draft bases in prs.
+func distinctBases(prs []PR) ([]string, error) {
+	bases := make(map[string]bool)
+	for _, pr := range prs {
+		if pr.IsDraft {
+			continue
+		}
+		if strings.TrimSpace(pr.BaseRefName) == "" {
+			return nil, fmt.Errorf("PR #%d has no provider-observed base branch", pr.Number)
+		}
+		bases[pr.BaseRefName] = true
+	}
+	ordered := make([]string, 0, len(bases))
+	for base := range bases {
+		ordered = append(ordered, base)
+	}
+	sort.Strings(ordered)
+	return ordered, nil
 }
 
 func resolveRequiredChecksByBase(
@@ -53,23 +100,18 @@ func resolveRequiredChecksByBase(
 	prs []PR,
 	fetch requiredChecksFetchFunc,
 ) (RequiredChecksByBase, error) {
-	bases := make(map[string]bool)
-	for _, pr := range prs {
-		if pr.IsDraft {
-			continue
-		}
-		if strings.TrimSpace(pr.BaseRefName) == "" {
-			return RequiredChecksByBase{}, fmt.Errorf("PR #%d has no provider-observed base branch", pr.Number)
-		}
-		bases[pr.BaseRefName] = true
+	ordered, err := distinctBases(prs)
+	if err != nil {
+		return RequiredChecksByBase{}, err
 	}
+	return resolveRequiredChecksForBases(ctx, ordered, fetch)
+}
 
-	ordered := make([]string, 0, len(bases))
-	for base := range bases {
-		ordered = append(ordered, base)
-	}
-	sort.Strings(ordered)
-
+func resolveRequiredChecksForBases(
+	ctx context.Context,
+	ordered []string,
+	fetch requiredChecksFetchFunc,
+) (RequiredChecksByBase, error) {
 	resolved := RequiredChecksByBase{byBase: make(map[string]map[string]bool, len(ordered))}
 	for _, base := range ordered {
 		if err := ctx.Err(); err != nil {
