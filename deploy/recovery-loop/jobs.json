@@ -5,15 +5,24 @@
       "launchd_label": "com.dear-agent.mergeloop",
       "plist_path": "~/Library/LaunchAgents/com.dear-agent.mergeloop.plist",
       "binary_path": "~/go/bin/mergeloop",
-      "install_cmd": ["go", "install", "./cmd/mergeloop"],
-      "pulse": "mergeloop-loaded"
+      "install_cmd": [
+        "go",
+        "install",
+        "./cmd/mergeloop"
+      ],
+      "pulse": "mergeloop-loaded",
+      "pulse_is_structural": true
     },
     {
       "name": "disk-watchdog",
       "launchd_label": "com.dear-agent.disk-watchdog",
       "plist_path": "~/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist",
       "binary_path": "~/go/bin/disk-watchdog",
-      "install_cmd": ["go", "install", "./cmd/disk-watchdog"],
+      "install_cmd": [
+        "go",
+        "install",
+        "./cmd/disk-watchdog"
+      ],
       "pulse": "disk-watchdog-tick"
     },
     {
@@ -21,7 +30,11 @@
       "launchd_label": "com.dear-agent.sandbox-gc",
       "plist_path": "~/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist",
       "binary_path": "~/go/bin/agm",
-      "install_cmd": ["go", "install", "./agm/cmd/agm"],
+      "install_cmd": [
+        "go",
+        "install",
+        "./agm/cmd/agm"
+      ],
       "pulse": "sandbox-gc-tick"
     },
     {
@@ -36,7 +49,11 @@
       "launchd_label": "com.dear-agent.absence-alarm",
       "plist_path": "~/Library/LaunchAgents/com.dear-agent.absence-alarm.plist",
       "binary_path": "~/go/bin/absence-alarm",
-      "install_cmd": ["go", "install", "./cmd/absence-alarm"],
+      "install_cmd": [
+        "go",
+        "install",
+        "./cmd/absence-alarm"
+      ],
       "pulse": "absence-alarm-heartbeat"
     }
   ]
