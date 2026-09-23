@@ -974,6 +974,15 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Scope, stated because the transaction does not establish more: this
+	// versions every child the SELECT observes. It is a plain read, the
+	// adapter does not run serializably, and LinkSessionParent shares no lock
+	// with it, so a child attached by another client between this read and
+	// the DELETE below is detached by the cascade without being versioned.
+	// Closing that needs range locking or serializable isolation across both
+	// operations, which is a change to how this adapter transacts rather than
+	// to this function. DOLTR-15 records the boundary.
+	//
 	// Each child gets its own rotated revision, not just a new timestamp:
 	// updated_at is a bare TIMESTAMP and collides within a second. Rows are
 	// listed and updated individually because generating a distinct UUID per
