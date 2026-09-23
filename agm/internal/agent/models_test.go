@@ -370,9 +370,15 @@ func TestOpus55NeverSpelledWithADot(t *testing.T) {
 // Opus 5.5 that exists only under claude-code is unreachable from any spawn
 // that lands on a different harness.
 func TestOpus55RoutesThroughPiAndOpenRouter(t *testing.T) {
+	// Both spellings, on both aggregators. An alias that exists only under
+	// claude-code does not error here: ResolveModelFullName passes an unknown
+	// alias through verbatim, so "opus55" would reach the harness as the
+	// literal string "opus55" and be rejected there instead.
 	for _, harness := range []string{"pi-cli", "openrouter"} {
-		if got := ResolveModelFullName(harness, "opus5.5"); got != "anthropic/claude-opus-5-5" {
-			t.Errorf("ResolveModelFullName(%s, opus5.5) = %q, want anthropic/claude-opus-5-5", harness, got)
+		for _, alias := range []string{"opus5.5", "opus55"} {
+			if got := ResolveModelFullName(harness, alias); got != "anthropic/claude-opus-5-5" {
+				t.Errorf("ResolveModelFullName(%s, %s) = %q, want anthropic/claude-opus-5-5", harness, alias, got)
+			}
 		}
 	}
 }
