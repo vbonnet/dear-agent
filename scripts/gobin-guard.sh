@@ -105,13 +105,20 @@ ensure_searchable_dir() (
 		ensure_searchable_dir "$parent" || return 1
 	fi
 	# Never repair through a link to a target outside the lexical state tree.
-	# chmod u+x enforces the owner bit when permitted; the fallback accepts an
+	# chmod u+wx enforces the owner bits when permitted; the fallback accepts an
 	# already-traversable non-owned ancestor. test -x alone is insufficient
 	# because root reports effective access for mode-0600 directories.
+	#
+	# Write matters as much as search. With u+x alone a mode-0500 state tree
+	# stayed unwritable, so the trail record and the notification both went out
+	# and persist_alarm_marker then failed: no marker existed, and every later
+	# degraded tick redelivered the alert. A directory this function creates is
+	# already 0700, so repairing an existing one to match is consistent rather
+	# than a widening.
 	if [ -L "$dir" ]; then
 		return 1
 	elif [ -d "$dir" ]; then
-		chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
+		chmod u+wx "$dir" 2>/dev/null || { [ -x "$dir" ] && [ -w "$dir" ]; }
 	elif [ -e "$dir" ]; then
 		return 1
 	else

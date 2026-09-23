@@ -584,3 +584,24 @@ EOF
 	# Refused on both runs, so neither suppressed the second record.
 	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "2"
 }
+
+# An owner-repairable marker parent that lacks owner WRITE access must be
+# repaired too. ensure_searchable_dir added only the execute bit, so a 0500
+# state directory stayed unwritable: the trail record and the notification
+# both went out, then persist_alarm_marker failed, no marker existed, and
+# every later degraded tick redelivered the alert.
+@test "an owner-repairable marker parent without write access is repaired" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state"
+	chmod 0500 "$state"
+	guard_alarm="$state/guard-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	[ -f "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+}
