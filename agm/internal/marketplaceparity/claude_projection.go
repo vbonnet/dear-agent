@@ -150,9 +150,25 @@ var claudeMarketplaceEntryAllowedFields = map[string]bool{
 	"name":        true,
 	"repository":  true,
 	"source":      true,
-	"strict":      true,
 	"version":     true,
 }
+
+// claudeCanonicalMarketplaceEntryAllowedFields extends the shared set with
+// "strict".
+//
+// strict is only meaningful on the canonical entry, and only that entry's
+// validation parses it. Allowing it on every entry meant a shared plugin could
+// carry "strict": true with no neutral declaration behind it, silently
+// changing Claude's manifest handling, or carry "strict": "yes", which nothing
+// would ever unmarshal and so nothing would ever reject.
+var claudeCanonicalMarketplaceEntryAllowedFields = func() map[string]bool {
+	fields := make(map[string]bool, len(claudeMarketplaceEntryAllowedFields)+1)
+	for name := range claudeMarketplaceEntryAllowedFields {
+		fields[name] = true
+	}
+	fields["strict"] = true
+	return fields
+}()
 
 var claudePluginManifestAllowedFields = map[string]bool{
 	"author":      true,
@@ -226,7 +242,11 @@ func indexClaudePlugins(plugins []claudePluginEntry) (map[string]claudePluginEnt
 		if _, duplicate := byName[plugin.Name]; duplicate {
 			return nil, fmt.Errorf("claude marketplace contains duplicate plugin %q", plugin.Name)
 		}
-		if err := validateAllowedFields("claude marketplace entry", plugin.fields, claudeMarketplaceEntryAllowedFields); err != nil {
+		allowedFields := claudeMarketplaceEntryAllowedFields
+		if plugin.Name == canonicalPluginName {
+			allowedFields = claudeCanonicalMarketplaceEntryAllowedFields
+		}
+		if err := validateAllowedFields("claude marketplace entry", plugin.fields, allowedFields); err != nil {
 			return nil, err
 		}
 		if !strings.HasPrefix(plugin.Source, "./") {

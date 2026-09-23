@@ -89,8 +89,49 @@ func validateNeutralCanonicalExclusion(root string, neutral map[string]PluginEnt
 				plugin.Name,
 			)
 		}
+		// The root is not the whole identity. An ordinary directory can
+		// re-export the canonical package through a link NESTED inside it:
+		// ./shadow is real, shadow/skills points into spec-governance/skills,
+		// and the root test above passes because the root resolves nowhere
+		// near the canonical package. validatePlugin then follows that nested
+		// link and accepts the capability it carries, so the neutral catalogue
+		// advertises exactly the subtree it is forbidden to advertise.
+		if err := rejectNestedCanonicalAlias(canonicalSource, resolvedSource, plugin); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// rejectNestedCanonicalAlias walks a neutral plugin's resolved source and
+// rejects any entry that resolves into the Claude-only package.
+//
+// Only directories are followed, because a capability is always a directory
+// that validatePlugin reaches through os.Stat. An entry whose link cannot be
+// resolved is skipped rather than rejected: a dangling link advertises
+// nothing, and refusing it would make an unrelated broken symlink fail the
+// whole catalogue.
+func rejectNestedCanonicalAlias(canonicalSource, resolvedSource string, plugin PluginEntry) error {
+	return filepath.WalkDir(resolvedSource, func(entry string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry == resolvedSource {
+			return nil
+		}
+		target, resolveErr := filepath.EvalSymlinks(entry)
+		if resolveErr != nil {
+			return nil //nolint:nilerr // a dangling entry advertises nothing
+		}
+		if !pathWithinCanonical(canonicalSource, target) {
+			return nil
+		}
+		return fmt.Errorf(
+			"neutral marketplace must not advertise Claude-only plugin identity through nested source %q on plugin %q",
+			filepath.ToSlash(strings.TrimPrefix(entry, resolvedSource+string(filepath.Separator))),
+			plugin.Name,
+		)
+	})
 }
 
 // pathWithinCanonical reports whether resolved is the canonical package or any

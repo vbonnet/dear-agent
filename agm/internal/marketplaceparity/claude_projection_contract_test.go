@@ -893,3 +893,66 @@ func TestCanonicalManifestHonoursManifestSizeLimit(t *testing.T) {
 			"refused for exceeding the manifest size limit")
 	}
 }
+
+// Identity is not only the source ROOT. A neutral entry whose source is an
+// ordinary directory can still re-export the Claude-only package through a
+// symlink NESTED inside it: `./shadow` is a real directory, `shadow/skills`
+// points into `spec-governance/skills`, and the root containment test passes
+// because the root itself resolves nowhere near the canonical package.
+// validatePlugin then follows that nested link and accepts the `skills`
+// capability, so the neutral catalogue advertises exactly the subtree it is
+// forbidden to advertise.
+func TestNeutralCatalogRejectsNestedClaudeOnlyAlias(t *testing.T) {
+	fixture := newProjectionTestFixture(t)
+	shadowRoot := filepath.Join(fixture.root, "shadow")
+	if err := os.MkdirAll(shadowRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(
+		filepath.Join(fixture.root, "spec-governance", "skills"),
+		filepath.Join(shadowRoot, "skills"),
+	); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	const shadow = `{"name":"shadow","source":"./shadow","description":"Shadow","version":"0.1.0"}`
+	projectionTestReplace(t, fixture.neutralPath, "\n  ],\n  \"harnesses\"", ",\n    "+shadow+"\n  ],\n  \"harnesses\"")
+	projectionTestReplace(t, fixture.claudePath, "\n  ]\n}\n", ",\n    "+shadow+"\n  ]\n}\n")
+	for _, operation := range []struct {
+		name     string
+		validate func(string) error
+	}{
+		{name: "ValidateCatalog", validate: ValidateCatalog},
+		{name: "ValidateClaudeMarketplaceMirror", validate: ValidateClaudeMarketplaceMirror},
+	} {
+		err := operation.validate(fixture.root)
+		if err == nil || !strings.Contains(err.Error(), "must not advertise Claude-only plugin identity") {
+			t.Fatalf("%s() error = %v, want nested Claude-only identity rejection", operation.name, err)
+		}
+	}
+}
+
+// "strict" is only meaningful on the canonical entry, and only that entry's
+// validation parses it. While it was allowed on every entry, a shared plugin
+// could carry strict=true with no neutral declaration behind it, silently
+// changing Claude's manifest handling, or carry a value such as "yes" that
+// nothing would ever unmarshal and so nothing would ever reject.
+func TestClaudeMarketplaceRejectsStrictOnSharedEntry(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		entry string
+	}{
+		{name: "boolean", entry: `{"name":"wayfinder","source":"./wayfinder","description":"Wayfinder","version":"0.3.0","strict":true}`},
+		{name: "non-boolean", entry: `{"name":"wayfinder","source":"./wayfinder","description":"Wayfinder","version":"0.3.0","strict":"yes"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newProjectionTestFixture(t)
+			projectionTestReplace(t, fixture.claudePath,
+				`{"name":"wayfinder","source":"./wayfinder","description":"Wayfinder","version":"0.3.0"}`,
+				test.entry)
+			err := ValidateClaudeMarketplaceMirror(fixture.root)
+			if err == nil || !strings.Contains(err.Error(), "strict") {
+				t.Fatalf("ValidateClaudeMarketplaceMirror() error = %v, want the shared entry's strict field rejected", err)
+			}
+		})
+	}
+}
