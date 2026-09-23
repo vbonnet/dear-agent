@@ -32,22 +32,48 @@ func TestKill_AgentMode_BackendFailureReturnsJSON(t *testing.T) {
 	}
 }
 
-// setAgentJSON flips the package-global output state into agent/JSON mode for
-// the duration of a test and restores it afterwards, mirroring how
-// PersistentPreRunE resolves it at runtime.
+// setAgentJSON flips the package-global output state into unmasked agent/JSON
+// mode for the duration of a test and restores it afterwards, mirroring how
+// PersistentPreRunE resolves it at runtime without --fields.
 func setAgentJSON(t *testing.T) {
 	t.Helper()
-	origFmt, origMode := outputFormat, outputMode
-	outputFormat, outputMode = "json", ModeAgent
-	t.Cleanup(func() { outputFormat, outputMode = origFmt, origMode })
+	origFmt, origMode, origFields := outputFormat, outputMode, fieldsFlag
+	outputFormat, outputMode, fieldsFlag = "json", ModeAgent, nil
+	t.Cleanup(func() { outputFormat, outputMode, fieldsFlag = origFmt, origMode, origFields })
 }
 
-// setHumanText flips the globals into human/text mode and restores them after.
+// setHumanText flips the globals into unmasked human/text mode and restores
+// them afterwards.
 func setHumanText(t *testing.T) {
 	t.Helper()
-	origFmt, origMode := outputFormat, outputMode
-	outputFormat, outputMode = "text", ModeHuman
-	t.Cleanup(func() { outputFormat, outputMode = origFmt, origMode })
+	origFmt, origMode, origFields := outputFormat, outputMode, fieldsFlag
+	outputFormat, outputMode, fieldsFlag = "text", ModeHuman, nil
+	t.Cleanup(func() { outputFormat, outputMode, fieldsFlag = origFmt, origMode, origFields })
+}
+
+func TestOutputModeHelpers_RestoreAllGlobals(t *testing.T) {
+	origFmt, origMode, origFields := outputFormat, outputMode, fieldsFlag
+	t.Cleanup(func() { outputFormat, outputMode, fieldsFlag = origFmt, origMode, origFields })
+	outputFormat, outputMode, fieldsFlag = "sentinel", ModeHuman, []string{"sentinel"}
+
+	for _, tc := range []struct {
+		name, format string
+		mode         OutputMode
+		set          func(*testing.T)
+	}{
+		{"agent", "json", ModeAgent, setAgentJSON},
+		{"human", "text", ModeHuman, setHumanText},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.set(t)
+			if outputFormat != tc.format || outputMode != tc.mode || fieldsFlag != nil {
+				t.Fatalf("active output globals = (%q, %v, %v), want (%q, %v, nil)", outputFormat, outputMode, fieldsFlag, tc.format, tc.mode)
+			}
+		})
+		if outputFormat != "sentinel" || outputMode != ModeHuman || len(fieldsFlag) != 1 || fieldsFlag[0] != "sentinel" {
+			t.Fatalf("restored output globals = (%q, %v, %v), want sentinel state", outputFormat, outputMode, fieldsFlag)
+		}
+	}
 }
 
 // TestEmitConfirmationEnvelope_Exit4 checks the helper prints a JSON envelope

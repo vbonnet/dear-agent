@@ -886,9 +886,7 @@ func TestArchiveSession_DryRunCLIJSONHonorsFieldMask(t *testing.T) {
 	defer cleanup()
 	configureSingleArchiveDryRun(t)
 	setAgentJSON(t)
-	origFields := fieldsFlag
 	fieldsFlag = []string{"parameters"}
-	t.Cleanup(func() { fieldsFlag = origFields })
 
 	const sessionID = "single-dry-run-fields"
 	const sessionName = "dry-run-fields"
