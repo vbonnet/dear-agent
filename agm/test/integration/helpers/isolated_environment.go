@@ -118,6 +118,24 @@ func (e *IsolatedEnvironment) Environ() []string {
 		"ENGRAM_TEST_MODE":      "1",
 		"ENGRAM_TEST_WORKSPACE": "test",
 		"NO_COLOR":              "1",
+
+		// The spawn circuit breaker's host-resource gates are the last
+		// ambient dependency in an otherwise declared environment. Their
+		// defaults are derived from the machine (MaxLoad5 is NumCPU*2), so on
+		// a shared CI runner building and testing in parallel the five-minute
+		// load average routinely exceeds the threshold and the breaker
+		// refuses the spawn. The lifecycle tests then fail with
+		// "circuit breaker: spawn refused (load level: GREEN)" for a reason
+		// that has nothing to do with the product path under test. Observed
+		// on ubuntu-latest at load 11.7 against a threshold of 8.
+		//
+		// These tests exercise session lifecycle, not resource admission.
+		// The breaker's own gate behaviour is covered by its package tests,
+		// which can state a load rather than inherit one.
+		"AGM_MAX_LOAD5":        "100000",
+		"AGM_MIN_FREE_MEM_PCT": "0",
+		"AGM_MIN_FREE_DISK_GB": "0",
+		"AGM_MAX_AGENT_PROCS":  "100000",
 	}
 	for _, name := range []string{"USER", "LOGNAME", "TERM", "LANG", "LC_ALL", "LC_CTYPE"} {
 		if value, ok := os.LookupEnv(name); ok {
