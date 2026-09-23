@@ -3,7 +3,13 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
-- Canonical Go build cache evidence: `cmd/disk-watchdog/gocache_test.go` (DW-52 through DW-57)
+- Canonical Go build cache evidence: `cmd/disk-watchdog/gocache_test.go` (DW-52 through DW-57),
+  `cmd/disk-watchdog/gocache_fuzz_test.go` (DW-52, DW-55, DW-60) and
+  `cmd/disk-watchdog/gocache_review_test.go` (DW-52, DW-55 through DW-59:
+  shard directories survive the trim, the budget counts only removable bytes,
+  unusable budgets are rejected including the rounded int64 boundary, an
+  abandoned cache holding a fuzz corpus is kept, and per-checkout cache roots
+  are discovered one level below a configured parent)
 - Reaper-liveness evidence: `cmd/disk-watchdog/reaper_liveness_test.go` (DW-17..DW-23),
   `cmd/disk-watchdog/reaper_liveness_review_test.go` (DW-19, DW-24, DW-25),
   `cmd/disk-watchdog/reaper_liveness_bounds_test.go` (DW-26), and

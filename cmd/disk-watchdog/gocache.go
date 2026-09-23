@@ -100,31 +100,53 @@ func trimCanonicalCaches(cfg canonicalCacheConfig) canonicalCacheTrimResult {
 	g := cfg.withDefaults()
 	res := canonicalCacheTrimResult{Skipped: map[string]string{}, Errors: map[string]string{}}
 
-	for _, dir := range expandCacheRoots(cfg.Dirs) {
-		res.Scanned++
-		if !isGoBuildCacheRoot(dir) {
-			// Covers a missing directory, an unreadable one, and a real
-			// directory holding real work. All three mean keep.
-			res.Skipped[dir] = "not a proven Go build cache root"
+	// The budget belongs to the CONFIGURED path, not to each root discovered
+	// under it. Applying it per root let a per-checkout lint-cache hierarchy
+	// hold the full budget once per checkout, so any number of individually
+	// in-budget caches could add up without ever being trimmed, which is the
+	// unbounded growth the budget exists to stop.
+	for _, group := range expandCacheRoots(cfg.Dirs) {
+		var measured []cacheMeasurement
+		var total int64
+		for _, dir := range group.roots {
+			res.Scanned++
+			if !isGoBuildCacheRoot(dir) {
+				// Covers a missing directory, an unreadable one, and a real
+				// directory holding real work. All three mean keep.
+				res.Skipped[dir] = "not a proven Go build cache root"
+				continue
+			}
+			m, ok := measureRemovable(dir, g)
+			if !ok {
+				res.Skipped[dir] = "cache root became unreadable while measuring it"
+				continue
+			}
+			measured = append(measured, m)
+			total += m.total
+		}
+		if len(measured) == 0 {
 			continue
 		}
-		m, ok := measureRemovable(dir, g)
-		if !ok {
-			res.Skipped[dir] = "cache root became unreadable while measuring it"
-			continue
-		}
-		if m.total <= cfg.MaxBytes {
-			res.Skipped[dir] = fmt.Sprintf("within budget (%.1f GiB removable <= %.1f GiB)",
-				gib(m.total), gib(cfg.MaxBytes))
+		if total <= cfg.MaxBytes {
+			for _, m := range measured {
+				res.Skipped[m.root] = fmt.Sprintf(
+					"within budget (%.1f GiB removable under %s <= %.1f GiB)",
+					gib(total), group.configured, gib(cfg.MaxBytes))
+			}
 			continue
 		}
 		if !g.Trim {
-			res.Skipped[dir] = fmt.Sprintf("dry run (%.1f GiB over budget)", gib(m.total-cfg.MaxBytes))
-			res.BytesReclaimable += m.total
+			for _, m := range measured {
+				res.Skipped[m.root] = fmt.Sprintf("dry run (%.1f GiB over budget)",
+					gib(total-cfg.MaxBytes))
+				res.BytesReclaimable += m.total
+			}
 			continue
 		}
-		res.BytesReclaimed += trimCacheShards(m, g, &res)
-		res.Trimmed = append(res.Trimmed, dir)
+		for _, m := range measured {
+			res.BytesReclaimed += trimCacheShards(m, g, &res)
+			res.Trimmed = append(res.Trimmed, m.root)
+		}
 	}
 	sort.Strings(res.Trimmed)
 	return res
@@ -374,16 +396,24 @@ func xdgCacheHome(fallback string) string {
 // directories rather than hex shards, so the structural proof rejects it and
 // every cache beneath it stays unreachable. One level of expansion covers that
 // layout without loosening the proof each root still has to pass.
-func expandCacheRoots(dirs []string) []string {
-	var out []string
+// cacheGroup is the roots discovered under one configured path. The budget
+// applies to the group, because the configured path is what the operator sized
+// it for.
+type cacheGroup struct {
+	configured string
+	roots      []string
+}
+
+func expandCacheRoots(dirs []string) []cacheGroup {
+	var out []cacheGroup
 	for _, dir := range dirs {
 		if isGoBuildCacheRoot(dir) {
-			out = append(out, dir)
+			out = append(out, cacheGroup{configured: dir, roots: []string{dir}})
 			continue
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			out = append(out, dir)
+			out = append(out, cacheGroup{configured: dir, roots: []string{dir}})
 			continue
 		}
 		var children []string
@@ -397,12 +427,12 @@ func expandCacheRoots(dirs []string) []string {
 			}
 		}
 		if len(children) == 0 {
-			out = append(out, dir)
+			out = append(out, cacheGroup{configured: dir, roots: []string{dir}})
 			continue
 		}
-		out = append(out, children...)
+		sort.Strings(children)
+		out = append(out, cacheGroup{configured: dir, roots: children})
 	}
-	sort.Strings(out)
 	return out
 }
 

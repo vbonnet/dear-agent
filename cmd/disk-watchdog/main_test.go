@@ -184,9 +184,9 @@ func TestDecideBrake(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := decideBrake(tt.breached, tt.rem)
+			got := decideBrake(tt.breached, tt.rem, nil)
 			if got.Engage != tt.wantEngage || got.Release != tt.wantRelease {
-				t.Errorf("decideBrake(%v, %+v) = {engage:%v release:%v}, want {engage:%v release:%v}",
+				t.Errorf("decideBrake(%v, %+v, nil) = {engage:%v release:%v}, want {engage:%v release:%v}",
 					tt.breached, tt.rem, got.Engage, got.Release, tt.wantEngage, tt.wantRelease)
 			}
 		})
@@ -194,7 +194,7 @@ func TestDecideBrake(t *testing.T) {
 }
 
 func TestDecideBrake_ReasonCarriesTheRemediationError(t *testing.T) {
-	d := decideBrake(true, &sweepResult{Error: "agm worktree sweep --execute: signal: killed"})
+	d := decideBrake(true, &sweepResult{Error: "agm worktree sweep --execute: signal: killed"}, nil)
 	if !d.Engage {
 		t.Fatal("a failed remediation must engage the brake")
 	}
@@ -207,7 +207,7 @@ func TestUpdateAdmissionBrake_EngagesAndReleases(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "admission-brake.json")
 	cfg := config{brakePath: path, brakeTTL: time.Hour}
 
-	updateAdmissionBrake(cfg, true, &sweepResult{Error: "signal: killed"})
+	updateAdmissionBrake(cfg, true, &sweepResult{Error: "signal: killed"}, nil)
 	brake, err := admission.Read(path)
 	if err != nil {
 		t.Fatalf("Read after engage: %v", err)
@@ -221,7 +221,7 @@ func TestUpdateAdmissionBrake_EngagesAndReleases(t *testing.T) {
 		t.Errorf("Reason = %q, want the remediation error", brake.Reason)
 	}
 
-	updateAdmissionBrake(cfg, false, nil)
+	updateAdmissionBrake(cfg, false, nil, nil)
 	brake, err = admission.Read(path)
 	if err != nil {
 		t.Fatalf("Read after release: %v", err)
@@ -238,7 +238,7 @@ func TestUpdateAdmissionBrake_SuccessfulRemediationLeavesBrakeInPlace(t *testing
 	if err := admission.Engage(path, brakeSource, "earlier failure", time.Hour); err != nil {
 		t.Fatalf("Engage: %v", err)
 	}
-	updateAdmissionBrake(cfg, true, &sweepResult{Removed: []string{"/w/a"}})
+	updateAdmissionBrake(cfg, true, &sweepResult{Removed: []string{"/w/a"}}, nil)
 
 	brake, err := admission.Read(path)
 	if err != nil {

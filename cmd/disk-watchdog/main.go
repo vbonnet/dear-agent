@@ -87,6 +87,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"time"
 
@@ -292,7 +293,7 @@ func run(args []string, out io.Writer) (int, error) {
 		remediation = r
 	}
 
-	updateAdmissionBrake(cfg, diskBreached, remediation)
+	updateAdmissionBrake(cfg, diskBreached, remediation, goCaches)
 
 	// A dead reaper is an alarm in its own right, at whatever free space happens
 	// to be. Folding it into the same level/reasons the disk thresholds produce
@@ -513,7 +514,7 @@ type brakeDecision struct {
 // A breached tick whose remediation *succeeded* deliberately leaves an existing
 // brake alone rather than clearing it: one successful sweep under an active
 // alarm is not evidence the host is healthy. Only an unbreached tick releases.
-func decideBrake(breached bool, rem *sweepResult) brakeDecision {
+func decideBrake(breached bool, rem *sweepResult, goCaches *canonicalCacheTrimResult) brakeDecision {
 	switch {
 	case !breached:
 		return brakeDecision{Release: true}
@@ -522,14 +523,43 @@ func decideBrake(breached bool, rem *sweepResult) brakeDecision {
 			Engage: true,
 			Reason: fmt.Sprintf("worktree-sweep remediation failed: %s", rem.Error),
 		}
+	case goCaches != nil && len(goCaches.Errors) > 0:
+		// An over-budget cache that could not be emptied is a remediation
+		// failure, exactly like a failed worktree sweep. Reporting the errors
+		// and then letting a successful sweep clear the brake said the disk
+		// had been remediated while the largest consumer on the host was
+		// untouched, which is the ambiguity this whole file exists to remove.
+		return brakeDecision{
+			Engage: true,
+			Reason: fmt.Sprintf("canonical cache trim failed: %s", firstCacheTrimError(goCaches)),
+		}
 	default:
 		return brakeDecision{}
 	}
 }
 
+// firstCacheTrimError names one failing path deterministically, so the brake
+// reason does not change between ticks for the same failure.
+func firstCacheTrimError(res *canonicalCacheTrimResult) string {
+	paths := make([]string, 0, len(res.Errors))
+	for path := range res.Errors {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return "unknown"
+	}
+	detail := fmt.Sprintf("%s: %s", paths[0], res.Errors[paths[0]])
+	if len(paths) > 1 {
+		detail += fmt.Sprintf(" (and %d more)", len(paths)-1)
+	}
+	return detail
+}
+
 // updateAdmissionBrake applies the tick's brake decision.
-func updateAdmissionBrake(cfg config, breached bool, rem *sweepResult) {
-	d := decideBrake(breached, rem)
+func updateAdmissionBrake(cfg config, breached bool, rem *sweepResult,
+	goCaches *canonicalCacheTrimResult) {
+	d := decideBrake(breached, rem, goCaches)
 	switch {
 	case d.Engage:
 		applyBrake(cfg, true, d.Reason)

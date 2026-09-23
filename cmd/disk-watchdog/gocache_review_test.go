@@ -277,3 +277,91 @@ func TestEffectiveGoEnvFallsBackQuietly(t *testing.T) {
 		t.Error("defaultGoCacheDirs() went empty without a toolchain, want the conventional locations")
 	}
 }
+
+// The budget belongs to the configured path, not to each root discovered
+// under it.
+//
+// Applying it per root let the per-checkout lint-cache hierarchy hold the full
+// budget once per checkout, so any number of individually in-budget caches
+// could add up without ever being trimmed. That is the unbounded growth the
+// budget exists to stop.
+func TestBudgetAppliesToTheWholeConfiguredHierarchy(t *testing.T) {
+	parent := t.TempDir()
+	first := mkBuildCache(t, filepath.Join(parent, "1111111111"))
+	second := mkBuildCache(t, filepath.Join(parent, "2222222222"))
+	fatten(t, first, 32)
+	fatten(t, second, 32)
+
+	each := dirBytes(first)
+	if each == 0 {
+		t.Fatal("fixture wrote no bytes")
+	}
+	// A budget that each checkout is individually under, but the pair is over.
+	budget := each + each/2
+
+	res := trimCanonicalCaches(canonicalCacheConfig{
+		Dirs: []string{parent}, MaxBytes: budget, Trim: true,
+	})
+
+	if len(res.Trimmed) != 2 {
+		t.Fatalf("Trimmed = %v, want both checkouts: the budget is for %s, not for each child; skipped=%v",
+			res.Trimmed, parent, res.Skipped)
+	}
+	for _, dir := range []string{first, second} {
+		if n := nonEmptyShards(t, dir); n != 0 {
+			t.Errorf("%s: %d shard(s) still hold entries", dir, n)
+		}
+	}
+
+	// A hierarchy whose combined size is inside the budget is still left alone.
+	quiet := t.TempDir()
+	small := mkBuildCache(t, filepath.Join(quiet, "3333333333"))
+	fatten(t, small, 4)
+	res = trimCanonicalCaches(canonicalCacheConfig{
+		Dirs: []string{quiet}, MaxBytes: 1 << 30, Trim: true,
+	})
+	if len(res.Trimmed) != 0 {
+		t.Errorf("Trimmed = %v, want nothing for an in-budget hierarchy", res.Trimmed)
+	}
+	if n := nonEmptyShards(t, small); n != 256 {
+		t.Errorf("an in-budget hierarchy lost %d shard(s)", 256-n)
+	}
+}
+
+// An over-budget cache that cannot be emptied is a remediation failure.
+//
+// The Errors map was reported and then dropped: a successful worktree sweep
+// on the same tick released the brake, so the host recorded that the disk had
+// been remediated while the largest consumer on it was untouched. That is
+// exactly the "Status: OK on a filling disk" ambiguity this file exists to
+// remove.
+func TestCacheTrimErrorsEngageTheBrake(t *testing.T) {
+	clean := &sweepResult{}
+	failed := &canonicalCacheTrimResult{
+		Errors: map[string]string{
+			"/cache/zz": "permission denied",
+			"/cache/aa": "read-only file system",
+		},
+	}
+
+	d := decideBrake(true, clean, failed)
+	if !d.Engage {
+		t.Fatal("a cache that could not be emptied must engage the brake")
+	}
+	// Deterministic, so the reason does not churn between ticks.
+	if !strings.Contains(d.Reason, "/cache/aa") || !strings.Contains(d.Reason, "read-only file system") {
+		t.Errorf("Reason = %q, want it to name the lexically first failing path", d.Reason)
+	}
+	if !strings.Contains(d.Reason, "and 1 more") {
+		t.Errorf("Reason = %q, want it to say how many others failed", d.Reason)
+	}
+
+	// A clean trim on a breached tick still leaves the decision to the sweep.
+	if d := decideBrake(true, clean, &canonicalCacheTrimResult{}); d.Engage || d.Release {
+		t.Errorf("decideBrake with no errors = %+v, want no change", d)
+	}
+	// An unbreached tick still releases, regardless of stale trim errors.
+	if d := decideBrake(false, clean, failed); !d.Release {
+		t.Error("an unbreached tick must still release the brake")
+	}
+}
