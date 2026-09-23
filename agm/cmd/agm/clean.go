@@ -9,7 +9,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
@@ -44,7 +43,7 @@ Examples:
 		}
 
 		// Convert to UI sessions with status
-		uiSessions := cleanupUISessions(manifests, tmuxClient)
+		uiSessions := uiSessionsFromManifests(manifests, tmuxClient)
 
 		// Show multi-select cleanup UI
 		result, err := ui.CleanupMultiSelect(uiSessions, uiCfg)
@@ -109,19 +108,6 @@ func cleanupConfirmationLabels(sessions []*ui.Session) []string {
 		labels[i] = fmt.Sprintf("%q [ID: %q]", s.Name, s.SessionID)
 	}
 	return labels
-}
-
-func cleanupUISessions(manifests []*manifest.Manifest, tmux session.TmuxInterface) []*ui.Session {
-	statuses := session.ComputeStatusBatchByID(manifests, tmux)
-	uiSessions := make([]*ui.Session, len(manifests))
-	for i, m := range manifests {
-		uiSessions[i] = &ui.Session{
-			Manifest:  m,
-			Status:    statuses[m.SessionID],
-			UpdatedAt: m.UpdatedAt,
-		}
-	}
-	return uiSessions
 }
 
 func archiveSessionManifest(adapter *dolt.Adapter, m *manifest.Manifest) error {

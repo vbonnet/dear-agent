@@ -14,26 +14,31 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
-func TestCleanupUISessions_DuplicateNamesKeepOwnStatus(t *testing.T) {
+func TestUISessionsFromManifests_DuplicateNamesKeepIdentityAndStatus(t *testing.T) {
+	updatedAt := time.Now().Add(-time.Hour)
 	live := &manifest.Manifest{
-		SessionID: "live-id", Name: "shared-name",
+		SessionID: "live-id", Name: "shared-name", UpdatedAt: updatedAt,
 		Tmux: manifest.Tmux{SessionName: "live-tmux"},
 	}
 	stopped := &manifest.Manifest{
-		SessionID: "stopped-id", Name: "shared-name",
+		SessionID: "stopped-id", Name: "shared-name", UpdatedAt: updatedAt,
 		Tmux: manifest.Tmux{SessionName: "stopped-tmux"},
 	}
 	archived := &manifest.Manifest{
-		SessionID: "archived-id", Name: "shared-name",
+		SessionID: "archived-id", Name: "shared-name", UpdatedAt: updatedAt,
 		Lifecycle: manifest.LifecycleArchived,
 	}
 	tmux := session.NewMockTmux()
 	tmux.Sessions["live-tmux"] = true
 
-	got := cleanupUISessions([]*manifest.Manifest{live, stopped, archived}, tmux)
+	manifests := []*manifest.Manifest{live, stopped, archived}
+	got := uiSessionsFromManifests(manifests, tmux)
 	for i, want := range []struct {
 		id, status string
 	}{{"live-id", "active"}, {"stopped-id", "stopped"}, {"archived-id", "archived"}} {
+		if got[i].Manifest != manifests[i] || got[i].UpdatedAt != updatedAt {
+			t.Errorf("session %d lost its exact manifest or update time", i)
+		}
 		if got[i].SessionID != want.id || got[i].Status != want.status {
 			t.Errorf("session %d = (%q, %q), want (%q, %q)",
 				i, got[i].SessionID, got[i].Status, want.id, want.status)
