@@ -34,7 +34,7 @@ tiers:
         model: "o4-mini"
         reasoning_effort: "low"
       google:
-        model: "gemini-3.5-flash"
+        model: "gemini-3.8-flash"
   operational:
     description: "Workflow execution, file edits, standard dev tasks"
     providers:
@@ -45,7 +45,7 @@ tiers:
         model: "o4-mini"
         reasoning_effort: "medium"
       google:
-        model: "gemini-3.5-flash"
+        model: "gemini-3.8-flash"
   analysis:
     description: "Code review, spec review, quality assessment"
     providers:

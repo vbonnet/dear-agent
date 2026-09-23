@@ -37,9 +37,13 @@ var (
 	opus5Pricing  = pricingFromCosttrack("claude-opus-5")
 	sonnetPricing = Pricing{InputPerM: 3.00, OutputPerM: 15.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75}
 	haikuPricing  = Pricing{InputPerM: 1.00, OutputPerM: 5.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25}
-	// Fable pricing is not public; treat it at the Opus frontier tier as a
-	// conservative upper-bound estimate.
-	fablePricing = Pricing{InputPerM: 15.00, OutputPerM: 75.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75}
+	// Fable rates are published now, so both generations come from the
+	// canonical costtrack table rather than the old Opus-tier placeholder.
+	// Fable 5 and 5.1 share base and cache-write rates and differ only in
+	// cache reads (0.1x vs 0.025x of input), so they must not collapse into
+	// one tier.
+	fablePricing   = pricingFromCosttrack("claude-fable-5")
+	fable51Pricing = pricingFromCosttrack("claude-fable-5-1")
 )
 
 // pricingFromCosttrack adapts the canonical per-million-token pricing to the
@@ -67,6 +71,8 @@ func PriceFor(model string) Pricing {
 		return sonnetPricing
 	case strings.Contains(m, "haiku"):
 		return haikuPricing
+	case strings.Contains(m, "fable-5-1"):
+		return fable51Pricing
 	case strings.Contains(m, "fable"):
 		return fablePricing
 	default:

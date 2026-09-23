@@ -189,3 +189,41 @@ func TestCollectEmptyRoot(t *testing.T) {
 		t.Errorf("got %d entries, want 0", len(entries))
 	}
 }
+
+// TestFablePricingMatchesPublishedRateCard pins Fable 5 and Fable 5.1 to
+// Anthropic's published rates. Fable pricing was formerly a placeholder at the
+// legacy Opus frontier tier ($15/$75); it is public now. The two Fable
+// generations share base input/output rates and differ only in cache-read
+// pricing: Fable 5.1 reads cache at 0.025x input, every other model at 0.1x.
+func TestFablePricingMatchesPublishedRateCard(t *testing.T) {
+	fable5 := PriceFor("claude-fable-5")
+	if fable5.InputPerM != 10.00 || fable5.OutputPerM != 50.00 {
+		t.Errorf("Fable 5 base = %+v, want input 10.00 / output 50.00", fable5)
+	}
+	if fable5.CacheReadPerM != 1.00 || fable5.CacheWritePerM != 12.50 {
+		t.Errorf("Fable 5 cache = %+v, want read 1.00 / write 12.50", fable5)
+	}
+
+	fable51 := PriceFor("claude-fable-5-1")
+	if fable51.InputPerM != 10.00 || fable51.OutputPerM != 50.00 {
+		t.Errorf("Fable 5.1 base = %+v, want input 10.00 / output 50.00", fable51)
+	}
+	if fable51.CacheReadPerM != 0.25 {
+		t.Errorf("Fable 5.1 cache read = %f, want 0.25 (0.025x input)", fable51.CacheReadPerM)
+	}
+	if fable51.CacheWritePerM != 12.50 {
+		t.Errorf("Fable 5.1 cache write = %f, want 12.50", fable51.CacheWritePerM)
+	}
+}
+
+// TestFable51NotShadowedByFable5 guards the substring dispatch in PriceFor:
+// "claude-fable-5-1" contains "fable" and would otherwise take the Fable 5
+// branch, silently overcharging cache reads by 4x.
+func TestFable51NotShadowedByFable5(t *testing.T) {
+	if PriceFor("claude-fable-5-1") == PriceFor("claude-fable-5") {
+		t.Fatal("Fable 5.1 resolved to the Fable 5 tier; the cache-read rates differ")
+	}
+	if got := PriceFor("anthropic/claude-fable-5-1"); got.CacheReadPerM != 0.25 {
+		t.Errorf("provider-qualified Fable 5.1 cache read = %f, want 0.25", got.CacheReadPerM)
+	}
+}
