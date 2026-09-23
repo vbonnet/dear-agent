@@ -13,6 +13,10 @@ import (
 type GetSessionRequest struct {
 	// Identifier is a session ID, name, or UUID prefix.
 	Identifier string `json:"identifier"`
+	// ActiveOnly limits ambiguous name lookup to active identities. Exact IDs
+	// and harness UUIDs still resolve normally so their callers can report the
+	// more precise lifecycle error for a retired or reaping identity.
+	ActiveOnly bool `json:"-"`
 }
 
 // SessionDetail is the full session output with all fields.
@@ -68,11 +72,21 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 	// Try exact ID match first.
 	m, err := ctx.Storage.GetSession(req.Identifier)
 	if err != nil {
+		// Name/UUID fallback is safe only after the storage backend positively
+		// classified the exact ID as absent. Redirecting an arbitrary backend
+		// failure to a same-name row can mutate or observe the wrong session.
+		if !errors.Is(err, dolt.ErrSessionNotFound) {
+			return nil, ErrStorageError("get_session", err)
+		}
 		// Try name-based lookup; propagate real storage errors but fall through
 		// to the UUID lookup below on not-found — Stop hooks pass a Claude UUID
 		// that won't match any AGM ID or session name.
 		var nameErr error
-		m, nameErr = findByName(ctx, req.Identifier)
+		if req.ActiveOnly {
+			m, nameErr = findActiveByName(ctx, req.Identifier)
+		} else {
+			m, nameErr = findByName(ctx, req.Identifier)
+		}
 		if nameErr != nil {
 			var opErr *OpError
 			if !errors.As(nameErr, &opErr) || opErr.Code != ErrCodeSessionNotFound {
@@ -80,6 +94,8 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 			}
 			// nameErr is "not found" — continue to Claude UUID fallback.
 		}
+	} else if m == nil {
+		return nil, ErrStorageError("get_session", errors.New("storage returned no session and no error"))
 	}
 
 	// Fall back to Claude UUID lookup — Stop hooks pass the Claude session_id
@@ -96,8 +112,15 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 		return nil, ErrSessionNotFound(req.Identifier)
 	}
 
-	// Compute live status
-	status := computeSessionStatus(m, ctx.Tmux)
+	// Active-only mutation callers need exact retired IDs to resolve so they can
+	// return the precise lifecycle conflict, but must not observe a retired
+	// identity's former tmux name on the way there. That name may already belong
+	// to a live replacement. Preserve the lifecycle itself as the status until
+	// the caller rejects it; only active identities receive a live probe.
+	status := m.Lifecycle
+	if !req.ActiveOnly || m.Lifecycle == manifest.LifecycleLegacy {
+		status = computeSessionStatus(m, ctx.Tmux)
+	}
 
 	detail := toSessionDetail(m, status)
 
@@ -117,10 +140,27 @@ func findByName(ctx *OpContext, name string) (*manifest.Manifest, error) {
 	return findByNameWithFilter(ctx, name, nil)
 }
 
-// findActiveByName excludes retired identities before resolving a reusable
-// manifest or tmux name for a live operation such as message delivery.
+// findActiveByName excludes every non-active identity before resolving a
+// reusable manifest or tmux name for a live operation such as message delivery.
+// The storage filter avoids scanning archived rows in production, while the
+// explicit lifecycle check also excludes reaping rows and fails closed if the
+// closed lifecycle vocabulary gains another non-active value.
 func findActiveByName(ctx *OpContext, name string) (*manifest.Manifest, error) {
-	return findByNameWithFilter(ctx, name, &dolt.SessionFilter{ExcludeArchived: true})
+	manifests, err := ctx.Storage.ListSessions(&dolt.SessionFilter{ExcludeArchived: true})
+	if err != nil {
+		return nil, ErrStorageError("find_by_name", err)
+	}
+
+	for _, m := range manifests {
+		if m.Lifecycle != manifest.LifecycleLegacy {
+			continue
+		}
+		if m.Name == name || m.Tmux.SessionName == name {
+			return m, nil
+		}
+	}
+
+	return nil, ErrSessionNotFound(name)
 }
 
 func findByNameWithFilter(ctx *OpContext, name string, filter *dolt.SessionFilter) (*manifest.Manifest, error) {
