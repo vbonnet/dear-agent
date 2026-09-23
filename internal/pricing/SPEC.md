@@ -34,8 +34,8 @@ other model families.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/quota_parity.feature`
-- `agm/test/bdd/features/model_family_parity.feature`
+- Feature: `agm/test/bdd/features/quota_parity.feature`
+- Feature: `agm/test/bdd/features/model_family_parity.feature`
 
 ## Package Test Traceability
 
