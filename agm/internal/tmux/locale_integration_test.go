@@ -191,8 +191,17 @@ func TestSessionLocaleLeavesValidServerLocaleAlone(t *testing.T) {
 	defer cleanup()
 	setupTestState(t)
 
+	// Seed with a locale this host has actually installed, not a hard-coded
+	// en_US.UTF-8. On a minimal glibc image exposing only C.utf8,
+	// skipIfNoSessionLocalePin passes (a pinnable locale exists) while the
+	// hard-coded seed does not, so the production availability check correctly
+	// refuses it, SessionLocaleArgs returns a pin, and the assertion below
+	// fails for a host reason instead of testing what it claims to test.
+	installed := pinnableLocale()
+	require.NotEmpty(t, installed, "skipIfNoSessionLocalePin should have skipped without an installed locale")
+
 	seed := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "utf8-seed")
-	seed.Env = append(strippedLocaleEnv(), "LC_ALL=en_US.UTF-8")
+	seed.Env = append(strippedLocaleEnv(), "LC_ALL="+installed)
 	require.NoError(t, seed.Run(), "start UTF-8-locale tmux server")
 	defer func() { _ = exec.Command("tmux", "-S", socketPath, "kill-server").Run() }()
 
@@ -211,6 +220,6 @@ func TestSessionLocaleLeavesValidServerLocaleAlone(t *testing.T) {
 	global := environBlockLookup(string(out))
 	assert.True(t, localeIsUTF8ForShell(global), "the server must still be UTF-8:\n%s", out)
 	value, ok := global("LC_ALL")
-	assert.True(t, ok && value == "en_US.UTF-8",
+	assert.True(t, ok && value == installed,
 		"the operator's own LC_ALL must survive untouched, got %q (set=%v)", value, ok)
 }

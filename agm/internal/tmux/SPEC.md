@@ -118,7 +118,7 @@ back, and the locale a pane's own shell runs under.
 
 **TMUX-54** When the host cannot prove a UTF-8 locale is installed, or the tmux server reachable on the configured socket predates session-environment support or cannot be identified, the system shall create the session without a locale pin rather than fail session creation.
 
-**TMUX-55** When panes would already receive a UTF-8 locale that the host has installed, whether from a running tmux server or from the environment a server the system is about to start will inherit, the system shall leave that environment unchanged rather than substitute its own; a locale name that is not installed shall not count as already provided.
+**TMUX-55** When panes would already receive a UTF-8 locale that the host has installed, whether from a running tmux server or from the environment a server the system is about to start will inherit, the system shall leave that environment unchanged rather than substitute its own; a locale name that is not installed, including one whose spelling differs from an installed name only by case, shall not count as already provided, because setlocale is case-sensitive about the names the host enumerates.
 
 **TMUX-56** When the system cannot establish what locale a running tmux server provides, the system shall leave that environment unchanged, because an unreadable environment is not evidence that it is non-UTF-8.
 

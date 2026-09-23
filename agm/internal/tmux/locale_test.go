@@ -225,3 +225,35 @@ func TestEffectiveLocaleNameSkipsEmptyValues(t *testing.T) {
 	assert.Equal(t, "C", effectiveLocaleName(envLookup(map[string]string{"LC_ALL": "C", "LC_CTYPE": "en_US.UTF-8"})))
 	assert.Equal(t, "", effectiveLocaleName(envLookup(map[string]string{})))
 }
+
+// An inherited locale whose case does not match what the host installed is
+// not usable, and must not suppress the pin.
+//
+// setlocale is case-sensitive about the names locale(1) enumerates, so
+// LC_ALL=c.utf8 on a glibc host reporting C.utf8 is rejected and falls back to
+// ASCII with warnings. Folding case here marked it installed, suppressed the
+// session pin, and left exactly the byte corruption this file prevents.
+func TestInheritedLocaleCaseMustMatchInstalled(t *testing.T) {
+	installed := func() ([]string, bool) { return []string{"C.utf8", "en_US.UTF-8"}, true }
+	lookupOf := func(value string) func(string) (string, bool) {
+		return func(name string) (string, bool) {
+			if name == "LC_ALL" {
+				return value, true
+			}
+			return "", false
+		}
+	}
+
+	if !localeIsUsableUTF8With(lookupOf("C.utf8"), installed) {
+		t.Error("an exactly-spelled installed locale must read as usable")
+	}
+	if localeIsUsableUTF8With(lookupOf("c.utf8"), installed) {
+		t.Error("a wrongly cased locale must NOT read as usable: setlocale rejects it " +
+			"and the pin is what keeps the pane in UTF-8")
+	}
+	// The unverifiable case is unchanged: nothing can be pinned either, so the
+	// environment is left exactly as found.
+	if !localeIsUsableUTF8With(lookupOf("c.utf8"), func() ([]string, bool) { return nil, false }) {
+		t.Error("an unenumerable host must still report usable, since it cannot pin either")
+	}
+}

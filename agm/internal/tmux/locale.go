@@ -274,18 +274,34 @@ func serverLocaleUsableUTF8(ctx context.Context, socketPath string) (utf8, known
 // suppress the pin precisely where it is needed, so an uninstalled name counts
 // as not UTF-8 and lets the proven locale be pinned instead.
 func localeIsUsableUTF8(lookup func(string) (string, bool)) bool {
+	return localeIsUsableUTF8With(lookup, installedLocales)
+}
+
+// localeIsUsableUTF8With is the enumeration seam, matching resolveSessionLocale
+// so a test can state what the host installed instead of depending on it.
+func localeIsUsableUTF8With(lookup func(string) (string, bool), enumerate func() ([]string, bool)) bool {
 	if !localeIsUTF8ForShell(lookup) {
 		return false
 	}
 	name := effectiveLocaleName(lookup)
-	available, enumerated := installedLocales()
+	available, enumerated := enumerate()
 	if !enumerated {
 		// Cannot verify, and cannot pin either (pinnableLocale is empty in
 		// this case), so report it as usable and change nothing.
 		return true
 	}
 	for _, candidate := range available {
-		if strings.EqualFold(strings.TrimSpace(candidate), name) {
+		// Exact match, not EqualFold. setlocale is case-sensitive about the
+		// names locale(1) enumerates, so an inherited LC_ALL=c.utf8 on a host
+		// whose locale -a reports C.utf8 is NOT usable: setlocale rejects it
+		// and falls back to ASCII with warnings. Folding case there marked it
+		// installed, suppressed the pin, and left exactly the byte corruption
+		// this file exists to prevent.
+		//
+		// Erring the other way is cheap. A spelling this check fails to
+		// recognize is answered by pinning a locale the host has proven,
+		// which is the outcome the whole feature is built around.
+		if strings.TrimSpace(candidate) == name {
 			return true
 		}
 	}
