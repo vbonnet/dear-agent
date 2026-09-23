@@ -345,9 +345,16 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		fmt.Fprintln(os.Stderr, "safe-merge: ✓ expected reviewers have fresh reviews")
 	}
 
-	headInfo := prHeadResult{SHA: attemptState.HeadRefOid, Branch: attemptState.HeadRefName}
+	headInfo := prHeadResult{SHA: attemptState.HeadRefOid, Branch: attemptState.HeadRefName, Repo: attemptState.HeadRepo()}
 	if headInfo.SHA == "" || headInfo.Branch == "" {
 		return fmt.Errorf("state gate returned no headRefOid or headRefName; cannot anchor merge")
+	}
+
+	// Runs before Gate 5 so no provider round trip separates the freshness
+	// proof from the merge. See resolveMergeTransport.
+	stacked, err := resolveMergeTransport(ctx, cfg.PRNumber, cfg.Repo)
+	if err != nil {
+		return err
 	}
 
 	// Gate 5: independently resolve the live base and prove it is an ancestor of
@@ -388,10 +395,14 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
 	mergeSpan.SetAttributes(attribute.String("pr.head_sha", headInfo.SHA))
 
-	mergeArgs := BuildMergeArgs(cfg.PRNumber, cfg.Repo, headInfo.SHA)
+	mergeArgs := mergeArgsForTransport(stacked, cfg.PRNumber, cfg.Repo, headInfo.SHA)
+	mergeSpan.SetAttributes(attribute.Bool("pr.stacked", stacked))
+	if stacked {
+		fmt.Fprintln(os.Stderr, "safe-merge: PR is part of a stack — using the asynchronous REST merge")
+	}
 	confirm := func() error {
 		return confirmMergedWithin(ctx, mergeConfirmationCommandTimeout,
-			cfg.PRNumber, cfg.Repo, headInfo.SHA)
+			cfg.PRNumber, cfg.Repo, headInfo.SHA, transportName(stacked))
 	}
 	confirmCompletion := func() error {
 		// Keep provider acceptance, exact-head polling, and cleanup in one
@@ -399,6 +410,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		// Success from `gh pr merge --auto` only means it was queued.
 		return waitForMergeCompletion(ctx, cfg.WatchTimeout, cfg.WatchInterval, confirm)
 	}
+	probeIndeterminate := indeterminateProbe(ctx, cfg.WatchInterval, confirm)
 	failure := runProviderMergeTransaction(
 		ctx,
 		headInfo.Branch,
@@ -408,7 +420,16 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
 				fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
 			fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
+			// The async route carries no --delete-branch. safe-merge does not
+			// delete the remote head itself: the provider offers no atomic
+			// conditional delete, and a fork's head lives in another repository.
+			// Report instead, so a surviving branch is visible rather than
+			// silently left behind or unsafely removed.
+			if stacked {
+				reportRemoteHeadRetention(ctx, headInfo.Repo, headInfo.Branch)
+			}
 		},
+		probeIndeterminate,
 	)
 	if failure != nil {
 		mergeSpan.RecordError(failure.err)
@@ -416,7 +437,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		switch failure.stage {
 		case providerMergeCommandStage:
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+failure.err.Error())
-			return fmt.Errorf("gh pr merge failed: %w", failure.err)
+			return fmt.Errorf("%s failed: %w", transportName(stacked), failure.err)
 		case providerMergeConfirmationStage:
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", failure.err.Error())
 			return failure.err
@@ -435,7 +456,46 @@ type mergeResult struct {
 var (
 	errMergePending     = errors.New("merge is pending")
 	errMergeHeadChanged = errors.New("merge completion head changed")
+	// errProviderAuthDenied marks a confirmation failure that repeating cannot
+	// fix. An expired, revoked or under-scoped credential answers the same way
+	// every time, so polling it to the end of the window only delays the one
+	// thing the operator needs to see.
+	errProviderAuthDenied = errors.New("provider denied access")
 )
+
+// providerAuthDenialMarkers are the shapes gh surfaces on stderr for a
+// credential that will not start working within this window.
+var providerAuthDenialMarkers = []string{
+	"http 401",
+	"http 403",
+	"bad credentials",
+	"requires authentication",
+	"resource not accessible by personal access token",
+	"resource not accessible by integration",
+	"must have admin rights",
+	"insufficient scopes",
+	"gh auth login",
+}
+
+// providerAuthDenied reports whether err is a non-transient authorization
+// failure. Classification is by message because gh reports the HTTP status on
+// stderr rather than through an exit code that distinguishes it, and
+// runCommandAllowExitCodes folds that stderr into the returned error.
+func providerAuthDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errProviderAuthDenied) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	for _, marker := range providerAuthDenialMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // confirmMergedWithin prevents a successful `gh pr merge --auto` invocation from
 // being mistaken for a completed merge. GitHub exits zero when auto-merge is
@@ -445,7 +505,7 @@ func confirmMergedWithin(
 	parent context.Context,
 	timeout time.Duration,
 	prNum int,
-	repo, expectedHeadSHA string,
+	repo, expectedHeadSHA, transport string,
 ) error {
 	confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	defer cancel()
@@ -466,17 +526,17 @@ func confirmMergedWithin(
 	if err := json.Unmarshal(out, &result); err != nil {
 		return fmt.Errorf("parsing merge completion state: %w", err)
 	}
-	return validateMergeResult(result, expectedHeadSHA)
+	return validateMergeResult(result, expectedHeadSHA, transport)
 }
 
-func validateMergeResult(result mergeResult, expectedHeadSHA string) error {
+func validateMergeResult(result mergeResult, expectedHeadSHA, transport string) error {
 	if result.HeadRefOid != expectedHeadSHA {
 		return fmt.Errorf("%w: expected %s, got %s", errMergeHeadChanged,
 			expectedHeadSHA, result.HeadRefOid)
 	}
 	if result.State != "MERGED" {
-		return fmt.Errorf("%w: auto-merge accepted but PR remains %s; waiting for GitHub to complete it",
-			errMergePending,
+		return fmt.Errorf("%w: %s accepted but PR remains %s; waiting for GitHub to complete it",
+			errMergePending, transport,
 			strings.ToLower(result.State))
 	}
 	return nil
@@ -497,6 +557,12 @@ func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration
 		}
 		if errors.Is(err, errMergeHeadChanged) {
 			return err
+		}
+		if providerAuthDenied(err) {
+			// Retrying a denied credential produces the same denial until the
+			// window expires, which buries the actionable failure behind 45
+			// seconds of identical requests.
+			return fmt.Errorf("%w: %w", errProviderAuthDenied, err)
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("waiting for merge completion: %w", ctxErr)
@@ -1087,20 +1153,27 @@ func parseSoak(data []byte, now time.Time) error {
 type prHeadResult struct {
 	SHA    string
 	Branch string
+	Repo   string
 }
 
 func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 	out, err := runCommand(exec.Command("gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
-		"--json", "headRefName,headRefOid",
+		"--json", "headRefName,headRefOid,headRepository,headRepositoryOwner",
 	))
 	if err != nil {
 		return prHeadResult{}, err
 	}
 	var raw struct {
-		HeadRefName string `json:"headRefName"`
-		HeadRefOid  string `json:"headRefOid"`
+		HeadRefName    string `json:"headRefName"`
+		HeadRepository struct {
+			Name string `json:"name"`
+		} `json:"headRepository"`
+		HeadRepositoryOwner struct {
+			Login string `json:"login"`
+		} `json:"headRepositoryOwner"`
+		HeadRefOid string `json:"headRefOid"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return prHeadResult{}, err
@@ -1108,5 +1181,5 @@ func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 	if raw.HeadRefOid == "" {
 		return prHeadResult{}, fmt.Errorf("PR #%d has no headRefOid — cannot anchor merge", prNum)
 	}
-	return prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName}, nil
+	return prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName, Repo: joinRepo(raw.HeadRepositoryOwner.Login, raw.HeadRepository.Name)}, nil
 }
