@@ -60,13 +60,30 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 		}
 	}
 
+	return gcHealthFromSummary(summary, cfg, now)
+}
+
+// gcHealthFromSummary is the scan seam, so the verdict can be tested without
+// standing up a log large enough to cap a scan.
+func gcHealthFromSummary(summary gcloghealth.Summary, cfg config, now time.Time) *gcHealth {
 	// Old `agm` builds emitted reap records but no completion heartbeat.
 	// This fallback is valid only after a complete scan has ruled out a
 	// modern completion anywhere in the log.
 	last, viaFallback := summary.Proof()
 
 	h := &gcHealth{LastSuccess: last}
-	if summary.LastErrorAt.After(last) {
+	// Order the error against the success actually OBSERVED, not against
+	// Proof(). A capped tail holding an old error and a newer-but-stale
+	// completion makes Proof() return zero, and comparing against zero ranked
+	// the already-superseded error as the newest thing in the log and
+	// appended it to the alarm. LastSuccess is the observation; Proof() is a
+	// verdict about whether that observation can be trusted as liveness,
+	// which is a different question from which record came last.
+	errorBaseline := summary.LastSuccess
+	if errorBaseline.IsZero() {
+		errorBaseline = last
+	}
+	if summary.LastErrorAt.After(errorBaseline) {
 		h.LastError = summary.LastError
 	}
 	switch {

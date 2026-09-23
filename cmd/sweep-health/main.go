@@ -130,7 +130,15 @@ func evaluateSweep(s gcloghealth.Summary, now time.Time, window time.Duration, l
 		r.Status = "degraded"
 		switch {
 		case s.Indeterminate:
+			// A capped scan can observe a real error and still be unable to
+			// rule out older history. Reporting only the uncertainty threw
+			// away the one actionable thing the tail did contain, so an
+			// operator saw "we did not look far enough" instead of the dry
+			// run, deletion, probe, or GC failure that was right there.
 			r.Error = "sandbox GC liveness is undetermined: older history was not scanned"
+			if s.LastError != "" {
+				r.Error += "; most recent observed error: " + s.LastError
+			}
 			return "DEGRADED: " + r.Error, 1
 		case s.LastError != "":
 			r.Error = s.LastError

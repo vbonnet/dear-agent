@@ -48,13 +48,13 @@ func TestSalienceCLIJSONOutput(t *testing.T) {
 	var got struct {
 		Outcomes []map[string]any `json:"outcomes"`
 		Summary  struct {
-			Total       int              `json:"total"`
-			Notified    int              `json:"notified"`
-			Suppressed  int              `json:"suppressed"`
-			NotifyRatio float64          `json:"notifyRatio"`
-			ByTier      map[string]int   `json:"byTier"`
-			ByKind      map[string]int   `json:"byKind"`
-			ByReason    map[string]int   `json:"byReason"`
+			Total       int            `json:"total"`
+			Notified    int            `json:"notified"`
+			Suppressed  int            `json:"suppressed"`
+			NotifyRatio float64        `json:"notifyRatio"`
+			ByTier      map[string]int `json:"byTier"`
+			ByKind      map[string]int `json:"byKind"`
+			ByReason    map[string]int `json:"byReason"`
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {

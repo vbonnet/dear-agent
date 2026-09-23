@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gcloghealth"
 )
 
 // --- a refused reap is a failed remediation, not a quiet success ---
@@ -381,5 +383,40 @@ func TestGCLogEntry_DecodesTheSweepsProducerTagWireFormat(t *testing.T) {
 	}
 	if got.Source != gcSelfSource {
 		t.Errorf("Source = %q, want %q", got.Source, gcSelfSource)
+	}
+}
+
+// An error must be ordered against the success actually observed, not against
+// Proof().
+//
+// A capped tail holding an old error and a newer-but-stale completion makes
+// Proof() return zero, because a stale completion in a capped tail is not
+// proof of liveness. Comparing LastErrorAt against that zero ranked the
+// already-superseded error as the newest thing in the log and appended it to
+// the watchdog alarm, so the operator chased an error the log itself shows was
+// followed by a successful sweep.
+func TestCappedScanOrdersErrorsAgainstObservedSuccess(t *testing.T) {
+	now := time.Now()
+	summary := gcloghealth.Summary{
+		LastSuccess:   now.Add(-3 * time.Hour),
+		LastError:     "superseded: mount table unreadable",
+		LastErrorAt:   now.Add(-5 * time.Hour),
+		Indeterminate: true,
+	}
+	if proof, _ := summary.Proof(); !proof.IsZero() {
+		t.Fatalf("fixture precondition: Proof() = %v, want zero for an indeterminate scan", proof)
+	}
+
+	h := gcHealthFromSummary(summary, config{gcLogPath: "/tmp/gc.jsonl"}, now)
+	if h.LastError != "" {
+		t.Errorf("LastError = %q, want empty: the observed completion is newer than the error",
+			h.LastError)
+	}
+
+	// An error that really is newer than the observed success still surfaces.
+	summary.LastErrorAt = now.Add(-time.Hour)
+	h = gcHealthFromSummary(summary, config{gcLogPath: "/tmp/gc.jsonl"}, now)
+	if h.LastError == "" {
+		t.Error("an error newer than the observed success must still be reported")
 	}
 }
