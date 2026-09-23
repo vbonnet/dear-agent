@@ -456,7 +456,46 @@ type mergeResult struct {
 var (
 	errMergePending     = errors.New("merge is pending")
 	errMergeHeadChanged = errors.New("merge completion head changed")
+	// errProviderAuthDenied marks a confirmation failure that repeating cannot
+	// fix. An expired, revoked or under-scoped credential answers the same way
+	// every time, so polling it to the end of the window only delays the one
+	// thing the operator needs to see.
+	errProviderAuthDenied = errors.New("provider denied access")
 )
+
+// providerAuthDenialMarkers are the shapes gh surfaces on stderr for a
+// credential that will not start working within this window.
+var providerAuthDenialMarkers = []string{
+	"http 401",
+	"http 403",
+	"bad credentials",
+	"requires authentication",
+	"resource not accessible by personal access token",
+	"resource not accessible by integration",
+	"must have admin rights",
+	"insufficient scopes",
+	"gh auth login",
+}
+
+// providerAuthDenied reports whether err is a non-transient authorization
+// failure. Classification is by message because gh reports the HTTP status on
+// stderr rather than through an exit code that distinguishes it, and
+// runCommandAllowExitCodes folds that stderr into the returned error.
+func providerAuthDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errProviderAuthDenied) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	for _, marker := range providerAuthDenialMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // confirmMergedWithin prevents a successful `gh pr merge --auto` invocation from
 // being mistaken for a completed merge. GitHub exits zero when auto-merge is
@@ -518,6 +557,12 @@ func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration
 		}
 		if errors.Is(err, errMergeHeadChanged) {
 			return err
+		}
+		if providerAuthDenied(err) {
+			// Retrying a denied credential produces the same denial until the
+			// window expires, which buries the actionable failure behind 45
+			// seconds of identical requests.
+			return fmt.Errorf("%w: %w", errProviderAuthDenied, err)
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("waiting for merge completion: %w", ctxErr)

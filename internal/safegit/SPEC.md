@@ -90,6 +90,12 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-37** When the system cannot read a merged head branch and the credential's authority to read that repository's refs is unproven, the system shall report the outcome as unknown rather than as deleted, since the provider answers alike for a ref that is absent and one the credential may not read, and repository metadata access does not establish ref-read access.
 
+**SAFEGIT-38** When caller cancellation races provider acceptance, the system shall still poll for the merge at the exact gated head within the bounded indeterminate window, since a probe that carries the cancellation answers the question with the very condition that made the outcome indeterminate and would report failure on a merge that already completed.
+
+**SAFEGIT-39** When the bounded indeterminate probe observes that the pull request merged at a head other than the gated one, the system shall report that exact-head mismatch as the failure, since only a reported mismatch is terminal and substituting the provider command's error downgrades a safety violation into a retryable failure.
+
+**SAFEGIT-40** When a merge-completion read fails because the credential is expired, revoked, or lacks the required access, the system shall report that denial immediately rather than continue polling, since repeating a denied request cannot change its answer and only delays the actionable failure.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
