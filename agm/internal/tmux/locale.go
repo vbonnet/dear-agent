@@ -212,18 +212,43 @@ func parseTmuxVersion(raw string) (tmuxVersion, bool) {
 	return tmuxVersion{major: majorNum, minor: minorNum}, true
 }
 
-var installedLocaleOnce struct {
-	sync.Once
-	value string
+// installedLocaleCache memoizes the pinnable locale. Only a successful
+// resolution latches: a transient `locale -a` timeout used to be cached for
+// the lifetime of a long-running AGM process, so every later session skipped
+// an available pin long after the host recovered. Enumeration shells out, so
+// a negative result is still rate-limited rather than retried on every call.
+var installedLocaleCache struct {
+	mu       sync.Mutex
+	value    string
+	resolved bool
+	lastTry  time.Time
 }
+
+// installedLocaleRetryAfter bounds how often a failed enumeration is retried.
+const installedLocaleRetryAfter = time.Minute
+
+// localeEnumerator is the enumeration seam, so a test can state that the host
+// cannot enumerate rather than depending on one that cannot.
+var localeEnumerator = installedLocales
 
 // pinnableLocale is the installed UTF-8 locale AGM would pin, cached because
 // enumerating locales shells out. Empty means the host cannot prove one.
 func pinnableLocale() string {
-	installedLocaleOnce.Do(func() {
-		installedLocaleOnce.value = resolveSessionLocale(installedLocales)
-	})
-	return installedLocaleOnce.value
+	installedLocaleCache.mu.Lock()
+	defer installedLocaleCache.mu.Unlock()
+	if installedLocaleCache.resolved {
+		return installedLocaleCache.value
+	}
+	if !installedLocaleCache.lastTry.IsZero() &&
+		time.Since(installedLocaleCache.lastTry) < installedLocaleRetryAfter {
+		return ""
+	}
+	installedLocaleCache.lastTry = time.Now()
+	if value := resolveSessionLocale(localeEnumerator); value != "" {
+		installedLocaleCache.value = value
+		installedLocaleCache.resolved = true
+	}
+	return installedLocaleCache.value
 }
 
 // serverTmuxVersion reports the version of the tmux server actually listening
@@ -312,8 +337,14 @@ func localeIsUsableUTF8With(lookup func(string) (string, bool), enumerate func()
 // set to a non-empty string, which is the one POSIX actually uses.
 func effectiveLocaleName(lookup func(string) (string, bool)) string {
 	for _, name := range localeEnvVars {
+		// The emptiness test tolerates whitespace, because an all-blank value
+		// is not a locale. The RETURNED value does not get trimmed: libc reads
+		// the environment byte for byte, so LC_ALL=" C.utf8 " is rejected and
+		// falls back to ASCII. Normalizing it here turned it into the
+		// installed spelling and suppressed the pin, which is the same
+		// byte-corruption path the exact comparison was added to close.
 		if value, ok := lookup(name); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+			return value
 		}
 	}
 	return ""

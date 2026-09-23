@@ -1253,5 +1253,10 @@ func GetCurrentWorkingDirectory(sessionName string) (string, error) {
 		return "", fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	return strings.TrimSpace(string(output)), nil
+	// Only the record delimiter comes off. -u makes every path byte available,
+	// including a leading or trailing space or tab, and TrimSpace removed those
+	// along with the newline: `agm sync` could then persist a shortened path
+	// that does not exist, and status collection inspect the wrong Git
+	// directory, which is TMUX-52's arbitrary-path contract being false.
+	return paneCurrentPathFromOutput(output), nil
 }

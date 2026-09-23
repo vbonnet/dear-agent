@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -255,5 +256,78 @@ func TestInheritedLocaleCaseMustMatchInstalled(t *testing.T) {
 	// environment is left exactly as found.
 	if !localeIsUsableUTF8With(lookupOf("c.utf8"), func() ([]string, bool) { return nil, false }) {
 		t.Error("an unenumerable host must still report usable, since it cannot pin either")
+	}
+}
+
+// An inherited locale surrounded by whitespace is not usable either.
+//
+// libc reads the environment byte for byte, so LC_ALL=" C.utf8 " is rejected
+// and falls back to ASCII. Normalizing the value before the exact comparison
+// turned it into the installed spelling and suppressed the pin, which is the
+// same byte-corruption path the exact comparison closed for case.
+func TestInheritedLocaleWhitespaceIsNotUsable(t *testing.T) {
+	installed := func() ([]string, bool) { return []string{"C.utf8"}, true }
+	lookupOf := func(value string) func(string) (string, bool) {
+		return func(name string) (string, bool) {
+			if name == "LC_ALL" {
+				return value, true
+			}
+			return "", false
+		}
+	}
+
+	if !localeIsUsableUTF8With(lookupOf("C.utf8"), installed) {
+		t.Error("the exact installed spelling must read as usable")
+	}
+	for _, padded := range []string{" C.utf8", "C.utf8 ", " C.utf8 ", "\tC.utf8"} {
+		if localeIsUsableUTF8With(lookupOf(padded), installed) {
+			t.Errorf("%q must NOT read as usable: libc rejects it and the pin is what "+
+				"keeps the pane in UTF-8", padded)
+		}
+	}
+	// An all-blank value is not a locale at all, so it falls through to the
+	// next variable rather than being treated as a name.
+	if effectiveLocaleName(lookupOf("   ")) != "" {
+		t.Error("an all-blank locale value must read as unset")
+	}
+}
+
+// A transient enumeration failure must not disable the pin for the lifetime
+// of the process.
+func TestPinnableLocaleDoesNotCacheFailure(t *testing.T) {
+	installedLocaleCache.mu.Lock()
+	installedLocaleCache.value, installedLocaleCache.resolved = "", false
+	installedLocaleCache.lastTry = time.Time{}
+	installedLocaleCache.mu.Unlock()
+	t.Cleanup(func() {
+		installedLocaleCache.mu.Lock()
+		installedLocaleCache.value, installedLocaleCache.resolved = "", false
+		installedLocaleCache.lastTry = time.Time{}
+		installedLocaleCache.mu.Unlock()
+	})
+
+	previous := localeEnumerator
+	localeEnumerator = func() ([]string, bool) { return nil, false }
+	t.Cleanup(func() { localeEnumerator = previous })
+
+	// First attempt fails, as a `locale -a` timeout would.
+	if got := pinnableLocale(); got != "" {
+		t.Fatalf("pinnableLocale() = %q on a host with no enumeration, want empty", got)
+	}
+	installedLocaleCache.mu.Lock()
+	failedLatched := installedLocaleCache.resolved
+	installedLocaleCache.mu.Unlock()
+	if failedLatched {
+		t.Error("a failed enumeration latched; the pin would stay disabled after the host recovered")
+	}
+
+	// The host recovers. Past the retry window, the pin becomes available
+	// again instead of staying disabled for the process lifetime.
+	localeEnumerator = func() ([]string, bool) { return []string{"C.utf8"}, true }
+	installedLocaleCache.mu.Lock()
+	installedLocaleCache.lastTry = time.Now().Add(-2 * installedLocaleRetryAfter)
+	installedLocaleCache.mu.Unlock()
+	if got := pinnableLocale(); got == "" {
+		t.Error("the pin stayed disabled after the host recovered")
 	}
 }
