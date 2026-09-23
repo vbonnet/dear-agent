@@ -623,6 +623,12 @@ err := huh.NewSpinner().
     Run()
 ```
 
+The general session picker displays names but keys options and returned
+manifests by stable SessionID. The bare command likewise projects batch status
+by SessionID and passes the selected ID to `performResume`, so same-name rows
+cannot redirect a resume. The picker and cleanup use one package-private
+ID-keyed manifest-to-UI projection.
+
 ---
 
 ## Error Handling Architecture
@@ -852,8 +858,15 @@ for _, m := range manifests {
 }
 
 // FAST: Single tmux call
-statuses := session.ComputeStatusBatch(manifests, tmuxClient)
+statuses := session.ComputeStatusBatchByID(manifests, tmuxClient)
+for _, m := range manifests {
+    status := statuses[m.SessionID]
+}
 ```
+
+The name-keyed `ComputeStatusBatch` result loses duplicate-name sessions, so
+callers making per-session decisions use the ID-keyed result. Cleanup also
+carries the selected ID through dispatch and displays it at final confirmation.
 
 ### Health Check Caching
 

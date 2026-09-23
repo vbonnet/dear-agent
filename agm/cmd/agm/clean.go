@@ -9,7 +9,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
@@ -44,16 +43,7 @@ Examples:
 		}
 
 		// Convert to UI sessions with status
-		uiSessions := make([]*ui.Session, len(manifests))
-		statuses := session.ComputeStatusBatch(manifests, tmuxClient)
-
-		for i, m := range manifests {
-			uiSessions[i] = &ui.Session{
-				Manifest:  m,
-				Status:    statuses[m.Name],
-				UpdatedAt: m.UpdatedAt,
-			}
-		}
+		uiSessions := uiSessionsFromManifests(manifests, tmuxClient)
 
 		// Show multi-select cleanup UI
 		result, err := ui.CleanupMultiSelect(uiSessions, uiCfg)
@@ -66,17 +56,12 @@ Examples:
 			return nil
 		}
 
-		// Build confirmation message
-		var toArchiveNames, toDeleteNames []string
-		for _, s := range result.ToArchive {
-			toArchiveNames = append(toArchiveNames, s.Name)
-		}
-		for _, s := range result.ToDelete {
-			toDeleteNames = append(toDeleteNames, s.Name)
-		}
-
 		// Confirm cleanup
-		confirmed, err := ui.ConfirmCleanup(toArchiveNames, toDeleteNames, uiCfg)
+		confirmed, err := ui.ConfirmCleanup(
+			cleanupConfirmationLabels(result.ToArchive),
+			cleanupConfirmationLabels(result.ToDelete),
+			uiCfg,
+		)
 		if err != nil {
 			return err
 		}
@@ -115,6 +100,14 @@ Examples:
 		ui.PrintSuccess(fmt.Sprintf("Cleanup complete: %d archived, %d deleted", archived, deleted))
 		return nil
 	},
+}
+
+func cleanupConfirmationLabels(sessions []*ui.Session) []string {
+	labels := make([]string, len(sessions))
+	for i, s := range sessions {
+		labels[i] = fmt.Sprintf("%q [ID: %q]", s.Name, s.SessionID)
+	}
+	return labels
 }
 
 func archiveSessionManifest(adapter *dolt.Adapter, m *manifest.Manifest) error {

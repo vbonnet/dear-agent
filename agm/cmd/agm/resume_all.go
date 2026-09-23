@@ -84,16 +84,8 @@ func runResumeAll(cmd *cobra.Command, args []string) error {
 		manifests = filterByWorkspace(manifests, resumeAllWorkspace)
 	}
 
-	// 4. Compute status batch (efficient single tmux query)
-	statuses := session.ComputeStatusBatch(manifests, tmuxClient)
-
-	// 5. Filter to only "stopped" sessions
-	var stoppedSessions []*manifest.Manifest
-	for _, m := range manifests {
-		if statuses[m.Name] == "stopped" {
-			stoppedSessions = append(stoppedSessions, m)
-		}
-	}
+	// 4. Filter to only "stopped" sessions (single tmux query)
+	stoppedSessions := filterStoppedByID(manifests, tmuxClient)
 
 	// 6. Display preview and count
 	fmt.Printf("Found %d stopped session(s) to resume:\n\n", len(stoppedSessions))
@@ -116,6 +108,17 @@ func runResumeAll(cmd *cobra.Command, args []string) error {
 
 	// 9. Resume sessions with progress
 	return resumeSessionsBatch(cmd.Context(), adapter, stoppedSessions)
+}
+
+func filterStoppedByID(manifests []*manifest.Manifest, tmux session.TmuxInterface) []*manifest.Manifest {
+	statuses := session.ComputeStatusBatchByID(manifests, tmux)
+	var stopped []*manifest.Manifest
+	for _, m := range manifests {
+		if statuses[m.SessionID] == "stopped" {
+			stopped = append(stopped, m)
+		}
+	}
+	return stopped
 }
 
 // filterNonArchived removes archived sessions from list
