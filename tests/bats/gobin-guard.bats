@@ -510,3 +510,54 @@ EOF
 	[ -s "$real_state/hb" ]
 	assert_equal "$(file_mode "$real_state/hb")" "600"
 }
+
+# A configured alarm path may carry lexical dot segments without any symlink in
+# it. The marker check exists to reject a *symlinked* ancestor, but it compared
+# the given directory against its `cd -P` resolution, and `pwd -P` collapses
+# `.`/`..` as well as symlinks. A path such as `<state>/x/../x/alarm` therefore
+# never matched its own resolution, an existing marker always read as absent,
+# and every degraded invocation appended another trail record and re-notified
+# instead of suppressing delivery once the alarm was already recorded.
+@test "dot segments in the alarm path still suppress the second record" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/x"
+	guard_alarm="$state/x/../x/guard-alarm"
+	audit_alarm="$state/x/../x/audit-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	[ -f "$state/x/guard-alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+			GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 \
+			/bin/sh "$AUDIT_SCRIPT"
+		assert_failure 1
+	done
+	[ -f "$state/x/audit-alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+}
+
+# The dot-segment allowance must not weaken the symlink rejection it shares a
+# comparison with: a `..` that traverses *through* a symlinked component still
+# resolves somewhere the configured path does not name, so it fails closed.
+@test "dot segments through a symlinked component still fail closed" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/real" "$state/holder"
+	ln -s "$state/real" "$state/holder/link"
+	guard_alarm="$state/holder/link/../link/guard-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "2"
+}

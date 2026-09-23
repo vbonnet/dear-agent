@@ -129,6 +129,28 @@ ensure_searchable_dir() (
 # resolved side absolute, so they never compared equal, an existing marker
 # always read as absent, and every degraded invocation appended another trail
 # record instead of suppressing delivery.
+# lexical_path collapses "." and ".." segments without touching the filesystem.
+# The comparison in is_alarm_marker exists to reject a *symlinked* ancestor, but
+# `pwd -P` collapses dot segments as well as symlinks. Comparing a raw
+# configured path against its resolution therefore rejected a legal spelling
+# such as "<state>/x/../x/alarm", so an existing marker always read as absent
+# and every degraded invocation re-recorded and re-notified. Normalizing the
+# given side lexically first leaves the symlink rejection intact: a ".." that
+# traverses through a link still resolves somewhere the path does not name.
+lexical_path() (
+	IFS=/
+	set -f
+	out=
+	for seg in $1; do
+		case "$seg" in
+		'' | .) continue ;;
+		..) out=${out%/*} ;;
+		*) out="$out/$seg" ;;
+		esac
+	done
+	printf '%s' "${out:-/}"
+)
+
 is_alarm_marker() {
 	[ ! -L "$1" ] && [ -f "$1" ] || return 1
 	_d=$(dirname "$1")
@@ -138,6 +160,7 @@ is_alarm_marker() {
 	./*) _d="$(pwd -P)/${_d#./}" ;;
 	*) _d="$(pwd -P)/$_d" ;;
 	esac
+	_d=$(lexical_path "$_d")
 	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]
 }
 
