@@ -230,8 +230,9 @@ func TestRealTmuxReadinessAdvancesGeminiTrustOnVerifiedPane(t *testing.T) {
 func TestRealTmuxReadinessPinsLivenessAndDeliveryToActivePane(t *testing.T) {
 	socketPath := setupRealReadinessTmux(t)
 	sessionName := "multi-pane-claude"
-	if err := tmux.NewSession(sessionName, t.TempDir()); err != nil {
-		t.Fatalf("NewSession() error = %v", err)
+	stableSessionID := "multi-pane-claude-id"
+	if err := tmux.NewSessionBound(sessionName, t.TempDir(), stableSessionID); err != nil {
+		t.Fatalf("NewSessionBound() error = %v", err)
 	}
 	t.Cleanup(func() { tmux.KillSession(sessionName) })
 
@@ -276,12 +277,14 @@ func TestRealTmuxReadinessPinsLivenessAndDeliveryToActivePane(t *testing.T) {
 	if output, err := exec.Command("tmux", "-S", socketPath, "select-pane", "-t", claudePane).CombinedOutput(); err != nil {
 		t.Fatalf("select Claude pane: %v\n%s\nall panes: %v", err, output, listPaneIDs())
 	}
-	ready, err := realTmux.SendKeysIfInputReady(t.Context(), sessionName, "claude-code", "pane-pinned-message", InputDeliveryOptions{})
+	ready, err := realTmux.SendKeysIfInputReady(t.Context(), sessionName, "claude-code", "pane-pinned-message", InputDeliveryOptions{
+		ExpectedStableSessionID: stableSessionID,
+	})
 	if err != nil {
 		t.Fatalf("SendKeysIfInputReady(Claude pane) error = %v", err)
 	}
-	if !ready.Ready || ready.PaneID != claudePane {
-		t.Fatalf("atomic Claude delivery = %#v, want ready pinned to %s", ready, claudePane)
+	if !ready.Ready || ready.PaneID != claudePane || ready.StableSessionID != stableSessionID {
+		t.Fatalf("atomic Claude delivery = %#v, want ready pinned to %s with stable session %q", ready, claudePane, stableSessionID)
 	}
 	if err := exec.Command("tmux", "-S", socketPath, "select-pane", "-t", shellPane).Run(); err != nil {
 		t.Fatalf("reselect shell pane: %v", err)
