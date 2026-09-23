@@ -30,11 +30,11 @@ func TestThreadRemediationGuidance_IsRunnable(t *testing.T) {
 	got := threadRemediationGuidance("owner/repo", 42)
 	for _, want := range []string{
 		"resolve-review-threads list owner repo 42",
-		"reply-resolve",
 		"resolve-all owner repo 42",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("guidance missing %q, got:\n%s", want, got)
 		}
 	}
+	assertRoutesReviewThreadLifecycleToOwner(t, got)
 }

@@ -29,7 +29,9 @@ func TestNewEvent_ChannelDerivation(t *testing.T) {
 		wantCh    Channel
 	}{
 		{"telemetry.agent.launch", ChannelTelemetry},
-		{"notification.phase.complete", ChannelNotification},
+		{"notification.session.end", ChannelNotification},
+		{TypeWayfinderPhaseStarted, ChannelWayfinder},
+		{TypeWayfinderPhaseCompleted, ChannelWayfinder},
 		{"audit.session.start", ChannelAudit},
 		{"heartbeat.agent", ChannelHeartbeat},
 	}

@@ -602,6 +602,9 @@ func TestAGM(t *testing.T) {
 		},
 		Condition: func(cond string) (bool, error) {
 			if cond == "can-create-tmux-session" {
+				if os.Getenv("CI_SKIP_TMUX") == "true" {
+					return false, nil
+				}
 				// Check if agm can create sessions in a sandboxed environment.
 				socketDir := t.TempDir()
 				homeDir := t.TempDir()
@@ -613,7 +616,8 @@ func TestAGM(t *testing.T) {
 					return false, nil
 				}
 
-				cmd := exec.Command(agmPath, "session", "new", "cond-check", "--agent", "gpt", "--detached")
+				cmd := exec.Command(agmPath, "session", "new", "cond-check", "--harness", "claude-code", "--detached")
+				cmd.Stdin = strings.NewReader("")
 				cmd.Env = append(os.Environ(),
 					"HOME="+homeDir,
 					"AGM_TMUX_SOCKET="+socketDir+"/t.sock",

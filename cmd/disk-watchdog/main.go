@@ -36,6 +36,8 @@
 //	disk-watchdog --brake-ttl 45m        # how long an engaged brake blocks spawns
 //	disk-watchdog --gc-max-age 2h        # reaper-staleness window (0 disables)
 //	disk-watchdog --gc-log /path/gc.jsonl   # sandbox-GC log to read liveness from
+//	disk-watchdog --absence-max-age 30m  # absence-alarm staleness window (0 disables)
+//	disk-watchdog --absence-heartbeat /path/absence.heartbeat.json # absence-alarm heartbeat JSON
 //
 // # Reaper liveness
 //
@@ -52,6 +54,17 @@
 // tick here still printed "Status: OK". A stale reaper alarms and exits 1 but
 // deliberately does not latch the brake: halting every spawn because a GC is
 // behind would be a worse outage than the leak it warns about.
+//
+// # Absence-alarm cross-watch
+//
+// absence-alarm pulses on disk-watchdog's output log to verify this watchdog is
+// alive. disk-watchdog closes the loop by checking that absence-alarm's
+// heartbeat records a positive tick_time within the configured window
+// (--absence-max-age, default 30m; DW-48..DW-51).
+//
+// A stale absence-alarm alarms and exits 1 at WARN pressure but deliberately
+// does not latch the brake: halting every spawn because monitoring is behind
+// would be a worse outage than the monitoring gap it warns about.
 //
 // Beyond alarming and remediating, the watchdog drives the cross-process
 // admission brake (pkg/vroom/admission): when its own remediation fails, or
@@ -108,10 +121,12 @@ type config struct {
 	agmBin     string
 	trailPath  string
 	brakePath  string
-	brakeTTL   time.Duration
-	gcLogPath  string
-	gcMaxAge   time.Duration
-	thresholds supervisor.DiskAlertThresholds
+	brakeTTL             time.Duration
+	gcLogPath            string
+	gcMaxAge             time.Duration
+	absenceHeartbeatPath string
+	absenceMaxAge        time.Duration
+	thresholds           supervisor.DiskAlertThresholds
 
 	// Build-cache reaping is deliberately NOT gated on disk pressure. A Go
 	// build cache older than buildCacheMinAge has no value — the next run
@@ -127,6 +142,11 @@ type config struct {
 	e2eCacheDir        string
 	e2eCacheMinAge     time.Duration
 	e2eCacheMaxEntries int
+
+	// Preflight scratch directories accumulate under the user cache directory
+	// and legacy dotdirs under HOME (ce-m6j1y).
+	preflightScratchRoots  string
+	preflightScratchMinAge time.Duration
 
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
 	// so tests can observe the sweep invocation without spawning a process.
@@ -151,6 +171,10 @@ func run(args []string, out io.Writer) (int, error) {
 		"sandbox-GC JSONL log consulted for reaper liveness; empty disables the check")
 	fs.DurationVar(&cfg.gcMaxAge, "gc-max-age", defaultGCMaxAge,
 		"alarm when the sandbox GC has not completed a sweep within this window (0 disables)")
+	fs.StringVar(&cfg.absenceHeartbeatPath, "absence-heartbeat", defaultAbsenceHeartbeatPath(),
+		"absence-alarm heartbeat JSON path consulted for scheduler liveness; empty disables the check")
+	fs.DurationVar(&cfg.absenceMaxAge, "absence-max-age", defaultAbsenceMaxAge,
+		"alarm when the absence-alarm scheduler has not recorded a heartbeat within this window (0 disables)")
 	fs.StringVar(&cfg.buildCacheRoots, "build-cache-roots", defaultBuildCacheRoots(),
 		"comma-separated directories scanned for abandoned Go build caches (empty disables the reaper)")
 	fs.DurationVar(&cfg.buildCacheMinAge, "build-cache-min-age", defaultBuildCacheMinAge,
@@ -163,6 +187,10 @@ func run(args []string, out io.Writer) (int, error) {
 		"only reap E2E fixture directories whose mtime is older than this")
 	fs.IntVar(&cfg.e2eCacheMaxEntries, "e2e-cache-max-entries", defaultE2ECacheMaxEntries,
 		"maximum number of recent E2E fixture directories to retain")
+	fs.StringVar(&cfg.preflightScratchRoots, "preflight-scratch-roots", defaultPreflightScratchRoots(),
+		"comma-separated directories scanned for abandoned preflight scratch (empty disables the reaper)")
+	fs.DurationVar(&cfg.preflightScratchMinAge, "preflight-scratch-min-age", defaultPreflightScratchMinAge,
+		"only reap preflight scratch whose mtime is older than this")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -183,6 +211,9 @@ func run(args []string, out io.Writer) (int, error) {
 	if cfg.gcMaxAge < 0 {
 		return 2, fmt.Errorf("invalid -gc-max-age %s: the reaper-liveness window cannot be negative (use 0 to disable the check)", cfg.gcMaxAge)
 	}
+	if cfg.absenceMaxAge < 0 {
+		return 2, fmt.Errorf("invalid -absence-max-age %s: the absence-alarm liveness window cannot be negative (use 0 to disable the check)", cfg.absenceMaxAge)
+	}
 	// A negative or zero age window would make every cache — including one a
 	// build is writing right now — instantly eligible. Refuse it rather than
 	// silently reaping live state.
@@ -194,6 +225,9 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 	if cfg.e2eCacheDir != "" && cfg.e2eCacheMaxEntries < 0 {
 		return 2, fmt.Errorf("invalid -e2e-cache-max-entries %d: must be non-negative", cfg.e2eCacheMaxEntries)
+	}
+	if cfg.preflightScratchRoots != "" && cfg.preflightScratchMinAge <= 0 {
+		return 2, fmt.Errorf("invalid -preflight-scratch-min-age %s: must be positive (pass an empty -preflight-scratch-roots to disable the reaper)", cfg.preflightScratchMinAge)
 	}
 
 	snap, err := takeSnapshot(cfg.path)
@@ -219,11 +253,14 @@ func run(args []string, out io.Writer) (int, error) {
 	// producer tag (gcSelfSource) keeps later ticks from counting it too, and
 	// this ordering keeps the current tick honest even against an older `agm`
 	// that does not stamp the tag.
-	gc := checkGCHealth(cfg, time.Now())
+	now := time.Now()
+	gc := checkGCHealth(cfg, now)
+	absence := checkAbsenceAlarmHealth(cfg, now)
 
 	// Runs on every tick, breached or not: see the comment on config.
 	buildCaches := reapAbandonedBuildCaches(cfg)
 	e2eCaches := reapAbandonedE2ECaches(cfg)
+	preflightScratch := reapAbandonedPreflightScratch(cfg)
 
 	var remediation *sweepResult
 	if diskBreached && !cfg.dryRun {
@@ -249,6 +286,16 @@ func run(args []string, out io.Writer) (int, error) {
 		}
 		reasons = append(reasons, gc.Reason)
 	}
+	// A dead absence-alarm scheduler is also an alarm at WARN pressure (DW-51).
+	// Like reaper liveness, it deliberately does not touch the admission brake:
+	// halting every spawn because monitoring is behind would worsen an outage
+	// rather than resolve it.
+	if absence != nil && absence.Stale {
+		if level == supervisor.PressureNone {
+			level = supervisor.PressureWarn
+		}
+		reasons = append(reasons, absence.Reason)
+	}
 	breached := level != supervisor.PressureNone
 
 	// Logging the alarm to the trail is best-effort: a trail write failure is a
@@ -257,7 +304,7 @@ func run(args []string, out io.Writer) (int, error) {
 	// write is timeout-bounded because I/O on an exhausted disk can stall.
 	if breached {
 		logCtx, logCancel := context.WithTimeout(context.Background(), trailTimeout)
-		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc, buildCaches, e2eCaches)
+		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc, absence, buildCaches, e2eCaches, preflightScratch)
 		logCancel()
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: trail append failed: %v\n", lerr)
@@ -265,11 +312,11 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	if cfg.jsonOutput {
-		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches); err != nil {
+		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc, absence, buildCaches, e2eCaches, preflightScratch); err != nil {
 			return 2, err
 		}
 	} else {
-		emitReport(out, snap, level, reasons, remediation, cfg, gc, buildCaches, e2eCaches)
+		emitReport(out, snap, level, reasons, remediation, cfg, gc, absence, buildCaches, e2eCaches, preflightScratch)
 	}
 
 	if breached {
@@ -498,7 +545,9 @@ func applyBrake(cfg config, engage bool, reason string) {
 // logAlarm appends one watchdog.disk.alarm record to the decision trail.
 func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, gc *gcHealth,
-	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) error {
+	absence *absenceHealth,
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult,
+	preflightScratch *preflightScratchReapResult) error {
 	trail, err := decisiontrail.OpenJSONL(cfg.trailPath)
 	if err != nil {
 		return err
@@ -548,11 +597,25 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 		}
 		payload["sandbox_gc"] = sandboxGC
 	}
+	if absence != nil {
+		absenceAlarm := map[string]any{"stale": absence.Stale}
+		if !absence.TickTime.IsZero() {
+			absenceAlarm["tick_time"] = absence.TickTime.UTC().Format(time.RFC3339)
+			absenceAlarm["age_seconds"] = int64(absence.Age.Seconds())
+		}
+		if absence.Reason != "" {
+			absenceAlarm["reason"] = absence.Reason
+		}
+		payload["absence_alarm"] = absenceAlarm
+	}
 	if buildCaches != nil {
 		payload["build_caches"] = buildCaches
 	}
 	if e2eCaches != nil {
 		payload["e2e_caches"] = e2eCaches
+	}
+	if preflightScratch != nil {
+		payload["preflight_scratch"] = preflightScratch
 	}
 
 	return trail.Append(ctx, decisiontrail.Record{
@@ -564,7 +627,9 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 
 func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
-	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) error {
+	absence *absenceHealth,
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult,
+	preflightScratch *preflightScratchReapResult) error {
 	type gcReport struct {
 		Stale       bool   `json:"stale"`
 		LastSuccess string `json:"last_success,omitempty"`
@@ -576,6 +641,12 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Undetermined bool   `json:"undetermined,omitempty"`
 		Reason       string `json:"reason,omitempty"`
 	}
+	type absenceReport struct {
+		Stale      bool   `json:"stale"`
+		TickTime   string `json:"tick_time,omitempty"`
+		AgeSeconds *int64 `json:"age_seconds,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+	}
 	type report struct {
 		Level             string                         `json:"level"`
 		DiskFreeBytes     uint64                         `json:"disk_free_bytes"`
@@ -586,8 +657,10 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Reasons           []string                       `json:"reasons"`
 		Remediation       *sweepResult                   `json:"remediation,omitempty"`
 		SandboxGC         *gcReport                      `json:"sandbox_gc,omitempty"`
+		AbsenceAlarm      *absenceReport                 `json:"absence_alarm,omitempty"`
 		BuildCaches       *buildCacheReapResult          `json:"build_caches,omitempty"`
 		E2ECaches         *e2eCacheReapResult            `json:"e2e_caches,omitempty"`
+		PreflightScratch  *preflightScratchReapResult    `json:"preflight_scratch,omitempty"`
 		OK                bool                           `json:"ok"`
 	}
 	var gcr *gcReport
@@ -598,9 +671,16 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 			gcr.AgeSeconds = int64(gc.Age.Seconds())
 		}
 	}
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(report{
+	var ar *absenceReport
+	if absence != nil {
+		ar = &absenceReport{Stale: absence.Stale, Reason: absence.Reason}
+		if !absence.TickTime.IsZero() {
+			ar.TickTime = absence.TickTime.UTC().Format(time.RFC3339)
+			ageSecs := int64(absence.Age.Seconds())
+			ar.AgeSeconds = &ageSecs
+		}
+	}
+	rep := report{
 		Level:             level.String(),
 		DiskFreeBytes:     snap.DiskFreeBytes,
 		DiskFreeGiB:       float64(snap.DiskFreeBytes) / supervisor.GiB,
@@ -610,15 +690,22 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Reasons:           reasons,
 		Remediation:       rem,
 		SandboxGC:         gcr,
+		AbsenceAlarm:      ar,
 		BuildCaches:       buildCaches,
 		E2ECaches:         e2eCaches,
+		PreflightScratch:  preflightScratch,
 		OK:                level == supervisor.PressureNone,
-	})
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(rep)
 }
 
 func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth,
-	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult) {
+	absence *absenceHealth,
+	buildCaches *buildCacheReapResult, e2eCaches *e2eCacheReapResult,
+	preflightScratch *preflightScratchReapResult) {
 	fmt.Fprintln(out, "disk-watchdog report")
 	fmt.Fprintf(out, "  path        : %s\n", cfg.path)
 	fmt.Fprintf(out, "  disk free   : %.1f GiB  [warn < %.0f GiB, critical < %.0f GiB]\n",
@@ -643,11 +730,27 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 				state, gc.Age.Round(time.Minute), cfg.gcMaxAge)
 		}
 	}
+	if absence != nil {
+		switch {
+		case absence.TickTime.IsZero():
+			fmt.Fprintf(out, "  absence alarm: STALE (no valid heartbeat)  [max age %s]\n", cfg.absenceMaxAge)
+		default:
+			state := "ok"
+			if absence.Stale {
+				state = "STALE"
+			}
+			fmt.Fprintf(out, "  absence alarm: %s, last tick %s ago  [max age %s]\n",
+				state, absence.Age.Round(time.Second), cfg.absenceMaxAge)
+		}
+	}
 	if buildCaches != nil {
 		fmt.Fprintf(out, "  %s\n", summarizeBuildCacheReap(*buildCaches))
 	}
 	if e2eCaches != nil {
 		fmt.Fprintf(out, "  %s\n", summarizeE2ECacheReap(*e2eCaches))
+	}
+	if preflightScratch != nil {
+		fmt.Fprintf(out, "  %s\n", summarizePreflightScratchReap(*preflightScratch))
 	}
 	fmt.Fprintln(out)
 

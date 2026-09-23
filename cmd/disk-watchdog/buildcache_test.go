@@ -365,13 +365,13 @@ func TestRun_RejectsNonPositiveBuildCacheAge(t *testing.T) {
 // reported at all.
 func TestRun_EmptyRootsDisablesTheReaper(t *testing.T) {
 	var out bytes.Buffer
-	code, err := run([]string{
+	args := hermeticRunArgs(t, filepath.Join(t.TempDir(), "unused-gc.jsonl"), "0")
+	args = append(args,
 		"--build-cache-roots", "",
 		"--build-cache-min-age", "0s",
-		"--gc-max-age", "0",
-		"--free-warn-gb", "0.0001",
 		"--dry-run",
-	}, &out)
+	)
+	code, err := run(args, &out)
 	if err != nil || code != 0 {
 		t.Fatalf("empty roots should disable the reaper cleanly, got (code=%d, err=%v)\n%s", code, err, out.String())
 	}

@@ -151,6 +151,8 @@ Provide a production-ready CLI that:
 
 **CLI-61** When any command path reactivates a session, including `agm session unarchive` and `agm admin reconcile --fix`, the command shall acquire the same stable session-ID lifecycle lock held by archive and reload the current lifecycle under that lock. Unarchive shall keep the lock through durable reactivation and legacy manifest relocation. Reconcile shall also revalidate the corresponding tmux fact under the lock and skip a mismatch that changed while it waited. No reactivation path may make a session active while archive still owns destructive cleanup.
 
+**CLI-67** When `agm admin doctor` starts after configuration load, the command shall project one retained physical HOME from the loaded runtime authority before its initial session-path selection, Claude-history existence check, installation checks, and per-harness health checks, use that same snapshot throughout those checks, and fail before them if the authority is unavailable.
+
 ## Requirements
 
 ### Functional Requirements
@@ -1144,11 +1146,14 @@ agm 3.0.0 (/usr/local/bin/agm)
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Test consequence: CLI-57 through CLI-60 are verified by deterministic unit tests rather than new scenarios — `runtime_authority_test.go` covers fail-closed centralized bootstrap and the isolated-HOME authority recapture through `preflight`, and `new_sandbox_test.go` covers authority-derived provisioning plus the missing-snapshot and no-authority refusals.
+- Test consequence: CLI-67 is verified by deterministic command-package tests rather than a scenario because its observable contract is filesystem authority selection, not command grammar or cross-harness behavior. `doctor_home_test.go` loads through a synthetic symlinked HOME, moves live HOME, and proves retained-path resolution plus install and sessions projections; `doctor_harness_test.go` proves the explicit home reaches harness reporting.
 
 ## Package Test Traceability
 
 - `agm/cmd/agm/new_sandbox_test.go`
 - `agm/cmd/agm/runtime_authority_test.go`
+- `agm/cmd/agm/doctor_home_test.go`
+- `agm/cmd/agm/doctor_harness_test.go`
 
 ## References
 

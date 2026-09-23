@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -180,6 +182,46 @@ func TestBuildReviewPlan_RequiresRunnableGherkinAndSuppliesAuthenticatedFeatureE
 				}
 			}
 		})
+	}
+}
+
+func TestParseBDDFeature_PreservesCompleteEvidenceProjection(t *testing.T) {
+	const source = `@feature-b @feature-a
+Feature: contract
+
+  Background:
+    Given shared setup
+
+  Rule: payment rule
+
+    Background:
+      And rule setup
+
+    @case-b @case-a
+    Scenario: first case
+      When action occurs
+      Then result follows
+
+    Scenario: second case
+      Given another action
+`
+
+	evidence, err := parseBDDFeature("features/contract.feature", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"path":"features/contract.feature","language":"en","name":"contract",` +
+		`"tags":["@feature-b","@feature-a"],"scenarios":[` +
+		`{"rule":"payment rule","keyword":"Scenario","name":"first case",` +
+		`"tags":["@case-b","@case-a"],"steps":["When action occurs","Then result follows"]},` +
+		`{"rule":"payment rule","keyword":"Scenario","name":"second case",` +
+		`"tags":[],"steps":["Given another action"]}],"content":` + strconv.Quote(source) + "}"
+	if string(got) != want {
+		t.Fatalf("evidence JSON = %s, want %s", got, want)
 	}
 }
 

@@ -65,8 +65,9 @@ type Plan struct {
 	// TriggeredBy is recorded on the audit_runs row. "cli", "cron",
 	// "workflow:audit-daily", etc.
 	TriggeredBy string
-	// SeverityPolicy maps each Severity to a per-severity policy.
-	// nil falls back to the package default in DefaultSeverityPolicy.
+	// SeverityPolicy maps every valid Severity to a per-severity policy.
+	// nil falls back to the package default in DefaultSeverityPolicy; a supplied
+	// map must contain all valid severities so omitted gates cannot fail open.
 	SeverityPolicy map[Severity]SeverityRule
 }
 
@@ -106,6 +107,19 @@ func DefaultSeverityPolicy() map[Severity]SeverityRule {
 		SeverityP1: {FailRun: true, DefaultStrategy: StrategyPR, Notify: true},
 		SeverityP2: {FailRun: false, DefaultStrategy: StrategyIssue},
 		SeverityP3: {FailRun: false, DefaultStrategy: StrategyNoop},
+	}
+}
+
+// applyRemediationDefault normalizes only an unspecified strategy. Explicit
+// suggestions are preserved, including invalid values that Finding.Validate
+// must reject. Keeping this order in one helper prevents check and verifier
+// paths from drifting.
+func applyRemediationDefault(f *Finding, policy map[Severity]SeverityRule) {
+	if f.Suggested.Strategy != StrategyUnspecified {
+		return
+	}
+	if rule, ok := policy[f.Severity]; ok {
+		f.Suggested.Strategy = rule.DefaultStrategy
 	}
 }
 
@@ -154,9 +168,10 @@ type CheckOutcome struct {
 	WorkingDir string
 	Result     Result
 	Findings   []Finding
-	// Err is the error returned by Check.Run, if any. Non-nil Err
-	// transitions the audit run state to AuditRunPartial; the rest
-	// of the plan continues to run.
+	// Err aggregates errors returned by Check.Run and errors validating or
+	// persisting its emitted findings. Non-nil Err contributes a partial-run
+	// signal; cancellation or a separate persisted fail-run finding may still
+	// make the run failed. The rest of the plan continues to run.
 	Err error
 }
 
@@ -169,9 +184,10 @@ type VerifierOutcome struct {
 	VerifierName string
 	WorkingDir   string
 	Findings     []Finding
-	// Err is the error returned by Verifier.Verify, if any. Non-nil
-	// Err transitions the audit run state to AuditRunPartial; remaining
-	// verifiers continue to run.
+	// Err aggregates errors returned by Verifier.Verify and errors validating
+	// or persisting its emitted findings. Non-nil Err contributes a partial-run
+	// signal; cancellation or a separate persisted fail-run finding may still
+	// make the run failed. Remaining verifiers continue to run.
 	Err error
 }
 
@@ -337,11 +353,13 @@ func (r *Runner) runOneVerifier(
 	}
 
 	for i := range findings {
-		stored, ok := r.persistVerifierFinding(ctx, findings[i], plan, v, depth, policy, logger)
-		if !ok {
+		candidate, persistErr := r.persistVerifierFinding(ctx, findings[i], plan, v, depth, policy)
+		if persistErr != nil {
+			logger.Warn("audit: verifier finding rejected", "err", persistErr)
+			outcome.Err = errors.Join(outcome.Err, persistErr)
 			continue
 		}
-		outcome.Findings = append(outcome.Findings, stored)
+		outcome.Findings = append(outcome.Findings, candidate)
 	}
 	return outcome
 }
@@ -352,6 +370,8 @@ func (r *Runner) runOneVerifier(
 // (repo, fingerprint) uniqueness contract on audit_findings carries a
 // stable namespace. Verifier-emitted CheckIDs are conventionally
 // prefixed "verify." to distinguish them in CLI rendering.
+// On rejection it returns the normalized candidate with the error so the
+// caller can report the failed persistence attempt.
 func (r *Runner) persistVerifierFinding(
 	ctx context.Context,
 	f Finding,
@@ -359,8 +379,7 @@ func (r *Runner) persistVerifierFinding(
 	v Verifier,
 	depth string,
 	policy map[Severity]SeverityRule,
-	logger *slog.Logger,
-) (Finding, bool) {
+) (Finding, error) {
 	f.Repo = plan.Repo
 	f.CheckID = "verify." + v.Name()
 	if f.Evidence == nil {
@@ -388,21 +407,8 @@ func (r *Runner) persistVerifierFinding(
 		// unless the verifier explicitly raises severity.
 		f.Severity = SeverityP2
 	}
-	if err := f.Validate(); err != nil {
-		logger.Warn("audit: invalid verifier finding emitted; skipping", "err", err)
-		return Finding{}, false
-	}
-	if f.Suggested.Strategy == StrategyUnspecified {
-		if rule, ok := policy[f.Severity]; ok {
-			f.Suggested.Strategy = rule.DefaultStrategy
-		}
-	}
-	stored, upErr := r.Store.UpsertFinding(ctx, f)
-	if upErr != nil {
-		logger.Warn("audit: UpsertFinding (verifier) failed", "err", upErr, "fp", f.Fingerprint)
-		return Finding{}, false
-	}
-	return stored, true
+	applyRemediationDefault(&f, policy)
+	return r.validateAndUpsertFinding(ctx, f)
 }
 
 // executeRefiners walks every registered Refiner over the pooled
@@ -509,6 +515,9 @@ func preflightPlan(plan Plan, registry *Registry) error {
 	if !plan.Cadence.IsValid() {
 		return fmt.Errorf("audit: Plan.Cadence %q invalid", plan.Cadence)
 	}
+	if err := validateSeverityPolicy(plan.SeverityPolicy); err != nil {
+		return err
+	}
 	if len(plan.Trees) == 0 {
 		return errors.New("audit: Plan.Trees is empty")
 	}
@@ -523,6 +532,36 @@ func preflightPlan(plan Plan, registry *Registry) error {
 			if _, ok := registry.Lookup(sc.CheckID); !ok {
 				return fmt.Errorf("audit: Plan.Trees[%d].Checks[%d]: unknown check %q", ti, ci, sc.CheckID)
 			}
+		}
+	}
+	return nil
+}
+
+func validateSeverityPolicy(policy map[Severity]SeverityRule) error {
+	if policy == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(policy))
+	for severity := range policy {
+		keys = append(keys, string(severity))
+	}
+	sort.Strings(keys)
+	for _, rawSeverity := range keys {
+		severity := Severity(rawSeverity)
+		if !severity.IsValid() {
+			return fmt.Errorf("audit: Plan.SeverityPolicy contains invalid severity %q", severity)
+		}
+		strategy := policy[severity].DefaultStrategy
+		if strategy == StrategyUnspecified {
+			return fmt.Errorf("audit: Plan.SeverityPolicy[%q].DefaultStrategy is unspecified", severity)
+		}
+		if !strategy.IsValid() {
+			return fmt.Errorf("audit: Plan.SeverityPolicy[%q].DefaultStrategy %q invalid", severity, strategy)
+		}
+	}
+	for _, severity := range []Severity{SeverityP0, SeverityP1, SeverityP2, SeverityP3} {
+		if _, ok := policy[severity]; !ok {
+			return fmt.Errorf("audit: Plan.SeverityPolicy missing required severity %q", severity)
 		}
 	}
 	return nil
@@ -574,11 +613,13 @@ func (r *Runner) runOneCheck(
 	// Persist findings via the store. Apply the per-check severity
 	// ceiling and resolve unspecified strategies via policy.
 	for i := range result.Findings {
-		stored, ok := r.persistFinding(ctx, result.Findings[i], plan, meta, policy, logger)
-		if !ok {
+		candidate, persistErr := r.persistFinding(ctx, result.Findings[i], plan, meta, policy)
+		if persistErr != nil {
+			logger.Warn("audit: check finding rejected", "err", persistErr)
+			outcome.Err = errors.Join(outcome.Err, persistErr)
 			continue
 		}
-		outcome.Findings = append(outcome.Findings, stored)
+		outcome.Findings = append(outcome.Findings, candidate)
 	}
 	// Sort findings by severity (most severe first) for stable CLI
 	// rendering — checks may emit in any order.
@@ -590,32 +631,30 @@ func (r *Runner) runOneCheck(
 
 // persistFinding handles the per-finding pipeline pulled out of
 // runOneCheck: stamp metadata, clamp severity, validate, and upsert. Suggested
-// remediation remains inert data. Returns the stored finding plus an ok=false
-// signal when the finding was dropped.
+// remediation remains inert data. On rejection it returns the normalized
+// candidate with the error so the caller can report the failed persistence
+// attempt.
 func (r *Runner) persistFinding(
 	ctx context.Context,
 	f Finding,
 	plan Plan,
 	meta CheckMeta,
 	policy map[Severity]SeverityRule,
-	logger *slog.Logger,
-) (Finding, bool) {
+) (Finding, error) {
 	f.Repo = plan.Repo
 	f.CheckID = meta.ID
 	f.Severity = ClampSeverity(f.Severity, meta.SeverityCeiling)
+	applyRemediationDefault(&f, policy)
+	return r.validateAndUpsertFinding(ctx, f)
+}
+
+func (r *Runner) validateAndUpsertFinding(ctx context.Context, f Finding) (Finding, error) {
 	if err := f.Validate(); err != nil {
-		logger.Warn("audit: invalid finding emitted; skipping", "err", err)
-		return Finding{}, false
+		return f, fmt.Errorf("audit: validate finding %q from %q: %w", f.Fingerprint, f.CheckID, err)
 	}
-	if f.Suggested.Strategy == StrategyUnspecified {
-		if rule, ok := policy[f.Severity]; ok {
-			f.Suggested.Strategy = rule.DefaultStrategy
-		}
+	stored, err := r.Store.UpsertFinding(ctx, f)
+	if err != nil {
+		return f, fmt.Errorf("audit: persist finding %q from %q: %w", f.Fingerprint, f.CheckID, err)
 	}
-	stored, upErr := r.Store.UpsertFinding(ctx, f)
-	if upErr != nil {
-		logger.Warn("audit: UpsertFinding failed", "err", upErr, "fp", f.Fingerprint)
-		return Finding{}, false
-	}
-	return stored, true
+	return stored, nil
 }

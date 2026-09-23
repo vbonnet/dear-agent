@@ -79,10 +79,7 @@ func TestLiveDoltMigrationContract(t *testing.T) {
 		t.Fatalf("resolve opted-in Dolt executable: %v", err)
 	}
 
-	// Keep the Unix socket below the macOS path-length limit while retaining
-	// testing.T's checked recursive cleanup for every fixture artifact.
-	t.Setenv("TMPDIR", "/tmp")
-	root := t.TempDir()
+	root := newOwnedDoltRoot(t)
 	workspace := newOwnedWorkspace(t)
 	t.Setenv("ENGRAM_TEST_MODE", "1")
 	t.Setenv("ENGRAM_TEST_WORKSPACE", workspace)
@@ -140,6 +137,24 @@ func TestLiveDoltMigrationContract(t *testing.T) {
 	closeOwnedAdapter(t, &active)
 
 	t.Logf("validated 19 AGM migrations on owned Dolt at %s (server log %s)", server.address, server.logPath)
+}
+
+func newOwnedDoltRoot(t *testing.T) string {
+	t.Helper()
+
+	// testing.T.TempDir follows GOTMPDIR, which can produce a Unix socket path
+	// longer than macOS accepts. Own a short root independently of that ambient
+	// Go build setting while retaining checked cleanup for every fixture artifact.
+	root, err := os.MkdirTemp("/tmp", "agm-live-dolt-*")
+	if err != nil {
+		t.Fatalf("create short owned Dolt root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Errorf("remove owned Dolt root %s: %v", root, err)
+		}
+	})
+	return root
 }
 
 func newOwnedWorkspace(t *testing.T) string {
