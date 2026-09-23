@@ -42,7 +42,14 @@ func cacheBytes(t *testing.T, dir string) int64 {
 	return total
 }
 
-func countShards(t *testing.T, dir string) int {
+// nonEmptyShards counts shard directories that still hold entries.
+//
+// The trim empties shards and leaves the directories in place. Go creates all
+// 256 once, when it opens the cache, and later writes entries into them
+// without recreating the parent, so removing a shard under a concurrent build
+// turns a cache miss into an ENOENT that some build paths propagate. The
+// contract is therefore "no cache entries survive", not "no shards survive".
+func nonEmptyShards(t *testing.T, dir string) int {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -50,7 +57,14 @@ func countShards(t *testing.T, dir string) int {
 	}
 	n := 0
 	for _, e := range entries {
-		if e.IsDir() && hexShard.MatchString(e.Name()) {
+		if !e.IsDir() || !hexShard.MatchString(e.Name()) {
+			continue
+		}
+		inner, ierr := os.ReadDir(filepath.Join(dir, e.Name()))
+		if ierr != nil {
+			t.Fatalf("read shard %s: %v", e.Name(), ierr)
+		}
+		if len(inner) > 0 {
 			n++
 		}
 	}
@@ -79,8 +93,12 @@ func TestTrimCanonicalCaches_ReclaimsOverBudgetCache(t *testing.T) {
 	if res.BytesReclaimed != before {
 		t.Fatalf("BytesReclaimed = %d, want %d", res.BytesReclaimed, before)
 	}
-	if n := countShards(t, dir); n != 0 {
-		t.Fatalf("%d shard(s) survived the trim, want 0", n)
+	if n := nonEmptyShards(t, dir); n != 0 {
+		t.Fatalf("%d shard(s) still hold entries after the trim, want 0", n)
+	}
+	if n := len(shardNames(t, dir)); n != 256 {
+		t.Fatalf("%d shard directories survived, want all 256: removing them "+
+			"breaks a concurrent build that already opened the cache", n)
 	}
 	// The root itself must survive: Go recreates shards on demand but an
 	// absent GOCACHE root is a different failure for a concurrent build.
@@ -108,8 +126,11 @@ func TestTrimCanonicalCaches_KeepsCacheWithinBudget(t *testing.T) {
 	if !strings.Contains(res.Skipped[dir], "within budget") {
 		t.Fatalf("Skipped[%s] = %q, want a within-budget reason", dir, res.Skipped[dir])
 	}
-	if n := countShards(t, dir); n != 256 {
+	if n := len(shardNames(t, dir)); n != 256 {
 		t.Fatalf("%d shards survived, want all 256 untouched", n)
+	}
+	if n := nonEmptyShards(t, dir); n != 256 {
+		t.Fatalf("%d shards still hold entries, want all 256 untouched", n)
 	}
 }
 
@@ -175,8 +196,8 @@ func TestTrimCanonicalCaches_DryRunDeletesNothing(t *testing.T) {
 	if res.BytesReclaimable != before {
 		t.Fatalf("BytesReclaimable = %d, want %d", res.BytesReclaimable, before)
 	}
-	if n := countShards(t, dir); n != 256 {
-		t.Fatalf("dry run removed %d shard(s)", 256-n)
+	if n := nonEmptyShards(t, dir); n != 256 {
+		t.Fatalf("dry run emptied %d shard(s)", 256-n)
 	}
 }
 
@@ -211,8 +232,8 @@ func TestTrimOversizedCanonicalCaches_OnlyUnderDiskPressure(t *testing.T) {
 	if got := trimOversizedCanonicalCaches(cfg, false); got != nil {
 		t.Fatalf("unbreached tick must not walk the cache, got %+v", got)
 	}
-	if n := countShards(t, dir); n != 256 {
-		t.Fatalf("unbreached tick removed %d shard(s)", 256-n)
+	if n := nonEmptyShards(t, dir); n != 256 {
+		t.Fatalf("unbreached tick emptied %d shard(s)", 256-n)
 	}
 
 	got := trimOversizedCanonicalCaches(cfg, true)
@@ -256,8 +277,8 @@ func TestRun_TrimsCanonicalCacheUnderDiskPressure(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("forced breach should exit 1, got %d\n%s", code, out.String())
 	}
-	if n := countShards(t, dir); n != 0 {
-		t.Fatalf("%d shard(s) survived a breached tick\n%s", n, out.String())
+	if n := nonEmptyShards(t, dir); n != 0 {
+		t.Fatalf("%d shard(s) still hold entries after a breached tick\n%s", n, out.String())
 	}
 	want := humanBytes(before)
 	if !strings.Contains(out.String(), "go cache") || !strings.Contains(out.String(), want) {
@@ -291,4 +312,20 @@ func TestDefaultGoCacheDirs_IncludesTheCanonicalCache(t *testing.T) {
 			t.Fatalf("defaultGoCacheDirs() = %q, want it to include %q", got, want)
 		}
 	}
+}
+
+// shardNames lists the hex shard directories present in dir.
+func shardNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() && hexShard.MatchString(e.Name()) {
+			names = append(names, e.Name())
+		}
+	}
+	return names
 }

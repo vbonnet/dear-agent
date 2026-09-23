@@ -168,14 +168,20 @@ would worsen an outage rather than resolve it.
 
 **DW-51** If the absence-alarm heartbeat file cannot be read, contains invalid JSON, does not contain a valid `tick_time` timestamp, or records a `tick_time` older than the configured absence-alarm heartbeat window (default 30m), then the system shall classify the absence-alarm scheduler as stale and shall emit a WARN alarm without latching the admission brake.
 
-**DW-52** When a disk threshold is breached, the system shall trim every configured canonical Go build cache (GOCACHE, GOLANGCI_LINT_CACHE) whose size exceeds the configured budget, by removing its shard directories while leaving the cache root and its furniture in place.
+**DW-52** When a disk threshold is breached, the system shall trim every configured canonical Go build cache (GOCACHE, GOLANGCI_LINT_CACHE) whose removable size exceeds the configured budget, by removing the entries inside its shard directories while leaving the shard directories themselves, the cache root, and its furniture in place.
 
 **DW-53** While no disk threshold is breached, the system shall not walk or trim any canonical Go build cache, because the cache is worth its disk until it is the reason writes fail and measuring it costs a walk of hundreds of thousands of files.
 
 **DW-54** When trimming a canonical Go build cache, the system shall require the same structural proof it requires of an abandoned cache (DW-33) and shall never rely on the directory's name, so a GOCACHE mis-set to a source tree reclaims nothing.
 
-**DW-55** When identifying a canonical Go build cache, the system shall apply no age or liveness gate, because every build touches the canonical cache and a content-addressed entry removed under a running build is a cache miss rather than a corruption.
+**DW-55** When identifying a canonical Go build cache, the system shall apply no age or liveness gate, because every build touches the canonical cache and a content-addressed entry removed under a running build is a cache miss rather than a corruption. The shard directory a concurrent build has already opened is not itself regenerable on demand, so it shall survive the trim.
 
-**DW-56** When a shard directory cannot be removed, the system shall record it as an error and shall not count its bytes as reclaimed, so a still-full disk is never reported as remediated.
+**DW-56** When a shard directory cannot be emptied, the system shall record it as an error and shall count only the bytes the filesystem actually returned, so a still-full disk is never reported as remediated.
 
-**DW-57** When the configured canonical-cache budget is negative, the system shall reject it as a usage error and exit 2. Zero is a valid budget meaning "trim on any breached tick"; passing empty cache directories is the supported way to disable the trim.
+**DW-57** When the configured canonical-cache budget is negative, not a number, not finite, or larger than a representable byte count, the system shall reject it as a usage error and exit 2. Zero is a valid budget meaning "trim on any breached tick"; passing empty cache directories is the supported way to disable the trim.
+
+**DW-58** When sizing a canonical Go build cache against its budget, and when reporting reclaimable bytes for a dry run, the system shall count only the bytes the trim can remove, so preserved content such as a fuzz corpus can neither push an in-budget cache over the line nor be reported as reclaimable.
+
+**DW-59** When a configured canonical-cache path is not itself a proven cache root but directly contains proven cache roots, the system shall trim those roots. This covers the per-checkout lint cache hierarchy `${XDG_CACHE_HOME:-$HOME/.cache}/dear-agent/golangci-lint/<checkout>` that `scripts/preflight.sh` creates, and it shall not relax the structural proof each root must pass.
+
+**DW-60** When an abandoned build cache holds a fuzz corpus, the system shall keep it and record the reason, because the abandoned-cache path removes the whole cache root and a corpus is the one thing in a cache that cannot be regenerated on demand.

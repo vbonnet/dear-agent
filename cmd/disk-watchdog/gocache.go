@@ -2,10 +2,13 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
 // The canonical Go build cache is a different failure from an abandoned one,
@@ -94,7 +97,7 @@ func trimCanonicalCaches(cfg canonicalCacheConfig) canonicalCacheTrimResult {
 	g := cfg.withDefaults()
 	res := canonicalCacheTrimResult{Skipped: map[string]string{}, Errors: map[string]string{}}
 
-	for _, dir := range cfg.Dirs {
+	for _, dir := range expandCacheRoots(cfg.Dirs) {
 		res.Scanned++
 		if !isGoBuildCacheRoot(dir) {
 			// Covers a missing directory, an unreadable one, and a real
@@ -102,44 +105,101 @@ func trimCanonicalCaches(cfg canonicalCacheConfig) canonicalCacheTrimResult {
 			res.Skipped[dir] = "not a proven Go build cache root"
 			continue
 		}
-		size := g.sizeOf(dir)
-		if size <= cfg.MaxBytes {
-			res.Skipped[dir] = fmt.Sprintf("within budget (%.1f GiB <= %.1f GiB)",
-				gib(size), gib(cfg.MaxBytes))
+		m, ok := measureRemovable(dir, g)
+		if !ok {
+			res.Skipped[dir] = "cache root became unreadable while measuring it"
+			continue
+		}
+		if m.total <= cfg.MaxBytes {
+			res.Skipped[dir] = fmt.Sprintf("within budget (%.1f GiB removable <= %.1f GiB)",
+				gib(m.total), gib(cfg.MaxBytes))
 			continue
 		}
 		if !g.Trim {
-			res.Skipped[dir] = fmt.Sprintf("dry run (%.1f GiB over budget)", gib(size-cfg.MaxBytes))
-			res.BytesReclaimable += size
+			res.Skipped[dir] = fmt.Sprintf("dry run (%.1f GiB over budget)", gib(m.total-cfg.MaxBytes))
+			res.BytesReclaimable += m.total
 			continue
 		}
-		res.BytesReclaimed += trimCacheShards(dir, g, &res)
+		res.BytesReclaimed += trimCacheShards(m, g, &res)
 		res.Trimmed = append(res.Trimmed, dir)
 	}
 	sort.Strings(res.Trimmed)
 	return res
 }
 
-// trimCacheShards removes dir's shard directories and returns the bytes that
-// deletion actually reclaimed. A shard that fails to delete is recorded as an
-// error and contributes nothing: counting an undeleted shard as reclaimed is
-// how a still-full disk gets reported as remediated.
-func trimCacheShards(dir string, g canonicalCacheConfig, res *canonicalCacheTrimResult) int64 {
+// cacheMeasurement is one root measured once.
+//
+// The budget decision, the dry-run reclaimable figure, and the post-deletion
+// accounting all read from this single pass. The trim used to walk the whole
+// root for the budget and then walk every shard again to total the deletion,
+// so a cache of several hundred thousand files paid for two full metadata
+// passes before the first byte came back, during the emergency the trim
+// exists to end.
+type cacheMeasurement struct {
+	root   string
+	shards []string
+	sizes  map[string]int64
+	// total counts only bytes this trim can actually remove. Preserved
+	// furniture, including a fuzz corpus, is not reclaimable, so counting it
+	// toward the budget would let a corpus push an in-budget cache over the
+	// line and wipe newly warmed shards on every breached tick without ever
+	// bringing the measured size down.
+	total int64
+}
+
+// measureRemovable walks each shard of dir exactly once.
+func measureRemovable(dir string, g canonicalCacheConfig) (cacheMeasurement, bool) {
 	shards, _, ok := cacheShards(dir)
 	if !ok {
-		res.Errors[dir] = "cache root became unreadable during the trim"
-		return 0
+		return cacheMeasurement{}, false
 	}
-	var reclaimed int64
+	m := cacheMeasurement{root: dir, shards: shards, sizes: make(map[string]int64, len(shards))}
 	for _, shard := range shards {
 		size := g.sizeOf(shard)
-		if err := g.remove(shard); err != nil {
+		m.sizes[shard] = size
+		m.total += size
+	}
+	return m, true
+}
+
+// trimCacheShards empties each measured shard and returns the bytes deletion
+// actually reclaimed. A shard that fails to empty is recorded as an error and
+// contributes only what the filesystem gave back: counting an undeleted shard
+// as reclaimed is how a still-full disk gets reported as remediated.
+//
+// The shard directories themselves survive. Go creates all 256 once, when it
+// opens the cache, and later writes entries into them without recreating the
+// parent, so removing a shard under a concurrent build turns a cache miss,
+// which this trim is allowed to cause, into an ENOENT that some build paths
+// propagate as a failure. Go's own cache trimming removes entries and keeps
+// the shards.
+func trimCacheShards(m cacheMeasurement, g canonicalCacheConfig, res *canonicalCacheTrimResult) int64 {
+	var reclaimed int64
+	for _, shard := range m.shards {
+		before := m.sizes[shard]
+		if err := emptyShard(shard, g); err != nil {
 			res.Errors[shard] = err.Error()
+			reclaimed += before - g.sizeOf(shard)
 			continue
 		}
-		reclaimed += size
+		reclaimed += before
 	}
 	return reclaimed
+}
+
+// emptyShard removes every entry in shard, leaving the directory itself.
+func emptyShard(shard string, g canonicalCacheConfig) error {
+	entries, err := os.ReadDir(shard)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, e := range entries {
+		if rerr := g.remove(filepath.Join(shard, e.Name())); rerr != nil && firstErr == nil {
+			firstErr = rerr
+		}
+	}
+	return firstErr
 }
 
 func gib(b int64) float64 { return float64(b) / (1 << 30) }
@@ -181,6 +241,14 @@ func defaultGoCacheDirs() string {
 		add(lintCache)
 	} else if err == nil {
 		add(filepath.Join(cacheHome, "golangci-lint"))
+		// scripts/preflight.sh keys the lint cache on the checkout:
+		// ${XDG_CACHE_HOME:-$HOME/.cache}/dear-agent/golangci-lint/<cksum>.
+		// The launchd job sets no GOLANGCI_LINT_CACHE, so without this the
+		// watchdog fell back to ~/.cache/golangci-lint, a path that does not
+		// normally exist on this host, and the caches preflight actually
+		// grows stayed unreachable during disk pressure. This names the
+		// parent; expandCacheRoots finds the per-worktree roots under it.
+		add(filepath.Join(xdgCacheHome(cacheHome), "dear-agent", "golangci-lint"))
 	}
 	return strings.Join(dirs, ",")
 }
@@ -240,4 +308,80 @@ func summarizeCanonicalCacheTrim(res canonicalCacheTrimResult) string {
 		fmt.Fprintf(&b, ", %d error(s)", len(res.Errors))
 	}
 	return b.String()
+}
+
+// goCacheMaxBytes converts a -go-cache-max-gb value into a byte budget.
+//
+// A bare "< 0" check lets NaN and both infinities through, and the
+// float-to-int64 conversion of any of them, or of a finite value larger than
+// math.MaxInt64 bytes, is implementation-defined. On this platform it yields
+// MinInt64, under which every proven cache compares as over budget and is
+// emptied on the next breached tick despite the caller having asked for a
+// nonnegative or effectively unlimited budget.
+func goCacheMaxBytes(gb float64) (int64, error) {
+	switch {
+	case math.IsNaN(gb):
+		return 0, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget must be a number", gb)
+	case math.IsInf(gb, 0):
+		return 0, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget must be finite (pass an empty -go-cache-dirs to disable the trim)", gb)
+	case gb < 0:
+		return 0, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget cannot be negative (pass an empty -go-cache-dirs to disable the trim)", gb)
+	case gb > float64(math.MaxInt64)/supervisor.GiB:
+		return 0, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget does not fit in a byte count", gb)
+	}
+	return int64(gb * supervisor.GiB), nil
+}
+
+// xdgCacheHome returns the base directory preflight resolves its lint cache
+// against. os.UserCacheDir already honours XDG_CACHE_HOME on Linux, but on
+// macOS it returns ~/Library/Caches while the shell expression falls back to
+// ~/.cache, so the two disagree exactly where the cache is written.
+func xdgCacheHome(fallback string) string {
+	if xdg := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); xdg != "" {
+		return xdg
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".cache")
+	}
+	return fallback
+}
+
+// expandCacheRoots resolves each configured path to the cache roots under it.
+//
+// A configured path is usually a cache root itself. It can also be a parent of
+// several, which is how preflight keys its lint cache per checkout, and a
+// parent of cache roots is not itself a proven root: its entries are named
+// directories rather than hex shards, so the structural proof rejects it and
+// every cache beneath it stays unreachable. One level of expansion covers that
+// layout without loosening the proof each root still has to pass.
+func expandCacheRoots(dirs []string) []string {
+	var out []string
+	for _, dir := range dirs {
+		if isGoBuildCacheRoot(dir) {
+			out = append(out, dir)
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			out = append(out, dir)
+			continue
+		}
+		var children []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			child := filepath.Join(dir, e.Name())
+			if isGoBuildCacheRoot(child) {
+				children = append(children, child)
+			}
+		}
+		if len(children) == 0 {
+			out = append(out, dir)
+			continue
+		}
+		out = append(out, children...)
+	}
+	sort.Strings(out)
+	return out
 }

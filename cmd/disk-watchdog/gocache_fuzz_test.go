@@ -65,8 +65,8 @@ func TestTrimCanonicalCachesPreservesFuzzCorpus(t *testing.T) {
 		t.Fatalf("Trimmed = %v, want the cache trimmed; skipped=%v errors=%v",
 			res.Trimmed, res.Skipped, res.Errors)
 	}
-	if n := countShards(t, dir); n != 0 {
-		t.Fatalf("%d shard(s) survived the trim, want 0", n)
+	if n := nonEmptyShards(t, dir); n != 0 {
+		t.Fatalf("%d shard(s) still hold entries after the trim, want 0", n)
 	}
 	if _, err := os.Stat(seed); err != nil {
 		t.Fatalf("fuzz corpus must survive the trim: %v", err)

@@ -394,7 +394,35 @@ func (g buildCacheGates) keepReason(cache string, minAge time.Duration) string {
 	if busy {
 		return "a process holds a file open inside"
 	}
+	if holdsFuzzCorpus(cache) {
+		// This path removes the whole root, not just its hex shards.
+		// Accepting fuzz/ as cache furniture is what made a corpus-bearing
+		// cache eligible here at all, and a corpus is the one thing in a
+		// cache that is not regenerable: those inputs cost fuzzing time to
+		// discover and cannot be rebuilt on demand.
+		return "holds a fuzz corpus, which whole-directory reaping cannot preserve"
+	}
 	return ""
+}
+
+// holdsFuzzCorpus reports whether cache has a non-empty fuzz/ directory.
+//
+// An unreadable fuzz/ counts as holding one: the reap it gates is a recursive
+// delete, so "cannot tell" must keep the directory rather than destroy it.
+func holdsFuzzCorpus(cache string) bool {
+	fuzz := filepath.Join(cache, "fuzz")
+	info, err := os.Lstat(fuzz)
+	if err != nil {
+		return false
+	}
+	if !info.IsDir() {
+		return false
+	}
+	entries, err := os.ReadDir(fuzz)
+	if err != nil {
+		return true
+	}
+	return len(entries) > 0
 }
 
 // dirBytes sums the apparent size of every regular file beneath dir.

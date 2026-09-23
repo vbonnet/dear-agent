@@ -240,10 +240,11 @@ func run(args []string, out io.Writer) (int, error) {
 	if cfg.e2eCacheDir != "" && cfg.e2eCacheMaxEntries < 0 {
 		return 2, fmt.Errorf("invalid -e2e-cache-max-entries %d: must be non-negative", cfg.e2eCacheMaxEntries)
 	}
-	if goCacheMaxGB < 0 {
-		return 2, fmt.Errorf("invalid -go-cache-max-gb %v: the cache budget cannot be negative (pass an empty -go-cache-dirs to disable the trim)", goCacheMaxGB)
+	goCacheBytes, err := goCacheMaxBytes(goCacheMaxGB)
+	if err != nil {
+		return 2, err
 	}
-	cfg.goCacheMaxBytes = int64(goCacheMaxGB * supervisor.GiB)
+	cfg.goCacheMaxBytes = goCacheBytes
 	if cfg.preflightScratchRoots != "" && cfg.preflightScratchMinAge <= 0 {
 		return 2, fmt.Errorf("invalid -preflight-scratch-min-age %s: must be positive (pass an empty -preflight-scratch-roots to disable the reaper)", cfg.preflightScratchMinAge)
 	}
