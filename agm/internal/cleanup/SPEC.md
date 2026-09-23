@@ -21,7 +21,7 @@ hide the rest of the cleanup result.
 
 **CLEANUP-02** When listing worktrees for a session fails, the system shall record the error in the cleanup result.
 
-**CLEANUP-03** When a tracked worktree exists, the system shall request git worktree removal and untrack the worktree record.
+**CLEANUP-03** When a tracked worktree exists and holds no uncommitted or untracked work, the system shall request git worktree removal and untrack the worktree record.
 
 **CLEANUP-04** When a tracked worktree is already absent, the system shall still untrack the worktree record.
 
@@ -44,6 +44,8 @@ hide the rest of the cleanup result.
 **CLEANUP-13** When dry run is enabled, the system shall report removable worktrees without removing them.
 
 **CLEANUP-14** When a tracked worktree was removed or was already absent, the system shall delete only that record's non-empty branch, deduplicate identical repository-and-branch targets, and preserve every inferred session-name branch and every branch whose worktree removal failed.
+
+**CLEANUP-15** When a tracked worktree still holds uncommitted or untracked work, or its status cannot be determined, the system shall keep that worktree, keep its record tracked, preserve its branch, and report the preservation with a reason.
 
 ## BDD Traceability
 

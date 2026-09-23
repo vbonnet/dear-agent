@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,6 +43,9 @@ type mockGitOps struct {
 	// preserveBranches names branches PreserveBranch protects, so a test can
 	// drive the branch-preservation gate without a gh binary or a remote.
 	preserveBranches map[string]bool
+	// preserveWorktrees names worktrees PreserveWorktree protects, so a test
+	// can drive the liveness gate without standing up a dirty repository.
+	preserveWorktrees map[string]bool
 }
 
 func (m *mockGitOps) RemoveWorktree(_, worktreePath string, _ bool) error {
@@ -57,6 +61,15 @@ func (m *mockGitOps) RemoveWorktree(_, worktreePath string, _ bool) error {
 func (m *mockGitOps) PreserveBranch(_, branchName string) (bool, string) {
 	if m.preserveBranches[branchName] {
 		return true, "test fixture preserves this branch"
+	}
+	return false, ""
+}
+
+// PreserveWorktree defaults to allowing removal so existing cases keep their
+// meaning; preserveWorktrees names the worktrees this fake protects.
+func (m *mockGitOps) PreserveWorktree(_, worktreePath string) (bool, string) {
+	if m.preserveWorktrees[worktreePath] {
+		return true, "test fixture preserves this worktree"
 	}
 	return false, ""
 }
@@ -287,5 +300,110 @@ func TestSessionResources_PreservedBranchSurvivesTrackedCleanup(t *testing.T) {
 	}
 	if len(result.BranchesPreserved) != 1 || !strings.Contains(result.BranchesPreserved[0], "keep-me") {
 		t.Errorf("BranchesPreserved = %v, want it to name keep-me", result.BranchesPreserved)
+	}
+}
+
+// A tracked worktree that still holds uncommitted or ignored work must survive
+// session cleanup.
+//
+// SAFEGIT-13 says local recovery state is removed only through sanctioned
+// session cleanup "with explicit ownership and liveness checks". The Stop hook
+// invokes `agm session cleanup` automatically, and its tracked-resource path
+// force-removed every recorded worktree, so the state safe-merge had just
+// stopped deleting was destroyed at session end instead. That postponed the
+// loss rather than preventing it, and made the SPEC promise untrue.
+//
+// A preserved worktree must also stay tracked and keep its branch: untracking
+// it would strand it from the next cleanup, and the branch is the other half
+// of the same recovery state.
+func TestSessionResources_DirtyWorktreeSurvivesTrackedCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	dirty := filepath.Join(tmpDir, "dirty")
+	clean := filepath.Join(tmpDir, "clean")
+	if err := os.MkdirAll(dirty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(clean, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	store := &mockWorktreeStore{
+		worktrees: []WorktreeRecord{
+			{WorktreePath: dirty, RepoPath: "/repo", Branch: "dirty-branch", SessionName: "s"},
+			{WorktreePath: clean, RepoPath: "/repo", Branch: "clean-branch", SessionName: "s"},
+		},
+	}
+	git := &mockGitOps{preserveWorktrees: map[string]bool{dirty: true}}
+
+	result := SessionResources(context.Background(), "s", store, git, slog.Default())
+
+	for _, w := range git.removedWorktrees {
+		if w == dirty {
+			t.Fatal("tracked cleanup removed a worktree the liveness gate protects")
+		}
+	}
+	if len(git.removedWorktrees) != 1 || git.removedWorktrees[0] != clean {
+		t.Errorf("removedWorktrees = %v, want only %s", git.removedWorktrees, clean)
+	}
+	for _, u := range store.untracked {
+		if u == dirty {
+			t.Error("a preserved worktree was untracked, stranding it from the next cleanup")
+		}
+	}
+	for _, b := range git.deletedBranches {
+		if b == "dirty-branch" {
+			t.Error("the branch of a preserved worktree was deleted")
+		}
+	}
+	if result.WorktreesRemoved != 1 {
+		t.Errorf("WorktreesRemoved = %d, want 1", result.WorktreesRemoved)
+	}
+	if len(result.WorktreesPreserved) != 1 || !strings.Contains(result.WorktreesPreserved[0], dirty) {
+		t.Errorf("WorktreesPreserved = %v, want it to name %s", result.WorktreesPreserved, dirty)
+	}
+}
+
+// RealGitOps must answer the liveness question from the filesystem, and must
+// answer "preserve" when it cannot tell. An unreadable or non-repository path
+// is not evidence that there is nothing to lose.
+func TestRealGitOpsPreserveWorktree(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "f"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "f")
+	run("commit", "-qm", "seed")
+
+	if preserve, reason := (RealGitOps{}).PreserveWorktree("/repo", repo); preserve {
+		t.Errorf("clean worktree preserved: %s", reason)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "f"), []byte("b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	preserve, reason := (RealGitOps{}).PreserveWorktree("/repo", repo)
+	if !preserve {
+		t.Error("worktree with uncommitted changes was not preserved")
+	}
+	if reason == "" {
+		t.Error("preservation carried no reason")
+	}
+
+	preserve, reason = (RealGitOps{}).PreserveWorktree("/repo", filepath.Join(repo, "not-a-repo-here"))
+	if !preserve {
+		t.Error("unknown worktree status must preserve, not remove")
+	}
+	if reason == "" {
+		t.Error("preservation carried no reason")
 	}
 }
