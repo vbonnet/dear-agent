@@ -6,6 +6,8 @@ Feature: SKILL and plugin marketplace parity
   AGM should publish one marketplace contract that every active harness can
   consume. Claude Code uses the native plugin marketplace, while Codex CLI, AGY,
   OpenCode and Pi use the harness-neutral catalog with AGENTS.md/SKILL fallback.
+  The Claude-only SPEC-governance source projection is an explicit exception to
+  the shared neutral-to-Claude plugin inventory.
 
   Scenario Outline: Active harnesses have marketplace discovery surfaces
     Given harness "<harness>" is configured
@@ -21,7 +23,7 @@ Feature: SKILL and plugin marketplace parity
       | opencode-cli |
       | pi-cli       |
 
-  Scenario: Claude marketplace mirrors the neutral catalog
+  Scenario: Claude marketplace mirrors shared plugins with its approved exception
     When AGM validates marketplace catalog mirrors
     Then the Claude marketplace should match the neutral marketplace catalog
 
@@ -30,6 +32,8 @@ Feature: SKILL and plugin marketplace parity
     When AGM validates marketplace parity
     Then marketplace plugin "<plugin>" should publish its declared assets
 
+    # SPEC-governance is a Claude-only catalog exception covered by the
+    # deterministic projection contract tests, not this shared-catalog outline.
     Examples:
       | plugin    |
       | agm       |

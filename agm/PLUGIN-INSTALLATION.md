@@ -13,17 +13,23 @@ From a local clone of this repo:
 ./scripts/install-claude-plugins.sh
 ```
 
-This registers the marketplace and installs every plugin it declares (`agm`,
-`wayfinder`, `youtube`, `research-pipeline`). It is idempotent — re-running
-just refreshes the marketplace and updates each plugin to the version declared in
-`marketplace.json`. Restart Claude Code afterward to pick up the new commands.
+This registers the marketplace and bulk-manages the historical four-plugin set:
+`agm`, `wayfinder`, `youtube`, and `research-pipeline`. It is idempotent —
+re-running just refreshes the marketplace and updates those four plugins to the
+versions declared in `marketplace.json`. Restart Claude Code afterward to pick
+up the new commands.
+
+The Claude source catalog also declares a `spec-governance` projection. It is
+deliberately excluded from this script's install, update, and uninstall actions.
+Catalog and source validation do not prove that projection is registered,
+installed, enabled, discovered, invoked, or loaded at runtime.
 
 Common flags:
 
 ```bash
 ./scripts/install-claude-plugins.sh --github     # install from github.com/vbonnet/dear-agent
 ./scripts/install-claude-plugins.sh --dry-run    # preview without changes
-./scripts/install-claude-plugins.sh --uninstall  # remove every dear-agent plugin
+./scripts/install-claude-plugins.sh --uninstall  # remove the four bulk-managed plugins
 ./scripts/install-claude-plugins.sh --scope user # forward --scope to claude plugin install
 ./scripts/install-claude-plugins.sh --help       # full help
 ```
@@ -45,7 +51,7 @@ claude plugin marketplace add vbonnet/dear-agent
 claude plugin install agm@dear-agent wayfinder@dear-agent youtube@dear-agent research-pipeline@dear-agent
 ```
 
-## Available plugins
+## Bulk-installed plugins
 
 After install, the following are exposed:
 
