@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,6 +89,9 @@ Examples:
 		for _, s := range result.ToArchive {
 			applied, reason, err := applyCleanupSelection(cmd.Context(), adapter, s,
 				cleanupArchive, uiCfg.Defaults.CleanupThresholdDays, strictTmux)
+			if cleanupCanceled(cmd.Context(), err) {
+				return cleanupCancellation(cmd.Context(), err, archived, deleted)
+			}
 			if err != nil {
 				ui.PrintWarning(fmt.Sprintf("Failed to archive %s: %v", s.Name, err))
 			} else if !applied {
@@ -102,6 +106,9 @@ Examples:
 		for _, s := range result.ToDelete {
 			applied, reason, err := applyCleanupSelection(cmd.Context(), adapter, s,
 				cleanupDelete, uiCfg.Defaults.ArchiveThresholdDays, strictTmux)
+			if cleanupCanceled(cmd.Context(), err) {
+				return cleanupCancellation(cmd.Context(), err, archived, deleted)
+			}
 			if err != nil {
 				ui.PrintWarning(fmt.Sprintf("Failed to delete %s: %v", s.Name, err))
 			} else if !applied {
@@ -117,6 +124,32 @@ Examples:
 		ui.PrintSuccess(fmt.Sprintf("Cleanup complete: %d archived, %d deleted", archived, deleted))
 		return nil
 	},
+}
+
+// cleanupCanceled reports whether the batch was interrupted rather than
+// hitting a per-item problem.
+//
+// SIGINT and SIGTERM cancel the root command context, and applyCleanupSelection
+// surfaces that as an ordinary error. Treating it as a per-item warning let
+// both loops run to completion and RunE print "Cleanup complete" and return
+// nil, so an interrupted batch exited successfully while silently leaving
+// every remaining selection untouched.
+func cleanupCanceled(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
+// cleanupCancellation reports what the interrupted batch did manage to do, and
+// returns a non-nil error so the command's exit status says it did not finish.
+func cleanupCancellation(ctx context.Context, err error, archived, deleted int) error {
+	cause := err
+	if cause == nil {
+		cause = ctx.Err()
+	}
+	ui.PrintWarning(fmt.Sprintf(
+		"Cleanup interrupted after %d archived and %d deleted; remaining selections were not touched",
+		archived, deleted))
+	return fmt.Errorf("cleanup canceled: %w", cause)
 }
 
 type cleanupAction uint8

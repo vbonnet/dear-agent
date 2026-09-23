@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,5 +253,38 @@ func TestCleanupSelection_LockReloadRejectsChangeDuringPrompt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "sentinel")); err != nil {
 		t.Fatalf("session directory changed: %v", err)
+	}
+}
+
+// A canceled batch must not report success.
+//
+// SIGINT and SIGTERM cancel the root command context, and
+// applyCleanupSelection surfaces that as an ordinary error. While both loops
+// treated it as a per-item warning, they ran to completion and the command
+// printed "Cleanup complete" and returned nil, so an interrupted batch exited
+// successfully while silently leaving every remaining selection untouched.
+func TestCleanupCanceledIsNotAPerItemWarning(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if !cleanupCanceled(canceled, nil) {
+		t.Error("a canceled context alone must count as cancellation")
+	}
+	if !cleanupCanceled(context.Background(), context.Canceled) {
+		t.Error("a wrapped context.Canceled must count as cancellation")
+	}
+	if !cleanupCanceled(context.Background(), fmt.Errorf("lock: %w", context.DeadlineExceeded)) {
+		t.Error("a wrapped deadline error must count as cancellation")
+	}
+	if cleanupCanceled(context.Background(), errors.New("reload session: no such row")) {
+		t.Error("an ordinary per-item failure must not count as cancellation")
+	}
+
+	err := cleanupCancellation(canceled, nil, 2, 1)
+	if err == nil {
+		t.Fatal("an interrupted batch must return a non-nil error so the exit status says so")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cleanupCancellation() = %v, want it to wrap the cancellation cause", err)
 	}
 }

@@ -323,8 +323,15 @@ func (a *Adapter) DetachChild(sessionID string) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	query := `UPDATE agm_sessions SET parent_session_id = NULL WHERE id = ? AND workspace = ?`
-	result, err := a.conn.Exec(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
+	// updated_at advances with the detach, exactly as it does when
+	// LinkSessionParent attaches one. Every revalidation that asks whether a
+	// session changed since it was snapshotted compares updated_at, and
+	// GetSession deliberately omits parent_session_id pending migration 007,
+	// so a detach that left the timestamp alone was invisible on both sides of
+	// that comparison. A child detached while a confirmation prompt was open
+	// then looked unchanged and cleanup archived or deleted it.
+	query := `UPDATE agm_sessions SET parent_session_id = NULL, updated_at = ? WHERE id = ? AND workspace = ?`
+	result, err := a.conn.Exec(query, time.Now(), sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to detach child session %s: %w", sessionID, err)
 	}
