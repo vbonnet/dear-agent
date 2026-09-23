@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // mockWorktreeStore implements WorktreeStore for testing.
@@ -368,21 +369,12 @@ func TestSessionResources_DirtyWorktreeSurvivesTrackedCleanup(t *testing.T) {
 // is not evidence that there is nothing to lose.
 func TestRealGitOpsPreserveWorktree(t *testing.T) {
 	repo := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	run("init", "-q")
-	run("config", "user.email", "t@example.com")
-	run("config", "user.name", "t")
+	gittest.InitRepo(t, repo)
 	if err := os.WriteFile(filepath.Join(repo, "f"), []byte("a\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run("add", "f")
-	run("commit", "-qm", "seed")
+	gittest.Run(t, repo, "add", "f")
+	gittest.Run(t, repo, "commit", "-qm", "seed")
 
 	if preserve, reason := (RealGitOps{}).PreserveWorktree("/repo", repo); preserve {
 		t.Errorf("clean worktree preserved: %s", reason)
