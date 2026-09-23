@@ -98,27 +98,38 @@ esac
 
 # Repair state directories left non-searchable by the former alarm umask. A
 # subshell gives each recursive call private variables in POSIX sh.
+# The second argument asks for write access, and only the caller's own
+# directory gets it. Ancestors need search alone.
+#
+# Requiring write on every ancestor reaches "/" on any absolute path. An
+# unprivileged chmod on "/" fails on Linux and [ -w / ] is false, so the whole
+# chain refused and the guard could neither record nor clear an alarm. macOS
+# hides that: chmod there returns 0 when the requested bits are already set,
+# so the fallback is never reached and the defect is invisible on this host.
 ensure_searchable_dir() (
 	dir=$1
+	need_write=${2:-0}
 	parent=$(dirname "$dir")
 	if [ "$parent" != "$dir" ]; then
-		ensure_searchable_dir "$parent" || return 1
+		ensure_searchable_dir "$parent" 0 || return 1
 	fi
 	# Never repair through a link to a target outside the lexical state tree.
 	# chmod u+wx enforces the owner bits when permitted; the fallback accepts an
 	# already-traversable non-owned ancestor. test -x alone is insufficient
 	# because root reports effective access for mode-0600 directories.
 	#
-	# Write matters as much as search. With u+x alone a mode-0500 state tree
-	# stayed unwritable, so the trail record and the notification both went out
-	# and persist_alarm_marker then failed: no marker existed, and every later
-	# degraded tick redelivered the alert. A directory this function creates is
-	# already 0700, so repairing an existing one to match is consistent rather
-	# than a widening.
+	# Write matters where the marker is written. With u+x alone a mode-0500
+	# state tree stayed unwritable, so the trail record and the notification
+	# both went out and persist_alarm_marker then failed: no marker existed,
+	# and every later degraded tick redelivered the alert. A directory this
+	# function creates is already 0700, so repairing the marker's own
+	# directory to match is consistent rather than a widening.
 	if [ -L "$dir" ]; then
 		return 1
-	elif [ -d "$dir" ]; then
+	elif [ -d "$dir" ] && [ "$need_write" = 1 ]; then
 		chmod u+wx "$dir" 2>/dev/null || { [ -x "$dir" ] && [ -w "$dir" ]; }
+	elif [ -d "$dir" ]; then
+		chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
 	elif [ -e "$dir" ]; then
 		return 1
 	else
@@ -167,13 +178,19 @@ is_alarm_marker() {
 	./*) _d="$(pwd -P)/${_d#./}" ;;
 	*) _d="$(pwd -P)/$_d" ;;
 	esac
-	_d=$(lexical_path "$_d")
-	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]
+	# Resolve the RAW directory and compare it against the LEXICAL collapse of
+	# that same raw directory. Collapsing first and then resolving erased a
+	# symlink whenever ".." cancelled it: "<state>/holder/link/.." became
+	# "<state>/holder", which resolves to itself, so the guard accepted a
+	# marker that actually lives wherever the link pointed. The healthy branch
+	# then deleted that file, outside the tree the configured path names.
+	_l=$(lexical_path "$_d")
+	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_l" ]
 }
 
 persist_alarm_marker() (
 	marker_path=$1
-	ensure_searchable_dir "$(dirname "$marker_path")" || return 1
+	ensure_searchable_dir "$(dirname "$marker_path")" 1 || return 1
 	# Reject every existing leaf before redirection so FIFOs and devices are
 	# never opened. Noclobber also rejects a regular file or link inserted after
 	# this serialized check; ce-1hu9.108 owns broader concurrent replacement.

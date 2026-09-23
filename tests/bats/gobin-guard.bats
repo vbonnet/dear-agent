@@ -605,3 +605,58 @@ EOF
 	[ -f "$guard_alarm" ]
 	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
 }
+
+# Ancestors must need search access only, never write.
+#
+# Requiring write on every ancestor reaches "/" on any absolute path. An
+# unprivileged chmod on "/" fails on Linux and `[ -w / ]` is false, so the
+# whole chain refused and the guard could neither record nor clear an alarm.
+# macOS hides that, because chmod there returns 0 when the requested bits are
+# already set, so a host-only test passes while Linux is broken.
+#
+# The stub makes chmod always fail, which is what an unowned ancestor looks
+# like, so the fallback is the thing under test on every platform.
+@test "a searchable but unwritable ancestor does not block the marker" {
+	cat >"$MOCK_BIN/chmod" <<'STUB'
+#!/bin/sh
+exit 1
+STUB
+	chmod +x "$MOCK_BIN/chmod"
+
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state"
+	# An ancestor we can traverse but not write, as "/" and "/Users" are.
+	chmod 0555 "$FAKE_HOME/.local"
+	# The marker's own directory stays writable; that is where write is needed.
+	chmod 0700 "$state"
+
+	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" \
+		GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$state/guard-alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+
+	chmod 0755 "$FAKE_HOME/.local"
+	[ -f "$state/guard-alarm" ]
+}
+
+# The reviewer's exact fixture: a `..` that cancels a symlink, with a real
+# file already sitting at the lexically collapsed location. The healthy path
+# clears the marker it recognizes, so if the guard accepted this path it would
+# delete a file outside the tree the configured path actually names.
+@test "healthy status does not delete a file reached by cancelling a symlink" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/real" "$state/holder"
+	ln -s "$state/real" "$state/holder/link"
+	printf 'do not delete me\n' >"$state/alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_ALARM_STATE="$state/holder/link/../alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	assert_equal "$(cat "$state/alarm")" "do not delete me"
+}

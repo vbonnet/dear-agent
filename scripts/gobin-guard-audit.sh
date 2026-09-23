@@ -1,11 +1,15 @@
 #!/bin/sh
 # Independent freshness audit for gobin-guard.sh; invoked by its own launchd job.
 set -eu
+# Second argument asks for write access; only the marker's own directory gets
+# it. See scripts/gobin-guard.sh for why ancestors must not require write.
 ensure_searchable_dir() (
-  dir=$1; parent=$(dirname "$dir")
-  [ "$parent" = "$dir" ] || ensure_searchable_dir "$parent" || return 1
+  dir=$1; need_write=${2:-0}; parent=$(dirname "$dir")
+  [ "$parent" = "$dir" ] || ensure_searchable_dir "$parent" 0 || return 1
   if [ -L "$dir" ]; then
     return 1
+  elif [ -d "$dir" ] && [ "$need_write" = 1 ]; then
+    chmod u+wx "$dir" 2>/dev/null || { [ -x "$dir" ] && [ -w "$dir" ]; }
   elif [ -d "$dir" ]; then
     chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
   elif [ -e "$dir" ]; then
@@ -49,11 +53,17 @@ is_alarm_marker() {
 	./*) _d="$(pwd -P)/${_d#./}" ;;
 	*) _d="$(pwd -P)/$_d" ;;
 	esac
-	_d=$(lexical_path "$_d")
-	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_d" ]
+	# Resolve the RAW directory and compare it against the LEXICAL collapse of
+	# that same raw directory. Collapsing first and then resolving erased a
+	# symlink whenever ".." cancelled it: "<state>/holder/link/.." became
+	# "<state>/holder", which resolves to itself, so the guard accepted a
+	# marker that actually lives wherever the link pointed. The healthy branch
+	# then deleted that file, outside the tree the configured path names.
+	_l=$(lexical_path "$_d")
+	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_l" ]
 }
 persist_alarm_marker() (
-  marker=$1; ensure_searchable_dir "$(dirname "$marker")" || return 1
+  marker=$1; ensure_searchable_dir "$(dirname "$marker")" 1 || return 1
   [ ! -e "$marker" ] && [ ! -L "$marker" ] || return 1
   set -C; umask 0077; : >"$marker"
 )
