@@ -140,6 +140,31 @@ func TestLaunchdCadenceDoesNotForceRefresh(t *testing.T) {
 	}
 }
 
+func TestLaunchdCadenceUsesDedicatedAuditEvidence(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "launchd", "com.dear-agent.token-refresher.plist"))
+	if err != nil {
+		t.Fatalf("read launchd template: %v", err)
+	}
+	auditPath := plistArgAfter(t, string(data), "-audit-log")
+	want := "__HOME__/.local/state/dear-agent/token-refresher-cadence-audit.jsonl"
+	if auditPath != want {
+		t.Fatalf("launchd -audit-log = %q, want cadence-only path %q", auditPath, want)
+	}
+	t.Setenv("HOME", t.TempDir())
+	installedCadencePath := strings.Replace(auditPath, "__HOME__", os.Getenv("HOME"), 1)
+	manualDefault := defaultAuditPath()
+	if filepath.Clean(installedCadencePath) == filepath.Clean(manualDefault) {
+		t.Fatal("launchd cadence shares the ordinary CLI default audit path")
+	}
+	writeAudit(manualDefault, auditRecord{Mode: "check", Outcome: "ok"})
+	if _, err := os.Stat(manualDefault); err != nil {
+		t.Fatalf("ordinary default audit write: %v", err)
+	}
+	if _, err := os.Stat(installedCadencePath); !os.IsNotExist(err) {
+		t.Fatalf("ordinary default audit write touched cadence evidence: %v", err)
+	}
+}
+
 // TestLaunchdExpirySkewExceedsStartInterval pins the invariant that actually
 // keeps the credentials file valid. Dropping -force stopped the 30-minute
 // rotations, but the resolver's default skew is 60s while the job only looks

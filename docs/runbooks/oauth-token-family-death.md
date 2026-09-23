@@ -126,10 +126,23 @@ usually needed.
 
 ## Identifying the culprit
 
-Every audit line in `~/.local/state/dear-agent/token-refresher-audit.jsonl`
-carries `refresh_token_fp` (a short SHA-256 prefix of the refresh token that was
-on disk when the tick started) and `credentials_mtime`. Compare the lines around
-a `token_family_dead` outcome:
+The audit trail is split across two files, and you need both:
+
+- `~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl` holds the
+  records written by the scheduled launchd job (`-cadence`). This is where the
+  regular ticks live.
+- `~/.local/state/dear-agent/token-refresher-audit.jsonl` holds every other
+  invocation: manual `-check`, `-force`, `-ensure`, and anything run by hand.
+
+The split is deliberate. It is what lets `token-refresher-tick` prove the
+scheduled job is alive without a manual run refreshing the file's mtime on its
+behalf. It also means that grepping only the general file during an incident
+omits the scheduled records and can produce a wrong fingerprint diagnosis.
+
+Every audit line in either file carries `refresh_token_fp` (a short SHA-256
+prefix of the refresh token that was on disk when the tick started) and
+`credentials_mtime`. Compare the lines around a `token_family_dead` outcome,
+merging both files in time order:
 
 - **Fingerprint CHANGED between our ticks while `refreshed` was false** — another
   client on this host rotated the token and wrote the new one back. That client
@@ -142,7 +155,20 @@ a `token_family_dead` outcome:
 Check it with:
 
 ```sh
-grep -E 'token_family_dead|"refreshed":true' ~/.local/state/dear-agent/token-refresher-audit.jsonl | tail -20
+# Both files, merged in timestamp order. Dropping either one can hide the tick
+# that actually spent the token.
+cat ~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl \
+    ~/.local/state/dear-agent/token-refresher-audit.jsonl 2>/dev/null \
+  | jq -c 'select(.outcome == "token_family_dead" or .refreshed == true)' \
+  | jq -s -c 'sort_by(.timestamp) | .[]' \
+  | tail -20
+```
+
+If you only care about whether the scheduled job is ticking at all, read the
+cadence file alone:
+
+```sh
+tail -5 ~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl
 ```
 
 ## Recovery
