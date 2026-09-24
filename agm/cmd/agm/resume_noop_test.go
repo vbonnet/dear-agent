@@ -40,7 +40,7 @@ func TestPerformResume_RejectsArchivedSession(t *testing.T) {
 		t.Fatalf("failed to read seeded session: %v", err)
 	}
 
-	err = performResume(context.Background(), adapter, m)
+	err = performResume(context.Background(), adapter, m.SessionID)
 	if err == nil {
 		t.Fatal("performResume returned nil for an archived session — resume logic is a no-op (regression: ce-6as.35)")
 	}

@@ -14,34 +14,49 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
+func testCadenceCredentials(t *testing.T) (string, string) {
+	t.Helper()
+	path := credsWithRefreshToken(t, "rt-cadence-fixture")
+	fingerprint, _ := credentialsFingerprint(path)
+	if fingerprint == "" {
+		t.Fatal("synthetic credentials fingerprint is empty")
+	}
+	return path, fingerprint
+}
+
 // The bug this guards: after the family died, the launchd job exited 2 every
 // 30 minutes until launchd throttled it off the schedule entirely, so nothing
 // refreshed the credentials even after the operator re-authenticated.
 func TestCadenceExit_TokenFamilyDeathReportsSuccess(t *testing.T) {
 	dir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
+	notifications := testNotificationLog(t)
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitOK {
+	if got := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge); got != exitOK {
 		t.Errorf("cadenceExit(family dead) = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(dir, deathSentinelName)); err != nil {
 		t.Errorf("expected a death sentinel to be written: %v", err)
 	}
+	assertNotificationCount(t, notifications, 1)
 }
 
 // The operator should be alerted once per episode, not every 30 minutes.
 func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 	dir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
+	notifications := testNotificationLog(t)
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge)
 	first, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge)
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
@@ -50,11 +65,14 @@ func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 	if string(first) != string(second) {
 		t.Error("sentinel rewritten on the second tick: the operator would be re-alerted every 30 minutes")
 	}
+	assertNotificationCount(t, notifications, 1)
 }
 
 func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 	dir := t.TempDir()
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "", "dead", "test title", "test message")
+	creds, fp := testCadenceCredentials(t)
+	notifications := testNotificationLog(t)
+	notifyCadenceOnce(dir, deathSentinelName, "", creds, fp, "dead", "test title", "test message")
 
 	sentinel := filepath.Join(dir, deathSentinelName)
 	first, err := os.ReadFile(sentinel)
@@ -62,7 +80,7 @@ func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	notifyCadenceOnce(dir, deathSentinelName, "", "", "", "dead", "test title", "test message")
+	notifyCadenceOnce(dir, deathSentinelName, "", creds, fp, "dead", "test title", "test message")
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel after second alert: %v", err)
@@ -70,20 +88,25 @@ func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
 	if string(first) != string(second) {
 		t.Error("non-standard cadence alert rewrote its sentinel on the second tick")
 	}
+	assertNotificationCount(t, notifications, 1)
 }
 
 // A successful refresh must re-arm the alert so the NEXT death notifies again.
 func TestCadenceExit_SuccessClearsSentinel(t *testing.T) {
 	dir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
+	notifications := testNotificationLog(t)
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
-	cadenceExit(exitOK, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge)
+	cadenceExit(exitOK, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge)
 
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Error("sentinel survived a successful refresh: the next death would be silent")
 	}
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge)
+	assertNotificationCount(t, notifications, 2)
 }
 
 func TestClearCadenceSentinel(t *testing.T) {
@@ -123,12 +146,13 @@ func TestCadenceStopPersistsBesideCredentialsAndRearmsExplicitly(t *testing.T) {
 // Only the dead-family code is flattened; other failures still surface.
 func TestCadenceExit_PassesThroughOtherFailures(t *testing.T) {
 	dir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitNotPersisted, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitNotPersisted {
+	if got := cadenceExit(exitNotPersisted, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge); got != exitNotPersisted {
 		t.Errorf("cadenceExit(not persisted) = %d, want %d", got, exitNotPersisted)
 	}
-	if got := cadenceExit(exitError, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge); got != exitError {
+	if got := cadenceExit(exitError, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge); got != exitError {
 		t.Errorf("cadenceExit(generic error) = %d, want %d", got, exitError)
 	}
 }
@@ -295,6 +319,7 @@ func TestPruneCadenceSentinels_IgnoresInvalidSentinelNames(t *testing.T) {
 
 func TestCadenceExit_PrunesStaleSentinels(t *testing.T) {
 	dir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
 	now := time.Now()
 
 	stale := filepath.Join(dir, deathSentinelName+"-0123456789abcdef")
@@ -304,7 +329,7 @@ func TestCadenceExit_PrunesStaleSentinels(t *testing.T) {
 	_ = os.Chtimes(stale, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
 	var stderr bytes.Buffer
-	cadenceExit(exitOK, dir, deathSentinelName, "", "", "", &stderr, 24*time.Hour)
+	cadenceExit(exitOK, dir, deathSentinelName, "", creds, fp, &stderr, 24*time.Hour)
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale sentinel survived cadenceExit")
@@ -573,6 +598,7 @@ func TestPruneCadenceSentinels_SkipsTempAndSystemRoot(t *testing.T) {
 
 func TestNotifyCadenceOnce_NewEpisodeAlertsWhenTokenFingerprintRotates(t *testing.T) {
 	stateDir := t.TempDir()
+	notifications := testNotificationLog(t)
 	sentinel := filepath.Join(stateDir, deathSentinelName)
 	credsPath := credsWithRefreshToken(t, "rt-first")
 	fpFirst, _ := credentialsFingerprint(credsPath)
@@ -603,6 +629,7 @@ func TestNotifyCadenceOnce_NewEpisodeAlertsWhenTokenFingerprintRotates(t *testin
 	if !strings.Contains(string(data2), fpSecond) {
 		t.Fatalf("sentinel not updated with new episode fingerprint %q: %s", fpSecond, string(data2))
 	}
+	assertNotificationCount(t, notifications, 2)
 }
 
 func TestIsActiveSentinel_ExpiredEpisodeWithRotatedFingerprintReturnsFalse(t *testing.T) {
@@ -651,6 +678,7 @@ func TestDefaultStateDir_ScopedPerUserFallback(t *testing.T) {
 
 func TestCadenceExit_UnrelatedErrorPrunesStaleExpiredSentinel(t *testing.T) {
 	dir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
 	now := time.Now()
 	var stderr bytes.Buffer
 
@@ -660,7 +688,7 @@ func TestCadenceExit_UnrelatedErrorPrunesStaleExpiredSentinel(t *testing.T) {
 	}
 	_ = os.Chtimes(staleSentinel, now.Add(-48*time.Hour), now.Add(-48*time.Hour))
 
-	got := cadenceExit(exitError, dir, deathSentinelName, "", "", "", &stderr, defaultSentinelMaxAge)
+	got := cadenceExit(exitError, dir, deathSentinelName, "", creds, fp, &stderr, defaultSentinelMaxAge)
 	if got != exitError {
 		t.Fatalf("cadenceExit = %d, want %d", got, exitError)
 	}
@@ -672,12 +700,13 @@ func TestCadenceExit_UnrelatedErrorPrunesStaleExpiredSentinel(t *testing.T) {
 
 func TestNotifyCadenceOnce_SkipsNonRegularFile(t *testing.T) {
 	dir := t.TempDir()
+	creds, fp := testCadenceCredentials(t)
 	fifoPath := filepath.Join(dir, "cadence-fifo")
 	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
 		t.Skipf("cannot make FIFO on this platform: %v", err)
 	}
 
-	notifyCadenceOnce(dir, "cadence-fifo", "", "", "", "dead", "title", "message")
+	notifyCadenceOnce(dir, "cadence-fifo", "", creds, fp, "dead", "title", "message")
 
 	info, err := os.Lstat(fifoPath)
 	if err != nil {

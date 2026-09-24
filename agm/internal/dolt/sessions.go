@@ -958,9 +958,85 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	query := `DELETE FROM agm_sessions WHERE id = ? AND workspace = ?`
+	// Migration 007 declares ON DELETE SET NULL, so deleting a parent detaches
+	// its children without going through DetachChild and therefore without
+	// advancing their updated_at. GetSession also omits parent_session_id, so
+	// a caller comparing two manifest snapshots would see no change at all and
+	// could archive or remove a child whose hierarchy moved underneath it.
+	//
+	// Versioning and deleting share one transaction. Done as two statements, a
+	// LinkSessionParent committing between them attaches a child that the
+	// cascade then detaches unversioned, which is the same defect one race
+	// narrower.
+	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
+	if err != nil {
+		return fmt.Errorf("failed to begin delete of session %s: %w", sessionID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
-	result, err := a.conn.Exec(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
+	// Scope, stated because the transaction does not establish more: this
+	// versions every child the SELECT observes. It is a plain read, the
+	// adapter does not run serializably, and LinkSessionParent shares no lock
+	// with it, so a child attached by another client between this read and
+	// the DELETE below is detached by the cascade without being versioned.
+	// Closing that needs range locking or serializable isolation across both
+	// operations, which is a change to how this adapter transacts rather than
+	// to this function. DOLTR-15 records the boundary.
+	//
+	// Each child gets its own rotated revision, not just a new timestamp:
+	// updated_at is a bare TIMESTAMP and collides within a second. Rows are
+	// listed and updated individually because generating a distinct UUID per
+	// row in one statement is not portable across Dolt and the SQLite adapter
+	// the tests use. Child counts are small and this is already inside the
+	// transaction.
+	rows, err := tx.Query( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT id FROM agm_sessions WHERE parent_session_id = ? AND workspace = ?`,
+		sessionID, a.workspace)
+	if err != nil {
+		return fmt.Errorf("failed to list children of session %s before delete: %w", sessionID, err)
+	}
+	var children []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("failed to scan child of session %s: %w", sessionID, err)
+		}
+		children = append(children, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("failed to read children of session %s: %w", sessionID, err)
+	}
+	rows.Close()
+
+	for _, child := range children {
+		// Detach EXPLICITLY rather than relying on the foreign key. Migration
+		// 007 declares ON DELETE SET NULL, but sqliteSessionSchema declares
+		// parent_session_id as a plain column with no foreign key, so the
+		// cascade never runs on the SQLite adapter: children kept pointing at
+		// a row that no longer exists, GetChildren still returned them, and
+		// GetParent resolved to nothing. Doing it here makes both backends
+		// behave the same and stops the tests from exercising a code path
+		// production does not take.
+		// The predicate still names the parent being deleted. Matching on the
+		// child id alone would null out a relationship established after the
+		// SELECT: a concurrent LinkSessionParent moving the child to another
+		// parent would report success and then be silently discarded here.
+		// Moving a child away wins over deleting its former parent, and a row
+		// that no longer matches is left entirely alone, revision included.
+		if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+			`UPDATE agm_sessions SET parent_session_id = NULL, updated_at = ?, tmux_session_revision = ?
+			 WHERE id = ? AND workspace = ? AND parent_session_id = ?`,
+			time.Now(), uuid.NewString(), child, a.workspace, sessionID,
+		); err != nil {
+			return fmt.Errorf("failed to version child %s of session %s before delete: %w",
+				child, sessionID, err)
+		}
+	}
+
+	result, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`DELETE FROM agm_sessions WHERE id = ? AND workspace = ?`, sessionID, a.workspace)
 	if err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
@@ -972,6 +1048,10 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 
 	if rowsAffected == 0 {
 		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delete of session %s: %w", sessionID, err)
 	}
 
 	return nil

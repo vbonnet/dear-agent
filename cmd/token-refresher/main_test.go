@@ -279,8 +279,10 @@ func TestRun_CheckModeReportsStatusNoNetwork(t *testing.T) {
 }
 
 func TestRun_NegativeSentinelMaxAgeRejects(t *testing.T) {
+	creds, _ := testCadenceCredentials(t)
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-sentinel-max-age", "-1s"}, &stdout, &stderr)
+	code := run([]string{"-sentinel-max-age", "-1s", "-credentials", creds,
+		"-audit-log", "", "-state-dir", t.TempDir()}, &stdout, &stderr)
 	if code != exitError {
 		t.Fatalf("exit = %d, want %d", code, exitError)
 	}
@@ -380,6 +382,7 @@ func TestClearRefreshProtectionsCommand_ShellQuotesMetacharacters(t *testing.T) 
 }
 
 func TestRun_CadenceRejectsInsecureFallbackStateDir(t *testing.T) {
+	creds, _ := testCadenceCredentials(t)
 	insecureDir := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-%d-insecure-main-%d", os.Getuid(), time.Now().UnixNano()))
 	if err := os.Mkdir(insecureDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -390,7 +393,8 @@ func TestRun_CadenceRejectsInsecureFallbackStateDir(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-cadence", "-state-dir", insecureDir}, &stdout, &stderr)
+	code := run([]string{"-cadence", "-credentials", creds, "-state-dir", insecureDir,
+		"-audit-log", ""}, &stdout, &stderr)
 	if code != exitError {
 		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
 	}
@@ -400,9 +404,11 @@ func TestRun_CadenceRejectsInsecureFallbackStateDir(t *testing.T) {
 }
 
 func TestRun_CheckAndCadenceMutuallyExclusive(t *testing.T) {
+	creds, _ := testCadenceCredentials(t)
 	var stdout, stderr bytes.Buffer
 	nonExistentStateDir := filepath.Join(os.TempDir(), fmt.Sprintf("dear-agent-sideeffect-%d", time.Now().UnixNano()))
-	code := run([]string{"-check", "-cadence", "-state-dir", nonExistentStateDir}, &stdout, &stderr)
+	code := run([]string{"-check", "-cadence", "-credentials", creds, "-state-dir", nonExistentStateDir,
+		"-audit-log", ""}, &stdout, &stderr)
 	if code != exitError {
 		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
 	}
@@ -415,6 +421,7 @@ func TestRun_CheckAndCadenceMutuallyExclusive(t *testing.T) {
 }
 
 func TestRun_CadenceRejectsReadOnlyStateDir(t *testing.T) {
+	creds, _ := testCadenceCredentials(t)
 	if os.Getuid() == 0 {
 		t.Skip("skipping chmod-based write denial test when running as root")
 	}
@@ -427,7 +434,8 @@ func TestRun_CadenceRejectsReadOnlyStateDir(t *testing.T) {
 	}()
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-cadence", "-state-dir", roDir}, &stdout, &stderr)
+	code := run([]string{"-cadence", "-credentials", creds, "-state-dir", roDir,
+		"-audit-log", ""}, &stdout, &stderr)
 	if code != exitError {
 		t.Errorf("expected exitError (%d), got %d; stderr: %s", exitError, code, stderr.String())
 	}
@@ -469,6 +477,7 @@ func TestRun_CadenceFingerprintsUnderLockAttemptedToken(t *testing.T) {
 			"-force",
 			"-credentials", credPath,
 			"-state-dir", stateDir,
+			"-audit-log", filepath.Join(stateDir, "audit.jsonl"),
 			"-quarantine", quarPath,
 			"-endpoint", server.URL,
 		}, &stdout, &stderr)
