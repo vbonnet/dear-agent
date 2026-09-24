@@ -902,10 +902,12 @@ func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 		"merge":               false,
 		"--squash":            false,
 		"--auto":              false,
-		"--delete-branch":     false,
 		"--match-head-commit": false,
 	}
 	for _, a := range args {
+		if a == "--delete-branch" {
+			t.Fatal("BuildMergeArgs must preserve local and remote recovery refs")
+		}
 		if _, ok := required[a]; ok {
 			required[a] = true
 		}
