@@ -128,6 +128,12 @@ var ModelAliases = map[string]string{
 	"opus":   "claude-opus-4-8",
 	"sonnet": "claude-sonnet-4-5@20250929",
 	"haiku":  "claude-3-5-haiku-20241022",
+	// agm/internal/agent/models.go advertises both of these as public
+	// spellings of gpt-6-astra. Without them here a caller that kept the
+	// alias missed the rate row entirely and was billed at zero, which is
+	// the failure registering the model was meant to prevent.
+	"astra":   "gpt-6-astra",
+	"6-astra": "gpt-6-astra",
 }
 
 // PricingTable maps model IDs to pricing

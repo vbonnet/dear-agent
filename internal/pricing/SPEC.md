@@ -28,7 +28,7 @@ other model families.
 
 **PRICING-08** When OpenRouter model-family defaults are selected, the system shall use the provider's current canonical model slug rather than an unverified shorthand identifier.
 
-**PRICING-09** When a model identifier shares no substring with any existing rate row, the system shall carry its own row rather than resolving to `UnknownModel`, so a new generation cannot price at zero.
+**PRICING-09** When a model identifier is registered for fleet routing and shares no substring with any existing rate row, the system shall carry its own row rather than resolving to `UnknownModel`, so a new generation cannot price at zero. An identifier that is not registered remains subject to PRICING-03 and PRICING-05.
 
 **PRICING-10** When a model's rate is recorded, the system shall store the rate-card source and the as-of date the rate was read from that source.
 
