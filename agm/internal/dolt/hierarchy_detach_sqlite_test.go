@@ -181,3 +181,66 @@ func TestDeleteSessionVersionsDetachedChildren(t *testing.T) {
 		t.Error("an unrelated session was versioned by the delete")
 	}
 }
+
+// A child reparented away before the delete keeps its new parent.
+//
+// The detach predicate must still name the parent being deleted. Matching on
+// the child id alone nulled out a relationship established after the SELECT,
+// so a concurrent LinkSessionParent could report success and then be silently
+// discarded. Moving a child away wins over deleting its former parent.
+func TestDeleteSessionLeavesReparentedChildAlone(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	newSession := func(id string) *manifest.Manifest {
+		return &manifest.Manifest{
+			SchemaVersion: manifest.SchemaVersion,
+			SessionID:     id,
+			Name:          id,
+			Harness:       "claude-code",
+			CreatedAt:     time.Now().Add(-time.Hour),
+			UpdatedAt:     time.Now().Add(-time.Hour),
+			Context:       manifest.Context{Project: t.TempDir()},
+			Tmux:          manifest.Tmux{SessionName: id},
+		}
+	}
+	oldParent := newSession("reparent-old")
+	newParent := newSession("reparent-new")
+	child := newSession("reparent-child")
+	for _, m := range []*manifest.Manifest{oldParent, newParent, child} {
+		if err := adapter.CreateSession(m); err != nil {
+			t.Fatalf("CreateSession(%s) error: %v", m.SessionID, err)
+		}
+	}
+	if err := adapter.LinkSessionParent(context.Background(),
+		child.SessionID, "", oldParent.SessionID, nil); err != nil {
+		t.Fatalf("LinkSessionParent(old) error: %v", err)
+	}
+	// The child moves away before the old parent is deleted, which is the
+	// race the predicate has to survive.
+	moved, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.LinkSessionParent(context.Background(),
+		child.SessionID, moved.Tmux.SessionRevision, newParent.SessionID, nil); err != nil {
+		t.Fatalf("LinkSessionParent(new) error: %v", err)
+	}
+
+	if err := adapter.DeleteSession(oldParent.SessionID); err != nil {
+		t.Fatalf("DeleteSession() error: %v", err)
+	}
+
+	stillLinked, err := adapter.GetParent(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetParent() error: %v", err)
+	}
+	if stillLinked == nil || stillLinked.SessionID != newParent.SessionID {
+		t.Fatalf("GetParent() = %v, want the new parent %q: deleting the former parent "+
+			"must not discard a relationship established after it was observed",
+			stillLinked, newParent.SessionID)
+	}
+}

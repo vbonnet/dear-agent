@@ -1019,9 +1019,16 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 		// GetParent resolved to nothing. Doing it here makes both backends
 		// behave the same and stops the tests from exercising a code path
 		// production does not take.
+		// The predicate still names the parent being deleted. Matching on the
+		// child id alone would null out a relationship established after the
+		// SELECT: a concurrent LinkSessionParent moving the child to another
+		// parent would report success and then be silently discarded here.
+		// Moving a child away wins over deleting its former parent, and a row
+		// that no longer matches is left entirely alone, revision included.
 		if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
-			`UPDATE agm_sessions SET parent_session_id = NULL, updated_at = ?, tmux_session_revision = ? WHERE id = ? AND workspace = ?`,
-			time.Now(), uuid.NewString(), child, a.workspace,
+			`UPDATE agm_sessions SET parent_session_id = NULL, updated_at = ?, tmux_session_revision = ?
+			 WHERE id = ? AND workspace = ? AND parent_session_id = ?`,
+			time.Now(), uuid.NewString(), child, a.workspace, sessionID,
 		); err != nil {
 			return fmt.Errorf("failed to version child %s of session %s before delete: %w",
 				child, sessionID, err)
