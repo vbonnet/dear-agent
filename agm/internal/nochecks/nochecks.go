@@ -22,12 +22,17 @@
 // supervisor would otherwise miss.
 package nochecks
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // PR is the minimal view of an open pull request the detector needs.
 type PR struct {
 	Number      int    `json:"number"`
 	Title       string `json:"title"`
+	BaseRefName string `json:"base_ref_name"`
 	HeadRefName string `json:"head_ref_name"`
 	HeadSHA     string `json:"head_sha"`
 	IsDraft     bool   `json:"is_draft"`
@@ -43,8 +48,14 @@ type CheckRun struct {
 type StuckPR struct {
 	Number      int    `json:"number"`
 	Title       string `json:"title"`
+	BaseRefName string `json:"base_ref_name"`
 	HeadRefName string `json:"head_ref_name"`
 	HeadSHA     string `json:"head_sha"`
+
+	// requiredChecks is the complete policy that classified this candidate.
+	// It is intentionally unexported so only Scan can produce a triggerable
+	// StuckPR; RetriggerCI uses it to prove the candidate has not self-healed.
+	requiredChecks map[string]bool
 }
 
 // NeedsRetrigger reports whether pr's head SHA is missing CI entirely and should
@@ -54,10 +65,11 @@ type StuckPR struct {
 // non-empty, a PR is stuck only when NONE of the required checks has a run on
 // the head SHA: a partial set (some required runs present, others not yet) means
 // CI did fire and is merely still in progress, so the PR is left alone. When
-// required is empty — the protection API was unreadable, or the branch is
-// unprotected — the predicate falls back to "any check-run at all": zero runs
-// means stuck. This fallback is conservative in the safe direction; it can only
-// ever flag a PR that genuinely has no checks.
+// required is empty because the complete effective policy is authoritatively
+// known to require no checks, the predicate falls back to "any check-run at
+// all": zero runs means stuck. Incomplete policy never reaches this predicate.
+// This fallback is conservative in the safe direction; it can only ever flag a
+// PR that genuinely has no checks.
 //
 // Draft PRs are never flagged: CI legitimately may not run on a draft, so a
 // re-trigger would be noise.
@@ -85,14 +97,53 @@ func NeedsRetrigger(pr PR, runs []CheckRun, required map[string]bool) bool {
 // transient GitHub hiccup can never make a live PR look stuck.
 type CheckRunsFunc func(headSHA string) ([]CheckRun, error)
 
-// Scan flags every open, non-draft PR whose head SHA is missing required CI
-// (per NeedsRetrigger). It calls runsOf once per PR. PRs whose check-runs can't
-// be read are skipped, never flagged, and their errors are returned keyed by PR
-// number so the caller can surface them without aborting the whole scan.
+// Scan flags every open, non-draft PR whose head SHA is missing the CI required
+// by that PR's provider-observed base (per NeedsRetrigger). Before reading any
+// check-runs it validates that required is initialized and contains a complete,
+// non-nil policy for every candidate base. This keeps an incomplete policy
+// snapshot from producing a partial classification or re-trigger set.
+//
+// It calls runsOf once per non-draft PR. PRs whose check-runs can't be read are
+// skipped, never flagged, and their errors are returned keyed by PR number so
+// the caller can surface them without aborting the whole scan.
 //
 // The returned stuck list is sorted by PR number for stable output.
-func Scan(prs []PR, required map[string]bool, runsOf CheckRunsFunc) (stuck []StuckPR, readErrs map[int]error) {
+func Scan(
+	prs []PR,
+	required RequiredChecksByBase,
+	runsOf CheckRunsFunc,
+) (stuck []StuckPR, readErrs map[int]error, err error) {
+	if required.byBase == nil {
+		return nil, nil, fmt.Errorf("required-check policy snapshot is uninitialized")
+	}
+	bases := make([]string, 0, len(required.byBase))
+	for base := range required.byBase {
+		bases = append(bases, base)
+	}
+	sort.Strings(bases)
+	for _, base := range bases {
+		policy := required.byBase[base]
+		if policy == nil {
+			return nil, nil, fmt.Errorf("required-check policy for base %q is incomplete", base)
+		}
+	}
 	for _, pr := range prs {
+		if pr.IsDraft {
+			continue
+		}
+		if strings.TrimSpace(pr.BaseRefName) == "" {
+			return nil, nil, fmt.Errorf("PR #%d has no provider-observed base branch", pr.Number)
+		}
+		policy, ok := required.byBase[pr.BaseRefName]
+		if !ok || policy == nil {
+			return nil, nil, fmt.Errorf("required-check policy for PR #%d base %q is incomplete", pr.Number, pr.BaseRefName)
+		}
+	}
+
+	for _, pr := range prs {
+		if pr.IsDraft {
+			continue
+		}
 		runs, err := runsOf(pr.HeadSHA)
 		if err != nil {
 			if readErrs == nil {
@@ -101,16 +152,20 @@ func Scan(prs []PR, required map[string]bool, runsOf CheckRunsFunc) (stuck []Stu
 			readErrs[pr.Number] = err
 			continue
 		}
-		if !NeedsRetrigger(pr, runs, required) {
+		if !NeedsRetrigger(pr, runs, required.byBase[pr.BaseRefName]) {
 			continue
 		}
 		stuck = append(stuck, StuckPR{
 			Number:      pr.Number,
 			Title:       pr.Title,
+			BaseRefName: pr.BaseRefName,
 			HeadRefName: pr.HeadRefName,
 			HeadSHA:     pr.HeadSHA,
+			requiredChecks: cloneRequiredChecks(
+				required.byBase[pr.BaseRefName],
+			),
 		})
 	}
 	sort.Slice(stuck, func(i, j int) bool { return stuck[i].Number < stuck[j].Number })
-	return stuck, readErrs
+	return stuck, readErrs, nil
 }
