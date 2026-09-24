@@ -66,9 +66,12 @@ func (g *GitIntegrator) IsGitWorktree() bool {
 // CommitPhaseCompletion creates a scoped git commit for phase completion.
 // It includes canonical marker files and the phase's Markdown artifacts while
 // preserving unrelated staged or unstaged user changes.
-func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) error {
+// It reports whether a commit was created; a repository that ignores every
+// candidate artifact yields (false, nil) so the caller does not announce a
+// commit that does not exist.
+func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) (bool, error) {
 	if !g.IsGitRepo() {
-		return fmt.Errorf("project directory is not a git repository")
+		return false, fmt.Errorf("project directory is not a git repository")
 	}
 
 	files := []string{
@@ -78,7 +81,7 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 	}
 	artifacts, err := filepath.Glob(filepath.Join(g.projectDir, phase+"-*.md"))
 	if err != nil {
-		return fmt.Errorf("find %s phase artifacts: %w", phase, err)
+		return false, fmt.Errorf("find %s phase artifacts: %w", phase, err)
 	}
 	for _, artifact := range artifacts {
 		files = append(files, filepath.Base(artifact))
@@ -87,29 +90,31 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 		files = append(files, "ARCHITECTURE.md")
 		adrs, err := filepath.Glob(filepath.Join(g.projectDir, "ADR-*.md"))
 		if err != nil {
-			return fmt.Errorf("find DESIGN ADR artifacts: %w", err)
+			return false, fmt.Errorf("find DESIGN ADR artifacts: %w", err)
 		}
 		for _, adr := range adrs {
 			files = append(files, filepath.Base(adr))
 		}
 	}
 
-	if err := g.commitScoped(g.formatCommitMessage(phase, outcome, context), files); err != nil {
-		return fmt.Errorf("failed to create commit: %w", err)
+	committed, err := g.commitScoped(g.formatCommitMessage(phase, outcome, context), files)
+	if err != nil {
+		return false, fmt.Errorf("failed to create commit: %w", err)
 	}
-	return nil
+	return committed, nil
 }
 
 // CommitRewind commits the status and retrospective markers produced by a
 // rewind so the documented next start-phase command sees a clean project.
-func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) error {
+// It reports whether a commit was created.
+func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) (bool, error) {
 	if !g.IsGitRepo() {
-		return fmt.Errorf("project directory is not a git repository")
+		return false, fmt.Errorf("project directory is not a git repository")
 	}
 	archivePath := archiveRef.RelativePath()
 	cleanArchivePath := filepath.ToSlash(filepath.Clean(archivePath))
 	if archivePath == "" || filepath.IsAbs(archivePath) || archivePath != cleanArchivePath || !strings.HasPrefix(cleanArchivePath, ".wayfinder/archives/") {
-		return fmt.Errorf("invalid rewind archive reference %q", archivePath)
+		return false, fmt.Errorf("invalid rewind archive reference %q", archivePath)
 	}
 	message := fmt.Sprintf("wayfinder: rewind %s to %s\n\nWayfinder-Event: rewind", fromPhase, toPhase)
 	return g.commitScoped(message, []string{
@@ -125,86 +130,39 @@ func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string, archiveRef archi
 // Adds WAYFINDER-STATUS.md and WAYFINDER-HISTORY.jsonl to staging and commits so
 // the worktree is clean before any deliverable work begins. Without this, the
 // next start-phase call finds uncommitted marker files and refuses (ce-fvkz).
-func (g *GitIntegrator) CommitPhaseStart(phase string) error {
+// It reports whether a commit was created.
+func (g *GitIntegrator) CommitPhaseStart(phase string) (bool, error) {
 	if !g.IsGitRepo() {
-		return fmt.Errorf("project directory is not a git repository")
+		return false, fmt.Errorf("project directory is not a git repository")
 	}
 
-	markerFiles := []string{
+	message := fmt.Sprintf("wayfinder: start %s\n\nWayfinder-Phase: %s\nWayfinder-Event: started", phase, phase)
+	return g.commitScoped(message, []string{
 		"WAYFINDER-STATUS.md",
 		history.HistoryFilename,
 		history.LegacyHistoryFilename,
-	}
-
-	// Track which files were successfully staged so we can scope the commit to
-	// exactly those files. Using `git commit -- <files>` prevents accidentally
-	// sweeping up any other staged changes the user may have queued separately.
-	var staged []string
-	for _, file := range markerFiles {
-		present, err := g.pathExistsOrTracked(file)
-		if err != nil {
-			return err
-		}
-		if !present {
-			continue
-		}
-		if err := g.gitAdd(file); err != nil {
-			return fmt.Errorf("failed to add %s: %w", file, err)
-		}
-		staged = append(staged, file)
-	}
-
-	if len(staged) == 0 {
-		return nil
-	}
-
-	commitMsg := fmt.Sprintf("wayfinder: start %s\n\nWayfinder-Phase: %s\nWayfinder-Event: started", phase, phase)
-	args := append([]string{"commit", "-m", commitMsg, "--"}, staged...)
-	cmd := exec.Command("git", args...)
-	cmd.Dir = g.projectDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if strings.Contains(string(output), "nothing to commit") {
-			return nil
-		}
-		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
-	}
-
-	return nil
+	})
 }
 
 // CommitSessionInit commits WAYFINDER-STATUS.md after a new session is created
 // so that the immediately following `start-phase CHARTER` sees a clean worktree
 // and does not refuse with "uncommitted files detected" (ce-11fi bootstrap fix).
 //
-// Unlike CommitPhaseStart, this method is lenient: it returns nil when the
-// directory is not inside a git repository (non-git workflows are valid).
-func (g *GitIntegrator) CommitSessionInit(projectName string) error {
+// Unlike CommitPhaseStart, this method is lenient: it reports (false, nil) when
+// the directory is not inside a git repository (non-git workflows are valid).
+// It reports whether a commit was created.
+func (g *GitIntegrator) CommitSessionInit(projectName string) (bool, error) {
 	if !g.IsGitRepo() {
-		return nil // not an error — non-git workflows are allowed
+		return false, nil // not an error — non-git workflows are allowed
 	}
 
 	statusFile := filepath.Join(g.projectDir, "WAYFINDER-STATUS.md")
 	if _, err := os.Stat(statusFile); os.IsNotExist(err) {
-		return nil // nothing to commit
+		return false, nil // nothing to commit
 	}
 
-	if err := g.gitAdd("WAYFINDER-STATUS.md"); err != nil {
-		return fmt.Errorf("failed to add WAYFINDER-STATUS.md: %w", err)
-	}
-
-	commitMsg := fmt.Sprintf("wayfinder: init session %s\n\nWayfinder-Event: session-started", projectName)
-	cmd := exec.Command("git", "commit", "-m", commitMsg, "--", "WAYFINDER-STATUS.md")
-	cmd.Dir = g.projectDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if strings.Contains(string(output), "nothing to commit") {
-			return nil
-		}
-		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
-	}
-
-	return nil
+	message := fmt.Sprintf("wayfinder: init session %s\n\nWayfinder-Event: session-started", projectName)
+	return g.commitScoped(message, []string{"WAYFINDER-STATUS.md"})
 }
 
 // formatCommitMessage creates a standardized commit message for phase completion
@@ -228,36 +186,86 @@ func (g *GitIntegrator) formatCommitMessage(phase, outcome, context string) stri
 	return msg.String()
 }
 
-// gitAdd stages one scoped lifecycle artifact. Canonical Wayfinder markers are
-// owned by this component, so force-add them even when a repository-wide
-// ignore rule (for example, *.jsonl) would otherwise hide lifecycle state.
-// User-authored phase artifacts continue to obey the repository's ignore
-// policy.
-func (g *GitIntegrator) gitAdd(file string) error {
-	args := []string{"add"}
-	if isCanonicalMarker(file) {
-		args = append(args, "--force")
+// stageArtifact stages one scoped lifecycle artifact and reports whether it was
+// staged. The repository's ignore policy is authoritative: a path the
+// repository ignores and does not already track is deliberately temporal, so it
+// is skipped rather than force-added.
+//
+// Force-adding ignored markers made the mandated PR path block itself
+// (ce-2sgej): `wayfinder session start` committed WAYFINDER-STATUS.md and
+// WAYFINDER-HISTORY.jsonl, routing-guard's temporal-debt gate then rejected
+// them as tracked temporal artifacts, that gate runs inside `preflight-full`,
+// and `safe-pr` refuses to open a PR when preflight fails. Skipping costs
+// nothing: Git does not report ignored files, so the worktree the next
+// start-phase inspects is still clean.
+//
+// A marker the repository already tracks keeps receiving its updates. Ignore
+// rules do not apply to tracked paths, so a plain `git add` is correct there
+// and staging it prevents silent drift.
+func (g *GitIntegrator) stageArtifact(file string) (bool, error) {
+	tracked, err := g.isTracked(file)
+	if err != nil {
+		return false, err
 	}
-	args = append(args, "--", file)
-	cmd := exec.Command("git", args...)
+	if !tracked {
+		ignored, err := g.isIgnored(file)
+		if err != nil {
+			return false, err
+		}
+		if ignored {
+			return false, nil
+		}
+	}
+
+	cmd := exec.Command("git", "add", "--", file)
 	cmd.Dir = g.projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git add failed: %w (output: %s)", err, string(output))
+		return false, fmt.Errorf("git add failed: %w (output: %s)", err, string(output))
 	}
-	return nil
+	return true, nil
 }
 
-func isCanonicalMarker(file string) bool {
-	switch file {
-	case "WAYFINDER-STATUS.md", history.HistoryFilename, history.LegacyHistoryFilename, retrospective.RetroFilename:
-		return true
-	default:
-		return strings.HasPrefix(filepath.ToSlash(filepath.Clean(file)), ".wayfinder/archives/")
+// isIgnored reports whether the repository's ignore rules exclude the path.
+// `git check-ignore -q` exits 0 when the path is ignored and 1 when it is not;
+// any other exit status is a real failure and must not read as "not ignored".
+func (g *GitIntegrator) isIgnored(file string) (bool, error) {
+	cmd := exec.Command("git", "check-ignore", "-q", "--", file)
+	cmd.Dir = g.projectDir
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
 	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("check ignore status of %s: %w", file, err)
 }
 
-func (g *GitIntegrator) commitScoped(message string, candidates []string) error {
+// isTracked reports whether the path is in the index.
+func (g *GitIntegrator) isTracked(file string) (bool, error) {
+	cmd := exec.Command("git", "ls-files", "--error-unmatch", "--", file)
+	cmd.Dir = g.projectDir
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	// `git ls-files --error-unmatch` exits 1 for a path that is not in the
+	// index, which is an answer rather than a failure. Any other exit code is
+	// a real error and must not be reported as "untracked". Binding the typed
+	// error instead of discarding it also keeps errcheck and modernize from
+	// contradicting each other on this line.
+	if exitErr, isExit := errors.AsType[*exec.ExitError](err); isExit && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("check tracked path %s: %w", file, err)
+}
+
+// commitScoped stages the candidate artifacts the repository accepts and
+// commits exactly those. It reports whether a commit was actually created so
+// callers do not announce lifecycle commits that never happened.
+func (g *GitIntegrator) commitScoped(message string, candidates []string) (bool, error) {
 	seen := make(map[string]bool, len(candidates))
 	staged := make([]string, 0, len(candidates))
 	for _, file := range candidates {
@@ -267,18 +275,22 @@ func (g *GitIntegrator) commitScoped(message string, candidates []string) error 
 		seen[file] = true
 		present, err := g.pathExistsOrTracked(file)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !present {
 			continue
 		}
-		if err := g.gitAdd(file); err != nil {
-			return fmt.Errorf("failed to add %s: %w", file, err)
+		added, err := g.stageArtifact(file)
+		if err != nil {
+			return false, fmt.Errorf("failed to add %s: %w", file, err)
+		}
+		if !added {
+			continue
 		}
 		staged = append(staged, file)
 	}
 	if len(staged) == 0 {
-		return nil
+		return false, nil
 	}
 	args := append([]string{"commit", "-m", message, "--"}, staged...)
 	cmd := exec.Command("git", args...)
@@ -286,11 +298,11 @@ func (g *GitIntegrator) commitScoped(message string, candidates []string) error 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(output), "nothing to commit") {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
+		return false, fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
 	}
-	return nil
+	return true, nil
 }
 
 func (g *GitIntegrator) pathExistsOrTracked(file string) (bool, error) {
@@ -299,17 +311,7 @@ func (g *GitIntegrator) pathExistsOrTracked(file string) (bool, error) {
 	} else if !os.IsNotExist(err) {
 		return false, fmt.Errorf("stat %s: %w", file, err)
 	}
-	cmd := exec.Command("git", "ls-files", "--error-unmatch", "--", file)
-	cmd.Dir = g.projectDir
-	err := cmd.Run()
-	if err == nil {
-		return true, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return false, nil
-	}
-	return false, fmt.Errorf("check tracked path %s: %w", file, err)
+	return g.isTracked(file)
 }
 
 // GetCommitHash returns the current HEAD commit hash

@@ -235,3 +235,33 @@ func TestAllAliasesResolveToKnownModels(t *testing.T) {
 		})
 	}
 }
+
+// Every alias AGM advertises must price, not just every alias this package
+// happens to know.
+//
+// agm/internal/agent/models.go registers "astra" and "6-astra" as public
+// spellings of gpt-6-astra, but neither was in ModelAliases, so a caller that
+// kept the alias missed the rate row and GetPricingOrDefault silently returned
+// zero. Registering a model at a nonzero rate and then billing it at zero
+// through its own advertised name is the failure the registration exists to
+// prevent.
+func TestAdvertisedAstraAliasesPrice(t *testing.T) {
+	full, found := GetPricing("gpt-6-astra")
+	assert.True(t, found, "the canonical Astra id must price")
+	assert.Positive(t, full.Input, "Astra must not price at zero")
+
+	for _, alias := range []string{"astra", "6-astra"} {
+		t.Run(alias, func(t *testing.T) {
+			pricing, ok := GetPricing(alias)
+			assert.True(t, ok, "advertised alias %q must resolve to a rate row", alias)
+			assert.InDelta(t, full.Input, pricing.Input, 0.000000001,
+				"alias %q must price identically to the canonical id", alias)
+			assert.InDelta(t, full.Output, pricing.Output, 0.000000001)
+
+			// The path the finding named: a caller that kept the alias.
+			byDefault := GetPricingOrDefault(alias)
+			assert.InDelta(t, full.Input, byDefault.Input, 0.000000001,
+				"GetPricingOrDefault(%q) fell back to a default instead of Astra's rate", alias)
+		})
+	}
+}

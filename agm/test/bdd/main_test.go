@@ -120,6 +120,7 @@ func RegisterScenarioDefinitions(ctx *godog.ScenarioContext) {
 	steps.RegisterAGMProductSurfaceGuardrailSteps(ctx)
 	steps.RegisterQuotaMonitoringGuardrailSteps(ctx)
 	steps.RegisterQualityCommandGuardrailSteps(ctx)
+	steps.RegisterReviewThreadReplySafetySteps(ctx)
 	steps.RegisterRootLifecycleCommandGuardrailSteps(ctx)
 	steps.RegisterRootMaintenanceCommandGuardrailSteps(ctx)
 	steps.RegisterRootSafetyCommandGuardrailSteps(ctx)

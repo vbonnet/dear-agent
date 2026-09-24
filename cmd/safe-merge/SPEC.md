@@ -27,11 +27,15 @@ break-glass merge behind an explicit TTY-only subcommand.
 
 **SAFE-MERGE-06** When break-glass mode is requested without a PR argument, the system shall reject the request.
 
-**SAFE-MERGE-07** When every other gate has passed and the PR head is behind its base branch, the system shall advance the head to the base tip and block the merge attempt, so that the merge is only ever executed against checks that ran on the base the PR will land on.
+**SAFE-MERGE-07** When every other gate has passed, the system shall report base freshness only after proving that the gated PR head contains the then-live target base tip.
 
-**SAFE-MERGE-08** When the PR head is behind its base branch and `--dry-run` is set, the system shall report the staleness without pushing to the branch.
+**SAFE-MERGE-08** When the PR head does not contain the live base tip and `--dry-run` is set, the system shall report the staleness without pushing to the branch.
 
 **SAFE-MERGE-09** When the PR conflicts with its base branch, the system shall reject the merge without modifying the branch.
+
+**SAFE-MERGE-10** When the target base state cannot be established or changes across the client-side freshness proof, the system shall reject the merge attempt.
+
+**SAFE-MERGE-11** When the PR head does not contain the live base tip and the provider reports `BEHIND`, `CLEAN`, or `UNSTABLE`, the system shall request a head-anchored branch update and block until a later attempt re-runs every gate against the updated head.
 
 ## BDD Traceability
 

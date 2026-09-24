@@ -576,7 +576,7 @@ if err != nil {
     return err
 }
 capabilities := harness.Capabilities()
-health := agent.CheckHarnessHealth(harnessName)
+health := agent.CheckHarnessHealthAtHome(harnessName, retainedHome)
 
 // Run the cross-surface creation transaction through shared operations.
 result, err := ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{

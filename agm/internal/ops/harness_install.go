@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // HarnessType represents a supported coding agent harness
@@ -72,6 +73,9 @@ func IsInstalled(ctx context.Context, harness HarnessType) (bool, string, error)
 	return true, path, nil
 }
 
+// defaultHarnessVersionTimeout bounds the duration allowed to probe a harness version.
+const defaultHarnessVersionTimeout = 3 * time.Second
+
 // GetVersion retrieves the version of an installed harness
 func GetVersion(ctx context.Context, harness HarnessType) (string, error) {
 	var cmd string
@@ -94,7 +98,10 @@ func GetVersion(ctx context.Context, harness HarnessType) (string, error) {
 		return "", fmt.Errorf("unknown harness: %s", harness)
 	}
 
-	cmdExec := exec.CommandContext(ctx, cmd, args...)
+	probeCtx, cancel := context.WithTimeout(ctx, defaultHarnessVersionTimeout)
+	defer cancel()
+
+	cmdExec := exec.CommandContext(probeCtx, cmd, args...)
 	output, err := cmdExec.CombinedOutput()
 	if err != nil {
 		return "", err
