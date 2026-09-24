@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -67,6 +68,42 @@ func DidYouMean(input string, matches []fuzzy.Match, cfg *Config) (string, error
 // ConfirmCleanup confirms batch archive/delete operations
 func ConfirmCleanup(toArchive, toDelete []string, cfg *Config) (bool, error) {
 	return confirmCleanupWithIO(toArchive, toDelete, cfg, os.Stderr, os.Stdin)
+}
+
+// ConfirmCleanupContext is ConfirmCleanup that gives up when ctx is canceled.
+//
+// huh's RunAccessible takes no context and blocks on stdin, so SIGINT during
+// the prompt cancelled the command context while the process sat waiting for
+// input that was never coming. The cleanup loops downstream therefore never
+// reached their own cancellation checks, and Ctrl-C left `agm admin clean`
+// hanging at the confirmation instead of exiting nonzero.
+//
+// The reader goroutine stays parked on stdin after cancellation. That is
+// deliberate rather than overlooked: there is no portable way to interrupt a
+// blocking terminal read, the channel is buffered so the goroutine can finish
+// and exit if input ever arrives, and the only caller is a command that is
+// already on its way out.
+func ConfirmCleanupContext(ctx context.Context, toArchive, toDelete []string, cfg *Config) (bool, error) {
+	return confirmCleanupWithIOContext(ctx, toArchive, toDelete, cfg, os.Stderr, os.Stdin)
+}
+
+func confirmCleanupWithIOContext(ctx context.Context, toArchive, toDelete []string,
+	cfg *Config, out io.Writer, in io.Reader) (bool, error) {
+	type outcome struct {
+		confirmed bool
+		err       error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		confirmed, err := confirmCleanupWithIO(toArchive, toDelete, cfg, out, in)
+		done <- outcome{confirmed, err}
+	}()
+	select {
+	case got := <-done:
+		return got.confirmed, got.err
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
 }
 
 func confirmCleanupWithIO(toArchive, toDelete []string, cfg *Config, out io.Writer, in io.Reader) (bool, error) {

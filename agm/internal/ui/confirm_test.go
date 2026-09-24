@@ -9,6 +9,9 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
+
+	"context"
 )
 
 func TestCleanupConfirmationDescription_ListsEachSelectedTarget(t *testing.T) {
@@ -99,3 +102,39 @@ func TestConfirmCleanup_RemainsVisibleWhenStdoutRedirected(t *testing.T) {
 type failingCleanupWriter struct{}
 
 func (failingCleanupWriter) Write([]byte) (int, error) { return 0, errors.New("output failed") }
+
+// Ctrl-C at the confirmation prompt must stop the command, not hang it.
+//
+// huh's RunAccessible takes no context and blocks on stdin, so SIGINT
+// cancelled the command context while the process sat waiting for input that
+// was never coming. The cleanup loops downstream never reached their own
+// cancellation checks.
+func TestConfirmCleanupContextGivesUpOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// A reader that never yields, which is what a terminal awaiting input is.
+	blocked, _ := io.Pipe()
+	defer blocked.Close()
+
+	done := make(chan struct{})
+	var confirmed bool
+	var err error
+	go func() {
+		confirmed, err = confirmCleanupWithIOContext(ctx,
+			[]string{"session-a"}, nil, &Config{}, io.Discard, blocked)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("confirmation did not observe cancellation; Ctrl-C would hang the command")
+	}
+	if confirmed {
+		t.Error("a canceled confirmation must not read as confirmed")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}

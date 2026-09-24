@@ -63,7 +63,8 @@ Examples:
 		}
 
 		// Confirm cleanup
-		confirmed, err := ui.ConfirmCleanup(
+		confirmed, err := ui.ConfirmCleanupContext(
+			cmd.Context(),
 			cleanupConfirmationLabels(result.ToArchive),
 			cleanupConfirmationLabels(result.ToDelete),
 			uiCfg,
