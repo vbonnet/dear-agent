@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gcloghealth"
 )
 
 // --- a refused reap is a failed remediation, not a quiet success ---
@@ -259,14 +261,15 @@ func TestScanGCLog_FindsAHeartbeatPushedBeyondTheFirstWindow(t *testing.T) {
 	}
 }
 
-// Once the window reaches back past the liveness horizon, nothing older can be
-// a live heartbeat, so the scan stops rather than reading the whole history.
-func TestScanGCLog_StopsWideningPastTheLivenessHorizon(t *testing.T) {
-	now := time.Now()
-	withScanBounds(t, 64*1024, 64*1024*1024)
+// Event timestamps are not append offsets: an old tail record cannot rule
+// out a recent completion in earlier bytes when the scan hits its cap.
+func TestCheckGCHealth_BackdatedTailIsUndetermined(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	withScanBounds(t, 64*1024, 128*1024)
 
 	p := filepath.Join(t.TempDir(), "gc.jsonl")
 	var b strings.Builder
+	b.WriteString(gcCompletedAt(now.Add(-5*time.Minute)) + "\n")
 	filler := `{"timestamp":"` + now.Add(-48*time.Hour).Format(time.RFC3339Nano) +
 		`","operation":"gc_archive","reason":"` + strings.Repeat("z", 2048) + `"}` + "\n"
 	for written := int64(0); written < 4*maxGCLogScanBytes; written += int64(len(filler)) {
@@ -276,12 +279,37 @@ func TestScanGCLog_StopsWideningPastTheLivenessHorizon(t *testing.T) {
 		t.Fatalf("write gc log: %v", err)
 	}
 
-	got, err := scanGCLog(p, now, 6*time.Hour)
-	if err != nil {
-		t.Fatalf("scanGCLog: %v", err)
+	got := checkGCHealth(config{gcLogPath: p, gcMaxAge: 6 * time.Hour}, now)
+	if got == nil || !got.Stale || !got.Indeterminate || !got.LastSuccess.IsZero() {
+		t.Fatalf("health = %+v, want uncertain non-green result", got)
 	}
-	if got.Indeterminate {
-		t.Error("history older than the SLA cannot hold a live heartbeat; the answer is determined")
+	if strings.Contains(got.Reason, "never recorded") || !strings.Contains(got.Reason, "undetermined") {
+		t.Fatalf("reason = %q, want explicit uncertainty rather than never ran", got.Reason)
+	}
+}
+
+func TestCheckGCHealth_CappedStaleCompletionIsNotDefinitiveLatest(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	withScanBounds(t, 128, 256)
+
+	p := filepath.Join(t.TempDir(), "gc.jsonl")
+	var b strings.Builder
+	b.WriteString(gcCompletedAt(now.Add(-5*time.Minute)) + "\n")
+	for range 12 {
+		b.WriteString(`{"timestamp":"` + now.Add(-time.Minute).Format(time.RFC3339Nano) +
+			`","operation":"gc_archive","reason":"chatter"}` + "\n")
+	}
+	b.WriteString(gcCompletedAt(now.Add(-48*time.Hour)) + "\n")
+	if err := os.WriteFile(p, []byte(b.String()), 0o600); err != nil {
+		t.Fatalf("write gc log: %v", err)
+	}
+
+	got := checkGCHealth(config{gcLogPath: p, gcMaxAge: 6 * time.Hour}, now)
+	if got == nil || !got.Stale || !got.Indeterminate || !got.LastSuccess.IsZero() {
+		t.Fatalf("health = %+v, want uncertain non-green result", got)
+	}
+	if !strings.Contains(got.Reason, "undetermined") || strings.Contains(got.Reason, "last completed") {
+		t.Fatalf("reason = %q, want uncertainty without latest-sweep claim", got.Reason)
 	}
 }
 
@@ -355,5 +383,40 @@ func TestGCLogEntry_DecodesTheSweepsProducerTagWireFormat(t *testing.T) {
 	}
 	if got.Source != gcSelfSource {
 		t.Errorf("Source = %q, want %q", got.Source, gcSelfSource)
+	}
+}
+
+// An error must be ordered against the success actually observed, not against
+// Proof().
+//
+// A capped tail holding an old error and a newer-but-stale completion makes
+// Proof() return zero, because a stale completion in a capped tail is not
+// proof of liveness. Comparing LastErrorAt against that zero ranked the
+// already-superseded error as the newest thing in the log and appended it to
+// the watchdog alarm, so the operator chased an error the log itself shows was
+// followed by a successful sweep.
+func TestCappedScanOrdersErrorsAgainstObservedSuccess(t *testing.T) {
+	now := time.Now()
+	summary := gcloghealth.Summary{
+		LastSuccess:   now.Add(-3 * time.Hour),
+		LastError:     "superseded: mount table unreadable",
+		LastErrorAt:   now.Add(-5 * time.Hour),
+		Indeterminate: true,
+	}
+	if proof, _ := summary.Proof(); !proof.IsZero() {
+		t.Fatalf("fixture precondition: Proof() = %v, want zero for an indeterminate scan", proof)
+	}
+
+	h := gcHealthFromSummary(summary, config{gcLogPath: "/tmp/gc.jsonl"}, now)
+	if h.LastError != "" {
+		t.Errorf("LastError = %q, want empty: the observed completion is newer than the error",
+			h.LastError)
+	}
+
+	// An error that really is newer than the observed success still surfaces.
+	summary.LastErrorAt = now.Add(-time.Hour)
+	h = gcHealthFromSummary(summary, config{gcLogPath: "/tmp/gc.jsonl"}, now)
+	if h.LastError == "" {
+		t.Error("an error newer than the observed success must still be reported")
 	}
 }

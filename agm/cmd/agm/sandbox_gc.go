@@ -143,6 +143,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 
 	result, err := ops.SandboxGC(&ops.OpContext{}, &ops.SandboxGCRequest{
 		Reap:           reap,
+		Source:         strings.TrimSpace(os.Getenv(sandboxGCSourceEnv)),
 		MinAge:         minAge,
 		LiveSessionIDs: constantLiveSessionIDs(liveSessionIDs),
 		Warnings:       warnings,

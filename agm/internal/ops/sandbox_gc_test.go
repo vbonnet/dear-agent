@@ -72,6 +72,38 @@ func sandboxTestBase(t *testing.T) string {
 	return base
 }
 
+// A watchdog-triggered reap writes its per-sandbox record before the CLI
+// completion. If that record is untagged, a legacy fallback reader can use
+// it to certify a dead scheduled reaper even after excluding the completion.
+func TestSandboxGCReapRecordCarriesRunnerSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base := sandboxTestBase(t)
+	mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+	result, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true, Source: "disk-watchdog"}, base, checker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reaped != 1 {
+		t.Fatalf("reaped = %d, want 1", result.Reaped)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".agm", "logs", "gc.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry struct {
+		Operation string `json:"operation"`
+		Source    string `json:"source"`
+	}
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Operation != "sandbox_gc_reap" || entry.Source != "disk-watchdog" {
+		t.Fatalf("reap entry = %+v, want tagged watchdog source", entry)
+	}
+}
+
 func TestSandboxGCDryRunByDefault(t *testing.T) {
 	base := sandboxTestBase(t)
 	dead := mkSandbox(t, base, "deadbeef", 24*time.Hour)

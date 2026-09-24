@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gcloghealth"
 )
 
 func fixedTime() time.Time {
@@ -345,5 +347,136 @@ func TestRun_BoundedTailScanDiscardsPartialLine(t *testing.T) {
 
 	if !strings.Contains(out, "HEALTHY") {
 		t.Errorf("stdout = %q, want HEALTHY", out)
+	}
+}
+
+func TestRun_WatchdogRemediationCannotCertifySchedule(t *testing.T) {
+	now := fixedTime()
+	logPath := writeLog(t,
+		fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+			now.Add(-8*time.Hour).Format(time.RFC3339)),
+		fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed","source":"disk-watchdog"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)),
+	)
+	d := defaultDeps()
+	d.now = fixedTime
+	var report Report
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath, "--json"}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "degraded" || report.LatestSweepAt != now.Add(-8*time.Hour).Format(time.RFC3339) {
+		t.Fatalf("report = %+v, want stale scheduled proof only", report)
+	}
+}
+
+func TestRun_ExplicitSandboxErrorIsDiagnostic(t *testing.T) {
+	now := fixedTime()
+	logPath := writeLog(t,
+		fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive_error","error":"session error"}`,
+			now.Add(-2*time.Minute).Format(time.RFC3339)),
+		fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_error","error":"mount table unreadable"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)),
+	)
+	d := defaultDeps()
+	d.now = fixedTime
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if !strings.Contains(out, "mount table unreadable") || strings.Contains(out, "session error") {
+		t.Fatalf("output = %q, want sandbox diagnostic only", out)
+	}
+}
+
+func TestRun_IndeterminateTailIsNotNeverRan(t *testing.T) {
+	now := fixedTime()
+	lines := []string{fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+		now.Add(-5*time.Minute).Format(time.RFC3339))}
+	for range 12 {
+		lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive","reason":"chatter"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)))
+	}
+	lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive","reason":"backdated"}`,
+		now.Add(-48*time.Hour).Format(time.RFC3339)))
+	logPath := writeLog(t, lines...)
+	d := defaultDeps()
+	d.now = fixedTime
+	d.maxLogScanBytes, d.maxLogMaxBytes = 128, 256
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if !strings.Contains(out, "undetermined") || strings.Contains(out, "no completed") {
+		t.Fatalf("output = %q, want explicit uncertainty", out)
+	}
+}
+
+func TestRun_StaleCompletionInCappedTailIsNotDefinitiveLatest(t *testing.T) {
+	now := fixedTime()
+	lines := []string{fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+		now.Add(-5*time.Minute).Format(time.RFC3339))}
+	for range 12 {
+		lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"gc_archive","reason":"chatter"}`,
+			now.Add(-time.Minute).Format(time.RFC3339)))
+	}
+	lines = append(lines, fmt.Sprintf(`{"timestamp":%q,"operation":"sandbox_gc_completed"}`,
+		now.Add(-48*time.Hour).Format(time.RFC3339)))
+	logPath := writeLog(t, lines...)
+	d := defaultDeps()
+	d.now = fixedTime
+	d.maxLogScanBytes, d.maxLogMaxBytes = 128, 256
+	var report Report
+	out := captureStdout(func() {
+		if code := run([]string{"--log", logPath, "--json"}, d); code != 1 {
+			t.Fatalf("run() = %d, want degraded/1", code)
+		}
+	})
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "degraded" || report.LatestSweepAt != "" ||
+		!strings.Contains(report.Error, "undetermined") {
+		t.Fatalf("report = %+v, want uncertainty without latest-sweep claim", report)
+	}
+}
+
+// sweep-health must order errors against the observed success, the same way
+// the watchdog adapter does.
+//
+// Proof() is zero for an indeterminate scan, so an error the log itself shows
+// was followed by a successful sweep would otherwise be reported as the live
+// problem and send responders after something already fixed.
+func TestSweepHealthOrdersErrorsAgainstObservedSuccess(t *testing.T) {
+	now := time.Now()
+	superseded := gcloghealth.Summary{
+		LastSuccess:   now.Add(-3 * time.Hour),
+		LastError:     "superseded: mount table unreadable",
+		LastErrorAt:   now.Add(-5 * time.Hour),
+		Indeterminate: true,
+	}
+	var r Report
+	line, code := evaluateSweep(superseded, now, time.Hour, "24h", &r)
+	if strings.Contains(line, "superseded") || strings.Contains(r.Error, "superseded") {
+		t.Errorf("report = %q / %q, want the superseded error left out", line, r.Error)
+	}
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 for an indeterminate scan", code)
+	}
+
+	// An error genuinely newer than the observed success still surfaces.
+	live := superseded
+	live.LastErrorAt = now.Add(-time.Hour)
+	live.LastError = "live: deletion refused"
+	r = Report{}
+	line, _ = evaluateSweep(live, now, time.Hour, "24h", &r)
+	if !strings.Contains(line, "live: deletion refused") {
+		t.Errorf("report = %q, want an error newer than the observed success reported", line)
 	}
 }

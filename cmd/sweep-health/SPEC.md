@@ -28,9 +28,9 @@ the generic absence-alarm probe interface defined in `pkg/absencealarm/SPEC.md`.
 
 **SWEEP-01** When the sandbox GC log contains at least one valid proof-of-completed-sweep record within the lookback window, the sweep-health probe shall report healthy and exit 0.
 
-**SWEEP-02** When the sandbox GC log is accessible but contains no proof-of-completed-sweep record within the lookback window, the sweep-health probe shall report degraded with the latest sweep timestamp and age and exit 1.
+**SWEEP-02** When a complete sandbox GC log contains only stale proof-of-completed-sweep records, the sweep-health probe shall report degraded with the latest sweep timestamp and age and exit 1.
 
-**SWEEP-03** When the sandbox GC log is accessible but contains zero completed sweep records, the sweep-health probe shall report degraded and exit 1.
+**SWEEP-03** When a complete sandbox GC log contains zero completed sweep records, the sweep-health probe shall report degraded and exit 1.
 
 **SWEEP-04** When the sandbox GC log cannot be read or does not exist, the sweep-health probe shall report down with the underlying error and exit 2.
 
@@ -42,9 +42,19 @@ the generic absence-alarm probe interface defined in `pkg/absencealarm/SPEC.md`.
 
 **SWEEP-08** When evaluating proof of a completed sweep, the sweep-health probe shall accept only a non-dry-run completion record with zero reap errors and zero probe failures.
 
-**SWEEP-09** When scanning the sandbox GC log, the sweep-health probe shall bound record reading to a maximum tail window to prevent stalling on oversized log files.
+**SWEEP-09** When scanning the sandbox GC log, the sweep-health probe shall begin with a bounded whole-record tail and widen only while unscanned history could contain live proof, up to a hard byte cap, so a fixed tail cannot falsely claim a recent scheduled sweep never happened.
+
+**SWEEP-10** When a sandbox GC record has `source=disk-watchdog`, the sweep-health probe shall exclude that record from liveness proof, legacy reap fallback, and error diagnosis, so watchdog remediation cannot certify the scheduled reaper.
+
+**SWEEP-11** When an explicit sandbox-GC error follows the latest accepted proof, the sweep-health probe shall include that error in a degraded report while ignoring unrelated session-GC errors.
+
+**SWEEP-12** When the hard scan cap leaves unread earlier bytes and no recent qualified completion was found, the sweep-health probe shall report degraded and undetermined without claiming that no sweep ever ran or that an observed stale completion was the latest.
+
+**SWEEP-13** When a reap record is the only apparent proof, the sweep-health probe shall accept legacy fallback only for an untagged reap after a complete scan establishes that the log contains no modern completion record; at the hard cap it shall report undetermined.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/observability_package_guardrails.feature`
-- Package tests: `cmd/sweep-health/main_test.go`
+- Package tests: `cmd/sweep-health/main_test.go` (report/exit mapping and
+  SWEEP-10 through SWEEP-12) and `internal/gcloghealth/scan_test.go`
+  (shared admission, widening, hard cap, and SWEEP-13 fallback proof).

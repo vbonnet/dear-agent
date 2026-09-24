@@ -179,3 +179,33 @@ func TestEntrySourcePublishedOnTheWire(t *testing.T) {
 		t.Errorf("an undeclared runner published a source: %s", out)
 	}
 }
+
+// The root health observer consumes this same literal corpus. Keep producer
+// field names and source values pinned without importing across Go's internal
+// package boundary.
+func TestEntryMatchesHealthReaderWireFixture(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "gcloghealth", "testdata", "wire.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := func(hour, minute int) time.Time {
+		return time.Date(2026, 9, 20, hour, minute, 0, 0, time.UTC)
+	}
+	entries := []Entry{
+		{Timestamp: stamp(11, 0), Operation: "sandbox_gc_completed", Source: "disk-watchdog"},
+		{Timestamp: stamp(11, 30), Operation: "sandbox_gc_completed"},
+		{Timestamp: stamp(11, 40), Operation: "sandbox_gc_error", Error: "mount table unreadable"},
+	}
+	var got strings.Builder
+	for _, entry := range entries {
+		wire, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got.Write(wire)
+		got.WriteByte('\n')
+	}
+	if got.String() != string(fixture) {
+		t.Fatalf("producer wire differs from shared health fixture:\n got: %s\nwant: %s", got.String(), fixture)
+	}
+}

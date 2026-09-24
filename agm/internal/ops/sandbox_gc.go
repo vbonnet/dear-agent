@@ -38,6 +38,10 @@ const DefaultSandboxMinAge = time.Hour
 type SandboxGCRequest struct {
 	// Reap actually deletes eligible sandboxes. Default false = dry-run.
 	Reap bool `json:"reap,omitempty"`
+	// Source identifies the runner on per-sandbox reap records as well as
+	// the CLI's completion record. A watchdog reap must not look like an
+	// unstamped legacy scheduled-reaper heartbeat.
+	Source string `json:"source,omitempty"`
 	// MinAge skips sandboxes modified more recently than this
 	// (default DefaultSandboxMinAge).
 	MinAge time.Duration `json:"min_age,omitempty"`
@@ -196,6 +200,7 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 		result.Entries = append(result.Entries, SandboxGCEntry{Name: name, Action: "reaped"})
 		logGCEntry(gclog.Entry{
 			Operation:      "sandbox_gc_reap",
+			Source:         req.Source,
 			SessionID:      name,
 			SandboxRemoved: dir,
 		})
