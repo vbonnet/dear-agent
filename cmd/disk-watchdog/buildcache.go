@@ -43,6 +43,26 @@ var buildCacheFurniture = map[string]bool{
 	"testexpire.txt": true,
 }
 
+// buildCacheFurnitureDirs are directories Go itself creates in a cache root
+// that are not hex shards.
+//
+// `go test -fuzz` writes its corpus to $GOCACHE/fuzz. Before this was listed,
+// one such directory disqualified the whole cache: cacheShards returned
+// not-a-cache, and the canonical 47 GB cache on this host reported
+// "not a proven Go build cache root" on every breached tick while the disk
+// filled. The reaper did not crash, it silently declined, which is the worse
+// failure for a thing nobody watches.
+//
+// This is deliberately a closed allowlist of one rather than "permit any
+// directory". The structural proof exists so that a GOCACHE mis-set to a
+// source tree reclaims nothing, and relaxing it to all directories would throw
+// that away. The trim only ever removes hex shards, so a fuzz corpus is
+// preserved: shards are regenerable build output, while a corpus took CPU time
+// to find and cannot be reproduced on demand.
+var buildCacheFurnitureDirs = map[string]bool{
+	"fuzz": true,
+}
+
 // minHexShards is how many shard directories must be present before a
 // directory is accepted. Go and golangci-lint both create all 256 up front,
 // so the threshold only has to be high enough that no ordinary directory
@@ -137,6 +157,8 @@ func cacheShards(dir string) (shards []string, rootInfo os.FileInfo, ok bool) {
 			shards = append(shards, filepath.Join(dir, name))
 		case buildCacheFurniture[name] && info.Mode().IsRegular():
 			// furniture, fine
+		case e.IsDir() && buildCacheFurnitureDirs[name]:
+			// a directory Go creates itself; not a shard, and never trimmed
 		default:
 			return nil, nil, false
 		}
@@ -372,7 +394,35 @@ func (g buildCacheGates) keepReason(cache string, minAge time.Duration) string {
 	if busy {
 		return "a process holds a file open inside"
 	}
+	if holdsFuzzCorpus(cache) {
+		// This path removes the whole root, not just its hex shards.
+		// Accepting fuzz/ as cache furniture is what made a corpus-bearing
+		// cache eligible here at all, and a corpus is the one thing in a
+		// cache that is not regenerable: those inputs cost fuzzing time to
+		// discover and cannot be rebuilt on demand.
+		return "holds a fuzz corpus, which whole-directory reaping cannot preserve"
+	}
 	return ""
+}
+
+// holdsFuzzCorpus reports whether cache has a non-empty fuzz/ directory.
+//
+// An unreadable fuzz/ counts as holding one: the reap it gates is a recursive
+// delete, so "cannot tell" must keep the directory rather than destroy it.
+func holdsFuzzCorpus(cache string) bool {
+	fuzz := filepath.Join(cache, "fuzz")
+	info, err := os.Lstat(fuzz)
+	if err != nil {
+		return false
+	}
+	if !info.IsDir() {
+		return false
+	}
+	entries, err := os.ReadDir(fuzz)
+	if err != nil {
+		return true
+	}
+	return len(entries) > 0
 }
 
 // dirBytes sums the apparent size of every regular file beneath dir.
