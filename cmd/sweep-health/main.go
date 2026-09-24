@@ -136,11 +136,16 @@ func evaluateSweep(s gcloghealth.Summary, now time.Time, window time.Duration, l
 			// operator saw "we did not look far enough" instead of the dry
 			// run, deletion, probe, or GC failure that was right there.
 			r.Error = "sandbox GC liveness is undetermined: older history was not scanned"
-			if s.LastError != "" {
+			// Order the error against the observed success, the way the
+			// watchdog adapter does. Proof() is zero for an indeterminate
+			// scan, so an error the log itself shows was followed by a
+			// successful sweep would otherwise be reported as the live
+			// problem and send responders after something already fixed.
+			if s.LastError != "" && s.LastErrorAt.After(s.LastSuccess) {
 				r.Error += "; most recent observed error: " + s.LastError
 			}
 			return "DEGRADED: " + r.Error, 1
-		case s.LastError != "":
+		case s.LastError != "" && s.LastErrorAt.After(s.LastSuccess):
 			r.Error = s.LastError
 			return "DEGRADED: " + s.LastError, 1
 		default:

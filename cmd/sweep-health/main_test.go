@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gcloghealth"
 )
 
 func fixedTime() time.Time {
@@ -442,5 +444,39 @@ func TestRun_StaleCompletionInCappedTailIsNotDefinitiveLatest(t *testing.T) {
 	if report.Status != "degraded" || report.LatestSweepAt != "" ||
 		!strings.Contains(report.Error, "undetermined") {
 		t.Fatalf("report = %+v, want uncertainty without latest-sweep claim", report)
+	}
+}
+
+// sweep-health must order errors against the observed success, the same way
+// the watchdog adapter does.
+//
+// Proof() is zero for an indeterminate scan, so an error the log itself shows
+// was followed by a successful sweep would otherwise be reported as the live
+// problem and send responders after something already fixed.
+func TestSweepHealthOrdersErrorsAgainstObservedSuccess(t *testing.T) {
+	now := time.Now()
+	superseded := gcloghealth.Summary{
+		LastSuccess:   now.Add(-3 * time.Hour),
+		LastError:     "superseded: mount table unreadable",
+		LastErrorAt:   now.Add(-5 * time.Hour),
+		Indeterminate: true,
+	}
+	var r Report
+	line, code := evaluateSweep(superseded, now, time.Hour, "24h", &r)
+	if strings.Contains(line, "superseded") || strings.Contains(r.Error, "superseded") {
+		t.Errorf("report = %q / %q, want the superseded error left out", line, r.Error)
+	}
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 for an indeterminate scan", code)
+	}
+
+	// An error genuinely newer than the observed success still surfaces.
+	live := superseded
+	live.LastErrorAt = now.Add(-time.Hour)
+	live.LastError = "live: deletion refused"
+	r = Report{}
+	line, _ = evaluateSweep(live, now, time.Hour, "24h", &r)
+	if !strings.Contains(line, "live: deletion refused") {
+		t.Errorf("report = %q, want an error newer than the observed success reported", line)
 	}
 }
