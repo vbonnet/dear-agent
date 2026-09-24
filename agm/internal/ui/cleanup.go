@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -13,22 +14,7 @@ func CleanupMultiSelect(sessions []*Session, cfg *Config) (*CleanupResult, error
 	stopped := filterByAge(filterStopped(sessions), cfg.Defaults.CleanupThresholdDays)
 	archived := filterByAge(filterArchived(sessions), cfg.Defaults.ArchiveThresholdDays)
 
-	// Build options
-	stoppedOpts := make([]huh.Option[string], len(stopped))
-	archivedOpts := make([]huh.Option[string], len(archived))
-	sessionMap := make(map[string]*Session)
-
-	for i, s := range stopped {
-		label := formatCleanupOption(s)
-		stoppedOpts[i] = huh.NewOption(label, s.Name)
-		sessionMap[s.Name] = s
-	}
-
-	for i, s := range archived {
-		label := formatCleanupOption(s)
-		archivedOpts[i] = huh.NewOption(label, s.Name)
-		sessionMap[s.Name] = s
-	}
+	choices := buildCleanupOptions(stopped, archived)
 
 	// Multi-select form
 	var toArchive, toDelete []string
@@ -36,28 +22,28 @@ func CleanupMultiSelect(sessions []*Session, cfg *Config) (*CleanupResult, error
 	groups := []*huh.Group{}
 
 	// Add stopped sessions group if any
-	if len(stoppedOpts) > 0 {
+	if len(choices.stopped) > 0 {
 		groups = append(groups, huh.NewGroup(
 			huh.NewNote().
 				Title("Stopped Sessions (>30 days)").
 				Description("Suggested for archival"),
 			huh.NewMultiSelect[string]().
 				Title("Select sessions to archive:").
-				Options(stoppedOpts...).
+				Options(choices.stopped...).
 				Value(&toArchive).
 				Limit(20),
 		))
 	}
 
 	// Add archived sessions group if any
-	if len(archivedOpts) > 0 {
+	if len(choices.archived) > 0 {
 		groups = append(groups, huh.NewGroup(
 			huh.NewNote().
 				Title("Archived Sessions (>90 days)").
 				Description("Suggested for deletion"),
 			huh.NewMultiSelect[string]().
 				Title("Select sessions to delete:").
-				Options(archivedOpts...).
+				Options(choices.archived...).
 				Value(&toDelete).
 				Limit(20),
 		))
@@ -73,25 +59,55 @@ func CleanupMultiSelect(sessions []*Session, cfg *Config) (*CleanupResult, error
 		return nil, err
 	}
 
-	// Build result
+	return choices.result(toArchive, toDelete), nil
+}
+
+type cleanupOptions struct {
+	stopped  []huh.Option[string]
+	archived []huh.Option[string]
+	byID     map[string]*Session
+}
+
+func buildCleanupOptions(stopped, archived []*Session) cleanupOptions {
+	choices := cleanupOptions{
+		stopped:  make([]huh.Option[string], len(stopped)),
+		archived: make([]huh.Option[string], len(archived)),
+		byID:     make(map[string]*Session, len(stopped)+len(archived)),
+	}
+	for i, s := range stopped {
+		choices.stopped[i] = huh.NewOption(cleanupOptionLabel(s), s.SessionID)
+		choices.byID[s.SessionID] = s
+	}
+	for i, s := range archived {
+		choices.archived[i] = huh.NewOption(cleanupOptionLabel(s), s.SessionID)
+		choices.byID[s.SessionID] = s
+	}
+	return choices
+}
+
+func cleanupOptionLabel(s *Session) string {
+	return fmt.Sprintf("[ID: %q] %q", s.SessionID, formatCleanupOption(s))
+}
+
+func (choices cleanupOptions) result(toArchive, toDelete []string) *CleanupResult {
 	result := &CleanupResult{
 		ToArchive: make([]*Session, 0, len(toArchive)),
 		ToDelete:  make([]*Session, 0, len(toDelete)),
 	}
 
-	for _, name := range toArchive {
-		if s, ok := sessionMap[name]; ok {
+	for _, id := range toArchive {
+		if s, ok := choices.byID[id]; ok {
 			result.ToArchive = append(result.ToArchive, s)
 		}
 	}
 
-	for _, name := range toDelete {
-		if s, ok := sessionMap[name]; ok {
+	for _, id := range toDelete {
+		if s, ok := choices.byID[id]; ok {
 			result.ToDelete = append(result.ToDelete, s)
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 func filterStopped(sessions []*Session) []*Session {

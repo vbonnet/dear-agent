@@ -139,6 +139,7 @@ func TestNotifyCadenceOnce_PersistsFailedTokenFingerprintEvenIfCredentialsRotate
 
 func TestNotifyCadenceOnce_ClaimsEpisodeAtomicallyConcurrent(t *testing.T) {
 	stateDir := t.TempDir()
+	notifications := testNotificationLog(t)
 	credsPath := credsWithRefreshToken(t, "rt-concurrent")
 	fp, _ := credentialsFingerprint(credsPath)
 
@@ -164,6 +165,7 @@ func TestNotifyCadenceOnce_ClaimsEpisodeAtomicallyConcurrent(t *testing.T) {
 	if rec.Fingerprint != fp {
 		t.Errorf("got fingerprint %q, want %q", rec.Fingerprint, fp)
 	}
+	assertNotificationCount(t, notifications, 1)
 }
 
 func TestIsActiveSentinel_SkipsFIFOCredentialsWithoutHanging(t *testing.T) {

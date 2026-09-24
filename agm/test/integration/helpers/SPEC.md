@@ -12,6 +12,8 @@
 
 **IHELP-04** If tmux is missing or permission is denied before server creation, then the helper shall remove owned filesystem state without invoking tmux or converting an intended skip into failure.
 
+**IHELP-05** When the helper constructs the isolated process environment, it shall declare the spawn circuit breaker's host-resource gates rather than inherit them, so a session lifecycle test cannot be refused because of the ambient load, memory, or disk state of the machine running it.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

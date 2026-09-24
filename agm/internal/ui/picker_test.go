@@ -246,6 +246,53 @@ func TestSessionPicker_EmptySessions(t *testing.T) {
 	}
 }
 
+func TestSessionPickerOptions_PreserveIDWithDuplicateNames(t *testing.T) {
+	cfg := DefaultConfig()
+	updatedAt := time.Now().Add(-2 * time.Hour)
+	sessions := []*Session{
+		{
+			Manifest:  &manifest.Manifest{SessionID: "active-id", Name: "shared"},
+			Status:    "active",
+			UpdatedAt: updatedAt,
+		},
+		{
+			Manifest:  &manifest.Manifest{SessionID: "stopped-a", Name: "shared"},
+			Status:    "stopped",
+			UpdatedAt: updatedAt,
+		},
+		{
+			Manifest:  &manifest.Manifest{SessionID: "stopped-b", Name: "shared"},
+			Status:    "stopped",
+			UpdatedAt: updatedAt,
+		},
+	}
+
+	options, byID := sessionPickerOptions(sessions, cfg)
+	if len(options) != len(sessions) {
+		t.Fatalf("got %d options, want %d", len(options), len(sessions))
+	}
+	for i, option := range options {
+		if option.Value != sessions[i].SessionID {
+			t.Errorf("option %d value = %q, want %q", i, option.Value, sessions[i].SessionID)
+		}
+		if byID[option.Value] != sessions[i] {
+			t.Errorf("option %d resolves to wrong session", i)
+		}
+	}
+	if !strings.Contains(options[0].Key, "(active)") || strings.Contains(options[0].Key, "[ID:") {
+		t.Errorf("distinct active label changed unexpectedly: %q", options[0].Key)
+	}
+	for i := 1; i < len(options); i++ {
+		if !strings.Contains(options[i].Key, "(stopped)") ||
+			!strings.Contains(options[i].Key, "[ID: "+sessions[i].SessionID+"]") {
+			t.Errorf("ambiguous stopped label lacks status or exact ID: %q", options[i].Key)
+		}
+	}
+	if options[1].Key == options[2].Key {
+		t.Errorf("same-name stopped sessions have indistinguishable labels: %q", options[1].Key)
+	}
+}
+
 func TestArchivedSessionPicker_EmptySessions(t *testing.T) {
 	_, err := ArchivedSessionPicker(nil)
 	if err == nil {

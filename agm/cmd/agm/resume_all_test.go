@@ -152,17 +152,26 @@ func TestResumeAllFiltering_Integration(t *testing.T) {
 	filteredWorkspace := filterByWorkspace(filtered, "alpha")
 	assert.Equal(t, 2, len(filteredWorkspace), "should filter to alpha workspace")
 
-	// Compute status to find stopped
-	statuses := session.ComputeStatusBatch(filteredWorkspace, mockTmux)
-	var stopped []*manifest.Manifest
-	for _, m := range filteredWorkspace {
-		if statuses[m.Name] == "stopped" {
-			stopped = append(stopped, m)
-		}
-	}
+	stopped := filterStoppedByID(filteredWorkspace, mockTmux)
 
 	assert.Equal(t, 1, len(stopped), "should have 1 stopped session")
 	assert.Equal(t, "stopped-alpha", stopped[0].Name, "wrong session filtered")
+}
+
+func TestFilterStoppedByID_DuplicateNames(t *testing.T) {
+	live := testManifest("shared-name", "live-tmux")
+	live.SessionID = "live-id"
+	stopped := testManifest("shared-name", "stopped-tmux")
+	stopped.SessionID = "stopped-id"
+	archived := testManifestArchived("shared-name")
+	archived.SessionID = "archived-id"
+	tmux := session.NewMockTmux()
+	tmux.Sessions["live-tmux"] = true
+
+	got := filterStoppedByID([]*manifest.Manifest{live, stopped, archived}, tmux)
+	if len(got) != 1 || got[0].SessionID != "stopped-id" {
+		t.Fatalf("stopped sessions = %v, want only stopped-id", got)
+	}
 }
 
 // TestResumeAllFiltering_EdgeCases tests edge cases
