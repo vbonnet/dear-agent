@@ -1,6 +1,6 @@
 # Model Pricing Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-09-09 -->
 
 ## Purpose
 
@@ -28,10 +28,16 @@ other model families.
 
 **PRICING-08** When OpenRouter model-family defaults are selected, the system shall use the provider's current canonical model slug rather than an unverified shorthand identifier.
 
+**PRICING-09** When a model identifier is registered for fleet routing and shares no substring with any existing rate row, the system shall carry its own row rather than resolving to `UnknownModel`, so a new generation cannot price at zero. An identifier that is not registered remains subject to PRICING-03 and PRICING-05.
+
+**PRICING-10** When a model's rate is recorded, the system shall store the rate-card source and the as-of date the rate was read from that source.
+
+**PRICING-11** When a model prices in bands that a single-rate table cannot express, such as a long-context band or a faster service tier, the system shall record the band the fleet actually launches with and document the remaining bands in `docs/model-registry.md`.
+
 ## BDD Traceability
 
-- `agm/test/bdd/features/quota_parity.feature`
-- `agm/test/bdd/features/model_family_parity.feature`
+- Feature: `agm/test/bdd/features/quota_parity.feature`
+- Feature: `agm/test/bdd/features/model_family_parity.feature`
 
 ## Package Test Traceability
 
