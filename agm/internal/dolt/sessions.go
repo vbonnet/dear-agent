@@ -1011,8 +1011,16 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 	rows.Close()
 
 	for _, child := range children {
+		// Detach EXPLICITLY rather than relying on the foreign key. Migration
+		// 007 declares ON DELETE SET NULL, but sqliteSessionSchema declares
+		// parent_session_id as a plain column with no foreign key, so the
+		// cascade never runs on the SQLite adapter: children kept pointing at
+		// a row that no longer exists, GetChildren still returned them, and
+		// GetParent resolved to nothing. Doing it here makes both backends
+		// behave the same and stops the tests from exercising a code path
+		// production does not take.
 		if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
-			`UPDATE agm_sessions SET updated_at = ?, tmux_session_revision = ? WHERE id = ? AND workspace = ?`,
+			`UPDATE agm_sessions SET parent_session_id = NULL, updated_at = ?, tmux_session_revision = ? WHERE id = ? AND workspace = ?`,
 			time.Now(), uuid.NewString(), child, a.workspace,
 		); err != nil {
 			return fmt.Errorf("failed to version child %s of session %s before delete: %w",

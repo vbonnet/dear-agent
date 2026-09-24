@@ -152,6 +152,24 @@ func TestDeleteSessionVersionsDetachedChildren(t *testing.T) {
 		t.Errorf("cascade left tmux_session_revision at %q; second-precision updated_at "+
 			"is not enough on its own", after.Tmux.SessionRevision)
 	}
+	// The child must actually be detached, not merely versioned. The SQLite
+	// schema declares parent_session_id as a plain column with no foreign
+	// key, so relying on ON DELETE SET NULL left the child pointing at a row
+	// that no longer exists on exactly the backend the tests use.
+	orphan, err := adapter.GetParent(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetParent() after delete error: %v", err)
+	}
+	if orphan != nil {
+		t.Errorf("GetParent() = %q after the parent was deleted, want nil", orphan.SessionID)
+	}
+	kids, err := adapter.GetChildren(parent.SessionID)
+	if err != nil {
+		t.Fatalf("GetChildren() after delete error: %v", err)
+	}
+	if len(kids) != 0 {
+		t.Errorf("GetChildren(deleted parent) returned %d, want none", len(kids))
+	}
 
 	// Only the parent's own children are versioned; an unrelated session is
 	// left alone, so this does not invalidate every snapshot in the workspace.
