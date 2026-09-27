@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -15,7 +16,8 @@ type Action string
 const (
 	// ActionInstalled means the artifact was written where nothing existed.
 	ActionInstalled Action = "installed"
-	// ActionUpdated means an existing, differing deployed file was replaced.
+	// ActionUpdated means managed state for an existing artifact changed. This
+	// can be the deployed file itself or an owned sidecar such as a pulse ledger.
 	ActionUpdated Action = "updated"
 	// ActionUnchanged means the deployed file already matched the source; sync
 	// skipped it. (install always rewrites, so it never reports this.)
@@ -31,6 +33,9 @@ type Result struct {
 	Action       Action
 	// SHA256 is the hash of the bytes now installed (empty on skip).
 	SHA256 string
+	// Detail identifies sidecar-only or recovery work while preserving the
+	// historical top-level result array and action values.
+	Detail string `json:"detail,omitempty"`
 }
 
 // Options configures a deploy run.
@@ -73,6 +78,60 @@ func resolveHome(opts Options) (string, error) {
 // previously-installed artifact is left exactly as it was. There is no bypass
 // flag: the only way to deploy is through this sequence (ADR-031, principle 9).
 func Deploy(a Artifact, opts Options) (Result, error) {
+	return deploy(a, opts)
+}
+
+// DeployRendered atomically deploys an already-rendered artifact snapshot. It
+// is for callers that must validate one artifact against another and then
+// publish the exact same bytes later in the operation. The snapshot is copied
+// before deployment so caller mutation cannot change the bytes being written.
+// The caller owns semantic validation of the supplied bytes.
+func DeployRendered(a Artifact, opts Options, rendered []byte) (Result, error) {
+	if opts.RepoRoot == "" {
+		return Result{}, fmt.Errorf("deploy rendered: RepoRoot is required")
+	}
+	if a.IsBinary() {
+		return Result{}, fmt.Errorf("deploy rendered: binary artifact %q has no rendered file content", a.Name)
+	}
+	home, err := resolveHome(opts)
+	if err != nil {
+		return Result{}, err
+	}
+	deployedPath := a.DeployedPath(home)
+	res := Result{Name: a.Name, DeployedPath: deployedPath}
+	mode, err := a.FileMode()
+	if err != nil {
+		return res, err
+	}
+	return deployRendered(a, opts, home, deployedPath, res, mode, bytes.Clone(rendered))
+}
+
+// SkipOptionalMissingSource returns the generic skipped result for an optional
+// file source whose absence the caller already observed in a pinned source
+// snapshot. It does not re-render the source: doing so could turn a no-write
+// decision into an unlocked write if the source appeared concurrently. An
+// existing target's parent directory is still confirmed before success so a
+// retry cannot conceal an earlier post-rename durability failure.
+func SkipOptionalMissingSource(a Artifact, opts Options) (Result, error) {
+	if !a.Optional {
+		return Result{}, fmt.Errorf("skip optional missing source: artifact %q is not optional", a.Name)
+	}
+	if a.IsBinary() {
+		return Result{}, fmt.Errorf("skip optional missing source: binary artifact %q has no file source", a.Name)
+	}
+	home, err := resolveHome(opts)
+	if err != nil {
+		return Result{}, err
+	}
+	deployedPath := a.DeployedPath(home)
+	res := Result{Name: a.Name, DeployedPath: deployedPath, Action: ActionSkipped}
+	if err := confirmOptionalTargetDirectory(deployedPath, syncDirectory); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
+func deploy(a Artifact, opts Options) (Result, error) {
 	if opts.RepoRoot == "" {
 		return Result{}, fmt.Errorf("deploy: RepoRoot is required")
 	}
@@ -97,48 +156,39 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 		return res, err
 	}
 
-	content, err := a.Render(opts.RepoRoot, home)
+	content, skipped, err := renderForDeploy(a, opts, home)
 	if err != nil {
-		if a.Optional && errors.Is(err, os.ErrNotExist) {
-			res.Action = ActionSkipped
-			return res, nil
-		}
-		if errors.Is(err, os.ErrNotExist) {
-			hint := ""
-			if a.Remediation != "" {
-				hint = fmt.Sprintf(" — produce it with: %s", a.Remediation)
-			}
-			return res, fmt.Errorf("source not found for %q: %s%s", a.Name, filepath.Join(opts.RepoRoot, a.Source), hint)
-		}
-		return res, fmt.Errorf("rendering %q: %w", a.Name, err)
+		return res, err
 	}
+	if skipped {
+		if err := confirmOptionalTargetDirectory(deployedPath, syncDirectory); err != nil {
+			return res, err
+		}
+		res.Action = ActionSkipped
+		return res, nil
+	}
+	return deployRendered(a, opts, home, deployedPath, res, mode, content)
+}
+
+func deployRendered(
+	a Artifact,
+	opts Options,
+	home string,
+	deployedPath string,
+	res Result,
+	mode os.FileMode,
+	content []byte,
+) (Result, error) {
 	wantHash := sha256hex(content)
 	res.SHA256 = wantHash
 
-	for _, d := range a.CreateDirs {
-		target := expandPath(d, home)
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return res, fmt.Errorf("creating required dir %s: %w", target, err)
-		}
+	action, shouldWrite, err := prepareDeploymentTarget(a, opts, home, deployedPath, wantHash)
+	if err != nil {
+		return res, err
 	}
-
-	// Decide install vs update vs unchanged from the current host state.
-	existing, statErr := os.ReadFile(deployedPath)
-	switch {
-	case statErr == nil && a.AbsentOnly:
-		// Absent-only: already deployed, preserve operator edits unconditionally,
-		// taking precedence over generic force installs.
-		res.Action = ActionUnchanged
+	res.Action = action
+	if !shouldWrite {
 		return res, nil
-	case statErr == nil && sha256hex(existing) == wantHash && !opts.Force:
-		res.Action = ActionUnchanged
-		return res, nil
-	case statErr == nil:
-		res.Action = ActionUpdated
-	case errors.Is(statErr, os.ErrNotExist):
-		res.Action = ActionInstalled
-	default:
-		return res, fmt.Errorf("reading deployed %q: %w", deployedPath, statErr)
 	}
 
 	if err := atomicWrite(deployedPath, content, mode, wantHash); err != nil {
@@ -147,8 +197,113 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 	return res, nil
 }
 
+func confirmOptionalTargetDirectory(deployedPath string, syncDir func(string) error) error {
+	if _, err := os.Lstat(deployedPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("inspecting optional deployed target %s: %w", deployedPath, err)
+	}
+	if err := syncDir(filepath.Dir(deployedPath)); err != nil {
+		return fmt.Errorf("confirming optional deployed directory %s: %w", filepath.Dir(deployedPath), err)
+	}
+	return nil
+}
+
+func prepareDeploymentTarget(
+	a Artifact,
+	opts Options,
+	home string,
+	deployedPath string,
+	wantHash string,
+) (Action, bool, error) {
+	return prepareDeploymentTargetWithDirSync(a, opts, home, deployedPath, wantHash, syncDirectory)
+}
+
+func prepareDeploymentTargetWithDirSync(
+	a Artifact,
+	opts Options,
+	home string,
+	deployedPath string,
+	wantHash string,
+	syncDir func(string) error,
+) (Action, bool, error) {
+	for _, d := range a.CreateDirs {
+		target := expandPath(d, home)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return "", false, fmt.Errorf("creating required dir %s: %w", target, err)
+		}
+	}
+
+	// Decide install vs update vs unchanged from the current host state.
+	existing, statErr := os.ReadFile(deployedPath)
+	switch {
+	case statErr == nil && a.AbsentOnly:
+		// Absent-only: already deployed, preserve operator edits unconditionally,
+		// taking precedence over generic force installs. Still confirm the parent
+		// namespace: a first-seed rename may have succeeded just before its
+		// directory sync failed, and a retry must not call that state durable
+		// without completing the barrier.
+		if err := syncDir(filepath.Dir(deployedPath)); err != nil {
+			return "", false, fmt.Errorf("confirming deployed directory %s: %w", filepath.Dir(deployedPath), err)
+		}
+		return ActionUnchanged, false, nil
+	case statErr == nil && sha256hex(existing) == wantHash && !opts.Force:
+		// A prior activation may have renamed these exact bytes into place but
+		// returned an error because its parent-directory sync failed. Confirm the
+		// namespace update before a retry reports the artifact unchanged.
+		if err := syncDir(filepath.Dir(deployedPath)); err != nil {
+			return "", false, fmt.Errorf("confirming deployed directory %s: %w", filepath.Dir(deployedPath), err)
+		}
+		return ActionUnchanged, false, nil
+	case statErr == nil:
+		return ActionUpdated, true, nil
+	case errors.Is(statErr, os.ErrNotExist):
+		return ActionInstalled, true, nil
+	default:
+		return "", false, fmt.Errorf("reading deployed %q: %w", deployedPath, statErr)
+	}
+}
+
+func renderForDeploy(
+	a Artifact,
+	opts Options,
+	home string,
+) ([]byte, bool, error) {
+	content, err := a.Render(opts.RepoRoot, home)
+	if err != nil {
+		if a.Optional && errors.Is(err, os.ErrNotExist) {
+			return nil, true, nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			hint := ""
+			if a.Remediation != "" {
+				hint = fmt.Sprintf(" — produce it with: %s", a.Remediation)
+			}
+			return nil, false, fmt.Errorf(
+				"source not found for %q: %s%s",
+				a.Name,
+				filepath.Join(opts.RepoRoot, a.Source),
+				hint,
+			)
+		}
+		return nil, false, fmt.Errorf("rendering %q: %w", a.Name, err)
+	}
+	return content, false, nil
+}
+
 // atomicWrite performs the stage → verify → activate write of content to path.
 func atomicWrite(path string, content []byte, mode os.FileMode, wantHash string) error {
+	return atomicWriteWithDirSync(path, content, mode, wantHash, syncDirectory)
+}
+
+func atomicWriteWithDirSync(
+	path string,
+	content []byte,
+	mode os.FileMode,
+	wantHash string,
+	syncDir func(string) error,
+) error {
 	dir := filepath.Dir(path)
 	// Parent dir is created up front: a first-time install of a launchd plist or
 	// a hook lands in a directory that may not exist yet on a fresh machine.
@@ -178,17 +333,19 @@ func atomicWrite(path string, content []byte, mode os.FileMode, wantHash string)
 		tmp.Close()
 		return fmt.Errorf("staging write: %w", err)
 	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return fmt.Errorf("staging chmod: %w", err)
+	}
 	// fsync before rename so the bytes are durable on disk, not just in the page
-	// cache, when we make the file live.
+	// cache, and the intended mode is part of that staged file state when we
+	// make it live.
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return fmt.Errorf("staging sync: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("staging close: %w", err)
-	}
-	if err := os.Chmod(tmpPath, mode); err != nil {
-		return fmt.Errorf("staging chmod: %w", err)
 	}
 
 	// --- verify ------------------------------------------------------------
@@ -205,6 +362,42 @@ func atomicWrite(path string, content []byte, mode os.FileMode, wantHash string)
 		return fmt.Errorf("activate (rename): %w", err)
 	}
 	staged = false
+	// The staged file sync does not make the directory-entry replacement
+	// durable. A transaction that journals one rename before another must not
+	// report success until each namespace update has reached its own parent
+	// directory, including a resolved symlink target in a different directory.
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("activate parent directory sync %s: %w", dir, err)
+	}
+	return nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open directory: %w", err)
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return fmt.Errorf("sync directory: %w", err)
+	}
+	if err := dir.Close(); err != nil {
+		return fmt.Errorf("close directory: %w", err)
+	}
+	return nil
+}
+
+func durableRemove(path string) error {
+	return durableRemoveWithDirSync(path, syncDirectory)
+}
+
+func durableRemoveWithDirSync(path string, syncDir func(string) error) error {
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("sync parent directory after remove: %w", err)
+	}
 	return nil
 }
 
@@ -238,7 +431,9 @@ type StatusResult struct {
 	// into the installed binary vs the repo HEAD it should match.
 	DeployedVersion string `json:"deployed_version,omitempty"`
 	SourceVersion   string `json:"source_version,omitempty"`
-	// Detail sub-classifies a binary drift ("stale ..." vs "divergent ...").
+	// Detail carries sub-artifact context while Name remains a manifest selector.
+	// Binary status uses it for "stale ..." vs "divergent ..."; aggregate
+	// artifact checks may use it for the exact nested items requiring action.
 	Detail string `json:"detail,omitempty"`
 }
 

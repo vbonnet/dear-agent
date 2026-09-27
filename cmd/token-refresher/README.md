@@ -122,6 +122,15 @@ stalled refresh cycle.
   rotate it. This is a *probabilistic* mitigation, not a lock — those clients
   still do not take `~/.claude/.credentials.lock`, and a real single-writer
   guarantee remains tracked in ce-77ip.
+
+  The shipped LaunchAgent also selects the dedicated audit path
+  `~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl`. The
+  `token-refresher-tick` recovery pulse watches that file, while manual
+  `-check`, `-force`, and ordinary invocations with default audit wiring keep
+  using `token-refresher-audit.jsonl`. This separation prevents unrelated
+  operator commands from making a stalled scheduler look alive. `-audit-log`
+  remains an explicit operator override; the cadence file is schedule-specific
+  wiring, not tamper-proof proof that launchd fired autonomously.
 - **In-process:** callers already using `auth.ResolveOAuthToken()` get the same
   refresh for free.
 
@@ -161,11 +170,29 @@ Stages [`deploy/launchd/com.dear-agent.token-refresher.plist`](../../deploy/laun
 ask-gated host step to run yourself:
 
 ```
-launchctl load ~/Library/LaunchAgents/com.dear-agent.token-refresher.plist
+launchctl bootout gui/$(id -u)/com.dear-agent.token-refresher 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 ```
 
-The scheduled job routes stdout (the access token) to `/dev/null` and keeps
-structured logs at `~/.local/state/dear-agent/token-refresher.err.log`.
+Reload is part of this change, not optional: launchd retains stale in-memory
+arguments until bootout/bootstrap. Before enabling any recovery pulse that
+watches the cadence-only audit file, verify the loaded job and then observe a
+natural scheduled append:
+
+```sh
+launchctl print gui/$(id -u)/com.dear-agent.token-refresher
+stat ~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl
+```
+
+The printed `ProgramArguments` must include the dedicated `-audit-log` path,
+and the file mtime must advance on a scheduled tick. Staging the plist or
+manually writing the file is not runtime proof. Do not deploy the cadence-file
+consumer pulse before both checks pass.
+
+The scheduled job routes stdout (the access token) to `/dev/null`, keeps
+structured logs at `~/.local/state/dear-agent/token-refresher.err.log`, and
+writes cadence-only audit evidence to
+`~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl`.
 
 ## Build
 
