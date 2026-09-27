@@ -1,0 +1,71 @@
+name: Stack Integrity
+
+# Purpose: refuse a pull request whose description presents it as part of a
+# stack when the branch topology is not actually a stack.
+#
+# Evidence this gate exists: #1380 and #1381 both carried "Stack 2/5" and
+# "Stack 3/5" markers and both had correct base refs, yet neither rendered as a
+# stack and #1380's diff silently contained its parent's commit. The parent
+# branch had been rebased and the children were never restacked, so the base
+# ref pointed at a branch the head no longer descended from. Nothing in CI
+# could see it, because every existing signal reads the diff rather than the
+# shape of the chain. A live sweep on the day this shipped found the same
+# defect unreported on #1427, #1431 and #1391, and a description claiming
+# "4/4" over a trunk base on #1345.
+#
+# The rule logic lives in Go (internal/stackguard, tools/stack-lint) and is
+# unit-tested there. This workflow is the thin trigger: it fetches the branch
+# refs the ancestry check needs and runs the checker for this pull request.
+#
+# Scope: structural findings block. The two hygiene findings (a chain with no
+# marker, a chain GitHub has not been told about) stay advisory here and are
+# promoted only under -strict, so this gate never becomes the reason an
+# otherwise correct pull request cannot merge.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to check
+        required: true
+        type: number
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  stack-integrity:
+    name: Stack Integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # The ancestry rule compares origin/<base> against origin/<head>, so
+          # the full history and every branch ref must be present. The default
+          # single-ref fetch would leave the parent branch unresolvable and the
+          # check would fail closed on every stacked pull request.
+          fetch-depth: 0
+
+      - name: Fetch branch refs
+        run: git fetch origin --no-tags --prune "+refs/heads/*:refs/remotes/origin/*"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check stack integrity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+        run: go run ./tools/stack-lint -pr "$PR_NUMBER"
