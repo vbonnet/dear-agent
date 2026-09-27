@@ -259,6 +259,13 @@ User → Completion verified (no pending work)
 | New workflow | Add workflow definition in `agm/internal/workflow/` |
 | Custom state detection | Add monitor strategy in `agm/internal/monitor/` |
 
+## Related proposals
+
+- [docs/architecture/feedback-loop-pipelines.md](docs/architecture/feedback-loop-pipelines.md):
+  proposed event/trigger to pipeline to transform to emit architecture, wiring
+  `agm-bus` and `pkg/trigger` together across VROOM, Wayfinder, Beads, mergeloop, and
+  the absence-alarm. See [ADR-040](docs/adr/ADR-040-event-trigger-pipeline-architecture.md).
+
 ## Monorepo Structure
 
 ```
