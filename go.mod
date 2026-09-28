@@ -68,7 +68,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.59.0
 	mvdan.cc/sh/v3 v3.14.1
-	tailscale.com v1.102.4
+	tailscale.com v1.102.5
 )
 
 require (
