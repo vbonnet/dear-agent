@@ -17,9 +17,12 @@ setup() {
     AUDIT_SCRIPT="$PROJECT_ROOT/scripts/gobin-guard-audit.sh"
 
     TEST_DIR="$(mktemp -d)"
+	TEST_DIR="$(cd "$TEST_DIR" && pwd -P)"
     export FAKE_HOME="$TEST_DIR/home"
     export TRAIL="$TEST_DIR/trail.jsonl"
 	export HEARTBEAT="$TEST_DIR/gobin-guard.heartbeat"
+	export ALARM="$FAKE_HOME/.local/state/dear-agent/gobin-guard.alarm"
+	export AUDIT_ALARM="$FAKE_HOME/.local/state/dear-agent/gobin-guard-audit.alarm"
     mkdir -p "$FAKE_HOME"
 	MOCK_BIN="$TEST_DIR/mock-bin"
 	mkdir -p "$MOCK_BIN"
@@ -31,11 +34,65 @@ teardown() {
 
 # run_guard invokes the guard against the isolated fixture HOME/trail.
 run_guard() {
-    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" "$@"
+    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$ALARM" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" "$@"
 }
 
 trail_lines() {
     [ -f "$TRAIL" ] && wc -l <"$TRAIL" | tr -d ' ' || echo 0
+}
+
+file_mode() {
+	local mode
+	if mode="$(stat -f '%Lp' "$1" 2>/dev/null)"; then
+		printf '%s\n' "$mode"
+	else
+		stat -c '%a' "$1"
+	fi
+}
+
+assert_fresh_private_alarm_tree() {
+	for private_dir in "$FAKE_HOME/.local" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local/state/dear-agent"; do
+		assert_equal "$(file_mode "$private_dir")" "700"
+	done
+	assert_equal "$(file_mode "$1")" "600"
+}
+
+poison_alarm_tree() {
+	mkdir -p "$FAKE_HOME/.local/state/dear-agent"
+	chmod 600 "$FAKE_HOME/.local/state/dear-agent" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local"
+}
+
+install_notification_mocks() {
+	cat >"$MOCK_BIN/uname" <<'EOF'
+#!/bin/sh
+echo Darwin
+EOF
+	cat >"$MOCK_BIN/osascript" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$NOTIFY_LOG"
+EOF
+	chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/osascript"
+	export NOTIFY_LOG="$TEST_DIR/notifications.log"
+}
+
+notification_lines() {
+	[ -f "$NOTIFY_LOG" ] && wc -l <"$NOTIFY_LOG" | tr -d ' ' || echo 0
+}
+
+install_non_owner_chmod_mock() {
+	export REAL_CHMOD
+	REAL_CHMOD="$(command -v chmod)"
+	cat >"$MOCK_BIN/chmod" <<'EOF'
+#!/bin/sh
+if [ "$1" = "u+x" ]; then
+	case "$2" in
+	"$FAKE_HOME" | "$FAKE_HOME"/*) ;;
+	*) exit 1 ;;
+	esac
+fi
+exec "$REAL_CHMOD" "$@"
+EOF
+	chmod +x "$MOCK_BIN/chmod"
 }
 
 @test "healthy GOBIN: exit 0, no escalation" {
@@ -61,12 +118,21 @@ trail_lines() {
 }
 
 @test "independent auditor alarms when guard heartbeat is missing" {
+	poison_alarm_tree
 	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
-		GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
 	assert_failure 1
 	assert_output --partial "heartbeat is missing or invalid"
 	assert_file_contains "$TRAIL" '"kind":"watchdog.gobin_guard.stale"'
 	assert_file_contains "$TRAIL" '"event_id":"gobin-guard-audit-'
+	assert_fresh_private_alarm_tree "$AUDIT_ALARM"
+	assert_equal "$(file_mode "$TRAIL")" "600"
+	assert_equal "$(trail_lines)" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(trail_lines)" "1"
 }
 
 @test "independent auditor accepts a fresh guard heartbeat" {
@@ -87,9 +153,222 @@ trail_lines() {
 	run_guard
 	assert_failure 1
 	assert_equal "$(trail_lines)" "1"
+	assert_fresh_private_alarm_tree "$ALARM"
+	assert_equal "$(file_mode "$HEARTBEAT")" "600"
+	assert_equal "$(file_mode "$TRAIL")" "600"
 	run_guard
 	assert_failure 1
 	assert_equal "$(trail_lines)" "1"
+}
+
+@test "missing GOBIN repairs legacy non-searchable alarm parents" {
+	poison_alarm_tree
+	run_guard
+	assert_failure 1
+	assert_equal "$(trail_lines)" "1"
+	assert_fresh_private_alarm_tree "$ALARM"
+}
+
+@test "default heartbeat and alarm preserve existing searchable parents" {
+	mkdir -p "$FAKE_HOME/.local/state/dear-agent"
+	chmod 755 "$FAKE_HOME/.local" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local/state/dear-agent"
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	for existing_dir in "$FAKE_HOME/.local" "$FAKE_HOME/.local/state" "$FAKE_HOME/.local/state/dear-agent"; do
+		assert_equal "$(file_mode "$existing_dir")" "755"
+	done
+	assert_equal "$(file_mode "$ALARM")" "600"
+	assert_equal "$(file_mode "$FAKE_HOME/.local/state/dear-agent/gobin-guard.heartbeat")" "600"
+	assert_equal "$(file_mode "$TRAIL")" "600"
+}
+
+@test "notification-only guard delivery persists and suppresses its alarm" {
+	install_notification_mocks
+	trail_blocker="$TEST_DIR/trail-blocker"
+	: >"$trail_blocker"
+	bad_trail="$trail_blocker/trail.jsonl"
+
+	for _ in 1 2; do
+		run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$bad_trail" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$ALARM" \
+			GOBIN_GUARD_NOTIFY=1 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+
+	assert_fresh_private_alarm_tree "$ALARM"
+	assert_equal "$(notification_lines)" "1"
+}
+
+@test "notification-only auditor delivery persists and suppresses its alarm" {
+	install_notification_mocks
+	trail_blocker="$TEST_DIR/trail-blocker"
+	: >"$trail_blocker"
+	bad_trail="$trail_blocker/trail.jsonl"
+
+	for _ in 1 2; do
+		run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$bad_trail" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" \
+			GOBIN_GUARD_NOTIFY=1 /bin/sh "$AUDIT_SCRIPT"
+		assert_failure 1
+	done
+
+	assert_fresh_private_alarm_tree "$AUDIT_ALARM"
+	assert_equal "$(notification_lines)" "1"
+}
+
+@test "option-looking relative state paths remain operands for both publishers" {
+	cd "$TEST_DIR"
+	guard_trail="-guard-trail.jsonl"
+	guard_heartbeat="-guard-heartbeat"
+	audit_trail="-audit-trail.jsonl"
+	audit_heartbeat="-audit-heartbeat"
+	guard_alarm="-guard-state/a/alarm"
+	audit_alarm="-audit-state/a/alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$guard_trail" GOBIN_GUARD_HEARTBEAT="$guard_heartbeat" \
+			GOBIN_GUARD_ALARM_STATE="$guard_alarm" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	assert_equal "$(wc -l <"$TEST_DIR/$guard_trail" | tr -d ' ')" "1"
+	assert_equal "$(file_mode "$TEST_DIR/$guard_heartbeat")" "600"
+	assert_equal "$(file_mode "$TEST_DIR/$guard_alarm")" "600"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$audit_trail" GOBIN_GUARD_HEARTBEAT="$audit_heartbeat" \
+			GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+		assert_failure 1
+	done
+	assert_equal "$(wc -l <"$TEST_DIR/$audit_trail" | tr -d ' ')" "1"
+	assert_equal "$(file_mode "$TEST_DIR/$audit_alarm")" "600"
+
+	date +%s >"$TEST_DIR/$audit_heartbeat"
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$audit_trail" GOBIN_GUARD_HEARTBEAT="$audit_heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_success
+}
+
+@test "alarm repair never chmods through a non-searchable symlink" {
+	guard_target="$TEST_DIR/guard-target"
+	audit_target="$TEST_DIR/audit-target"
+	mkdir "$guard_target" "$audit_target"
+	chmod 600 "$guard_target" "$audit_target"
+	ln -s "$guard_target" "$FAKE_HOME/guard-link"
+	ln -s "$audit_target" "$FAKE_HOME/audit-link"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$FAKE_HOME/guard-link/state/alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_equal "$(file_mode "$guard_target")" "600"
+	assert_file_not_exists "$FAKE_HOME/guard-link/state/alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$FAKE_HOME/audit-link/state/alarm" \
+		GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(file_mode "$audit_target")" "600"
+	assert_file_not_exists "$FAKE_HOME/audit-link/state/alarm"
+}
+
+@test "dangling alarm-marker symlinks fail closed for both publishers" {
+	guard_target="$TEST_DIR/guard-dangling-target"
+	audit_target="$TEST_DIR/audit-dangling-target"
+	guard_alarm="$FAKE_HOME/guard-alarm"
+	audit_alarm="$FAKE_HOME/audit-alarm"
+	ln -s "$guard_target" "$guard_alarm"
+	ln -s "$audit_target" "$audit_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_file_not_exists "$guard_target"
+	[ -L "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_file_not_exists "$audit_target"
+	[ -L "$audit_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+}
+
+@test "resolved alarm-marker symlinks neither suppress nor mutate for both publishers" {
+	guard_target="$TEST_DIR/guard-target"
+	audit_target="$TEST_DIR/audit-target"
+	printf 'guard sentinel\n' >"$guard_target"
+	printf 'audit sentinel\n' >"$audit_target"
+	chmod 600 "$guard_target" "$audit_target"
+	guard_alarm="$FAKE_HOME/guard-alarm"
+	audit_alarm="$FAKE_HOME/audit-alarm"
+	ln -s "$guard_target" "$guard_alarm"
+	ln -s "$audit_target" "$audit_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_equal "$(cat "$guard_target")" "guard sentinel"
+	assert_equal "$(file_mode "$guard_target")" "600"
+	[ -L "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(cat "$audit_target")" "audit sentinel"
+	assert_equal "$(file_mode "$audit_target")" "600"
+	[ -L "$audit_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+}
+
+@test "non-regular alarm-marker leaves fail closed for both publishers" {
+	guard_alarm="$FAKE_HOME/guard-fifo"
+	audit_alarm="$FAKE_HOME/audit-fifo"
+	mkfifo "$guard_alarm" "$audit_alarm"
+	# Keep both sides open so a regression that redirects into the FIFO cannot
+	# hang the test; the persistence warning proves the primary refused it.
+	exec 8<>"$guard_alarm"
+	exec 9<>"$audit_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_output --partial "cannot persist alarm state"
+	[ -p "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	[ -p "$audit_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+
+	exec 8>&-
+	exec 9>&-
+}
+
+@test "already-searchable non-owned ancestors do not block either publisher" {
+	install_non_owner_chmod_mock
+
+	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$ALARM" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+	assert_fresh_private_alarm_tree "$ALARM"
+
+	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+		GOBIN_GUARD_AUDIT_ALARM_STATE="$AUDIT_ALARM" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_equal "$(file_mode "$AUDIT_ALARM")" "600"
 }
 
 @test "independent auditor rejects a multi-line heartbeat" {
@@ -166,18 +445,218 @@ trail_lines() {
 }
 
 @test "macOS launchd alarm posts an active notification" {
-	cat >"$MOCK_BIN/uname" <<'EOF'
-#!/bin/sh
-echo Darwin
-EOF
-	cat >"$MOCK_BIN/osascript" <<'EOF'
-#!/bin/sh
-printf '%s\n' "$*" >>"$NOTIFY_LOG"
-EOF
-	chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/osascript"
-	export NOTIFY_LOG="$TEST_DIR/notifications.log"
+	install_notification_mocks
 
 	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" "$SCRIPT" --quiet
 	assert_failure 1
 	assert_file_contains "$NOTIFY_LOG" 'DEAR Agent GOBIN alarm'
+}
+
+# The healthy branch clears the alarm marker. It must clear only a marker the
+# guard could have written: an unvalidated `rm -f` deletes a symlink's target,
+# or a file reached through a symlinked ancestor, from outside the configured
+# state tree.
+@test "healthy status does not delete a symlinked alarm path's target" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	outside="$TEST_DIR/precious"
+	printf 'do not delete me\n' >"$outside"
+	linked_alarm="$FAKE_HOME/linked-alarm"
+	ln -s "$outside" "$linked_alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_ALARM_STATE="$linked_alarm" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	assert_equal "$(cat "$outside")" "do not delete me"
+	[ -L "$linked_alarm" ]
+}
+
+# The same rule for a file reached through a symlinked ancestor rather than a
+# symlinked leaf.
+@test "healthy status does not delete through a symlinked alarm ancestor" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	real_dir="$TEST_DIR/real-state"
+	mkdir -p "$real_dir"
+	printf 'do not delete me\n' >"$real_dir/alarm"
+	ln -s "$real_dir" "$FAKE_HOME/linked-state"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_ALARM_STATE="$FAKE_HOME/linked-state/alarm" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	assert_equal "$(cat "$real_dir/alarm")" "do not delete me"
+}
+
+# A heartbeat carries no suppressive power, so a configured path beneath a
+# symlinked state directory must still publish. Refusing it would make a
+# healthy guard look stale to the independent auditor.
+@test "heartbeat publishes beneath a symlinked directory" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	real_state="$TEST_DIR/real-heartbeat-state"
+	mkdir -p "$real_state"
+	ln -s "$real_state" "$FAKE_HOME/linked-heartbeat-state"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" \
+		GOBIN_GUARD_HEARTBEAT="$FAKE_HOME/linked-heartbeat-state/hb" \
+		GOBIN_GUARD_ALARM_STATE="$ALARM" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	[ -s "$real_state/hb" ]
+	assert_equal "$(file_mode "$real_state/hb")" "600"
+}
+
+# A configured alarm path may carry lexical dot segments without any symlink in
+# it. The marker check exists to reject a *symlinked* ancestor, but it compared
+# the given directory against its `cd -P` resolution, and `pwd -P` collapses
+# `.`/`..` as well as symlinks. A path such as `<state>/x/../x/alarm` therefore
+# never matched its own resolution, an existing marker always read as absent,
+# and every degraded invocation appended another trail record and re-notified
+# instead of suppressing delivery once the alarm was already recorded.
+@test "dot segments in the alarm path still suppress the second record" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/x"
+	guard_alarm="$state/x/../x/guard-alarm"
+	audit_alarm="$state/x/../x/audit-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	[ -f "$state/x/guard-alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/audit-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$TEST_DIR/missing-heartbeat" \
+			GOBIN_GUARD_AUDIT_ALARM_STATE="$audit_alarm" GOBIN_GUARD_NOTIFY=0 \
+			/bin/sh "$AUDIT_SCRIPT"
+		assert_failure 1
+	done
+	[ -f "$state/x/audit-alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/audit-trail.jsonl" | tr -d ' ')" "1"
+}
+
+# The dot-segment allowance must not weaken the symlink rejection it shares a
+# comparison with: a `..` that traverses *through* a symlinked component still
+# resolves somewhere the configured path does not name, so it fails closed.
+@test "dot segments through a symlinked component still fail closed" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/real" "$state/holder"
+	ln -s "$state/real" "$state/holder/link"
+	guard_alarm="$state/holder/link/../link/guard-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "2"
+}
+
+# A symlink immediately cancelled by `..` must still fail closed.
+#
+# The concern is that lexical normalization erases the link before `cd -P` can
+# see it. It does not: `cd -P` resolves the link FIRST and then applies `..`,
+# so it lands in the link target's parent while the lexical form lands in the
+# link's own parent. The two disagree and the marker is refused, which is the
+# safe outcome, and this test pins that they keep disagreeing.
+@test "a symlink cancelled by .. still fails closed" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/real" "$state/holder"
+	ln -s "$state/real" "$state/holder/link"
+	guard_alarm="$state/holder/link/../guard-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	# Refused on both runs, so neither suppressed the second record.
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "2"
+}
+
+# An owner-repairable marker parent that lacks owner WRITE access must be
+# repaired too. ensure_searchable_dir added only the execute bit, so a 0500
+# state directory stayed unwritable: the trail record and the notification
+# both went out, then persist_alarm_marker failed, no marker existed, and
+# every later degraded tick redelivered the alert.
+@test "an owner-repairable marker parent without write access is repaired" {
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state"
+	chmod 0500 "$state"
+	guard_alarm="$state/guard-alarm"
+
+	for _ in 1 2; do
+		run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+			GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$guard_alarm" \
+			GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+		assert_failure 1
+	done
+	[ -f "$guard_alarm" ]
+	assert_equal "$(wc -l <"$TEST_DIR/guard-trail.jsonl" | tr -d ' ')" "1"
+}
+
+# Ancestors must need search access only, never write.
+#
+# Requiring write on every ancestor reaches "/" on any absolute path. An
+# unprivileged chmod on "/" fails on Linux and `[ -w / ]` is false, so the
+# whole chain refused and the guard could neither record nor clear an alarm.
+# macOS hides that, because chmod there returns 0 when the requested bits are
+# already set, so a host-only test passes while Linux is broken.
+#
+# The stub makes chmod always fail, which is what an unowned ancestor looks
+# like, so the fallback is the thing under test on every platform.
+@test "a searchable but unwritable ancestor does not block the marker" {
+	cat >"$MOCK_BIN/chmod" <<'STUB'
+#!/bin/sh
+exit 1
+STUB
+	chmod +x "$MOCK_BIN/chmod"
+
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state"
+	# An ancestor we can traverse but not write, as "/" and "/Users" are.
+	chmod 0555 "$FAKE_HOME/.local"
+	# The marker's own directory stays writable; that is where write is needed.
+	chmod 0700 "$state"
+
+	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" \
+		GOBIN_GUARD_TRAIL="$TEST_DIR/guard-trail.jsonl" \
+		GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_ALARM_STATE="$state/guard-alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_failure 1
+
+	chmod 0755 "$FAKE_HOME/.local"
+	[ -f "$state/guard-alarm" ]
+}
+
+# The reviewer's exact fixture: a `..` that cancels a symlink, with a real
+# file already sitting at the lexically collapsed location. The healthy path
+# clears the marker it recognizes, so if the guard accepted this path it would
+# delete a file outside the tree the configured path actually names.
+@test "healthy status does not delete a file reached by cancelling a symlink" {
+	mkdir -p "$FAKE_HOME/go/bin"
+	printf '#!/bin/sh\n' >"$FAKE_HOME/go/bin/agm"
+	chmod +x "$FAKE_HOME/go/bin/agm"
+
+	state="$FAKE_HOME/.local/state/dear-agent"
+	mkdir -p "$state/real" "$state/holder"
+	ln -s "$state/real" "$state/holder/link"
+	printf 'do not delete me\n' >"$state/alarm"
+
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_ALARM_STATE="$state/holder/link/../alarm" \
+		GOBIN_GUARD_NOTIFY=0 "$SCRIPT" --quiet
+	assert_success
+	assert_equal "$(cat "$state/alarm")" "do not delete me"
 }

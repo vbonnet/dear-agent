@@ -10,7 +10,7 @@
 
 **REPO-SCRIPT-03** When local preflight runs repository tests, the system shall use the same explicit test timeout as required CI.
 
-**REPO-SCRIPT-05** When the GOBIN guard runs and the Go toolchain bin directory or its sentinel binary is absent, the system shall append an escalation record to the decision trail and exit non-zero.
+**REPO-SCRIPT-05** When the GOBIN guard or its independent freshness auditor observes a degraded state without a non-linked regular alarm marker, the system shall attempt its durable-trail and active-notification channels; when either channel succeeds and the configured marker path has owner-repairable, non-linked directory components and an absent leaf, the system shall create an owner-private marker beneath owner-traversable directories and suppress later serialized delivery attempts while that non-linked regular marker remains. Configured alarm, heartbeat, and trail paths beginning with `-` shall be treated as relative path operands rather than utility options. Every degraded invocation shall exit non-zero, and any pre-existing non-regular, linked, unsafe, or otherwise unwriteable marker path shall fail closed without opening or mutating that leaf or its linked target.
 
 **REPO-SCRIPT-06** When full local preflight skips wall-clock performance assertions under race instrumentation, the system shall re-run every affected package with inherited Go test modes neutralized and explicit ordinary non-race, non-short settings before publication succeeds.
 

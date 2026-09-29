@@ -71,6 +71,9 @@ if [ -z "$HOME_DIR" ]; then
 	echo "$PROG: HOME is not set" >&2
 	exit 2
 fi
+# Resolve physical path once so state dirs beneath a symlinked home (e.g. macOS
+# /Users -> /private/Users) are accepted by ensure_searchable_dir.
+_real=$(cd -P -- "$HOME_DIR" 2>/dev/null && pwd -P) && HOME_DIR=$_real
 
 gobin_dir="${GOBIN_GUARD_DIR:-$HOME_DIR/go/bin}"
 sentinel_name="${GOBIN_GUARD_BINARY:-agm}"
@@ -80,12 +83,151 @@ heartbeat_path="${GOBIN_GUARD_HEARTBEAT:-$HOME_DIR/.local/state/dear-agent/gobin
 alarm_path="${GOBIN_GUARD_ALARM_STATE:-$HOME_DIR/.local/state/dear-agent/gobin-guard.alarm}"
 role="${GOBIN_GUARD_ROLE:-watchdog}"
 
+# Keep option-looking relative state paths from being parsed as utility flags.
+# Shell redirections accept the original spelling, but dirname/cat/mv/rm do not
+# reliably do so across the supported host utilities.
+case "$trail_path" in
+-*) trail_path="./$trail_path" ;;
+esac
+case "$heartbeat_path" in
+-*) heartbeat_path="./$heartbeat_path" ;;
+esac
+case "$alarm_path" in
+-*) alarm_path="./$alarm_path" ;;
+esac
+
+# Repair state directories left non-searchable by the former alarm umask. A
+# subshell gives each recursive call private variables in POSIX sh.
+# The second argument asks for write access, and only the caller's own
+# directory gets it. Ancestors need search alone.
+#
+# Requiring write on every ancestor reaches "/" on any absolute path. An
+# unprivileged chmod on "/" fails on Linux and [ -w / ] is false, so the whole
+# chain refused and the guard could neither record nor clear an alarm. macOS
+# hides that: chmod there returns 0 when the requested bits are already set,
+# so the fallback is never reached and the defect is invisible on this host.
+ensure_searchable_dir() (
+	dir=$1
+	need_write=${2:-0}
+	parent=$(dirname "$dir")
+	if [ "$parent" != "$dir" ]; then
+		ensure_searchable_dir "$parent" 0 || return 1
+	fi
+	# Never repair through a link to a target outside the lexical state tree.
+	# chmod u+wx enforces the owner bits when permitted; the fallback accepts an
+	# already-traversable non-owned ancestor. test -x alone is insufficient
+	# because root reports effective access for mode-0600 directories.
+	#
+	# Write matters where the marker is written. With u+x alone a mode-0500
+	# state tree stayed unwritable, so the trail record and the notification
+	# both went out and persist_alarm_marker then failed: no marker existed,
+	# and every later degraded tick redelivered the alert. A directory this
+	# function creates is already 0700, so repairing the marker's own
+	# directory to match is consistent rather than a widening.
+	if [ -L "$dir" ]; then
+		return 1
+	elif [ -d "$dir" ] && [ "$need_write" = 1 ]; then
+		chmod u+wx "$dir" 2>/dev/null || { [ -x "$dir" ] && [ -w "$dir" ]; }
+	elif [ -d "$dir" ]; then
+		chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
+	elif [ -e "$dir" ]; then
+		return 1
+	else
+		(umask 0077 && mkdir "$dir")
+	fi
+)
+
+# A marker suppresses the trail record and the notification, so it is only
+# honoured when it is a regular file with no symlinked component: a linked
+# ancestor could point at a target outside the configured state tree.
+#
+# Both operands must be absolute physical paths before the comparison. A
+# configured relative path (including the "./" rewrite applied to
+# option-looking spellings above) left the given side relative and the
+# resolved side absolute, so they never compared equal, an existing marker
+# always read as absent, and every degraded invocation appended another trail
+# record instead of suppressing delivery.
+# lexical_path collapses "." and ".." segments without touching the filesystem.
+# The comparison in is_alarm_marker exists to reject a *symlinked* ancestor, but
+# `pwd -P` collapses dot segments as well as symlinks. Comparing a raw
+# configured path against its resolution therefore rejected a legal spelling
+# such as "<state>/x/../x/alarm", so an existing marker always read as absent
+# and every degraded invocation re-recorded and re-notified. Normalizing the
+# given side lexically first leaves the symlink rejection intact: a ".." that
+# traverses through a link still resolves somewhere the path does not name.
+lexical_path() (
+	IFS=/
+	set -f
+	out=
+	for seg in $1; do
+		case "$seg" in
+		'' | .) continue ;;
+		..) out=${out%/*} ;;
+		*) out="$out/$seg" ;;
+		esac
+	done
+	printf '%s' "${out:-/}"
+)
+
+is_alarm_marker() {
+	[ ! -L "$1" ] && [ -f "$1" ] || return 1
+	_d=$(dirname "$1")
+	case "$_d" in
+	/*) ;;
+	.) _d=$(pwd -P) ;;
+	./*) _d="$(pwd -P)/${_d#./}" ;;
+	*) _d="$(pwd -P)/$_d" ;;
+	esac
+	# Resolve the RAW directory and compare it against the LEXICAL collapse of
+	# that same raw directory. Collapsing first and then resolving erased a
+	# symlink whenever ".." cancelled it: "<state>/holder/link/.." became
+	# "<state>/holder", which resolves to itself, so the guard accepted a
+	# marker that actually lives wherever the link pointed. The healthy branch
+	# then deleted that file, outside the tree the configured path names.
+	_l=$(lexical_path "$_d")
+	_r=$(cd -P -- "$_d" 2>/dev/null && pwd -P) && [ "$_r" = "$_l" ]
+}
+
+persist_alarm_marker() (
+	marker_path=$1
+	ensure_searchable_dir "$(dirname "$marker_path")" 1 || return 1
+	# Reject every existing leaf before redirection so FIFOs and devices are
+	# never opened. Noclobber also rejects a regular file or link inserted after
+	# this serialized check; ce-1hu9.108 owns broader concurrent replacement.
+	[ ! -e "$marker_path" ] && [ ! -L "$marker_path" ] || return 1
+	set -C
+	umask 0077
+	: >"$marker_path"
+)
+
+# ensure_searchable_dir refuses a symlinked ancestor because the alarm marker
+# it guards is a suppression artifact. A heartbeat carries no suppressive
+# power: it is a liveness timestamp, and a configured path beneath a symlinked
+# home or state directory is an ordinary deployment. Refusing to publish there
+# makes a healthy guard look stale to the independent auditor, which is a false
+# alarm rather than a safety gain, so links are permitted here. A component
+# that exists but is not a directory is still refused.
+ensure_heartbeat_dir() (
+	dir=$1
+	parent=$(dirname "$dir")
+	if [ "$parent" != "$dir" ]; then
+		ensure_heartbeat_dir "$parent" || return 1
+	fi
+	if [ -d "$dir" ]; then
+		chmod u+x "$dir" 2>/dev/null || [ -x "$dir" ]
+	elif [ -e "$dir" ] || [ -L "$dir" ]; then
+		return 1
+	else
+		(umask 0077 && mkdir "$dir")
+	fi
+)
+
 # A distinct launchd agent audits this bounded freshness record. Write it before
 # classification so a failing detector is distinguishable from an unloaded or
 # missing detector; use rename so the auditor never reads a partial timestamp.
 write_heartbeat() {
 	heartbeat_dir=$(dirname "$heartbeat_path")
-	if ! mkdir -p "$heartbeat_dir" 2>/dev/null; then
+	if ! ensure_heartbeat_dir "$heartbeat_dir" 2>/dev/null; then
 		echo "$PROG: warning: cannot create heartbeat dir $heartbeat_dir" >&2
 		return 0
 	fi
@@ -178,7 +320,12 @@ notify_operator() {
 }
 
 if [ "$status" = "ok" ]; then
-	rm -f "$alarm_path" 2>/dev/null || true
+	# Clear only a marker this guard could have written. Removing an
+	# unvalidated path would delete a symlink's target, or a file reached
+	# through a symlinked ancestor, from outside the configured state tree.
+	if is_alarm_marker "$alarm_path"; then
+		rm -f "$alarm_path" 2>/dev/null || true
+	fi
 	if [ "$json_output" -eq 1 ]; then
 		printf '{"status":"ok","gobin_dir":"%s","sentinel":"%s"}\n' \
 			"$(json_escape "$gobin_dir")" "$(json_escape "$sentinel_path")"
@@ -191,12 +338,12 @@ fi
 # Degraded: report only the healthy-to-degraded transition. A missing GOBIN
 # can persist for hours; repeating notifications and trail entries each tick
 # obscures the original event rather than improving observability.
-if [ ! -e "$alarm_path" ]; then
+if ! is_alarm_marker "$alarm_path"; then
 	delivered=1
 	escalate && delivered=0
 	notify_operator && delivered=0
 	if [ "$delivered" -eq 0 ]; then
-		(umask 0177 && mkdir -p "$(dirname "$alarm_path")" && : >"$alarm_path") 2>/dev/null || \
+		persist_alarm_marker "$alarm_path" 2>/dev/null || \
 			echo "$PROG: warning: cannot persist alarm state: $alarm_path" >&2
 	fi
 fi
