@@ -16,10 +16,6 @@ import (
 )
 
 const (
-	cleanupHelperEnv            = "SAFEGIT_CLEANUP_HELPER"
-	cleanupHelperBranchEnv      = "SAFEGIT_CLEANUP_BRANCH"
-	cleanupHelperPrimaryEnv     = "SAFEGIT_CLEANUP_PRIMARY"
-	cleanupHelperCallerEnv      = "SAFEGIT_CLEANUP_CALLER"
 	attemptMergeHelperEnv       = "SAFEGIT_ATTEMPT_MERGE_HELPER"
 	attemptMergeHeadMismatchEnv = "SAFEGIT_ATTEMPT_MERGE_HEAD_MISMATCH"
 	attemptMergeMarkerEnv       = "SAFEGIT_ATTEMPT_MERGE_MARKER"
@@ -42,21 +38,6 @@ type cleanupFixture struct {
 	primary string
 	linked  string
 	branch  string
-}
-
-func TestCleanupWorktreeHelper(t *testing.T) {
-	if os.Getenv(cleanupHelperEnv) != "1" {
-		return
-	}
-	branch := os.Getenv(cleanupHelperBranchEnv)
-	if branch == "" {
-		t.Fatal("cleanup helper requires a branch")
-	}
-
-	plan := prepareCleanupPlan(context.Background(), branch)
-	plan.run(context.Background())
-	// Exit without asking the test runner to inspect the helper's removed cwd.
-	os.Exit(0)
 }
 
 func TestAttemptMergeCleanupHelper(t *testing.T) {
@@ -103,23 +84,13 @@ func TestAttemptMergeCleanupHelper(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestRunCleanupGitHonorsCanceledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if _, err := runCleanupGit(ctx, "", "version"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("runCleanupGit error = %v, want context.Canceled", err)
-	}
-}
-
-func TestProviderMergeDoesNotStartAfterCleanupPreparationCancellation(t *testing.T) {
+func TestProviderMergeDoesNotStartAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	missingProvider := filepath.Join(t.TempDir(), "must-not-start")
 	failure := runProviderMergeTransaction(
 		ctx,
-		"cleanup-topic",
 		[]string{missingProvider},
 		func() error { return nil },
 		nil,
@@ -158,7 +129,6 @@ func TestProviderMergeCommandCancellationRequiresConfirmation(t *testing.T) {
 			go func() {
 				result <- runProviderMergeTransaction(
 					ctx,
-					"",
 					[]string{provider, marker},
 					func() error {
 						confirmCalls++
@@ -209,7 +179,6 @@ func TestProviderMergeCommandFailureStopsBeforeConfirmationAndCleanup(t *testing
 	onConfirmed := 0
 	failure := runProviderMergeTransaction(
 		context.Background(),
-		fixture.branch,
 		[]string{filepath.Join(t.TempDir(), "missing-provider")},
 		func() error {
 			confirmed++
@@ -242,7 +211,6 @@ func TestProviderMergeRetriesLocalConfirmationTimeoutWithinTransaction(t *testin
 	confirmedCalls := 0
 	failure := runProviderMergeTransaction(
 		context.Background(),
-		"",
 		[]string{provider, marker},
 		func() error {
 			return waitForMergeCompletion(context.Background(), time.Second, time.Millisecond, func() error {
@@ -271,7 +239,7 @@ func TestProviderMergeRetriesLocalConfirmationTimeoutWithinTransaction(t *testin
 	}
 }
 
-func TestProviderMergeCleanupHonorsCancellationAfterConfirmation(t *testing.T) {
+func TestProviderMergePreservesRecoveryStateAfterConfirmation(t *testing.T) {
 	fixture := newCleanupFixture(t)
 	t.Chdir(fixture.primary)
 	provider := filepath.Join(t.TempDir(), "provider")
@@ -283,7 +251,6 @@ func TestProviderMergeCleanupHonorsCancellationAfterConfirmation(t *testing.T) {
 	confirmed := 0
 	failure := runProviderMergeTransaction(
 		ctx,
-		fixture.branch,
 		[]string{provider},
 		func() error {
 			cancel()
@@ -298,16 +265,17 @@ func TestProviderMergeCleanupHonorsCancellationAfterConfirmation(t *testing.T) {
 		t.Fatalf("confirmed callback count = %d, want 1", confirmed)
 	}
 	if _, err := os.Stat(fixture.linked); err != nil {
-		t.Fatalf("canceled cleanup changed target worktree: %v", err)
+		t.Fatalf("provider transaction changed target worktree: %v", err)
 	}
 	assertWorktreeRegistration(t, fixture, true)
 	assertBranchRef(t, fixture, true)
 }
 
-func TestProviderMergeTreatsCleanupPreparationFailureAsPostMergeWarning(t *testing.T) {
+func TestProviderMergeNeverInvokesLocalGit(t *testing.T) {
 	fakeDir := t.TempDir()
+	gitMarker := filepath.Join(fakeDir, "git-called")
 	for name, script := range map[string]string{
-		"git":      "#!/bin/sh\nexit 1\n",
+		"git":      "#!/bin/sh\nprintf called > \"$SAFEGIT_TEST_GIT_MARKER\"\nexit 1\n",
 		"provider": "#!/bin/sh\nprintf ran > \"$SAFEGIT_TEST_PROVIDER_MARKER\"\n",
 	} {
 		if err := os.WriteFile(filepath.Join(fakeDir, name), []byte(script), 0o700); err != nil {
@@ -316,6 +284,7 @@ func TestProviderMergeTreatsCleanupPreparationFailureAsPostMergeWarning(t *testi
 	}
 	marker := filepath.Join(t.TempDir(), "provider-ran")
 	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SAFEGIT_TEST_GIT_MARKER", gitMarker)
 	t.Setenv("SAFEGIT_TEST_PROVIDER_MARKER", marker)
 
 	readDiagnostics, writeDiagnostics, err := os.Pipe()
@@ -333,7 +302,6 @@ func TestProviderMergeTreatsCleanupPreparationFailureAsPostMergeWarning(t *testi
 		}()
 		failure = runProviderMergeTransaction(
 			context.Background(),
-			"cleanup-topic",
 			[]string{filepath.Join(fakeDir, "provider")},
 			func() error { return nil },
 			func() { confirmed++ },
@@ -345,7 +313,7 @@ func TestProviderMergeTreatsCleanupPreparationFailureAsPostMergeWarning(t *testi
 		t.Fatalf("read stderr capture: %v", readErr)
 	}
 	if failure != nil {
-		t.Fatalf("provider merge failed because cleanup preparation failed: %v", failure.err)
+		t.Fatalf("provider merge failed: %v", failure.err)
 	}
 	if confirmed != 1 {
 		t.Fatalf("confirmed callback count = %d, want 1", confirmed)
@@ -353,53 +321,15 @@ func TestProviderMergeTreatsCleanupPreparationFailureAsPostMergeWarning(t *testi
 	if data, err := os.ReadFile(marker); err != nil || string(data) != "ran" {
 		t.Fatalf("provider marker = %q, %v; want ran", data, err)
 	}
-	if !strings.Contains(string(diagnostics), "cleanup: pre-merge context: git worktree list") {
-		t.Fatalf("cleanup preparation warning missing from stderr: %q", diagnostics)
+	if _, err := os.Stat(gitMarker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("provider transaction invoked local git: %v", err)
+	}
+	if !strings.Contains(string(diagnostics), "no local worktree or ref was removed") {
+		t.Fatalf("preservation diagnostic missing from stderr: %q", diagnostics)
 	}
 }
 
-func TestRunCleanupGitBoundsDescendantHeldPipes(t *testing.T) {
-	fakeGit := filepath.Join(t.TempDir(), "git")
-	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\n(sleep 30) &\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", filepath.Dir(fakeGit)+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	// ErrWaitDelay proves the configured drain bound expired and closed the
-	// descendant-held pipes; command-start wall time also includes scheduler delay.
-	_, err := runCleanupGit(context.Background(), "", "version")
-	if !errors.Is(err, exec.ErrWaitDelay) {
-		t.Fatalf("runCleanupGit error = %v, want exec.ErrWaitDelay", err)
-	}
-}
-
-func TestCleanupWorktreeUsesPrimaryAfterRemovingCallerDirectory(t *testing.T) {
-	fixture := newCleanupFixture(t)
-	output := runCleanupHelper(t, fixture)
-
-	if _, err := os.Stat(fixture.linked); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("linked worktree path still exists after cleanup: %v", err)
-	}
-	assertWorktreeRegistration(t, fixture, false)
-	assertBranchRef(t, fixture, false)
-	assertPrimaryUsable(t, fixture.primary)
-
-	if !strings.Contains(output, "removed local branch "+fixture.branch) {
-		t.Fatalf("cleanup did not report successful branch deletion:\n%s", output)
-	}
-	for _, diagnostic := range []string{
-		"getcwd",
-		"unable to read current working directory",
-		"cannot chdir",
-		"no such file or directory",
-	} {
-		if strings.Contains(strings.ToLower(output), diagnostic) {
-			t.Fatalf("cleanup emitted stale-cwd diagnostic %q:\n%s", diagnostic, output)
-		}
-	}
-}
-
-func TestAttemptMergeRetainsCleanupPlanAcrossProviderMutation(t *testing.T) {
+func TestAttemptMergePreservesLocalRecoveryAfterProviderMutation(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		watch bool
@@ -412,17 +342,19 @@ func TestAttemptMergeRetainsCleanupPlanAcrossProviderMutation(t *testing.T) {
 			caller := addCleanupCaller(t, fixture)
 			output := runAttemptMergeCleanupHelper(t, fixture, caller, attemptMergeOutcomeSuccess, tc.watch)
 
-			if _, err := os.Stat(caller); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("provider did not remove caller worktree: %v", err)
+			if _, err := os.Stat(caller); err != nil {
+				t.Fatalf("caller worktree was not preserved: %v", err)
 			}
-			if _, err := os.Stat(fixture.linked); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("target worktree path still exists after confirmed merge cleanup: %v", err)
+			if _, err := os.Stat(fixture.linked); err != nil {
+				t.Fatalf("target worktree was not preserved: %v", err)
 			}
-			assertWorktreeRegistration(t, fixture, false)
-			assertBranchRef(t, fixture, false)
+			assertWorktreeRegistration(t, fixture, true)
+			assertCallerWorktreeRegistration(t, fixture.primary, caller)
+			assertBranchRef(t, fixture, true)
 			assertPrimaryUsable(t, fixture.primary)
-			if !strings.Contains(output, "removed local branch "+fixture.branch) {
-				t.Fatalf("attemptMerge did not retain the pre-provider cleanup plan:\n%s", output)
+			preserved := "no local worktree or ref was removed"
+			if !strings.Contains(output, preserved) {
+				t.Fatalf("attemptMerge did not report preserved local recovery state:\n%s", output)
 			}
 			if count := strings.Count(output, "safe-merge: ✓ merge complete"); count != 1 {
 				t.Fatalf("confirmed merge message count = %d, want 1:\n%s", count, output)
@@ -430,9 +362,9 @@ func TestAttemptMergeRetainsCleanupPlanAcrossProviderMutation(t *testing.T) {
 			if count := strings.Count(output, "snapshot: head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa contains live base main@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); count != 1 {
 				t.Fatalf("live-base proof receipt count = %d, want 1:\n%s", count, output)
 			}
-			if confirmedAt, cleanupAt := strings.Index(output, "safe-merge: ✓ merge complete"),
-				strings.Index(output, "removed local branch "+fixture.branch); confirmedAt > cleanupAt {
-				t.Fatalf("cleanup completed before the confirmed-merge record:\n%s", output)
+			if confirmedAt, preservedAt := strings.Index(output, "safe-merge: ✓ merge complete"),
+				strings.Index(output, preserved); confirmedAt > preservedAt {
+				t.Fatalf("preservation diagnostic preceded confirmed merge:\n%s", output)
 			}
 		})
 	}
@@ -451,13 +383,14 @@ func TestAttemptMergeDoesNotCleanupBeforeExactHeadConfirmation(t *testing.T) {
 			caller := addCleanupCaller(t, fixture)
 			output := runAttemptMergeCleanupHelper(t, fixture, caller, attemptMergeOutcomeHeadMismatch, tc.watch)
 
-			if _, err := os.Stat(caller); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("provider did not remove caller worktree: %v", err)
+			if _, err := os.Stat(caller); err != nil {
+				t.Fatalf("caller worktree was not preserved: %v", err)
 			}
 			if _, err := os.Stat(fixture.linked); err != nil {
 				t.Fatalf("target worktree was removed before exact-head confirmation: %v", err)
 			}
 			assertWorktreeRegistration(t, fixture, true)
+			assertCallerWorktreeRegistration(t, fixture.primary, caller)
 			assertBranchRef(t, fixture, true)
 			assertPrimaryUsable(t, fixture.primary)
 			if strings.Contains(output, "removed local branch "+fixture.branch) {
@@ -488,6 +421,7 @@ func TestAttemptMergeProviderFailureDoesNotConfirmOrCleanup(t *testing.T) {
 		t.Fatalf("provider failure changed target worktree: %v", err)
 	}
 	assertWorktreeRegistration(t, fixture, true)
+	assertCallerWorktreeRegistration(t, fixture.primary, caller)
 	assertBranchRef(t, fixture, true)
 	assertPrimaryUsable(t, fixture.primary)
 	if !strings.Contains(output, "gh pr merge failed") {
@@ -496,72 +430,6 @@ func TestAttemptMergeProviderFailureDoesNotConfirmOrCleanup(t *testing.T) {
 	if strings.Contains(output, "safe-merge: ✓ merge complete") ||
 		strings.Contains(output, "removed local branch "+fixture.branch) {
 		t.Fatalf("attemptMerge confirmed or cleaned after provider failure:\n%s", output)
-	}
-}
-
-func TestCleanupWorktreePreservesPrimaryPathWhitespace(t *testing.T) {
-	fixture := newCleanupFixtureWithPrimaryName(t, "primary\ncheckout \t")
-	output := runCleanupHelper(t, fixture)
-
-	if _, err := os.Stat(fixture.linked); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("linked worktree path still exists after cleanup: %v", err)
-	}
-	assertWorktreeRegistration(t, fixture, false)
-	assertBranchRef(t, fixture, false)
-	assertPrimaryUsable(t, fixture.primary)
-	if !strings.Contains(output, "removed local branch "+fixture.branch) {
-		t.Fatalf("cleanup did not preserve the primary worktree path:\n%s", output)
-	}
-}
-
-func TestCleanupWorktreeWarnsWhenDirtyWorktreeCannotBeRemoved(t *testing.T) {
-	fixture := newCleanupFixture(t)
-	readme := filepath.Join(fixture.linked, "README.md")
-	if err := os.WriteFile(readme, []byte("# dirty linked worktree\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	output := runCleanupHelper(t, fixture)
-
-	if !strings.Contains(output, "cleanup: worktree remove "+fixture.linked+":") {
-		t.Fatalf("cleanup did not identify the failed worktree removal:\n%s", output)
-	}
-	if !strings.Contains(output, "cleanup: branch -d "+fixture.branch+":") {
-		t.Fatalf("cleanup did not identify the conservative branch deletion failure:\n%s", output)
-	}
-	if strings.Contains(output, "removed local branch "+fixture.branch) {
-		t.Fatalf("cleanup falsely reported complete branch cleanup:\n%s", output)
-	}
-	if _, err := os.Stat(fixture.linked); err != nil {
-		t.Fatalf("dirty linked worktree path was not preserved: %v", err)
-	}
-	assertWorktreeRegistration(t, fixture, true)
-	assertBranchRef(t, fixture, true)
-	assertPrimaryUsable(t, fixture.primary)
-}
-
-func TestCleanupWorktreePreservesUnmergedBranchAfterRemovingCleanWorktree(t *testing.T) {
-	fixture := newCleanupFixture(t)
-	unique := filepath.Join(fixture.linked, "branch-only.txt")
-	if err := os.WriteFile(unique, []byte("unmerged branch content\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gittest.Run(t, fixture.linked, "add", "--", "branch-only.txt")
-	gittest.Run(t, fixture.linked, "commit", "-m", "branch-only commit")
-
-	output := runCleanupHelper(t, fixture)
-
-	if _, err := os.Stat(fixture.linked); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("clean linked worktree path still exists after cleanup: %v", err)
-	}
-	assertWorktreeRegistration(t, fixture, false)
-	assertBranchRef(t, fixture, true)
-	assertPrimaryUsable(t, fixture.primary)
-	if !strings.Contains(output, "cleanup: branch -d "+fixture.branch+":") {
-		t.Fatalf("cleanup did not report conservative unmerged-branch preservation:\n%s", output)
-	}
-	if strings.Contains(output, "removed local branch "+fixture.branch) {
-		t.Fatalf("cleanup forcibly deleted an unmerged branch:\n%s", output)
 	}
 }
 
@@ -593,21 +461,6 @@ func addCleanupCaller(t *testing.T, fixture cleanupFixture) string {
 	gittest.Run(t, fixture.primary, "branch", callerBranch)
 	gittest.Run(t, fixture.primary, "worktree", "add", "--quiet", caller, callerBranch)
 	return caller
-}
-
-func runCleanupHelper(t *testing.T, fixture cleanupFixture) string {
-	t.Helper()
-	helper := exec.Command(os.Args[0], "-test.run=^TestCleanupWorktreeHelper$")
-	helper.Dir = fixture.linked
-	helper.Env = append(gittest.Env(t),
-		cleanupHelperEnv+"=1",
-		cleanupHelperBranchEnv+"="+fixture.branch,
-	)
-	out, err := helper.CombinedOutput()
-	if err != nil {
-		t.Fatalf("cleanup helper failed: %v\n%s", err, out)
-	}
-	return string(out)
 }
 
 func runAttemptMergeCleanupHelper(
@@ -654,18 +507,13 @@ case "$*" in
   "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{"message":"Updating pull request branch."}' ;;
-  "pr merge 42 --repo owner/repo --squash --auto --delete-branch --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+  "pr merge 42 --repo owner/repo --squash --auto --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	printf '%s\n' provider >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
 	if [ "${SAFEGIT_ATTEMPT_MERGE_PROVIDER_FAILURE:-}" = "1" ]; then
 	  printf '%s\n' 'synthetic provider failure' >&2
 	  exit 9
-	fi
-    git -C "$SAFEGIT_CLEANUP_PRIMARY" worktree remove --force -- "$SAFEGIT_CLEANUP_CALLER" ;;
+	fi ;;
   "pr view 42 --repo owner/repo --json state,headRefOid")
-	if [ -e "$SAFEGIT_CLEANUP_CALLER" ]; then
-	  printf '%s\n' 'caller still exists at confirmation' >&2
-	  exit 2
-	fi
 	printf '%s\n' confirm >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
 	count=0
 	if [ -f "$SAFEGIT_ATTEMPT_MERGE_CONFIRM_COUNT" ]; then
@@ -700,8 +548,6 @@ esac
 	helper.Env = append(gittest.Env(t),
 		"PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		attemptMergeHelperEnv+"=1",
-		cleanupHelperPrimaryEnv+"="+fixture.primary,
-		cleanupHelperCallerEnv+"="+caller,
 		attemptMergeMarkerEnv+"="+marker,
 		attemptMergeConfirmCountEnv+"="+confirmCount,
 		"SAFE_MERGE_AUDIT_DIR="+auditDir,
@@ -775,6 +621,14 @@ func assertWorktreeRegistration(t *testing.T, fixture cleanupFixture, want bool)
 	got := strings.Contains(list, "worktree "+fixture.linked+"\n")
 	if got != want {
 		t.Fatalf("linked worktree registration present = %t, want %t:\n%s", got, want, list)
+	}
+}
+
+func assertCallerWorktreeRegistration(t *testing.T, primary, caller string) {
+	t.Helper()
+	list := gittest.Run(t, primary, "worktree", "list", "--porcelain")
+	if !strings.Contains(list, "worktree "+caller+"\n") {
+		t.Fatalf("caller worktree registration missing:\n%s", list)
 	}
 }
 

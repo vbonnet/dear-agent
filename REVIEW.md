@@ -314,11 +314,13 @@ process.
 2. CI runs preflight (lint + build + vet) — MUST pass.
 3. Review agent runs all 5 dimensions in parallel.
 4. Synthesis produces outcome (§1).
-   - approved       → merge (squash, delete branch)
+   - approved       → merge (squash; local refs preserved)
    - needs-work     → author fixes → loop from step 2
    - rejected       → close PR; design new approach
    - needs-human    → human reviews + overrides or closes
-5. After merge: delete branch.
+5. After merge: leave the local worktree and branch ref in place.
+   Per SAFEGIT-13 the merge preserves them, and only sanctioned session
+   cleanup may remove them, after explicit ownership and liveness checks.
 ```
 
 No PR merges while any dimension has an unresolved finding with severity

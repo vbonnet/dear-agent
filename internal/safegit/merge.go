@@ -7,7 +7,7 @@
 //   - No unresolved review threads exist
 //   - Minimum soak: head commit is at least 5 minutes old
 //
-// After merge: worktree + branch are cleaned up automatically.
+// After merge, local recovery state is preserved for sanctioned session cleanup.
 package safegit
 
 import (
@@ -190,8 +190,8 @@ func watchMergeWithAttempt(
 			return nil
 		}
 		// Once the provider reports a different head, retrying the whole merge
-		// transaction would cross the exact-head safety boundary and discard the
-		// retained cleanup root. Surface the terminal mismatch immediately.
+		// transaction would cross the exact-head safety boundary. Surface the
+		// terminal mismatch immediately.
 		if errors.Is(err, errMergeHeadChanged) {
 			return err
 		}
@@ -394,14 +394,13 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 			cfg.PRNumber, cfg.Repo, headInfo.SHA)
 	}
 	confirmCompletion := func() error {
-		// Keep provider acceptance, exact-head polling, and cleanup in one
-		// transaction so a pending merge cannot discard the retained local root.
+		// Keep provider acceptance and exact-head polling in one transaction so
+		// a pending merge cannot be mistaken for completion.
 		// Success from `gh pr merge --auto` only means it was queued.
 		return waitForMergeCompletion(ctx, cfg.WatchTimeout, cfg.WatchInterval, confirm)
 	}
 	failure := runProviderMergeTransaction(
 		ctx,
-		headInfo.Branch,
 		mergeArgs,
 		confirmCompletion,
 		func() {
@@ -439,8 +438,8 @@ var (
 
 // confirmMergedWithin prevents a successful `gh pr merge --auto` invocation from
 // being mistaken for a completed merge. GitHub exits zero when auto-merge is
-// merely enabled, so cleanup is safe only after the PR reports MERGED at the
-// exact head SHA that passed the gates.
+// merely enabled, so completion is known only after the PR reports MERGED at
+// the exact head SHA that passed the gates.
 func confirmMergedWithin(
 	parent context.Context,
 	timeout time.Duration,
@@ -613,7 +612,6 @@ func BuildMergeArgs(prNum int, repo, headSHA string) []string {
 		"--repo", repo,
 		"--squash",
 		"--auto",
-		"--delete-branch",
 		"--match-head-commit", headSHA,
 	}
 }

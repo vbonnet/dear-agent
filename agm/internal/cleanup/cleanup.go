@@ -36,6 +36,12 @@ type GitOps interface {
 	// the interface rather than inside DeleteBranch: a caller that swaps in
 	// its own GitOps must make the preservation decision explicitly.
 	PreserveBranch(repoPath, branchName string) (preserve bool, reason string)
+	// PreserveWorktree reports whether a worktree must survive cleanup, and
+	// why. This is the liveness half of the same rule: RemoveWorktree is
+	// called with force, so an unexamined removal discards uncommitted and
+	// ignored work that no ref points at and nothing can recover. It sits in
+	// the interface for the same reason PreserveBranch does.
+	PreserveWorktree(repoPath, worktreePath string) (preserve bool, reason string)
 }
 
 // RealGitOps implements GitOps using real git commands.
@@ -59,6 +65,22 @@ func (RealGitOps) PreserveBranch(repoPath, branchName string) (bool, string) {
 	return v.Preserve, v.Reason
 }
 
+// PreserveWorktree answers the liveness question from the filesystem. It
+// preserves a worktree that has staged, unstaged, or untracked changes, and it
+// preserves one whose status cannot be determined at all: "unknown" is not
+// evidence that there is nothing to lose, and the removal it gates is forced
+// and unrecoverable.
+func (RealGitOps) PreserveWorktree(_, worktreePath string) (bool, string) {
+	dirty, err := gitpkg.HasUncommittedChanges(worktreePath)
+	if err != nil {
+		return true, fmt.Sprintf("worktree status could not be determined: %v", err)
+	}
+	if dirty {
+		return true, "worktree has uncommitted or untracked changes"
+	}
+	return false, ""
+}
+
 // Result holds the outcome of a session cleanup operation.
 type Result struct {
 	WorktreesRemoved int `json:"worktrees_removed"`
@@ -66,7 +88,11 @@ type Result struct {
 	// BranchesPreserved names each branch cleanup declined to delete, with
 	// the reason, so a preserved branch is visible rather than merely absent
 	// from the deleted count.
-	BranchesPreserved    []string `json:"branches_preserved,omitempty"`
+	BranchesPreserved []string `json:"branches_preserved,omitempty"`
+	// WorktreesPreserved names each worktree cleanup declined to remove, with
+	// the reason, so preserved recovery state is visible rather than merely
+	// absent from the removed count.
+	WorktreesPreserved   []string `json:"worktrees_preserved,omitempty"`
 	TmpFilesRemoved      int      `json:"tmp_files_removed"`
 	InterruptFlagCleared bool     `json:"interrupt_flag_cleared"`
 	Errors               []string `json:"errors,omitempty"`
@@ -116,7 +142,21 @@ func SessionResources(ctx context.Context, sessionName string, store WorktreeSto
 					continue
 				}
 
-				// Remove the git worktree (force to handle uncommitted changes)
+				// Liveness gate before a forced removal. Removing a
+				// worktree that still holds uncommitted or ignored work
+				// destroys state no ref points at, so a preserved worktree
+				// stays tracked (the next cleanup must be able to retry it)
+				// and keeps its branch, which is the other half of the same
+				// recovery state.
+				if preserve, reason := git.PreserveWorktree(wt.RepoPath, wt.WorktreePath); preserve {
+					logger.Info("Preserving worktree during session cleanup",
+						"path", wt.WorktreePath, "repo", wt.RepoPath, "reason", reason)
+					result.WorktreesPreserved = append(result.WorktreesPreserved,
+						fmt.Sprintf("%s (%s)", wt.WorktreePath, reason))
+					continue
+				}
+
+				// Remove the git worktree (force is safe past the gate above)
 				if err := git.RemoveWorktree(wt.RepoPath, wt.WorktreePath, true); err != nil {
 					msg := fmt.Sprintf("failed to remove worktree %s: %v", wt.WorktreePath, err)
 					logger.Warn(msg)

@@ -40,7 +40,7 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-12** When configured flaky checks fail for the first allowed occurrence, the system shall request the sanctioned rerun before treating the check as a hard block.
 
-**SAFEGIT-13** When an exact-head provider merge is confirmed for a local branch, the system shall attempt caller-cancelable, bounded linked-worktree removal before conservative local-branch deletion without depending on the continued existence of the invoking worktree, and shall report cleanup failures as warnings without changing the confirmed provider merge result.
+**SAFEGIT-13** When an exact-head provider merge is confirmed, the system shall preserve every local worktree and branch ref so local recovery state can be removed only through sanctioned session cleanup with explicit ownership and liveness checks.
 
 **SAFEGIT-14** When the effective required-check policy cannot be completely discovered, the system shall block the merge before classifying CI results.
 
