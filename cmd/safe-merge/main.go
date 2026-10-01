@@ -165,9 +165,19 @@ Audit log:
   (override with SAFE_MERGE_AUDIT_DIR).
 
 Merge execution uses GitHub auto-merge so protected direct-merge policies and
-merge queues remain supported. The exact head SHA is pinned.
+merge queues remain supported. A pull request in a stack merges through the
+asynchronous REST merge instead, because the provider refuses the auto-merge
+mutation for those. Either way the exact head SHA is pinned, and diagnostics
+name the interface that was actually used.
 
-Post-merge: local worktree and branch are cleaned up automatically.
+Post-merge: the local worktree is removed and local branch deletion is attempted
+on a best-effort basis; a squash merge leaves the gated head off the local base,
+so git refuses to delete a topic branch it cannot see as merged and the branch
+stays. The ordinary route asks GitHub to delete the remote branch
+(gh pr merge --delete-branch).
+The stacked route cannot, and does not delete it itself; instead it reads the
+head ref in the repository that holds it and says so if the branch survives,
+whatever the repository's auto-deletion setting claims.
 `
 
 // WatchInterval is re-exported to allow overriding in tests.

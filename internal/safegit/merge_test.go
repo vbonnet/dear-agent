@@ -933,7 +933,7 @@ func TestMergeResultRequiresExactMergedHead(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := validateMergeResult(tc.result, tc.expected); (got != nil) != tc.wantError {
+			if got := validateMergeResult(tc.result, tc.expected, "gh pr merge"); (got != nil) != tc.wantError {
 				t.Fatalf("validateMergeResult() error = %v, wantError %v", got, tc.wantError)
 			}
 		})
@@ -941,7 +941,7 @@ func TestMergeResultRequiresExactMergedHead(t *testing.T) {
 }
 
 func TestMergeResultPendingUsesSentinel(t *testing.T) {
-	err := validateMergeResult(mergeResult{State: "OPEN", HeadRefOid: "abc123"}, "abc123")
+	err := validateMergeResult(mergeResult{State: "OPEN", HeadRefOid: "abc123"}, "abc123", "gh pr merge")
 	if !errors.Is(err, errMergePending) {
 		t.Fatalf("validateMergeResult() error = %v, want errMergePending", err)
 	}

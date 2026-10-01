@@ -76,6 +76,26 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-30** When the set of commits a push would publish cannot be determined, the system shall report the skipped scan on the diagnostic stream and shall allow the push to proceed.
 
+**SAFEGIT-31** When a pull request belongs to a stack and clears every merge gate, the system shall complete the merge at the exact gated head, since a pull request that satisfies every gate shall not be left unmergeable by the provider interface the system chose.
+
+**SAFEGIT-32** When the system cannot determine which merge interface a pull request requires, the system shall block the merge rather than assume one, since either assumption can merge through a path the provider refuses.
+
+**SAFEGIT-33** When the system merges a pull request, the base-freshness proof shall be the last provider observation the system makes before the merge, since any intervening round trip lets the target branch advance unobserved for that call's duration and voids the proof.
+
+**SAFEGIT-34** When a merge attempt fails or remains incomplete, the system shall report the interface it actually used, since naming an operation that was never attempted hides the actionable failure.
+
+**SAFEGIT-35** When the system completes a merge through an interface that does not itself delete the merged head branch, the system shall observe whether that branch still exists in the repository holding it and shall report a branch that survives, rather than deleting it, since the provider offers no atomic conditional deletion and a configured auto-deletion setting records an intention rather than an outcome.
+
+**SAFEGIT-36** When a provider merge command exits nonzero while the request may still have been accepted, the system shall poll for the merge at the exact gated head within a bounded window before classifying the attempt as failed, since an out-of-band merge is commonly still pending at the first observation and a lost response would otherwise skip cleanup and invite a retry of a merge that already completed.
+
+**SAFEGIT-37** When the system cannot read a merged head branch and the credential's authority to read that repository's refs is unproven, the system shall report the outcome as unknown rather than as deleted, since the provider answers alike for a ref that is absent and one the credential may not read, and repository metadata access does not establish ref-read access.
+
+**SAFEGIT-38** When caller cancellation races provider acceptance, the system shall still poll for the merge at the exact gated head within the bounded indeterminate window, since a probe that carries the cancellation answers the question with the very condition that made the outcome indeterminate and would report failure on a merge that already completed.
+
+**SAFEGIT-39** When the bounded indeterminate probe observes that the pull request merged at a head other than the gated one, the system shall report that exact-head mismatch as the failure, since only a reported mismatch is terminal and substituting the provider command's error downgrades a safety violation into a retryable failure.
+
+**SAFEGIT-40** When a merge-completion read fails because the credential is expired, revoked, or lacks the required access, the system shall report that denial immediately rather than continue polling, since repeating a denied request cannot change its answer and only delays the actionable failure.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

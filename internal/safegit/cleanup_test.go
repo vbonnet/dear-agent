@@ -28,6 +28,8 @@ const (
 	attemptMergeTransientEnv    = "SAFEGIT_ATTEMPT_MERGE_TRANSIENT_CONFIRMATION"
 	attemptMergeConfirmCountEnv = "SAFEGIT_ATTEMPT_MERGE_CONFIRM_COUNT"
 	attemptMergeProviderFailEnv = "SAFEGIT_ATTEMPT_MERGE_PROVIDER_FAILURE"
+	attemptMergeStackedEnv      = "SAFEGIT_ATTEMPT_MERGE_STACKED"
+	attemptMergeTransportEnv    = "SAFEGIT_ATTEMPT_MERGE_TRANSPORT"
 )
 
 type attemptMergeTestOutcome uint8
@@ -82,8 +84,14 @@ func TestAttemptMergeCleanupHelper(t *testing.T) {
 		err = attemptMerge(context.Background(), cfg)
 	}
 	if os.Getenv(attemptMergeProviderFailEnv) == "1" {
-		if err == nil || !strings.Contains(err.Error(), "gh pr merge failed") {
-			t.Fatalf("attemptMerge error = %v, want gh pr merge failure", err)
+		// The diagnostic must name the interface actually attempted, so a
+		// stacked failure does not report an operation that never ran.
+		wantFailure := "gh pr merge failed"
+		if os.Getenv(attemptMergeStackedEnv) == "1" {
+			wantFailure = "asynchronous REST merge failed"
+		}
+		if err == nil || !strings.Contains(err.Error(), wantFailure) {
+			t.Fatalf("attemptMerge error = %v, want %q", err, wantFailure)
 		}
 		_, _ = os.Stderr.WriteString(err.Error() + "\n")
 		os.Exit(0)
@@ -92,7 +100,7 @@ func TestAttemptMergeCleanupHelper(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "merge completion head changed") {
 			t.Fatalf("attemptMerge error = %v, want exact-head mismatch", err)
 		}
-		if strings.Contains(err.Error(), "gh pr merge failed") {
+		if strings.Contains(err.Error(), "failed: exit status") {
 			t.Fatalf("attemptMerge misclassified exact-head mismatch as provider failure: %v", err)
 		}
 		os.Exit(0)
@@ -101,6 +109,46 @@ func TestAttemptMergeCleanupHelper(t *testing.T) {
 		t.Fatalf("attemptMerge: %v", err)
 	}
 	os.Exit(0)
+}
+
+// A stacked PR must complete the whole provider transaction through the async
+// REST merge: GitHub refuses the auto-merge mutation for these, so exercising
+// only the ordinary route would leave acceptance, exact-head confirmation, and
+// cleanup unverified for the transport they actually use.
+func TestAttemptMergeStackedPRUsesAsyncTransactionEndToEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		watch bool
+	}{
+		{name: "one-shot"},
+		{name: "watch", watch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newCleanupFixture(t)
+			caller := addCleanupCaller(t, fixture)
+
+			runAttemptMergeCleanupHelper(t, fixture, caller,
+				attemptMergeOutcomeSuccess, tc.watch, true)
+
+			if _, err := os.Stat(caller); err == nil {
+				t.Fatal("confirmed async merge left the caller worktree in place")
+			}
+			assertWorktreeRegistration(t, fixture, false)
+		})
+	}
+}
+
+func TestAttemptMergeStackedProviderFailureDoesNotCleanup(t *testing.T) {
+	fixture := newCleanupFixture(t)
+	caller := addCleanupCaller(t, fixture)
+
+	runAttemptMergeCleanupHelper(t, fixture, caller,
+		attemptMergeOutcomeProviderFailure, false, true)
+
+	if _, err := os.Stat(caller); err != nil {
+		t.Fatalf("async provider failure changed caller worktree: %v", err)
+	}
+	assertWorktreeRegistration(t, fixture, true)
 }
 
 func TestRunCleanupGitHonorsCanceledContext(t *testing.T) {
@@ -410,7 +458,7 @@ func TestAttemptMergeRetainsCleanupPlanAcrossProviderMutation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newCleanupFixture(t)
 			caller := addCleanupCaller(t, fixture)
-			output := runAttemptMergeCleanupHelper(t, fixture, caller, attemptMergeOutcomeSuccess, tc.watch)
+			output := runAttemptMergeCleanupHelper(t, fixture, caller, attemptMergeOutcomeSuccess, tc.watch, false)
 
 			if _, err := os.Stat(caller); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("provider did not remove caller worktree: %v", err)
@@ -449,7 +497,7 @@ func TestAttemptMergeDoesNotCleanupBeforeExactHeadConfirmation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newCleanupFixture(t)
 			caller := addCleanupCaller(t, fixture)
-			output := runAttemptMergeCleanupHelper(t, fixture, caller, attemptMergeOutcomeHeadMismatch, tc.watch)
+			output := runAttemptMergeCleanupHelper(t, fixture, caller, attemptMergeOutcomeHeadMismatch, tc.watch, false)
 
 			if _, err := os.Stat(caller); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("provider did not remove caller worktree: %v", err)
@@ -478,6 +526,7 @@ func TestAttemptMergeProviderFailureDoesNotConfirmOrCleanup(t *testing.T) {
 		fixture,
 		caller,
 		attemptMergeOutcomeProviderFailure,
+		false,
 		false,
 	)
 
@@ -616,15 +665,24 @@ func runAttemptMergeCleanupHelper(
 	caller string,
 	outcome attemptMergeTestOutcome,
 	watch bool,
+	stacked bool,
 ) string {
 	t.Helper()
 	fakeDir := t.TempDir()
 	fakeGH := filepath.Join(fakeDir, "gh")
 	script := `#!/bin/sh
 set -eu
+merge_body() {
+	printf '%s\n' provider >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
+	if [ "${SAFEGIT_ATTEMPT_MERGE_PROVIDER_FAILURE:-}" = "1" ]; then
+	  printf '%s\n' 'synthetic provider failure' >&2
+	  exit 9
+	fi
+	git -C "$SAFEGIT_CLEANUP_PRIMARY" worktree remove --force -- "$SAFEGIT_CLEANUP_CALLER"
+}
 case "$*" in
-  "pr view 42 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid")
-    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
+  "pr view 42 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner")
+    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","headRepository":{"name":"repo"},"headRepositoryOwner":{"login":"owner"}}' ;;
   "pr view 42 --repo owner/repo --json baseRefName")
     printf '%s\n' '{"baseRefName":"main"}' ;;
   "pr view 42 --repo owner/repo --json baseRefName,headRefOid")
@@ -654,13 +712,22 @@ case "$*" in
   "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
     printf '%s\n' '{"message":"Updating pull request branch."}' ;;
+  "api repos/owner/repo/git/ref/heads%2Fcleanup-topic")
+    printf '%s\n' retention-check >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
+    printf '%s\n' 'gh: Not Found (HTTP 404)' >&2
+    exit 1 ;;
+  "api repos/owner/repo/pulls/42")
+    if [ "${SAFEGIT_ATTEMPT_MERGE_STACKED:-}" = "1" ]; then
+      printf '%s\n' '{"number":42,"stack":{"id":7,"number":43,"position":1,"size":2}}'
+    else
+      printf '%s\n' '{"number":42,"stack":null}'
+    fi ;;
   "pr merge 42 --repo owner/repo --squash --auto --delete-branch --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	printf '%s\n' provider >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
-	if [ "${SAFEGIT_ATTEMPT_MERGE_PROVIDER_FAILURE:-}" = "1" ]; then
-	  printf '%s\n' 'synthetic provider failure' >&2
-	  exit 9
-	fi
-    git -C "$SAFEGIT_CLEANUP_PRIMARY" worktree remove --force -- "$SAFEGIT_CLEANUP_CALLER" ;;
+    printf '%s\n' graphql > "$SAFEGIT_ATTEMPT_MERGE_TRANSPORT"
+    merge_body ;;
+  "api -X PUT repos/owner/repo/pulls/42/merge-async -f merge_method=squash -f sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    printf '%s\n' async > "$SAFEGIT_ATTEMPT_MERGE_TRANSPORT"
+    merge_body ;;
   "pr view 42 --repo owner/repo --json state,headRefOid")
 	if [ -e "$SAFEGIT_CLEANUP_CALLER" ]; then
 	  printf '%s\n' 'caller still exists at confirmation' >&2
@@ -691,6 +758,7 @@ esac
 	if err := os.WriteFile(fakeGH, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
+	transportFile := filepath.Join(t.TempDir(), "transport")
 	marker := filepath.Join(t.TempDir(), "provider-order")
 	confirmCount := filepath.Join(t.TempDir(), "confirm-count")
 	auditDir := t.TempDir()
@@ -704,8 +772,13 @@ esac
 		cleanupHelperCallerEnv+"="+caller,
 		attemptMergeMarkerEnv+"="+marker,
 		attemptMergeConfirmCountEnv+"="+confirmCount,
+		attemptMergeTransportEnv+"="+transportFile,
+		indeterminateConfirmWindowEnv+"=50ms",
 		"SAFE_MERGE_AUDIT_DIR="+auditDir,
 	)
+	if stacked {
+		helper.Env = append(helper.Env, attemptMergeStackedEnv+"=1")
+	}
 	switch outcome {
 	case attemptMergeOutcomeHeadMismatch:
 		helper.Env = append(helper.Env, attemptMergeHeadMismatchEnv+"=1")
@@ -736,10 +809,28 @@ esac
 	}
 	if outcome == attemptMergeOutcomeSuccess {
 		wantOrder += "confirm\n"
+		// The async route has no --delete-branch, so it reports whether the
+		// provider will remove the remote head rather than deleting it itself.
+		if stacked {
+			wantOrder += "retention-check\n"
+		}
 	}
 	if got, want := string(order), wantOrder; got != want {
 		t.Fatalf("provider order = %q, want %q", got, want)
 	}
+	gotTransport, err := os.ReadFile(transportFile)
+	if err != nil {
+		t.Fatalf("read invoked transport: %v", err)
+	}
+	wantTransport := "graphql\n"
+	if stacked {
+		wantTransport = "async\n"
+	}
+	if string(gotTransport) != wantTransport {
+		t.Fatalf("invoked transport = %q, want %q — a stacked PR must not be merged "+
+			"through the mutation GitHub refuses for it", gotTransport, wantTransport)
+	}
+
 	auditData, err := os.ReadFile(filepath.Join(auditDir, "safe-merge-audit.jsonl"))
 	if err != nil {
 		t.Fatalf("read attemptMerge audit: %v", err)
@@ -794,4 +885,59 @@ func assertPrimaryUsable(t *testing.T, primary string) {
 		t.Fatal("primary worktree has no usable HEAD after cleanup")
 	}
 	gittest.Run(t, primary, "status", "--porcelain")
+}
+
+// A nonzero provider exit does not prove the merge was rejected: the request
+// can be accepted while the response is lost, which the async route makes
+// likelier because it completes out of band. Reporting failure there would skip
+// cleanup and invite watch mode to retry a merge that already landed.
+func TestProviderMergeConfirmsIndeterminateCommandFailure(t *testing.T) {
+	fixture := newCleanupFixture(t)
+	missingProvider := filepath.Join(t.TempDir(), "provider-that-fails")
+
+	confirmed := 0
+	onConfirmed := 0
+	failure := runProviderMergeTransaction(
+		context.Background(),
+		fixture.branch,
+		[]string{missingProvider},
+		func() error {
+			confirmed++
+			return nil
+		},
+		func() { onConfirmed++ },
+		// The provider accepted the merge; only the response was lost.
+		func() error { return nil },
+	)
+	if failure != nil {
+		t.Fatalf("provider merge failure = %#v, want success: an accepted merge "+
+			"must not be reported as failed because its response was lost", failure)
+	}
+	// The probe already proved the merge at the exact gated head, so the
+	// confirmation must not run again: a second poll can fail on a later
+	// provider read and turn an already-proven merge into a reported failure.
+	if confirmed != 0 {
+		t.Fatalf("confirm ran %d extra time(s) after a successful indeterminate probe", confirmed)
+	}
+	if onConfirmed != 1 {
+		t.Fatalf("onConfirmed=%d, want 1", onConfirmed)
+	}
+}
+
+// The rescue must not fire when the provider genuinely rejected the mutation.
+func TestProviderMergeKeepsFailureWhenProbeDisagrees(t *testing.T) {
+	fixture := newCleanupFixture(t)
+	missingProvider := filepath.Join(t.TempDir(), "provider-that-fails")
+
+	failure := runProviderMergeTransaction(
+		context.Background(),
+		fixture.branch,
+		[]string{missingProvider},
+		func() error { return nil },
+		nil,
+		func() error { return errors.New("PR is still open") },
+	)
+	if failure == nil || failure.stage != providerMergeCommandStage {
+		t.Fatalf("provider merge failure = %#v, want command-stage failure", failure)
+	}
 }
