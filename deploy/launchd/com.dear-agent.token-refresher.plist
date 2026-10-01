@@ -44,8 +44,10 @@
 
   stdout carries ONLY the access token
   (stdout-only token contract), so it is routed to /dev/null to keep the secret
-  out of the log file; structured logs and the JSONL audit trail go to stderr /
-  ~/.local/state/dear-agent.
+  out of the log file. The scheduled invocation writes its audit trail to a
+  cadence-only JSONL path. Unrelated manual check/force/ensure invocations keep
+  their default general audit path and therefore do not refresh the
+  scheduler-liveness pulse.
 
   The plist is a TEMPLATE: the install target
   (make install-token-refresher-launchagent) substitutes __HOME__ for the real
@@ -60,6 +62,8 @@
   <array>
     <string>__HOME__/go/bin/token-refresher</string>
     <string>-cadence</string>
+    <string>-audit-log</string>
+    <string>__HOME__/.local/state/dear-agent/token-refresher-cadence-audit.jsonl</string>
     <!-- Must exceed StartInterval below; see the header note. -->
     <string>-expiry-skew</string>
     <string>45m</string>
