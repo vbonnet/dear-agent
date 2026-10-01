@@ -29,6 +29,19 @@
       "source": "./research-pipeline",
       "description": "Provider-routed research pipeline: ingest, cited research, independent cross-model verification/planning, beads decomposition, execution",
       "version": "0.1.0"
+    },
+    {
+      "name": "spec-governance",
+      "source": "./spec-governance",
+      "description": "Canonical SPEC.md authoring and read-only consolidation-audit skills",
+      "version": "0.1.0",
+      "author": {
+        "name": "dear-agent",
+        "url": "https://github.com/vbonnet/dear-agent"
+      },
+      "repository": "https://github.com/vbonnet/dear-agent",
+      "license": "Apache-2.0",
+      "strict": true
     }
   ]
 }

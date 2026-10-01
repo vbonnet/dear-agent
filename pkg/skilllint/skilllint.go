@@ -115,18 +115,27 @@ var providerExecutionFields = []string{
 	"user-invocable",
 }
 
+// CheckContent validates skill or command Markdown content. Path identifies the
+// surface kind and is preserved in returned violations.
+func CheckContent(path string, data []byte) []Violation {
+	kind := classifySurface(path)
+	if kind == surfaceUnknown {
+		return []Violation{{Path: path, Reason: "not a recognized SKILL.md or commands/*.md surface"}}
+	}
+	return checkData(path, data, kind)
+}
+
 // CheckFile validates one recognized skill or command Markdown file. Content
 // defects are returned as violations; read failures are operational errors.
 func CheckFile(path string) ([]Violation, error) {
-	kind := classifySurface(path)
-	if kind == surfaceUnknown {
-		return []Violation{{Path: path, Reason: "not a recognized SKILL.md or commands/*.md surface"}}, nil
+	if classifySurface(path) == surfaceUnknown {
+		return CheckContent(path, nil), nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read: %w", err)
 	}
-	return checkData(path, data, kind), nil
+	return CheckContent(path, data), nil
 }
 
 // CheckDir recursively validates every recognized skill and command surface in

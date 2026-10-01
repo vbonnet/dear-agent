@@ -9,13 +9,15 @@ This directory contains the canonical source workflows for two skills:
   authored workflow for a pinned, read-only ownership audit that produces a
   structured ledger and self-contained HTML.
 
-These source files are not harness adapters or discovery registrations. A
-committed skill proves source presence only; whether a harness discovers or
-invokes it remains `UNVERIFIED` until separately observed in that harness.
-If a repository-local harness discovery registration is added later, it must
-be a contained tracked symlink to the canonical `SKILL.md`; `skill-lint`
-rejects a second regular-file owner with the same skill name and rejects an
-alias whose resolved target is not that tracked canonical owner.
+The repository also publishes a native Claude plugin source declaration for
+these same directories. Its checked-in catalog and manifest prove only source
+metadata, schema validity, and the declared two-skill inventory. Marketplace
+registration, installation, enabled state, discovery, invocation, and runtime
+loading remain `UNVERIFIED` until separately observed in that harness. Other
+repository-local harness projections must remain aliases to each canonical
+`SKILL.md`; `skill-lint` rejects a second regular-file owner with the same
+skill name and rejects an alias whose resolved target is not that tracked
+canonical owner.
 
 The authoring skill is the canonical guidance for the rule that one shared
 observable behavior has one harness-neutral product `SPEC.md` owner. The audit
