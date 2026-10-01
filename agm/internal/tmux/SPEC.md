@@ -1,6 +1,6 @@
 # AGM tmux Delivery Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-09-13 -->
 
 ## Purpose
 
@@ -13,6 +13,8 @@ process is actually running in a pane's process tree, because tmux session
 existence alone is a false-green liveness signal. It also verifies and repairs
 new-session working directories when tmux silently ignores `new-session -c`
 because the tmux server's own cwd has been deleted.
+It owns the UTF-8 guarantee on both tmux seams: the format values AGM reads
+back, and the locale a pane's own shell runs under.
 
 ## EARS Requirements
 
@@ -110,10 +112,22 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-51** When a readiness or pane-liveness scan invokes multiple sequential tmux or process-table observations, the system shall bound the complete scan with an internal deadline that accommodates the full observation sequence under loaded-host contention while an earlier caller cancellation or deadline remains authoritative; exhausting either deadline or failing any observation shall return an operational error and shall never fabricate absence, wrong-harness state, or readiness.
 
+**TMUX-52** When the system reads a tmux format value that can contain arbitrary path bytes, the system shall request UTF-8 output from tmux for that invocation so non-ASCII and control bytes are not transliterated into a different path.
+
+**TMUX-53** When the system creates a session on a tmux server that accepts a session environment and whose own environment is not already UTF-8, the system shall pin a UTF-8 LC_CTYPE that the host has installed into that session and shall neutralize any inherited LC_ALL that would outrank it, so a pane shell preserves the multi-byte characters of delivered input.
+
+**TMUX-54** When the host cannot prove a UTF-8 locale is installed, or the tmux server reachable on the configured socket predates session-environment support or cannot be identified, the system shall create the session without a locale pin rather than fail session creation.
+
+**TMUX-55** When panes would already receive a UTF-8 locale that the host has installed, whether from a running tmux server or from the environment a server the system is about to start will inherit, the system shall leave that environment unchanged rather than substitute its own; a locale name that is not installed, including one whose spelling differs from an installed name only by case, shall not count as already provided, because setlocale is case-sensitive about the names the host enumerates.
+
+**TMUX-56** When the system cannot establish what locale a running tmux server provides, the system shall leave that environment unchanged, because an unreadable environment is not evidence that it is non-UTF-8.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/tmux/workdir_test.go`
+- Package tests: `agm/internal/tmux/locale_test.go`
+- Integration tests: `agm/internal/tmux/locale_integration_test.go`
 - Package tests: `agm/internal/tmux/liveness_test.go`
 - Package tests: `agm/internal/tmux/enter_reliable_test.go`
 - Package tests: `agm/internal/tmux/tmux_test.go`
