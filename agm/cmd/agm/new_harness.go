@@ -233,12 +233,7 @@ func waitForClaudeReady(ctx context.Context, sessionName string, claudeReady *tm
 		debug.Log("Claude prompt detection failed: %v", waitErr)
 		ui.PrintError(waitErr,
 			"Failed to detect Claude ready signal",
-			"  Claude prompt not detected in tmux session.\n"+
-				"  \n"+
-				"  Troubleshooting:\n"+
-				"    1. Check if Claude started: tmux attach -t "+sessionName+"\n"+
-				"    2. Verify Claude is installed: which claude\n"+
-				"    3. Check for errors in tmux: tmux capture-pane -t "+sessionName+" -p\n")
+			claudeReadyFailureDetail(ctx, sessionName))
 		return fmt.Errorf("claude not ready: %w", waitErr)
 	}
 	debug.Log("✓ Claude prompt detected - Claude is ready")
@@ -249,6 +244,34 @@ func waitForClaudeReady(ctx context.Context, sessionName string, claudeReady *tm
 	debug.Log("Claude ready signal received")
 	ui.PrintSuccess("Claude is ready!")
 	return nil
+}
+
+// claudeReadyFailureDetail explains a readiness timeout. An unanswered
+// interactive startup gate and a harness that never started both surface as the
+// same timeout, and the generic checklist ("is claude installed?") sends the
+// operator the wrong way for by far the more common cause: a detached session
+// cannot answer Claude Code's workspace-trust or MCP-approval dialog, so it
+// sits on the dialog until the wait expires.
+//
+// The diagnosis is read-only and best-effort. When no gate is recognized the
+// original generic checklist is returned unchanged.
+func claudeReadyFailureDetail(ctx context.Context, sessionName string) string {
+	generic := "  Claude prompt not detected in tmux session.\n" +
+		"  \n" +
+		"  Troubleshooting:\n" +
+		"    1. Check if Claude started: tmux attach -t " + sessionName + "\n" +
+		"    2. Verify Claude is installed: which claude\n" +
+		"    3. Check for errors in tmux: tmux capture-pane -t " + sessionName + " -p\n"
+	block, found := tmux.DiagnoseStartupBlock(ctx, sessionName)
+	if !found {
+		return generic
+	}
+	debug.Log("Readiness timeout attributed to startup gate: %s", block.Kind)
+	return "  " + block.Summary + "\n" +
+		"  \n" +
+		"  " + block.Remedy + sessionName + "\n" +
+		"  \n" +
+		generic
 }
 
 // startGeminiHarness starts Gemini either via the agm-agent-wrapper (preferred)
