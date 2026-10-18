@@ -181,6 +181,34 @@ state why.
 
 **FSG-41** When a path falls under `~/.agm/vroom/` or `~/.agm/sandboxes/`, the system shall allow the write because these are VROOM supervisor runtime-state directories (heartbeat files, trail logs, dispatch ledger, worker sandbox trees), and the carveout shall remain namespaced so `~/.agm/vroomX/` or `~/.agm/sandboxesX/` prefix lookalikes are still blocked.
 
+
+### Supervisor Role Policy (`DetectSupervisor`, `CheckSupervisor*`)
+
+This layer answers a different question from the rest of the package. The path
+policy asks "may this path be written?"; the role policy asks "may this session
+perform implementation work at all?". A VROOM supervisor coordinates workers and
+must never do the work itself: a detached supervisor cannot answer a permission
+prompt, so a modal raised by its own tool call wedges it and stalls dispatch for
+the whole mesh, and implementation detail consumes the context window the
+coordination role depends on.
+
+**FSG-70** When `AGM_SUPERVISOR_ID` is non-empty, the system shall classify the session as a supervisor and return that value as the identity, including a value that is not canonical, because that variable is set only for supervisors.
+
+**FSG-71** When `AGM_SESSION_NAME` matches a canonical VROOM supervisor identity or compact alias, case-insensitively and as an exact match rather than a prefix, the system shall classify the session as a supervisor. Both markers are checked because `agm supervisor run` sets the first while `vroom-dispatch` spawns through `agm session new` and sets only the second.
+
+**FSG-72** When neither marker identifies a supervisor, the system shall classify the session as a worker, and no role rule shall apply to it.
+
+**FSG-73** When a supervisor invokes a file-mutation tool, the system shall allow the write only when the resolved target lies under a control-plane root (`/dev`, the temp directories, or `~/.agm`), and shall block every other target with delegation guidance.
+
+**FSG-74** When a supervisor's write target cannot be resolved to an absolute path, or is empty, the system shall block it. The role policy fails CLOSED, unlike path classification, because a supervisor has no legitimate write outside the control-plane set.
+
+**FSG-75** When a supervisor runs a Bash command, the system shall evaluate it through the shared segment walker, so runner stripping, shell nesting, redirections, and `cd` tracking behave exactly as they do for the path policy.
+
+**FSG-76** When a supervisor runs a git subcommand that cannot mutate a repository under any flags, the system shall allow it; when the subcommand has both a read and a write mode (`branch`, `remote`, `worktree`, `tag`, `config`, `stash`), the system shall allow it only when every argument is a recognised read flag, the value of a value-taking read flag, a read verb, or a positional following a read verb; and the system shall block every other git subcommand wherever it runs, including inside a worktree, because producing the commit is the worker's job.
+
+**FSG-77** When a supervisor's Bash command cannot be tokenised, the system shall fail open, matching `InspectCommand`, so a guard defect can never brick a supervisor's read and dispatch path.
+
+**FSG-78** The role policy shall have no graduated enforcement. Every refusal is a hard block, because an `ask` decision would raise the very modal the policy exists to prevent.
 ---
 
 ## Key Invariants
