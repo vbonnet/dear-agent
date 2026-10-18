@@ -92,8 +92,15 @@ test is the enforcement mechanism; the prose above is only its rationale.
 Enforcement is scoped to what a change can actually break, not to the whole
 tree. `Vulnerability Scan` blocks a PR only when it touches a dependency
 manifest or lockfile; the whole-tree blocking scan moves to push-to-main
-(itself filtered to manifest changes), release, and the weekly schedule. The
-weekly schedule is therefore the unconditional backstop, not push-to-main.
+(itself filtered to manifest changes), release, and the daily schedule. The
+daily schedule is therefore the unconditional backstop, not push-to-main. The
+same scheduled job evaluates complete Dependabot and Trivy code-scanning
+inventories against the repository severity policy: HIGH and CRITICAL remain
+immediate blockers, while MEDIUM becomes overdue after 14 days. This bounded
+SLA is the liveness counter-check for findings that intentionally do not block
+unrelated pull requests. Dependency-path pushes evaluate the same provider
+policy, so a later green push cannot mask a red scheduled audit in the
+main-health watchdog.
 
 ## Alternatives
 
@@ -115,7 +122,7 @@ as grey in the PR checks list — that is the intended shape, not a missing run.
 
 Manifest-scoping the vulnerability gate is narrower than true baseline
 diffing: a PR that bumps one dependency is still blocked by an unrelated
-pre-existing CRITICAL, because Trivy has no `--baseline-commit`. The weekly
+pre-existing CRITICAL, because Trivy has no `--baseline-commit`. The daily
 scan, the release scan, and the main-health watchdog carry that residual risk.
 
 Applying the ruleset is a separate, manual admin step (see
