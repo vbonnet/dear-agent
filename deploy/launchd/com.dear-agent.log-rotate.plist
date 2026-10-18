@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for append-only log rotation.
+
+  cmd/log-rotate and internal/logrotate already existed and were correct, but
+  nothing ever ran them: there was no schedule, and defaultTargets did not name
+  ~/.agm/logs. The result was 197 MB across 36 unrotated files
+  (cleanup.jsonl 71 MB, procwatch-metrics.jsonl 51 MB, procwatch.log 22 MB,
+  audit.jsonl 18 MB, procwatch-alerts.jsonl 14 MB, gc.jsonl 13 MB), growing
+  without bound. A rotation library with no scheduler is not a rotation policy.
+
+  Why this and not newsyslog: newsyslog renames the live file but has no
+  copytruncate. A long-running tmux agent holding the fd keeps writing to the
+  renamed file, so nothing is reclaimed and the growth becomes invisible to
+  anything watching the original name. logrotate.Rotate re-creates the live
+  path, which is safe for the append-and-close writers here (each Log call
+  re-opens by path), and the JSONL compresses roughly 10:1.
+
+  Rotation is deliberately NOT the leak fix. Compressing a leaked log makes it
+  cheaper, not absent; the ledger is what attributes growth to a run. This job
+  exists so that logs stop being a second, independent unbounded writer.
+
+  The plist is a TEMPLATE: __HOME__ is substituted before staging into
+  ~/Library/LaunchAgents (launchd does not expand ~ or shell variables).
+    make install-log-rotate-launchagent
+
+  Preview before arming (changes nothing):
+    log-rotate --dry-run
+
+  Activate:
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.dear-agent.log-rotate.plist
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.dear-agent.log-rotate
+    rm ~/Library/LaunchAgents/com.dear-agent.log-rotate.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.log-rotate</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/log-rotate</string>
+    <!--
+      50MB before rotation: large enough that a busy day does not churn the
+      directory, small enough that a single file cannot reach the hundreds of
+      megabytes seen before this job existed.
+    -->
+    <string>--max-size</string>
+    <string>50MB</string>
+    <!--
+      14 days of history. gc.jsonl is read by the reclaim-health check over a
+      24h window, so the retention has to comfortably exceed that window or
+      rotation would itself destroy the evidence the alarm depends on.
+    -->
+    <string>--max-age</string>
+    <string>14d</string>
+    <string>--max-files</string>
+    <string>10</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- Hourly. Rotation is cheap (a stat per target, a rename past threshold)
+       and an hourly tick bounds worst-case growth between sweeps. -->
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/log-rotate.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/log-rotate.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/. -->
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+</dict>
+</plist>
