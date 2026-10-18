@@ -20,7 +20,7 @@ development without polluting production state.
 Examples:
   agm test-env create                         # Create with random name
   agm test-env create --name=my-env           # Create with specific name
-  agm test-env create --auth-mode=none        # Create without auth forwarding
+  agm test-env create --auth-mode=none        # No file auth projection; ambient auth env remains
   agm test-env destroy my-env                 # Remove test environment
   agm test-env list                           # List active test environments`,
 	Args: cobra.ArbitraryArgs,

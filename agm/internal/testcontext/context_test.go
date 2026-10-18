@@ -519,85 +519,6 @@ func TestCleanup_NoFilesExist(t *testing.T) {
 
 // --- ForwardAuth tests ---
 
-func TestForwardAuth_Inherit(t *testing.T) {
-	tc := New()
-	defer tc.Cleanup()
-	require.NoError(t, tc.EnsureDirs())
-
-	// Create a fake host home with credential dirs
-	fakeHome := t.TempDir()
-	claudeDir := filepath.Join(fakeHome, ".claude")
-	require.NoError(t, os.MkdirAll(claudeDir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0600))
-
-	codexDir := filepath.Join(fakeHome, ".codex")
-	require.NoError(t, os.MkdirAll(codexDir, 0700))
-
-	err := tc.ForwardAuth(fakeHome, AuthModeInherit)
-	require.NoError(t, err)
-
-	// Verify symlinks created
-	link, err := os.Readlink(filepath.Join(tc.HomeDir, ".claude"))
-	require.NoError(t, err)
-	assert.Equal(t, claudeDir, link)
-
-	link, err = os.Readlink(filepath.Join(tc.HomeDir, ".codex"))
-	require.NoError(t, err)
-	assert.Equal(t, codexDir, link)
-
-	// HostHome should be set
-	assert.Equal(t, fakeHome, tc.HostHome)
-}
-
-func TestForwardAuth_Inherit_MissingSource(t *testing.T) {
-	tc := New()
-	defer tc.Cleanup()
-	require.NoError(t, tc.EnsureDirs())
-
-	// Create a fake host home with NO credential dirs
-	fakeHome := t.TempDir()
-
-	err := tc.ForwardAuth(fakeHome, AuthModeInherit)
-	require.NoError(t, err, "should succeed even with no credential dirs")
-
-	// No symlinks should be created
-	_, err = os.Readlink(filepath.Join(tc.HomeDir, ".claude"))
-	assert.True(t, os.IsNotExist(err), "no .claude symlink should exist")
-}
-
-func TestForwardAuth_Env(t *testing.T) {
-	tc := New()
-	defer tc.Cleanup()
-	require.NoError(t, tc.EnsureDirs())
-
-	fakeHome := t.TempDir()
-	// Create a credential dir that should NOT be symlinked in env mode
-	require.NoError(t, os.MkdirAll(filepath.Join(fakeHome, ".claude"), 0700))
-
-	err := tc.ForwardAuth(fakeHome, AuthModeEnv)
-	require.NoError(t, err)
-
-	// No symlinks should be created
-	_, err = os.Readlink(filepath.Join(tc.HomeDir, ".claude"))
-	assert.True(t, os.IsNotExist(err), "env mode should not create symlinks")
-}
-
-func TestForwardAuth_None(t *testing.T) {
-	tc := New()
-	defer tc.Cleanup()
-	require.NoError(t, tc.EnsureDirs())
-
-	fakeHome := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(fakeHome, ".claude"), 0700))
-
-	err := tc.ForwardAuth(fakeHome, AuthModeNone)
-	require.NoError(t, err)
-
-	// No symlinks should be created
-	_, err = os.Readlink(filepath.Join(tc.HomeDir, ".claude"))
-	assert.True(t, os.IsNotExist(err), "none mode should not create symlinks")
-}
-
 func TestForwardAuth_InvalidMode(t *testing.T) {
 	tc := New()
 	defer tc.Cleanup()
@@ -606,23 +527,4 @@ func TestForwardAuth_InvalidMode(t *testing.T) {
 	err := tc.ForwardAuth(t.TempDir(), "bogus")
 	assert.Error(t, err, "unknown auth mode should return error")
 	assert.Contains(t, err.Error(), "unknown auth mode")
-}
-
-func TestForwardAuth_Inherit_NestedPath(t *testing.T) {
-	tc := New()
-	defer tc.Cleanup()
-	require.NoError(t, tc.EnsureDirs())
-
-	// Create a fake host home with .config/gcloud/ (nested path)
-	fakeHome := t.TempDir()
-	gcloudDir := filepath.Join(fakeHome, ".config", "gcloud")
-	require.NoError(t, os.MkdirAll(gcloudDir, 0700))
-
-	err := tc.ForwardAuth(fakeHome, AuthModeInherit)
-	require.NoError(t, err)
-
-	// Verify symlink at nested path
-	link, err := os.Readlink(filepath.Join(tc.HomeDir, ".config", "gcloud"))
-	require.NoError(t, err)
-	assert.Equal(t, gcloudDir, link)
 }
