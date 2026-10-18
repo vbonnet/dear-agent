@@ -31,7 +31,11 @@
     {
       "name": "otel-receiving",
       "type": "command",
-      "command": ["~/go/bin/jaeger-health", "--lookback", "24h"],
+      "command": [
+        "~/go/bin/jaeger-health",
+        "--lookback",
+        "24h"
+      ],
       "window": "24h",
       "expect": "Jaeger alive and receiving traces within 24h"
     },
@@ -84,6 +88,20 @@
       ],
       "window": "24h",
       "expect": "all retrospectives within 7d declare valid guards or tracked deferrals"
+    },
+    {
+      "name": "sandbox-gc-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/sandbox-gc.out.log",
+      "window": "2h",
+      "expect": "a COMPLETED sandbox-gc run within 2h (hourly job, 2 missed intervals). The evidence is the stdout log, which agm writes only after the run finishes, so a GC that errors early (for example a failed live-session inventory) leaves this stale and the pulse alarms. That is deliberate: a GC that never completes is a real problem a human should hear about, and remediation that cannot fix it reaches the give-up threshold and escalates. It does NOT prove the GC reaped anything (ce-uxju), and it does not distinguish 'not invoked' from 'invoked and failed' (ce-820tx)."
+    },
+    {
+      "name": "token-refresher-tick",
+      "type": "file_mtime",
+      "path": "~/.local/state/dear-agent/token-refresher-cadence-audit.jsonl",
+      "window": "1h",
+      "expect": "a cadence-only token-refresher audit append within 1h. The deployed LaunchAgent explicitly selects this path; unrelated manual check, force, and ordinary invocations with default audit wiring use the separate general audit log and do not mask a stalled scheduler. file_mtime, not json_timestamp: the audit log is JSONL and the json_timestamp probe decodes only the oldest record. This is schedule-specific wiring, not tamper-proof proof of autonomous launchd execution; it proves the configured cadence invocation wrote evidence, not that refresh succeeded."
     }
   ]
 }

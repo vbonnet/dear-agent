@@ -142,33 +142,45 @@ func DefaultProbes() Probes {
 	}
 }
 
-// LoadPulseConfig reads and validates the pulse configuration. Any invalid
-// pulse refuses the whole run (AA-19): a typo must not silently unmonitor
-// part of the fleet.
-func LoadPulseConfig(path string) ([]Pulse, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read pulse config: %w", err)
-	}
+// ParsePulseConfig parses and validates the exact bytes accepted by the
+// absence alarm. Deployment uses this same seam before publishing a projected
+// registry, so it cannot report an invalid configuration as successfully
+// deployed.
+// Any invalid pulse refuses the whole document (AA-19): a typo must not
+// silently unmonitor part of the fleet.
+func ParsePulseConfig(raw []byte) ([]Pulse, error) {
 	var cfg PulseConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("parse pulse config %s: %w", path, err)
+		return nil, fmt.Errorf("parse pulse config: %w", err)
 	}
 	if len(cfg.Pulses) == 0 {
-		return nil, fmt.Errorf("pulse config %s: no pulses configured", path)
+		return nil, fmt.Errorf("no pulses configured")
 	}
 	seen := make(map[string]bool, len(cfg.Pulses))
 	for i := range cfg.Pulses {
 		p := &cfg.Pulses[i]
 		if err := validatePulse(p); err != nil {
-			return nil, fmt.Errorf("pulse config %s: %w", path, err)
+			return nil, err
 		}
 		if seen[p.Name] {
-			return nil, fmt.Errorf("pulse config %s: duplicate pulse name %q", path, p.Name)
+			return nil, fmt.Errorf("duplicate pulse name %q", p.Name)
 		}
 		seen[p.Name] = true
 	}
 	return cfg.Pulses, nil
+}
+
+// LoadPulseConfig reads and validates the pulse configuration.
+func LoadPulseConfig(path string) ([]Pulse, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read pulse config: %w", err)
+	}
+	pulses, err := ParsePulseConfig(raw)
+	if err != nil {
+		return nil, fmt.Errorf("pulse config %s: %w", path, err)
+	}
+	return pulses, nil
 }
 
 func validatePulse(p *Pulse) error {

@@ -35,6 +35,7 @@ bin/
 /agm/scripts/hooks/posttool-context-monitor
 /agm/scripts/hooks/pretool-test-session-guard
 /chezmoi-deploy
+/dear-deploy
 /mergeloop
 /otel-local
 /safe-pr
