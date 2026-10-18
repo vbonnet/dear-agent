@@ -48,6 +48,15 @@ func defaultTargets() []string {
 	home, _ := os.UserHomeDir()
 	return []string{
 		filepath.Join(home, ".agm", "vroom", "trail.jsonl"),
+		// ~/.agm/logs is where every agm-side appender writes and nothing
+		// rotated it: 197 MB across 36 files at the time this was added
+		// (cleanup.jsonl 71 MB, procwatch-metrics.jsonl 51 MB, audit.jsonl
+		// 18 MB, gc.jsonl 13 MB). None of those writers call into
+		// internal/logrotate, so a scheduled sweep over the directory is the
+		// only thing that bounds them.
+		filepath.Join(home, ".agm", "logs", "*.jsonl"),
+		filepath.Join(home, ".agm", "logs", "*.log"),
+		filepath.Join(home, ".agm", "logs", "messages", "*.jsonl"),
 		filepath.Join(home, ".local", "state", "dear-agent", "*.log"),
 		filepath.Join(home, ".local", "state", "dear-agent", "*.jsonl"),
 	}
