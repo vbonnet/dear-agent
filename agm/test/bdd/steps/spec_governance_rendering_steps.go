@@ -16,6 +16,7 @@ func registerSpecGovernanceRenderingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(specGovernanceReadOnlyBoundaryStep, exerciseReadOnlySPECAuditBoundary)
 	ctx.Step(specGovernancePortablePackageStep, exercisePortableSpecGovernancePackage)
 	ctx.Step(specGovernanceOverlappingPackageStep, exerciseOverlappingSpecGovernancePackage)
+	ctx.Step(specGovernancePortableCommandStep, exercisePortableSpecGovernanceCommandBoundary)
 }
 
 func exerciseBoundedOfflineSPECAuditRendering(ctx context.Context) error {
@@ -40,4 +41,12 @@ func exercisePortableSpecGovernancePackage(ctx context.Context) error {
 
 func exerciseOverlappingSpecGovernancePackage(ctx context.Context) error {
 	return runSpecAuditGoTests(ctx, "TestPortableSpecGovernancePackageRejectsSourceOverlapBeforeAllocation")
+}
+
+func exercisePortableSpecGovernanceCommandBoundary(ctx context.Context) error {
+	return runSpecAuditGoTests(ctx,
+		"TestPortableSpecGovernancePackageRejectsUnapprovedExecutableReferencesAndRetainsPrivateRoot",
+		"TestReproductionRepositoryArgumentCannotChangeCommandShape",
+		"TestInventoryRejectsUnquotableRepositoryLabelsBeforeGit",
+	)
 }

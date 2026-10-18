@@ -40,3 +40,7 @@ Feature: SPEC audit tooling evidence boundary
   Scenario: A staging parent inside the source is rejected before allocation
     When AGM runs the focused overlapping SPEC governance package unit check
     Then the focused SPEC audit unit check should pass
+
+  Scenario: A staged package rejects unapproved executable references
+    When AGM runs the focused portable command boundary unit check
+    Then the focused SPEC audit unit check should pass

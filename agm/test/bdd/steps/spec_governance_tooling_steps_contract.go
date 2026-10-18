@@ -10,5 +10,6 @@ const (
 	specGovernanceReadOnlyBoundaryStep     = `^AGM runs the focused read-only audit boundary unit check$`
 	specGovernancePortablePackageStep      = `^AGM runs the focused portable SPEC governance package unit check$`
 	specGovernanceOverlappingPackageStep   = `^AGM runs the focused overlapping SPEC governance package unit check$`
+	specGovernancePortableCommandStep      = `^AGM runs the focused portable command boundary unit check$`
 	specGovernanceResultStep               = `^the focused SPEC audit unit check should pass$`
 )
