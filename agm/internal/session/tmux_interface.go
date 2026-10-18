@@ -67,6 +67,16 @@ type TmuxSessionKiller interface {
 	KillSession(name string) error
 }
 
+// StableSessionIdentityManager creates new tmux sessions with a durable AGM
+// identity binding and transactionally adopts an explicitly reused session.
+// Creation requires this capability so later strict delivery never relies on
+// a display name that a replacement can reuse.
+type StableSessionIdentityManager interface {
+	CreateSessionBound(name, workdir, stableSessionID string) error
+	BindSessionStableID(ctx context.Context, name, stableSessionID string) (newlyBound bool, err error)
+	ClearSessionStableID(ctx context.Context, name, stableSessionID string) error
+}
+
 // StrictSessionExistenceChecker distinguishes an absent exact target from
 // socket, permission, timeout, and other tmux failures. Destructive operations
 // use this capability so backend failure cannot be mistaken for absence.
@@ -85,7 +95,7 @@ type HarnessReadinessWaiter interface {
 // identity. Resume operations require this capability for cold-start rollback
 // so a same-named replacement can never be destroyed.
 type ResumeTmuxIdentityManager interface {
-	CreateSessionWithIdentity(name, workdir string) (tmux.SessionIdentity, error)
+	CreateSessionWithIdentity(name, workdir, stableSessionID string) (tmux.SessionIdentity, error)
 	KillSessionIdentityChecked(identity tmux.SessionIdentity) error
 	HasSessionIdentityStrict(identity tmux.SessionIdentity) (bool, error)
 }
@@ -137,7 +147,29 @@ type InputReadiness struct {
 	Ready  bool
 	State  string
 	PaneID string
-	Forced bool
+	// PanePID is tmux's root process for PaneID, captured with the pane and
+	// session incarnation. Pane IDs can be reused after a server restart.
+	PanePID int
+	// TargetPID is the foreground harness process captured in the same readiness proof.
+	// Identity-bound follow-up observers require both PaneID and TargetPID.
+	TargetPID int
+	// HarnessStartTime is the operating-system birth identity for TargetPID.
+	// It prevents PID reuse from attributing later work to the delivered turn.
+	HarnessStartTime string
+	// TargetSessionID is tmux's server-local session incarnation ID observed
+	// with PaneID. StableSessionID is AGM's durable identity bound as a tmux
+	// session option. Strict follow-up observers require both so a server
+	// restart or same-named replacement cannot inherit completion evidence.
+	TargetSessionID string
+	StableSessionID string
+	// MayHaveStarted records that delivery crossed the irreversible submission
+	// boundary even though its final acknowledgement was lost. Callers must not
+	// turn this into an ordinary retry-shaped failure.
+	MayHaveStarted bool
+	// PostSubmitProcessing is positive exact-target evidence that the harness
+	// entered its native processing state after submission.
+	PostSubmitProcessing bool
+	Forced               bool
 }
 
 // InputDeliveryOptions controls narrowly scoped exceptions inside the atomic
@@ -147,6 +179,16 @@ type InputReadiness struct {
 // or other fail-closed states.
 type InputDeliveryOptions struct {
 	AllowQueuedAGM bool
+	// RequireSubmissionConfirmation asks the runtime to preserve uncertainty
+	// when Enter was accepted but every post-submit observation failed, and to
+	// re-prove the exact submitted target as live-ready or natively processing.
+	RequireSubmissionConfirmation bool
+	// RawBracketedPaste preserves multiline input as one composer paste instead
+	// of allowing tmux to translate embedded newlines into submit keys.
+	RawBracketedPaste bool
+	// ExpectedStableSessionID binds the tmux incarnation to the durable AGM
+	// session identity before any terminal mutation.
+	ExpectedStableSessionID string
 }
 
 // InputReadinessChecker is the optional pre-delivery capability used by
@@ -163,7 +205,9 @@ type PaneOutputCapturer interface {
 
 // AtomicInputSender checks harness input ownership and delivers to the
 // resulting exact pane while holding one tmux mutation boundary. If Ready is
-// false, no input was sent; if Ready is true, delivery completed successfully.
+// false, no input was sent unless MayHaveStarted is true; if Ready is true and
+// error is nil, delivery completed successfully. PaneID/PanePID/TargetPID
+// identify the exact runtime for confirmed and submission-uncertain outcomes.
 // A forced result is valid only for a positively identified queued AGM paste
 // and reports the post-clear empty-composer state YES.
 type AtomicInputSender interface {

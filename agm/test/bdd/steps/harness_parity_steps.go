@@ -513,14 +513,20 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 }
 
 type bddLifecycleTmux struct {
-	sessions map[string]bool
-	sent     []string
-	events   []string
-	waited   []string
+	sessions         map[string]bool
+	stableSessionIDs map[string]string
+	sent             []string
+	events           []string
+	waited           []string
 }
 
+var _ session.StableSessionIdentityManager = (*bddLifecycleTmux)(nil)
+
 func newBDDLifecycleTmux() *bddLifecycleTmux {
-	return &bddLifecycleTmux{sessions: make(map[string]bool)}
+	return &bddLifecycleTmux{
+		sessions:         make(map[string]bool),
+		stableSessionIDs: make(map[string]string),
+	}
 }
 
 func (t *bddLifecycleTmux) HasSession(name string) (bool, error) { return t.sessions[name], nil }
@@ -541,6 +547,50 @@ func (t *bddLifecycleTmux) ListSessionsWithInfo() ([]session.SessionInfo, error)
 func (t *bddLifecycleTmux) ListClients(string) ([]session.ClientInfo, error) { return nil, nil }
 func (t *bddLifecycleTmux) CreateSession(name, _ string) error {
 	t.sessions[name] = true
+	return nil
+}
+func (t *bddLifecycleTmux) CreateSessionBound(name, workdir, stableSessionID string) error {
+	if stableSessionID == "" {
+		return fmt.Errorf("stable session identity is required")
+	}
+	if err := t.CreateSession(name, workdir); err != nil {
+		return err
+	}
+	t.stableSessionIDs[name] = stableSessionID
+	return nil
+}
+func (t *bddLifecycleTmux) BindSessionStableID(ctx context.Context, name, stableSessionID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !t.sessions[name] {
+		return false, fmt.Errorf("tmux target %q does not exist", name)
+	}
+	if stableSessionID == "" {
+		return false, fmt.Errorf("stable session identity is required")
+	}
+	current := t.stableSessionIDs[name]
+	if current == stableSessionID {
+		return false, nil
+	}
+	if current != "" {
+		return false, fmt.Errorf("tmux target %q is already bound to stable session %q", name, current)
+	}
+	t.stableSessionIDs[name] = stableSessionID
+	return true, nil
+}
+func (t *bddLifecycleTmux) ClearSessionStableID(ctx context.Context, name, stableSessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	current := t.stableSessionIDs[name]
+	if current == "" {
+		return nil
+	}
+	if current != stableSessionID {
+		return fmt.Errorf("refuse to clear tmux target %q binding %q", name, current)
+	}
+	delete(t.stableSessionIDs, name)
 	return nil
 }
 func (t *bddLifecycleTmux) AttachSession(string) error { return nil }
@@ -590,6 +640,7 @@ func (t *bddLifecycleTmux) KillSession(name string) error {
 		return fmt.Errorf("tmux target %q does not exist", name)
 	}
 	delete(t.sessions, name)
+	delete(t.stableSessionIDs, name)
 	return nil
 }
 
@@ -4779,6 +4830,9 @@ func aCodexCLISessionCreatedByAGM(ctx context.Context) error {
 	}
 	if exists, _ := tmuxRuntime.HasSession(harnessState.lifecycleSessionName); !exists {
 		return fmt.Errorf("create reported success without tmux target")
+	}
+	if stableID := tmuxRuntime.stableSessionIDs[harnessState.lifecycleSessionName]; stableID != harnessState.lifecycleSessionID {
+		return fmt.Errorf("create bound stable tmux identity %q, want %q", stableID, harnessState.lifecycleSessionID)
 	}
 	if len(createRuntime.launches) != 1 || createRuntime.launches[0].Harness != "codex-cli" || len(createRuntime.completions) != 1 {
 		return fmt.Errorf("create did not traverse the Codex production runtime: launches=%d completions=%d", len(createRuntime.launches), len(createRuntime.completions))

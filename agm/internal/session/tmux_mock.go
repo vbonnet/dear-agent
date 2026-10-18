@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -9,6 +10,9 @@ import (
 type MockTmux struct {
 	// Sessions maps session name to whether it exists
 	Sessions map[string]bool
+	// StableSessionIDs models the session-scoped tmux identity option used by
+	// strict delivery.
+	StableSessionIDs map[string]string
 
 	// CreatedSessions tracks the order in which sessions were created
 	CreatedSessions []string
@@ -46,10 +50,11 @@ type MockTmux struct {
 // NewMockTmux creates a new MockTmux instance
 func NewMockTmux() *MockTmux {
 	return &MockTmux{
-		Sessions:        make(map[string]bool),
-		CreatedSessions: []string{},
-		SentCommands:    []string{},
-		InputReadiness:  InputReadiness{Ready: true, State: "YES", PaneID: "%0"},
+		Sessions:         make(map[string]bool),
+		StableSessionIDs: make(map[string]string),
+		CreatedSessions:  []string{},
+		SentCommands:     []string{},
+		InputReadiness:   InputReadiness{Ready: true, State: "YES", PaneID: "%0"},
 	}
 }
 
@@ -120,6 +125,46 @@ func (m *MockTmux) CreateSession(name, workdir string) error {
 	return nil
 }
 
+// CreateSessionBound creates a mock tmux session and records its durable AGM
+// identity in the same operation.
+func (m *MockTmux) CreateSessionBound(name, workdir, stableSessionID string) error {
+	if err := m.CreateSession(name, workdir); err != nil {
+		return err
+	}
+	m.StableSessionIDs[name] = stableSessionID
+	return nil
+}
+
+// BindSessionStableID adopts one existing mock session without overwriting a
+// different durable identity.
+func (m *MockTmux) BindSessionStableID(_ context.Context, name, stableSessionID string) (bool, error) {
+	if !m.Sessions[name] {
+		return false, fmt.Errorf("cannot bind absent tmux session %q", name)
+	}
+	current := m.StableSessionIDs[name]
+	if current == stableSessionID {
+		return false, nil
+	}
+	if current != "" {
+		return false, fmt.Errorf("tmux session %q is already bound to %q", name, current)
+	}
+	m.StableSessionIDs[name] = stableSessionID
+	return true, nil
+}
+
+// ClearSessionStableID compensates the exact adopted mock binding.
+func (m *MockTmux) ClearSessionStableID(_ context.Context, name, stableSessionID string) error {
+	current := m.StableSessionIDs[name]
+	if current == "" {
+		return nil
+	}
+	if current != stableSessionID {
+		return fmt.Errorf("refuse to clear tmux session %q binding %q", name, current)
+	}
+	delete(m.StableSessionIDs, name)
+	return nil
+}
+
 // KillSession removes a mock session. It implements TmuxSessionKiller so
 // creation rollback is contract-testable without a real tmux server.
 func (m *MockTmux) KillSession(name string) error {
@@ -127,6 +172,7 @@ func (m *MockTmux) KillSession(name string) error {
 		return m.KillSessionError
 	}
 	delete(m.Sessions, name)
+	delete(m.StableSessionIDs, name)
 	return nil
 }
 
@@ -179,6 +225,13 @@ func (m *MockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harnes
 	readiness, err := m.CheckInputReadiness(ctx, sessionName, harness)
 	if err != nil {
 		return readiness, err
+	}
+	if options.ExpectedStableSessionID != "" && m.StableSessionIDs[sessionName] != options.ExpectedStableSessionID {
+		readiness.Ready = false
+		return readiness, fmt.Errorf(
+			"tmux session %q stable binding %q does not match %q",
+			sessionName, m.StableSessionIDs[sessionName], options.ExpectedStableSessionID,
+		)
 	}
 	if !readiness.Ready {
 		if !options.AllowQueuedAGM || readiness.State != "QUEUED_AGM" {

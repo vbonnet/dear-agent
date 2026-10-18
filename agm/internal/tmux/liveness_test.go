@@ -148,6 +148,20 @@ func TestResolveActivePaneTargetParsesSpaceSeparatedIdentity(t *testing.T) {
 	if pane.RootPID <= 0 {
 		t.Fatalf("resolveActivePaneTarget returned non-positive pane pid %d", pane.RootPID)
 	}
+
+	pinned, exists, err := resolvePaneTarget(t.Context(), pane.ID, socketPath)
+	if err != nil || !exists {
+		t.Fatalf("resolvePaneTarget() = (%#v, %v, %v), want exact pane", pinned, exists, err)
+	}
+	if pinned != pane {
+		t.Fatalf("resolvePaneTarget() = %#v, want %#v", pinned, pane)
+	}
+	if output, err := exec.Command("tmux", "-S", socketPath, "kill-pane", "-t", pane.ID).CombinedOutput(); err != nil {
+		t.Fatalf("kill exact pane: %v: %s", err, output)
+	}
+	if pinned, exists, err = resolvePaneTarget(t.Context(), pane.ID, socketPath); err != nil || exists {
+		t.Fatalf("resolvePaneTarget(deleted) = (%#v, %v, %v), want absent", pinned, exists, err)
+	}
 }
 
 func TestIsPiProcessInPaneTreeRejectsDeadPaneWithPiStartCommand(t *testing.T) {
@@ -412,6 +426,56 @@ func TestParsePSForegroundTable(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParsePSForegroundTable() = %#v, want %#v", got, want)
+	}
+}
+
+func TestReadProcessTableWithArgsRejectsPIDReuseBetweenSnapshots(t *testing.T) {
+	t.Parallel()
+
+	foreground := "  42 1 42 42 S+ Thu Aug 27 10:00:00 2026 MainThread\n" +
+		"  43 1 43 43 S+ Thu Aug 27 09:00:00 2026 MainThread\n"
+	args := "  42 Thu Aug 27 10:00:01 2026 /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js\n" +
+		"  43 Thu Aug 27 09:00:00 2026 /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js\n"
+	calls := 0
+	runPS := func(_ context.Context, commandArgs ...string) ([]byte, error) {
+		calls++
+		switch calls {
+		case 1:
+			want := []string{"-axo", "pid=,ppid=,pgid=,tpgid=,stat=,lstart=,comm="}
+			if !reflect.DeepEqual(commandArgs, want) {
+				t.Fatalf("foreground ps args = %q, want %q", commandArgs, want)
+			}
+			return []byte(foreground), nil
+		case 2:
+			want := []string{"-ww", "-axo", "pid=,lstart=,args="}
+			if !reflect.DeepEqual(commandArgs, want) {
+				t.Fatalf("argv ps args = %q, want %q", commandArgs, want)
+			}
+			return []byte(args), nil
+		default:
+			t.Fatalf("unexpected ps call %d", calls)
+			return nil, nil
+		}
+	}
+
+	got, err := readProcessTableWithArgsUsing(t.Context(), runPS)
+	if err != nil {
+		t.Fatalf("readProcessTableWithArgsUsing() error = %v", err)
+	}
+	if calls != 2 || len(got) != 2 {
+		t.Fatalf("readProcessTableWithArgsUsing() = (%d calls, %#v), want two rows from two snapshots", calls, got)
+	}
+	if got[0].PID != 42 || got[0].Args != "" {
+		t.Fatalf("recycled PID received replacement argv: %#v", got[0])
+	}
+	if expectedHarnessProcessMatcher("codex-cli")(got[0]) {
+		t.Fatalf("recycled PID was accepted as Codex liveness: %#v", got[0])
+	}
+	if got[1].PID != 43 || got[1].Args != "/usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js" {
+		t.Fatalf("stable process did not receive its argv: %#v", got[1])
+	}
+	if !expectedHarnessProcessMatcher("codex-cli")(got[1]) {
+		t.Fatalf("stable process was not accepted as Codex liveness: %#v", got[1])
 	}
 }
 

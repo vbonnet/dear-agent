@@ -9,6 +9,7 @@
 # RELATED-SPEC: agm/internal/reservation/SPEC.md
 # RELATED-SPEC: agm/internal/state/SPEC.md
 # RELATED-SPEC: agm/internal/tracking/SPEC.md
+# RELATED-SPEC: agm/internal/tmux/SPEC.md
 Feature: AGM runtime package guardrails
   AGM runtime support packages must keep executable SPEC traceability because
   harness parity depends on stable compaction, capacity, lock, state,
