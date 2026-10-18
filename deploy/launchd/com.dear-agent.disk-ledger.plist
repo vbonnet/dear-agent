@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the disk ledger check.
+
+  This is the dead-man's-switch for reclaim. disk-watchdog already alarms on
+  LOW FREE SPACE, which is a lagging indicator: by the time free space is low,
+  the leak has been running for days and the run that caused it is gone. On
+  2026-09-08 the watchdog reported
+
+      build caches: 14 found, 0 reaped, 0.0 GiB
+      Status: OK (all metrics within limits)
+
+  while ~/Library/Caches/go-build held 44 GiB, because its build-cache reaper
+  only walks /tmp and TMPDIR and nothing asserted anything about the shared
+  roots. Reclaiming nothing is indistinguishable from a healthy idle host
+  unless something also checks that the tracked roots are within budget.
+
+  disk-ledger checks exactly that pairing and writes a heartbeat. It is
+  REPORT-ONLY: it never deletes. Remediation stays with the existing reapers so
+  a detector bug cannot destroy data.
+
+  Exit codes (the *-health contract, consumed by absence-alarm):
+    0 healthy   1 degraded (over budget, or leaks with dead owners)
+    2 down      (silent_gc: over budget AND nothing reclaimed)
+    3 usage
+
+  The plist is a TEMPLATE: __HOME__ is substituted before staging into
+  ~/Library/LaunchAgents.
+    make install-disk-ledger-launchagent
+
+  Run by hand first:
+    disk-ledger
+
+  Activate:
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.dear-agent.disk-ledger.plist
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.dear-agent.disk-ledger
+    rm ~/Library/LaunchAgents/com.dear-agent.disk-ledger.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.disk-ledger</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/disk-ledger</string>
+    <!--
+      A 24h reclaim window matches the sandbox-GC hourly cadence with ample
+      slack: a collector that reclaimed nothing across 24 consecutive ticks
+      while roots sit over budget is broken, not merely idle.
+    -->
+    <string>--window</string>
+    <string>24h</string>
+    <!--
+      An open ledger entry younger than an hour belongs to a run that may still
+      be working. Charging it as a leak is how a reaper starts deleting live
+      work, so nothing inside the grace period is ever reported.
+    -->
+    <string>--grace</string>
+    <string>1h</string>
+    <string>--heartbeat</string>
+    <string>__HOME__/.local/state/dear-agent/disk-ledger.heartbeat.json</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!--
+    Every 15 minutes. The check walks the budgeted roots, so it is not free;
+    15 minutes keeps it cheap while still catching a runaway cache long before
+    free space moves. Growth here is measured in GB/day, not GB/minute.
+  -->
+  <key>StartInterval</key>
+  <integer>900</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/disk-ledger.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/disk-ledger.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Low priority: this is an observer, never worth contending with a build. -->
+  <key>Nice</key>
+  <integer>5</integer>
+
+  <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/. -->
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+</dict>
+</plist>
