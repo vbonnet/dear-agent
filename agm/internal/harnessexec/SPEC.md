@@ -65,6 +65,8 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-21** When the private executor receives the cold-remote-resume marker from AGM's Codex resume lifecycle, the system shall pass the documented `model_reasoning_effort="xhigh"` configuration override so a persisted unsupported effort value cannot prevent the resumed worker from receiving its first provider turn; fresh remote controller attachments and local Codex launches shall not receive that override.
 
+**HEXEC-22** Where AGM runs on FreeBSD, the system shall reject private harness execution as unsupported before request parsing, handoff consumption, override commitment, spawn accounting, executable lookup, or process replacement.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

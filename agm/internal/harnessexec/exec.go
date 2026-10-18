@@ -508,25 +508,6 @@ func privateCommandPrefix(executable, protocol string) string {
 	return shellquote.Quote(resolved) + " " + protocol
 }
 
-// Run validates a private protocol request and replaces the current AGM
-// process with the fixed harness executable. A successful call does not return.
-func Run(protocol string, args []string) error {
-	switch protocol {
-	case CodexProtocol:
-		return runCodex(args)
-	case ClaudeProtocol:
-		return runClaude(args)
-	case HarnessProtocol:
-		return runHarness(args)
-	case AgyProtocol:
-		return runAgy(args)
-	case ExpiryProtocol:
-		return runExpiry(args)
-	default:
-		return fmt.Errorf("unsupported private harness protocol %q", protocol)
-	}
-}
-
 func runHarness(args []string) error {
 	request, err := parseHarness(args)
 	if err != nil {
