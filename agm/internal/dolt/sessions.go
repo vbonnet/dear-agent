@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -359,7 +358,11 @@ func (a *Adapter) GetSession(sessionID string) (*manifest.Manifest, error) {
 	`
 
 	row := a.conn.QueryRow(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
-	return a.scanSession(row)
+	m, err := a.scanSession(row)
+	if errors.Is(err, ErrSessionNotFound) {
+		return nil, sessionNotFoundError(sessionID)
+	}
+	return m, err
 }
 
 // UpdateSession updates an existing session in the database
@@ -1132,8 +1135,8 @@ func (a *Adapter) ResolveIdentifier(identifier string) (*manifest.Manifest, erro
 	row := a.conn.QueryRow(query, a.workspace, identifier, identifier, identifier) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
-			return nil, fmt.Errorf("session not found: %s", identifier)
+		if errors.Is(err, ErrSessionNotFound) {
+			return nil, sessionNotFoundError(identifier)
 		}
 		return nil, err
 	}
@@ -1181,7 +1184,7 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 	row := a.conn.QueryRow(query, conversationUUID, conversationUUID, conversationUUID, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
+		if errors.Is(err, ErrSessionNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -1217,7 +1220,7 @@ func (a *Adapter) GetSessionByName(name string) (*manifest.Manifest, error) {
 	row := a.conn.QueryRow(query, a.workspace, name) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
+		if errors.Is(err, ErrSessionNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -1277,7 +1280,7 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("session not found")
+			return nil, ErrSessionNotFound
 		}
 		return nil, fmt.Errorf("failed to scan session: %w", err)
 	}

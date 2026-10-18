@@ -17,7 +17,8 @@ type Storage interface {
 	// CreateSession inserts a new session (legacy — delegates to Create).
 	CreateSession(session *manifest.Manifest) error
 
-	// GetSession retrieves a session by ID (legacy — delegates to Get).
+	// GetSession retrieves a session by ID (legacy — delegates to Get). A
+	// missing exact ID returns an error matching ErrSessionNotFound.
 	GetSession(sessionID string) (*manifest.Manifest, error)
 
 	// UpdateSession updates an existing session (legacy — delegates to Update).

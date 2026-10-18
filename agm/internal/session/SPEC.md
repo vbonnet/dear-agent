@@ -54,6 +54,18 @@ exact-pane capabilities.
 
 **SESS-19** When `VerifyCompletion` runs a git subprocess, the system shall bound it with a context and a timeout, so a hung git cannot block the archive gate indefinitely.
 
+### Readiness-sensitive observation provenance (ce-1hu9.84)
+
+**SESS-20** When shared state detection produces a compatibility state, the system shall preserve whether the observation was absent, unreadable, terminal, unrecognized, or positively live instead of making the state string itself readiness authority.
+
+**SESS-21** When a session observation is not positively established as live, the system shall not report that observation to a readiness-sensitive caller as positive live evidence.
+
+**SESS-22** When atomic input delivery loses acknowledgement after the irreversible submission boundary, the system shall preserve `MayHaveStarted` and the exact pane and foreground harness PID alongside the error instead of returning a zero readiness receipt.
+
+**SESS-23** When the operations layer creates, adopts, resumes, or delivers to a registered tmux session through focused runtime capabilities, the session boundary shall carry the stable AGM session ID into tmux ownership binding and exact-delivery expectations without widening the base `TmuxInterface` or allowing an unbound replacement to satisfy the request.
+
+**SESS-24** When strict exact-pane delivery observes native processing during post-submit reproof, the session boundary shall preserve that positive observation independently of readiness and acknowledgement so the compaction verifier can consume it as transition evidence.
+
 ## Key Invariants
 
 - **Capability, not contract widening.** Focused capability interfaces keep
@@ -67,9 +79,14 @@ exact-pane capabilities.
   check must never silently look clean on a git error or an unresolvable base
   ref — see SESS-16. A PR-confirmed-open override (SESS-17) is the only
   sanctioned downgrade from blocking, and it is itself fail-closed.
+- **Positive live observation.** A target exists, its exact pane observation is
+  readable and recognized, and the expected interactive harness is positively
+  established as the foreground terminal owner. A compatibility display
+  projection or session-wide any-harness scan is not provenance.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Feature: `agm/test/bdd/features/pi_custom_context.feature`
 - Package regression: `agm/internal/session/resume_test.go`
+- Related feature: `agm/test/bdd/features/agm_runtime_package_guardrails.feature` (SESS-20 through SESS-24)
