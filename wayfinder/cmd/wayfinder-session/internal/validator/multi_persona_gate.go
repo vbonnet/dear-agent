@@ -4,13 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/boundedexec"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
+
+// personaReviewTimeout bounds one provider-backed persona review. The gate is
+// advisory or blocking, never open-ended.
+const personaReviewTimeout = 5 * time.Minute
 
 // GateTier represents the enforcement level of a gate
 type GateTier int
@@ -419,13 +423,21 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 		return nil, fmt.Errorf("no AI provider configured: set VERTEX_PROJECT_ID (for VertexAI) or ANTHROPIC_API_KEY (for Anthropic)")
 	}
 
-	// Call multi-persona-review CLI
-	cmd := exec.Command("multi-persona-review", args...) //nolint:gosec // G702: command name is hardcoded; args built from validated config
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("multi-persona-review failed: %w (output: %s)", err, string(output))
+	// Call multi-persona-review CLI under a wall-clock bound: a provider that
+	// stalls must not stall phase completion.
+	res := boundedexec.Command{
+		Label:   "multi-persona review (" + persona + ")",
+		Name:    "multi-persona-review",
+		Args:    args,
+		Timeout: personaReviewTimeout,
+	}.Run()
+	if res.TimedOut {
+		return nil, fmt.Errorf("multi-persona-review timed out after %s", personaReviewTimeout)
 	}
+	if res.Err != nil {
+		return nil, fmt.Errorf("multi-persona-review failed: %w (output: %s)", res.Err, res.Output)
+	}
+	output := []byte(res.Output)
 
 	// Parse JSON output
 	var review struct {

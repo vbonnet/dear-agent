@@ -17,6 +17,11 @@ import (
 const (
 	processFixtureSetupTimeout = 30 * time.Second
 	processFixtureStopTimeout  = 5 * time.Second
+	// processFixtureCommandTimeout bounds the stub `go` command. It must exceed
+	// the readiness wait it is supposed to outlive: a watchdog shorter than that
+	// window fires first under load and reports exit code 124 instead of what
+	// the test is actually asserting.
+	processFixtureCommandTimeout = 30 * time.Second
 )
 
 type processPIDs struct {
@@ -121,11 +126,11 @@ func TestAwaitProcessFixtureReportsEarlyCommandExit(t *testing.T) {
 	// remove the scheduling race with awaitProcessFixture below): the stub
 	// exits immediately, but a hung command must still not block the test
 	// suite forever.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), processFixtureSetupTimeout)
 	defer cancel()
 	result <- runGoTestCommand(
 		ctx,
-		time.Second,
+		processFixtureCommandTimeout,
 		options{root: root},
 		[]string{"example.com/m/a"},
 		&bytes.Buffer{},
@@ -170,7 +175,7 @@ func TestAwaitProcessFixtureTimeoutCancelsAndJoinsProcessGroup(t *testing.T) {
 	go func() {
 		result <- runGoTestCommand(
 			ctx,
-			time.Second,
+			processFixtureCommandTimeout,
 			options{root: root},
 			[]string{"example.com/m/a"},
 			&bytes.Buffer{},
