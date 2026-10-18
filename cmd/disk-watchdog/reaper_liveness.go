@@ -92,9 +92,11 @@ const gcOperationPrefix = "sandbox_gc"
 // gcSelfSource is the value this watchdog stamps on the sweeps it triggers
 // itself (remediationEnv), and the one value the liveness check must ignore.
 //
-// Remediation runs `agm sandbox gc --reap` on every breached tick, which writes
-// a fresh completion record. Counting those, the question "is the hourly
-// schedule still alive?" is answered by evidence this process manufactured five
+// Remediation requests `agm sandbox gc --reap` on every breached tick. SGC-18
+// currently rejects that request before it can write a completion record; when
+// authenticated transport restores destructive execution, a successful request
+// can again write one. Counting such self-produced records would answer "is the
+// hourly schedule still alive?" with evidence this process manufactured five
 // minutes ago: under sustained disk pressure a dead schedule would look healthy
 // indefinitely, exactly inverting the leading indicator. An unstamped record is
 // NOT assumed to be ours — a manual run or an older agm leaves the field empty,
@@ -419,7 +421,7 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 	// treating a failing GC's own error records as evidence it is alive would
 	// mask exactly the failure this check exists to catch.
 	last, viaFallback := summary.LastSuccess, false
-	if !summary.HasCompletion && summary.LastReap.After(last) {
+	if !summary.HasCompletion && summary.LastReap.After(last) && summary.LastReap.After(summary.LastErrorAt) {
 		last, viaFallback = summary.LastReap, true
 	}
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/gclog"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/sandboxgc"
 )
@@ -77,7 +78,7 @@ func TestSandboxGCDryRunByDefault(t *testing.T) {
 	dead := mkSandbox(t, base, "deadbeef", 24*time.Hour)
 	checker := newTestChecker(base, map[string]bool{}, nil)
 
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{}, base, checker)
 	if err != nil {
 		t.Fatalf("sandboxGCWithChecker: %v", err)
 	}
@@ -95,6 +96,220 @@ func TestSandboxGCDryRunByDefault(t *testing.T) {
 	}
 }
 
+func TestSandboxGCPropagatesContextThroughSafetyGates(t *testing.T) {
+	tests := []struct {
+		name             string
+		reap             bool
+		cancelAt         string
+		wantMountCalls   int
+		wantUnmountCalls int
+	}{
+		{
+			name:     "dry run cancels during process inspection",
+			cancelAt: "process",
+		},
+		{
+			name:             "reap cancels during mount inspection",
+			reap:             true,
+			cancelAt:         "mount",
+			wantMountCalls:   1,
+			wantUnmountCalls: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := sandboxTestBase(t)
+			candidate := mkSandbox(t, base, "deadbeef", 24*time.Hour)
+			checker := newTestChecker(base, map[string]bool{}, nil)
+
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			var processCalls, mountCalls, unmountCalls, removeCalls int
+			checker.ListProcPaths = func(got context.Context) ([]sandboxgc.ProcPath, error) {
+				processCalls++
+				if got != ctx {
+					t.Fatalf("process context = %v, want sweep context %v", got, ctx)
+				}
+				if tt.cancelAt == "process" {
+					cancel()
+				}
+				return nil, nil
+			}
+			checker.ListMounts = func(got context.Context) ([]string, error) {
+				mountCalls++
+				if got != ctx {
+					t.Fatalf("mount context = %v, want sweep context %v", got, ctx)
+				}
+				if tt.cancelAt == "mount" {
+					cancel()
+				}
+				return nil, nil
+			}
+			checker.Unmount = func(string) error {
+				unmountCalls++
+				return nil
+			}
+			checker.Remove = func(string) error {
+				removeCalls++
+				return nil
+			}
+
+			res, err := sandboxGCWithChecker(ctx, &SandboxGCRequest{Reap: tt.reap}, base, checker)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("sandboxGCWithChecker error = %v, want context cancellation", err)
+			}
+			var refusal *sandboxgc.RefusalError
+			if !errors.As(err, &refusal) {
+				t.Fatalf("sandboxGCWithChecker error = %v, want the safety-gate refusal too", err)
+			}
+			if !refusal.ProbeFailure {
+				t.Fatal("canceled safety gate must remain identifiable as an unevaluated probe")
+			}
+			if res == nil {
+				t.Fatal("canceled sweep must return its partial result")
+			}
+			if res.Scanned != 1 || res.Reaped != 0 || res.Kept != 0 || res.Errors != 0 {
+				t.Fatalf("result = scanned:%d reaped:%d kept:%d errors:%d, want 1/0/0/0",
+					res.Scanned, res.Reaped, res.Kept, res.Errors)
+			}
+			if res.ProbeFailures != 0 {
+				t.Fatalf("probe failures = %d, want 0 in the partial sweep receipt", res.ProbeFailures)
+			}
+			if processCalls != 1 || mountCalls != tt.wantMountCalls || unmountCalls != tt.wantUnmountCalls {
+				t.Fatalf("safety calls = process:%d mount:%d unmount:%d, want 1/%d/%d",
+					processCalls, mountCalls, unmountCalls, tt.wantMountCalls, tt.wantUnmountCalls)
+			}
+			if removeCalls != 0 {
+				t.Fatalf("canceled sweep removed a sandbox %d time(s)", removeCalls)
+			}
+			if len(res.Entries) != 0 {
+				t.Fatalf("entries = %+v, want no manufactured kept entry", res.Entries)
+			}
+			if _, err := os.Stat(candidate); err != nil {
+				t.Fatalf("canceled sweep did not preserve candidate: %v", err)
+			}
+		})
+	}
+}
+
+func TestSandboxGCPreCanceledContextSkipsInventoryAndCandidates(t *testing.T) {
+	base := sandboxTestBase(t)
+	candidate := mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+
+	var inventoryCalls, processCalls, mountCalls, removeCalls int
+	checker.LiveSessionIDs = func() (map[string]bool, error) {
+		inventoryCalls++
+		return map[string]bool{}, nil
+	}
+	checker.ListProcPaths = func(context.Context) ([]sandboxgc.ProcPath, error) {
+		processCalls++
+		return nil, nil
+	}
+	checker.ListMounts = func(context.Context) ([]string, error) {
+		mountCalls++
+		return []string{"/"}, nil
+	}
+	checker.Remove = func(string) error {
+		removeCalls++
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	res, err := sandboxGCWithChecker(ctx, &SandboxGCRequest{Reap: true}, base, checker)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sandboxGCWithChecker error = %v, want context cancellation", err)
+	}
+	if res != nil {
+		t.Fatalf("pre-canceled sweep result = %+v, want nil before inventory", res)
+	}
+	if inventoryCalls != 0 || processCalls != 0 || mountCalls != 0 || removeCalls != 0 {
+		t.Fatalf("pre-canceled calls = inventory:%d process:%d mount:%d remove:%d, want all zero",
+			inventoryCalls, processCalls, mountCalls, removeCalls)
+	}
+	if _, statErr := os.Stat(candidate); statErr != nil {
+		t.Fatalf("pre-canceled sweep did not preserve candidate: %v", statErr)
+	}
+}
+
+func TestSandboxGCRecordsSuccessfulReapBeforeReturningCancellation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base := sandboxTestBase(t)
+	candidate := mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	checker.Remove = func(path string) error {
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+		cancel()
+		return nil
+	}
+
+	const source = "disk-watchdog"
+	res, err := sandboxGCWithChecker(ctx, &SandboxGCRequest{Reap: true, Source: source}, base, checker)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sandboxGCWithChecker error = %v, want context cancellation", err)
+	}
+	if res == nil || res.Scanned != 1 || res.Reaped != 1 || res.Kept != 0 || res.Errors != 0 {
+		t.Fatalf("partial result = %+v, want one successful reap receipt", res)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].Action != "reaped" {
+		t.Fatalf("entries = %+v, want one successful reap receipt", res.Entries)
+	}
+	if _, statErr := os.Stat(candidate); !os.IsNotExist(statErr) {
+		t.Fatalf("successfully reaped candidate still exists: %v", statErr)
+	}
+	data, readErr := os.ReadFile(filepath.Join(home, ".agm", "logs", "gc.jsonl"))
+	if readErr != nil {
+		t.Fatalf("read successful reap receipt: %v", readErr)
+	}
+	var receipt gclog.Entry
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &receipt); err != nil {
+		t.Fatalf("decode successful reap receipt: %v", err)
+	}
+	if receipt.Operation != "sandbox_gc_reap" || receipt.Source != source {
+		t.Fatalf("successful reap receipt = %+v, want source %q", receipt, source)
+	}
+}
+
+func TestSandboxGCRecordsRemovalErrorBeforeReturningCancellation(t *testing.T) {
+	base := sandboxTestBase(t)
+	candidate := mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	removeErr := errors.New("partial recursive removal")
+	checker.Remove = func(path string) error {
+		if err := os.Remove(filepath.Join(path, "upper", "f.txt")); err != nil {
+			return err
+		}
+		cancel()
+		return removeErr
+	}
+
+	res, err := sandboxGCWithChecker(ctx, &SandboxGCRequest{Reap: true}, base, checker)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, removeErr) {
+		t.Fatalf("sandboxGCWithChecker error = %v, want cancellation and removal failure", err)
+	}
+	if res == nil || res.Scanned != 1 || res.Reaped != 0 || res.Kept != 0 || res.Errors != 1 {
+		t.Fatalf("partial result = %+v, want one failed removal receipt", res)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].Action != "error" || !strings.Contains(res.Entries[0].Reason, removeErr.Error()) {
+		t.Fatalf("entries = %+v, want the failed removal receipt", res.Entries)
+	}
+	if _, statErr := os.Stat(candidate); statErr != nil {
+		t.Fatalf("partially removed candidate directory disappeared: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(candidate, "upper", "f.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("test did not exercise a partial mutation: %v", statErr)
+	}
+}
+
 func TestSandboxGCReap(t *testing.T) {
 	base := sandboxTestBase(t)
 	dead := mkSandbox(t, base, "deadbeef", 24*time.Hour)
@@ -102,7 +317,7 @@ func TestSandboxGCReap(t *testing.T) {
 	fresh := mkSandbox(t, base, "beef0002", 10*time.Minute) // younger than MinAge
 	checker := newTestChecker(base, map[string]bool{"cafe0001": true}, nil)
 
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker)
 	if err != nil {
 		t.Fatalf("sandboxGCWithChecker: %v", err)
 	}
@@ -126,7 +341,7 @@ func TestSandboxGCRefusesWhenSessionStoreDown(t *testing.T) {
 	dead := mkSandbox(t, base, "deadbeef", 24*time.Hour)
 	checker := newTestChecker(base, nil, errors.New("dolt down"))
 
-	if _, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker); err == nil {
+	if _, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker); err == nil {
 		t.Fatal("sweep must abort when live sessions cannot be enumerated")
 	}
 	if _, err := os.Stat(dead); err != nil {
@@ -140,7 +355,7 @@ func TestSandboxGCRefusesWithoutLiveSessionSource(t *testing.T) {
 	checker := newTestChecker(base, nil, nil)
 	checker.LiveSessionIDs = nil
 
-	if _, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker); err == nil {
+	if _, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker); err == nil {
 		t.Fatal("sweep must refuse to run without a live-session source")
 	}
 }
@@ -154,7 +369,7 @@ func TestSandboxGCKeepsMountedSandbox(t *testing.T) {
 		return []string{"/", filepath.Join(mounted, "merged")}, nil
 	}
 
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker)
 	if err != nil {
 		t.Fatalf("sandboxGCWithChecker: %v", err)
 	}
@@ -180,7 +395,7 @@ func TestSandboxGCKeepsSandboxWithLiveProcess(t *testing.T) {
 		return []sandboxgc.ProcPath{{PID: 42, Path: filepath.Join(busy, "merged")}}, nil
 	}
 
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker)
 	if err != nil {
 		t.Fatalf("sandboxGCWithChecker: %v", err)
 	}
@@ -208,7 +423,7 @@ func TestSandboxGCCountsProbeFailuresSeparately(t *testing.T) {
 		return nil, errors.New("lsof: command not found")
 	}
 
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker)
 	if err != nil {
 		t.Fatalf("sandboxGCWithChecker: %v", err)
 	}
@@ -233,7 +448,7 @@ func TestSandboxGCDryRunCountsProbeFailures(t *testing.T) {
 		return nil, errors.New("lsof: command not found")
 	}
 
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: false}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: false}, base, checker)
 	if err != nil {
 		t.Fatalf("sandboxGCWithChecker: %v", err)
 	}
@@ -264,7 +479,7 @@ func TestSandboxGCReapsNonGitAndPartialDirs(t *testing.T) {
 	}
 	checker := newTestChecker(base, map[string]bool{}, nil)
 
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker)
 	if err != nil {
 		t.Fatalf("sandboxGCWithChecker: %v", err)
 	}
@@ -284,7 +499,7 @@ func TestSandboxGCReapsNonGitAndPartialDirs(t *testing.T) {
 func TestSandboxGCMissingBaseIsNoop(t *testing.T) {
 	base := filepath.Join(t.TempDir(), ".agm", "sandboxes") // never created
 	checker := newTestChecker(base, map[string]bool{}, nil)
-	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	res, err := sandboxGCWithChecker(t.Context(), &SandboxGCRequest{Reap: true}, base, checker)
 	if err != nil {
 		t.Fatalf("missing base must be a no-op, got %v", err)
 	}

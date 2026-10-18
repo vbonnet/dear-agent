@@ -404,11 +404,13 @@ func TestReapProcessGateBlocksBeforeUnmount(t *testing.T) {
 
 func TestReapContextBoundsInFlightSafetyScans(t *testing.T) {
 	dir := testBase + "/deadbeef"
+	mountErr := errors.New("mount probe transport failed")
 	tests := []struct {
 		name          string
 		listProcPaths func(context.Context) ([]ProcPath, error)
 		listMounts    func(context.Context) ([]string, error)
 		wantUnmounts  int
+		wantCause     error
 	}{
 		{
 			name: "process inspection",
@@ -430,6 +432,18 @@ func TestReapContextBoundsInFlightSafetyScans(t *testing.T) {
 				return nil, ctx.Err()
 			},
 			wantUnmounts: 2,
+		},
+		{
+			name: "mount inspection preserves a concurrent probe error",
+			listProcPaths: func(context.Context) ([]ProcPath, error) {
+				return nil, nil
+			},
+			listMounts: func(ctx context.Context) ([]string, error) {
+				<-ctx.Done()
+				return nil, mountErr
+			},
+			wantUnmounts: 2,
+			wantCause:    mountErr,
 		},
 	}
 
@@ -460,8 +474,17 @@ func TestReapContextBoundsInFlightSafetyScans(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("ReapContext() error = %v, want fail-closed refusal", err)
 			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("ReapContext() error = %v, want deadline cause", err)
+			}
+			if tt.wantCause != nil && !errors.Is(err, tt.wantCause) {
+				t.Fatalf("ReapContext() error = %v, want concurrent probe cause %v", err, tt.wantCause)
+			}
 			if refusal.ProcessID != 0 {
 				t.Fatalf("deadline refusal process ID = %d, want 0", refusal.ProcessID)
+			}
+			if !refusal.ProbeFailure {
+				t.Fatal("deadline refusal must be marked as an unevaluated safety probe")
 			}
 			if unmounts != tt.wantUnmounts {
 				t.Fatalf("unmount calls = %d, want %d", unmounts, tt.wantUnmounts)

@@ -27,6 +27,7 @@ package sandboxgc
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,10 +71,17 @@ type RefusalError struct {
 	// sandbox at all, not that it correctly found the sandbox in use.
 	ProbeFailure bool
 	ProcessID    int // non-zero only when a specific live process caused the refusal
+	cause        error
 }
 
 func (e *RefusalError) Error() string {
 	return fmt.Sprintf("refusing to reap %s: %s (%s)", e.Path, e.Reason, e.Detail)
+}
+
+// Unwrap retains a probe's underlying cause, especially caller cancellation,
+// while RefusalError continues to carry the fail-closed decision metadata.
+func (e *RefusalError) Unwrap() error {
+	return e.cause
 }
 
 // ProcPath is one (pid, path) pair from the process table: a cwd or an open fd.
@@ -210,9 +218,17 @@ func (c *Checker) CheckReapableContext(ctx context.Context, dir string) error {
 		if err != nil {
 			// Fail CLOSED: if we cannot enumerate live sessions we must
 			// assume the sandbox is referenced.
-			return &RefusalError{Path: dir, Reason: ReasonLiveSession,
+			refusal := &RefusalError{Path: dir, Reason: ReasonLiveSession,
 				Detail:       fmt.Sprintf("cannot enumerate live sessions: %v", err),
-				ProbeFailure: true}
+				ProbeFailure: true,
+				cause:        err}
+			if ctxErr := contextRefusal(ctx, dir, "during live-session inspection"); ctxErr != nil {
+				return errors.Join(ctxErr, refusal)
+			}
+			return refusal
+		}
+		if err := contextRefusal(ctx, dir, "after live-session inspection"); err != nil {
+			return err
 		}
 		if live[filepath.Base(dir)] {
 			return &RefusalError{Path: dir, Reason: ReasonLiveSession,
@@ -223,9 +239,14 @@ func (c *Checker) CheckReapableContext(ctx context.Context, dir string) error {
 	procs, err := c.ListProcPaths(ctx)
 	if err != nil {
 		// Fail CLOSED: unknown process state means the dir may be in use.
-		return &RefusalError{Path: dir, Reason: ReasonLiveProcess,
+		refusal := &RefusalError{Path: dir, Reason: ReasonLiveProcess,
 			Detail:       fmt.Sprintf("cannot enumerate process paths: %v", err),
-			ProbeFailure: true}
+			ProbeFailure: true,
+			cause:        err}
+		if ctxErr := contextRefusal(ctx, dir, "during process inspection"); ctxErr != nil {
+			return errors.Join(ctxErr, refusal)
+		}
+		return refusal
 	}
 	if err := contextRefusal(ctx, dir, "after process inspection"); err != nil {
 		return err
@@ -249,15 +270,22 @@ func (c *Checker) MountedInside(dir string) (mountPoint string, mounted bool, pr
 // MountedInsideContext is MountedInside with caller cancellation propagated
 // through host mount-table inspection.
 func (c *Checker) MountedInsideContext(ctx context.Context, dir string) (mountPoint string, mounted bool, probeFailure bool) {
+	mountPoint, mounted, probeFailure, _ = c.mountedInsideContext(ctx, dir)
+	return mountPoint, mounted, probeFailure
+}
+
+// mountedInsideContext retains the probe's error for ReapContext while the
+// legacy public classifier above keeps its three-value compatibility surface.
+func (c *Checker) mountedInsideContext(ctx context.Context, dir string) (mountPoint string, mounted bool, probeFailure bool, cause error) {
 	mounts, err := c.ListMounts(ctx)
 	if err != nil {
-		return fmt.Sprintf("unreadable mount table: %v", err), true, true
+		return fmt.Sprintf("unreadable mount table: %v", err), true, true, err
 	}
 	if err := ctx.Err(); err != nil {
-		return fmt.Sprintf("mount inspection deadline: %v", err), true, true
+		return fmt.Sprintf("mount inspection deadline: %v", err), true, true, err
 	}
 	mp, found := MountInside(mounts, dir)
-	return mp, found, false
+	return mp, found, false, nil
 }
 
 // Reap deletes the sandbox at dir after all safety gates pass. Sequence:
@@ -300,10 +328,21 @@ func (c *Checker) ReapContext(ctx context.Context, dir string) error {
 	// still mounted at or under dir, refuse — deleting through a live mount
 	// can destroy the mount's source (per ~/.agm/cleanup-runbook.md).
 	// MountedInside fails closed on an unreadable mount table.
-	if m, mounted, probeFailure := c.MountedInsideContext(ctx, dir); mounted {
+	m, mounted, probeFailure, mountErr := c.mountedInsideContext(ctx, dir)
+	if ctxErr := contextRefusal(ctx, dir, "after mount inspection"); ctxErr != nil {
+		if mounted {
+			return errors.Join(ctxErr, &RefusalError{Path: dir, Reason: ReasonMountInside,
+				Detail:       fmt.Sprintf("mount survived unmount: %s", m),
+				ProbeFailure: probeFailure,
+				cause:        mountErr})
+		}
+		return ctxErr
+	}
+	if mounted {
 		return &RefusalError{Path: dir, Reason: ReasonMountInside,
 			Detail:       fmt.Sprintf("mount survived unmount: %s", m),
-			ProbeFailure: probeFailure}
+			ProbeFailure: probeFailure,
+			cause:        mountErr}
 	}
 
 	if err := contextRefusal(ctx, dir, "before removal"); err != nil {
@@ -320,9 +359,11 @@ func (c *Checker) ReapContext(ctx context.Context, dir string) error {
 func contextRefusal(ctx context.Context, dir, phase string) error {
 	if err := ctx.Err(); err != nil {
 		return &RefusalError{
-			Path:   dir,
-			Reason: ReasonDeadline,
-			Detail: fmt.Sprintf("%s: %v", phase, err),
+			Path:         dir,
+			Reason:       ReasonDeadline,
+			Detail:       fmt.Sprintf("%s: %v", phase, err),
+			ProbeFailure: true,
+			cause:        err,
 		}
 	}
 	return nil

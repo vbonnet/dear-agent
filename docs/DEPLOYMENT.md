@@ -158,8 +158,10 @@ The sandbox workspace root is **not** separately configurable: it is derived
 from the storage root that configuration load resolves, at
 `<storage root>/sandboxes/<session-id>` (`~/.agm/sandboxes/<session-id>` in
 dotfile mode). Change it through the `storage:` block — see
-[agm/CENTRALIZED-STORAGE.md](../agm/CENTRALIZED-STORAGE.md). Orphaned sandboxes
-are reclaimed by `agm sandbox gc --reap`, not by a cleanup policy key.
+[agm/CENTRALIZED-STORAGE.md](../agm/CENTRALIZED-STORAGE.md). `agm sandbox gc`
+still provides a read-only orphan scan. Destructive `--reap` is contained by
+SGC-18 until session-store endpoints have authenticated transport; there is no
+cleanup policy key or supported manual bypass.
 
 **Status**: ✅ COMPLETE (zero-config deployment)
 
@@ -318,8 +320,9 @@ agm session kill rollback-test
 
 ```bash
 # 1. Reclaim orphaned sandbox trees left by earlier runs
-agm sandbox gc            # report only
-agm sandbox gc --reap     # actually remove the safe ones
+agm sandbox gc            # report only; this is the available diagnostic path
+# Destructive --reap currently fails closed under SGC-18. Do not bypass it;
+# restore authenticated session-store transport before relying on reclamation.
 
 # 2. Reduce the sandbox lower-dir surface: pin `sandbox.repos` in
 #    ~/.config/agm/config.yaml to the repositories you actually need instead of
