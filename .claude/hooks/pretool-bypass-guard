@@ -57,46 +57,42 @@ fi
 
 # git push force forms, blocked when they can reach a protected destination.
 #
-# Preferred path: `safe-push --check` runs the same internal/safegit policy the
-# Go tools use, so shell and Go cannot drift into two different answers. It is
-# used only when the installed binary advertises the flag, because an older one
-# would forward --check to git and actually push.
+# Force-push is delegated whole to cmd/pretool-force-push-guard, which parses
+# the command (per simple command, both `git push` and `safe-push`, with `cd`
+# and -C tracked) and judges each destination with safegit.ForcePushViolation —
+# the same function safe-push and the write guard call.
 #
-# Fallback path: parse the destination rather than matching command text. Two
-# independent regexes could not agree on `git push -f origin HEAD:main`, and
-# the lease form used to be exempted wholesale even when it named main.
-if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?push' \
-   && printf '%s' "$cmd" | grep -qE -- '(^|[[:space:]])(-[[:alnum:]]*f[[:alnum:]]*|--force|--force-with-lease|--force-if-includes|--mirror|--all|--tags)([=[:space:]]|$)'; then
-  push_args="$(printf '%s' "$cmd" | sed -E 's/^.*[[:space:]]push([[:space:]]+|$)//')"
-  push_verdict=allow
-  if command -v safe-push >/dev/null 2>&1 && safe-push --help 2>/dev/null | grep -q -- '--check'; then
-    safe-push --check $push_args >/dev/null 2>&1 || push_verdict=block
-  else
-    push_verdict="$(printf '%s' "$push_args" | awk '
-      BEGIN { seen_remote = 0; refspecs = 0 }
-      {
-        for (i = 1; i <= NF; i++) {
-          a = $i
-          if (a == "--" || a ~ /^-/) continue
-          if (!seen_remote) { seen_remote = 1; continue }
-          refspecs++
-          d = a; sub(/^\+/, "", d)
-          if (index(d, ":") > 0) sub(/^[^:]*:/, "", d)
-          sub(/^\+/, "", d); sub(/^refs\/heads\//, "", d)
-          if (d == "main" || d == "master" || d == "HEAD" || d == "@" || index(d, "*") > 0) {
-            print "block"; exit
-          }
-        }
-        # No refspec means git resolves the destination from configuration,
-        # which is not knowable from the command text.
-        if (refspecs == 0) print "block"; else print "allow"
-      }')"
-    [ -n "$push_verdict" ] || push_verdict=block
+# It is delegated rather than reimplemented because the shell version answered a
+# different question than the policy asked. It matched command *text*, so it
+# refused `grep "git push --force"`, and it pooled a compound command's operands
+# into one argument list, so `safe-push -u origin HEAD:main && safe-push -f
+# origin feature/x` was refused for naming main in an unrelated earlier command.
+# Both readings look like "force-push is denied on this host" from inside a
+# session, and both stalled rebases that policy allows.
+#
+# Fallback when the binary is not installed: refuse only a force-push that
+# plainly names main or master as its destination. It is deliberately narrower
+# than the real policy — under-blocking here is caught by safe-push itself and
+# by the GitHub ruleset's non_fast_forward on the default branch, whereas
+# over-blocking is the defect this hook is being fixed for.
+force_push_guard=""
+for candidate in "${CLAUDE_PROJECT_DIR:-.}/bin/pretool-force-push-guard" \
+                 "$HOME/.config/claude-code/hooks/pretool-force-push-guard"; do
+  [ -x "$candidate" ] && force_push_guard="$candidate" && break
+done
+[ -n "$force_push_guard" ] || force_push_guard="$(command -v pretool-force-push-guard 2>/dev/null || true)"
+
+if [ -n "$force_push_guard" ]; then
+  guard_out="$(printf '%s' "$input" | "$force_push_guard" 2>/dev/null)"
+  if [ $? -eq 2 ]; then
+    printf '%s' "$guard_out"
+    exit 2
   fi
-  if [ "$push_verdict" = block ]; then
-    block "git push" "--force" \
-      "Use normal PR/merge flow for main/master/default; force-push only non-default PR branches, preferably with --force-with-lease"
-  fi
+elif printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?push' \
+   && printf '%s' "$cmd" | grep -qE -- '(^|[[:space:]])(-[[:alnum:]]*f[[:alnum:]]*|--force|--force-with-lease|--force-if-includes|--mirror)([=[:space:]]|$)' \
+   && printf '%s' "$cmd" | grep -qE -- '(^|[[:space:]:+/])(main|master)([[:space:]]|$)'; then
+  block "git push" "--force" \
+    "Use normal PR/merge flow for main/master/default; force-push only non-default PR branches, preferably with --force-with-lease. Install the full guard with: make install-write-guards"
 fi
 
 exit 0
