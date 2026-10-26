@@ -1,6 +1,6 @@
 module github.com/vbonnet/dear-agent
 
-go 1.26.6
+go 1.27.3
 
 require (
 	cloud.google.com/go/aiplatform v1.127.0
