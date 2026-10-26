@@ -120,9 +120,12 @@ func TestNewSession_WorkDirHonored(t *testing.T) {
 	defer cleanup()
 	setupTestState(t)
 
-	// A healthy server never needs to paste a corrective `cd`, so a path with
-	// terminal control bytes remains a valid liveness counter-check here.
-	workDir := filepath.Join(t.TempDir(), "valid\tworkdir")
+	// Edge whitespace is the hardest path tmux still reports verbatim, so it
+	// counter-checks the comparison without needing a corrective `cd`. Control
+	// bytes cannot serve here: tmux renders them as "_" in format output, so the
+	// pane never compares equal and the paste guard refuses the repair (see
+	// TestNewSession_ControlByteWorkDirFailsClosed).
+	workDir := filepath.Join(t.TempDir(), " valid workdir ")
 	require.NoError(t, os.Mkdir(workDir, 0o755))
 	sessionName := "test-workdir-honored"
 	start := time.Now()
@@ -135,6 +138,25 @@ func TestNewSession_WorkDirHonored(t *testing.T) {
 		"pane cwd %q should match requested workdir %q", panePath, workDir)
 	assert.Less(t, time.Since(start), workDirVerifyDeadline,
 		"happy path should not exhaust the verify deadline")
+}
+
+// TestNewSession_ControlByteWorkDirFailsClosed pins the end-to-end refusal: a
+// workdir tmux cannot report faithfully must fail with the paste guard's error
+// rather than send a corrective `cd` carrying terminal control bytes.
+func TestNewSession_ControlByteWorkDirFailsClosed(t *testing.T) {
+	skipIfNoTmux(t)
+	_, cleanup := setupTestSocket(t)
+	defer cleanup()
+	setupTestState(t)
+
+	workDir := filepath.Join(t.TempDir(), "tab\tworkdir")
+	require.NoError(t, os.Mkdir(workDir, 0o755))
+	sessionName := "test-workdir-control-byte"
+	err := NewSession(sessionName, workDir)
+	defer killSession(sessionName)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "control characters")
 }
 
 func tmuxVersionString(t *testing.T) string {
