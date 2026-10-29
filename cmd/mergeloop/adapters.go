@@ -39,6 +39,23 @@ type ghPR struct {
 	Files []struct {
 		Path string `json:"path"`
 	} `json:"files"`
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	IsCrossRepository bool `json:"isCrossRepository"`
+}
+
+// trustedPRAuthor reports whether mergeloop may act on a PR. The repo is
+// public, so a PR from anyone else could carry text that steers a fix agent or
+// code that merges once CI is green. Only the repo owner's own branches and
+// Dependabot qualify; a missing author fails closed.
+func trustedPRAuthor(r ghPR, repo string) bool {
+	if r.IsCrossRepository {
+		return false
+	}
+	owner, _, _ := strings.Cut(repo, "/")
+	login := r.Author.Login
+	return login != "" && (strings.EqualFold(login, owner) || login == "app/dependabot")
 }
 
 // ghChangedFilePageSize is the page size gh hard-codes for a pull request's
@@ -48,7 +65,7 @@ const ghChangedFilePageSize = 100
 func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]mergeloop.PR, error) {
 	args := []string{
 		"pr", "list", "--state", "open",
-		"--json", "number,title,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,labels,files",
+		"--json", "number,title,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,labels,files,author,isCrossRepository",
 		"--limit", strconv.Itoa(maxOpen + 1),
 	}
 	if repo != "" {
@@ -58,9 +75,15 @@ func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]me
 	if err != nil {
 		return nil, err
 	}
-	var raw []ghPR
-	if err := json.Unmarshal(out, &raw); err != nil {
+	var listed []ghPR
+	if err := json.Unmarshal(out, &listed); err != nil {
 		return nil, fmt.Errorf("parsing gh pr list: %w", err)
+	}
+	raw := listed[:0]
+	for _, r := range listed {
+		if trustedPRAuthor(r, repo) {
+			raw = append(raw, r)
+		}
 	}
 	prs := make([]mergeloop.PR, 0, len(raw))
 	if len(raw) > maxOpen {

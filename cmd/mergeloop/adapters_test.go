@@ -14,7 +14,7 @@ import (
 func TestMergeLoopUsesSharedRequiredProjection(t *testing.T) {
 	installMergeLoopFakeGH(t, `
 case "$*" in
-  "pr list"*) printf '%s\n' '[{"number":42,"title":"test","headRefName":"feature","headRefOid":"abc","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","reviewDecision":"","labels":[],"files":[]}]' ;;
+  "pr list"*) printf '%s\n' '[{"number":42,"title":"test","headRefName":"feature","headRefOid":"abc","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","reviewDecision":"","labels":[],"files":[],"author":{"login":"owner"},"isCrossRepository":false}]' ;;
   "pr checks 42 --repo owner/repo --json name,state") printf '%s\n' '[{"name":"Required","state":"SUCCESS"},{"name":"Advisory","state":"FAILURE"}]'; exit 1 ;;
   "pr view 42 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
   "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Required"}]}}]]' ;;
@@ -42,7 +42,7 @@ esac
 func TestMergeLoopPreservesAuthoritativeEmptyFallback(t *testing.T) {
 	installMergeLoopFakeGH(t, `
 case "$*" in
-  "pr list"*) printf '%s\n' '[{"number":42,"title":"test","headRefName":"feature","headRefOid":"abc","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","reviewDecision":"","labels":[],"files":[]}]' ;;
+  "pr list"*) printf '%s\n' '[{"number":42,"title":"test","headRefName":"feature","headRefOid":"abc","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","reviewDecision":"","labels":[],"files":[],"author":{"login":"owner"},"isCrossRepository":false}]' ;;
   "pr view 42 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
   "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[]]' ;;
   "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
@@ -91,7 +91,7 @@ func TestMergeLoopDefersOnlyUnavailableProjection(t *testing.T) {
 	sentinel := errors.New("required projection unavailable")
 	installMergeLoopFakeGH(t, `
 case "$*" in
-  "pr list"*) printf '%s\n' '[{"number":41,"title":"blocked"},{"number":42,"title":"ready"}]' ;;
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"blocked","author":{"login":"owner"}},{"number":42,"title":"ready","author":{"login":"owner"}}]' ;;
   *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 `)
@@ -126,7 +126,7 @@ esac
 func TestMergeLoopDefersOnlyUnknownProjectedStatus(t *testing.T) {
 	installMergeLoopFakeGH(t, `
 case "$*" in
-  "pr list"*) printf '%s\n' '[{"number":41,"title":"unknown"},{"number":42,"title":"ready"}]' ;;
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"unknown","author":{"login":"owner"}},{"number":42,"title":"ready","author":{"login":"owner"}}]' ;;
   *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 `)
@@ -148,7 +148,7 @@ esac
 func TestMergeLoopAbortsWhenParentContextCanceled(t *testing.T) {
 	installMergeLoopFakeGH(t, `
 case "$*" in
-  "pr list"*) printf '%s\n' '[{"number":41,"title":"canceled"}]' ;;
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"canceled","author":{"login":"owner"}}]' ;;
   *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 `)
@@ -166,7 +166,7 @@ esac
 func TestMergeLoopSkipsProjectionWhenOpenPRsExceedCap(t *testing.T) {
 	installMergeLoopFakeGH(t, `
 case "$*" in
-  "pr list"*) printf '%s\n' '[{"number":41,"title":"one"},{"number":42,"title":"two"}]' ;;
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"one","author":{"login":"owner"}},{"number":42,"title":"two","author":{"login":"owner"}}]' ;;
   *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 `)
@@ -195,4 +195,27 @@ func installMergeLoopFakeGH(t *testing.T, body string) {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestMergeLoopIgnoresUntrustedAuthors(t *testing.T) {
+	installMergeLoopFakeGH(t, `
+case "$*" in
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"stranger","author":{"login":"someone"}},{"number":42,"title":"fork","author":{"login":"owner"},"isCrossRepository":true},{"number":43,"title":"no author"},{"number":44,"title":"deps","author":{"login":"app/dependabot"}},{"number":45,"title":"mine","author":{"login":"Owner"}}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	lister := &ghLister{project: func(context.Context, int, string) ([]safegit.RequiredCheck, error) {
+		return nil, nil
+	}}
+	prs, err := lister.ListOpen(context.Background(), "owner/repo", 50)
+	if err != nil {
+		t.Fatalf("ListOpen() error = %v", err)
+	}
+	var got []int
+	for _, pr := range prs {
+		got = append(got, pr.Number)
+	}
+	if len(got) != 2 || got[0] != 44 || got[1] != 45 {
+		t.Fatalf("ListOpen() kept PRs %v, want [44 45]", got)
+	}
 }

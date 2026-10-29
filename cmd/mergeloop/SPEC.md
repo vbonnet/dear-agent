@@ -37,6 +37,8 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-14** When the shared effective required-check policy is authoritatively empty, the command shall classify every reported check instead of treating the pull request as green.
 
+**MLC-15** When listing open pull requests, the command shall act only on pull requests whose head branch is in the repository itself and whose author is the repository owner or Dependabot; a pull request from a fork, from any other author, or with no reported author shall be left alone.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
