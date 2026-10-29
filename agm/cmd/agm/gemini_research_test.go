@@ -39,6 +39,8 @@ func TestBuildGeminiResearchArgsOmitsUnsetOptionals(t *testing.T) {
 }
 
 func TestRunGeminiResearchSuccess(t *testing.T) {
+	t.Setenv("GITHUB_PERSONAL_ACCESS_TOKEN", "ghp_fake")
+	t.Setenv("GH_TOKEN", "gho_fake")
 	var gotAgy string
 	var gotArgs, gotEnv []string
 	run := func(_ context.Context, agyPath string, args, env []string, _ string) ([]byte, error) {
@@ -64,8 +66,9 @@ func TestRunGeminiResearchSuccess(t *testing.T) {
 	}
 	// Sensitive vars must be scrubbed from the child environment.
 	for _, e := range gotEnv {
-		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") || strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
-			t.Errorf("child env leaked a sensitive var: %q", e)
+		name, _, _ := strings.Cut(e, "=")
+		if geminiResearchScrubbedEnvVars[name] {
+			t.Errorf("child env leaked a sensitive var: %q", name)
 		}
 	}
 }

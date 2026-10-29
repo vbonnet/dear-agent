@@ -477,7 +477,7 @@ func TestIsAccessDeniedClassifiesTerminalFailures(t *testing.T) {
 }
 
 func TestProviderEnvDropsGitHubCredentials(t *testing.T) {
-	got := providerEnv([]string{"PATH=/usr/bin", "GH_TOKEN=ghp_secret", "GITHUB_TOKEN=ghs_secret", "HOME=/home/op", "GH_CONFIG_DIR=/home/op/.config/gh"})
+	got := providerEnv([]string{"PATH=/usr/bin", "GITHUB_PERSONAL_ACCESS_TOKEN=ghp_secret", "GH_TOKEN=ghp_secret", "GITHUB_TOKEN=ghs_secret", "HOME=/home/op", "GH_CONFIG_DIR=/home/op/.config/gh"})
 	want := []string{"PATH=/usr/bin", "HOME=/home/op"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("providerEnv() = %#v, want %#v", got, want)

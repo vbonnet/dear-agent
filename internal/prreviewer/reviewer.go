@@ -103,6 +103,7 @@ func (r IsolatedRunner) Run(ctx context.Context, name string, args []string, std
 // contributor-controlled text. Kept in line with the scrub list used by the
 // canonical AGY launch in agm/cmd/agm/gemini_research.go.
 var scrubbedProviderVars = []string{
+	"GITHUB_PERSONAL_ACCESS_TOKEN",
 	"GH_TOKEN",
 	"GITHUB_TOKEN",
 	"GH_ENTERPRISE_TOKEN",

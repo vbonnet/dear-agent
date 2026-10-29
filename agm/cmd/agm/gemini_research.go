@@ -37,6 +37,12 @@ const maxGeminiResearchStdinBytes = 1 << 20 // 1 MiB
 // safe. Keep in sync with the sensitive vars stripped by the canonical harness
 // launch (internal/harnessexec).
 var geminiResearchScrubbedEnvVars = map[string]bool{
+	"GITHUB_PERSONAL_ACCESS_TOKEN":        true,
+	"GH_TOKEN":                            true,
+	"GITHUB_TOKEN":                        true,
+	"GH_ENTERPRISE_TOKEN":                 true,
+	"GITHUB_ENTERPRISE_TOKEN":             true,
+	"GITHUB_API_TOKEN":                    true,
 	"ANTHROPIC_API_KEY":                   true,
 	"CLAUDE_CODE_OAUTH_TOKEN":             true,
 	"AWS_SECRET_ACCESS_KEY":               true,
