@@ -61,6 +61,8 @@ type CrossCheckReport struct {
 }
 
 // Default RBAC allowlist for auto-approve. These tool patterns are safe to approve.
+// Write and Edit are left out: the tool name is scraped from pane text that a
+// web page or PR can print, so auto-approving file changes on it is unsafe.
 var defaultRBACAllowlist = []string{
 	"Read",
 	"Glob",
@@ -70,8 +72,6 @@ var defaultRBACAllowlist = []string{
 	"Bash(go build",
 	"Bash(go vet",
 	"Bash(ls",
-	"Write",
-	"Edit",
 }
 
 // Well-known tmux sessions that are not AGM-managed.
